@@ -1,0 +1,288 @@
+2023-11-04 04:57:00,320 - freqtrade.loggers - INFO - Verbosity set to 0
+2023-11-04 04:57:00,321 - freqtrade.configuration.configuration - INFO - Runmode set to dry_run.
+2023-11-04 04:57:00,322 - freqtrade.configuration.configuration - INFO - Parameter --db-url detected ...
+2023-11-04 04:57:00,323 - freqtrade.configuration.configuration - INFO - Dry run is enabled
+2023-11-04 04:57:00,324 - freqtrade.configuration.configuration - INFO - Using DB: "sqlite:////freqtrade/user_data/tradesv3_2.sqlite"
+2023-11-04 04:57:00,324 - freqtrade.configuration.configuration - INFO - Using max_open_trades: 3 ...
+2023-11-04 04:57:00,372 - freqtrade.configuration.configuration - INFO - Using user-data directory: /freqtrade/user_data ...
+2023-11-04 04:57:00,374 - freqtrade.configuration.configuration - INFO - Using data directory: /freqtrade/user_data/data/kraken ...
+2023-11-04 04:57:00,378 - freqtrade.exchange.check_exchange - INFO - Checking exchange...
+2023-11-04 04:57:00,396 - freqtrade.exchange.check_exchange - INFO - Exchange "kraken" is officially supported by the Freqtrade development team.
+2023-11-04 04:57:00,397 - freqtrade.configuration.configuration - INFO - Using pairlist from configuration.
+2023-11-04 04:57:00,456 - freqtrade.resolvers.iresolver - INFO - Using resolved strategy SampleStrategy from '/freqtrade/user_data/strategies/sample_strategy.py'...
+2023-11-04 04:57:00,457 - freqtrade.strategy.hyper - INFO - Found no parameter file.
+2023-11-04 04:57:00,460 - freqtrade.resolvers.strategy_resolver - INFO - Override strategy 'stake_currency' with value in config file: USDT.
+2023-11-04 04:57:00,460 - freqtrade.resolvers.strategy_resolver - INFO - Override strategy 'stake_amount' with value in config file: unlimited.
+2023-11-04 04:57:00,461 - freqtrade.resolvers.strategy_resolver - INFO - Override strategy 'unfilledtimeout' with value in config file: {'entry': 10, 'exit': 10, 'exit_timeout_count': 0, 'unit': 'minutes'}.
+2023-11-04 04:57:00,462 - freqtrade.resolvers.strategy_resolver - INFO - Override strategy 'max_open_trades' with value in config file: 3.
+2023-11-04 04:57:00,463 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using minimal_roi: {'60': 0.01, '30': 0.02, '0': 0.04}
+2023-11-04 04:57:00,463 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using timeframe: 5m
+2023-11-04 04:57:00,464 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using stoploss: -0.1
+2023-11-04 04:57:00,465 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using trailing_stop: False
+2023-11-04 04:57:00,465 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using trailing_stop_positive_offset: 0.0
+2023-11-04 04:57:00,466 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using trailing_only_offset_is_reached: False
+2023-11-04 04:57:00,467 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using use_custom_stoploss: False
+2023-11-04 04:57:00,467 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using process_only_new_candles: True
+2023-11-04 04:57:00,468 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using order_types: {'entry': 'limit', 'exit': 'limit', 'stoploss': 'market', 'stoploss_on_exchange': False}
+2023-11-04 04:57:00,469 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using order_time_in_force: {'entry': 'GTC', 'exit': 'GTC'}
+2023-11-04 04:57:00,469 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using stake_currency: USDT
+2023-11-04 04:57:00,470 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using stake_amount: unlimited
+2023-11-04 04:57:00,471 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using protections: []
+2023-11-04 04:57:00,471 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using startup_candle_count: 200
+2023-11-04 04:57:00,472 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using unfilledtimeout: {'entry': 10, 'exit': 10, 'exit_timeout_count': 0, 'unit': 'minutes'}
+2023-11-04 04:57:00,473 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using use_exit_signal: True
+2023-11-04 04:57:00,473 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using exit_profit_only: False
+2023-11-04 04:57:00,474 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using ignore_roi_if_entry_signal: False
+2023-11-04 04:57:00,475 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using exit_profit_offset: 0.0
+2023-11-04 04:57:00,475 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using disable_dataframe_checks: False
+2023-11-04 04:57:00,476 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using ignore_buying_expired_candle_after: 0
+2023-11-04 04:57:00,477 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using position_adjustment_enable: False
+2023-11-04 04:57:00,477 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using max_entry_position_adjustment: -1
+2023-11-04 04:57:00,478 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using max_open_trades: 3
+2023-11-04 04:57:00,479 - freqtrade.configuration.config_validation - INFO - Validating configuration ...
+2023-11-04 04:57:00,492 - freqtrade.exchange.exchange - INFO - Instance is running with dry_run enabled
+2023-11-04 04:57:00,493 - freqtrade.exchange.exchange - INFO - Using CCXT 4.1.22
+2023-11-04 04:57:00,517 - freqtrade.exchange.exchange - INFO - Using Exchange "Kraken"
+2023-11-04 04:57:03,667 - freqtrade.resolvers.exchange_resolver - INFO - Using resolved exchange 'Kraken'...
+2023-11-04 04:57:04,144 - freqtrade.wallets - INFO - Wallets synced.
+2023-11-04 04:57:04,185 - freqtrade.resolvers.iresolver - INFO - Using resolved pairlist VolumePairList from '/freqtrade/freqtrade/plugins/pairlist/VolumePairList.py'...
+2023-11-04 04:57:04,411 - freqtrade.rpc.rpc_manager - INFO - Enabling rpc.telegram ...
+2023-11-04 04:57:04,999 - freqtrade.rpc.rpc_manager - INFO - Enabling rpc.api_server
+2023-11-04 04:57:05,142 - freqtrade.rpc.telegram - INFO - rpc.telegram is listening for following commands: [['status'], ['profit'], ['balance'], ['start'], ['stop'], ['forceexit', 'forcesell', 'fx'], ['forcebuy', 'forcelong'], ['forceshort'], ['reload_trade'], ['trades'], ['delete'], ['cancel_open_order', 'coo'], ['performance'], ['buys', 'entries'], ['exits', 'sells'], ['mix_tags'], ['stats'], ['daily'], ['weekly'], ['monthly'], ['count'], ['locks'], ['delete_locks', 'unlock'], ['reload_conf', 'reload_config'], ['show_conf', 'show_config'], ['stopbuy', 'stopentry'], ['whitelist'], ['blacklist'], ['bl_delete', 'blacklist_delete'], ['logs'], ['edge'], ['health'], ['help'], ['version'], ['marketdir']]
+2023-11-04 04:57:05,952 - telegram.ext.Application - INFO - Application started
+2023-11-04 04:57:06,267 - freqtrade.rpc.api_server.webserver - INFO - Starting HTTP Server at 127.0.0.1:8080
+2023-11-04 04:57:06,268 - freqtrade.rpc.api_server.webserver - INFO - Starting Local Rest Server.
+2023-11-04 04:57:06,288 - uvicorn.error - INFO - Started server process [1]
+2023-11-04 04:57:06,288 - uvicorn.error - INFO - Waiting for application startup.
+2023-11-04 04:57:06,289 - uvicorn.error - INFO - Application startup complete.
+2023-11-04 04:57:06,290 - uvicorn.error - INFO - Uvicorn running on http://127.0.0.1:8080 (Press CTRL+C to quit)
+2023-11-04 04:57:06,326 - freqtrade.resolvers.iresolver - INFO - Using resolved pairlist VolumePairList from '/freqtrade/freqtrade/plugins/pairlist/VolumePairList.py'...
+2023-11-04 04:57:06,395 - freqtrade.plugins.pairlistmanager - INFO - Whitelist with 20 pairs: ['BTC/USDT', 'USDC/USDT', 'LINK/USDT', 'ETH/USDT', 'SOL/USDT', 'ADA/USDT', 'DAI/USDT', 'XRP/USDT', 'DOT/USDT', 'LTC/USDT', 'APE/USDT', 'DOGE/USDT', 'ATOM/USDT', 'EURT/USDT', 'AVAX/USDT', 'XMR/USDT', 'MATIC/USDT', 'ALGO/USDT', 'BCH/USDT', 'EOS/USDT']
+2023-11-04 04:57:06,396 - freqtrade.strategy.hyper - INFO - No params for buy found, using default values.
+2023-11-04 04:57:06,397 - freqtrade.strategy.hyper - INFO - Strategy Parameter(default): buy_rsi = 30
+2023-11-04 04:57:06,398 - freqtrade.strategy.hyper - INFO - Strategy Parameter(default): exit_short_rsi = 30
+2023-11-04 04:57:06,398 - freqtrade.strategy.hyper - INFO - No params for sell found, using default values.
+2023-11-04 04:57:06,399 - freqtrade.strategy.hyper - INFO - Strategy Parameter(default): sell_rsi = 70
+2023-11-04 04:57:06,400 - freqtrade.strategy.hyper - INFO - Strategy Parameter(default): short_rsi = 70
+2023-11-04 04:57:06,400 - freqtrade.strategy.hyper - INFO - No params for protection found, using default values.
+2023-11-04 04:57:06,401 - freqtrade.plugins.protectionmanager - INFO - No protection Handlers defined.
+2023-11-04 04:57:06,401 - freqtrade.rpc.rpc_manager - INFO - Sending rpc message: {'type': status, 'status': 'running'}
+2023-11-04 04:57:06,402 - freqtrade.worker - INFO - Changing state to: RUNNING
+2023-11-04 04:57:06,457 - freqtrade.rpc.rpc_manager - INFO - Sending rpc message: {'type': warning, 'status': 'Dry run is enabled. All trades are simulated.'}
+2023-11-04 04:57:06,458 - freqtrade.rpc.rpc_manager - INFO - Sending rpc message: {'type': startup, 'status': "*Exchange:* `kraken`\n*Stake per trade:* `unlimited USDT`\n*Minimum ROI:* `{'60': 0.01, '30': 0.02, '0': 0.04}`\n*Stoploss:* `-0.1`\n*Position adjustment:* `Off`\n*Timeframe:* `5m`\n*Strategy:* `SampleStrategy`"}
+2023-11-04 04:57:06,463 - freqtrade.rpc.rpc_manager - INFO - Sending rpc message: {'type': startup, 'status': "Searching for USDT pairs to buy and sell based on [{'VolumePairList': 'VolumePairList - top 20 volume pairs.'}]"}
+2023-11-04 04:57:29,236 - freqtrade.worker - INFO - Bot heartbeat. PID=1, version='2023.10', state='RUNNING'
+2023-11-04 04:58:29,287 - freqtrade.worker - INFO - Bot heartbeat. PID=1, version='2023.10', state='RUNNING'
+2023-11-04 04:59:29,347 - freqtrade.worker - INFO - Bot heartbeat. PID=1, version='2023.10', state='RUNNING'
+2023-11-04 05:00:28,617 - telegram.ext.Updater - ERROR - Error while getting Updates: Conflict: terminated by other getUpdates request; make sure that only one bot instance is running
+2023-11-04 05:00:28,618 - telegram.ext.Updater - ERROR - Exception happened while polling for updates.
+Traceback (most recent call last):
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/ext/_updater.py", line 640, in _network_loop_retry
+    if not await action_cb():
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/ext/_updater.py", line 345, in polling_action_cb
+    raise exc
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/ext/_updater.py", line 334, in polling_action_cb
+    updates = await self.bot.get_updates(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/ext/_extbot.py", line 565, in get_updates
+    updates = await super().get_updates(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/_bot.py", line 519, in decorator
+    result = await func(self, *args, **kwargs)  # skipcq: PYL-E1102
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/_bot.py", line 3562, in get_updates
+    await self._post(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/_bot.py", line 607, in _post
+    return await self._do_post(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/ext/_extbot.py", line 347, in _do_post
+    return await super()._do_post(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/_bot.py", line 635, in _do_post
+    return await request.post(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/request/_baserequest.py", line 168, in post
+    result = await self._request_wrapper(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/request/_baserequest.py", line 327, in _request_wrapper
+    raise Conflict(message)
+telegram.error.Conflict: Conflict: terminated by other getUpdates request; make sure that only one bot instance is running
+2023-11-04 05:00:29,890 - freqtrade.worker - INFO - Bot heartbeat. PID=1, version='2023.10', state='RUNNING'
+2023-11-04 05:00:33,963 - telegram.ext.Updater - ERROR - Error while getting Updates: Conflict: terminated by other getUpdates request; make sure that only one bot instance is running
+2023-11-04 05:00:33,964 - telegram.ext.Updater - ERROR - Exception happened while polling for updates.
+Traceback (most recent call last):
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/ext/_updater.py", line 640, in _network_loop_retry
+    if not await action_cb():
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/ext/_updater.py", line 345, in polling_action_cb
+    raise exc
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/ext/_updater.py", line 334, in polling_action_cb
+    updates = await self.bot.get_updates(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/ext/_extbot.py", line 565, in get_updates
+    updates = await super().get_updates(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/_bot.py", line 519, in decorator
+    result = await func(self, *args, **kwargs)  # skipcq: PYL-E1102
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/_bot.py", line 3562, in get_updates
+    await self._post(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/_bot.py", line 607, in _post
+    return await self._do_post(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/ext/_extbot.py", line 347, in _do_post
+    return await super()._do_post(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/_bot.py", line 635, in _do_post
+    return await request.post(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/request/_baserequest.py", line 168, in post
+    result = await self._request_wrapper(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/request/_baserequest.py", line 327, in _request_wrapper
+    raise Conflict(message)
+telegram.error.Conflict: Conflict: terminated by other getUpdates request; make sure that only one bot instance is running
+2023-11-04 05:00:40,293 - telegram.ext.Updater - ERROR - Error while getting Updates: Conflict: terminated by other getUpdates request; make sure that only one bot instance is running
+2023-11-04 05:00:40,293 - telegram.ext.Updater - ERROR - Exception happened while polling for updates.
+Traceback (most recent call last):
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/ext/_updater.py", line 640, in _network_loop_retry
+    if not await action_cb():
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/ext/_updater.py", line 345, in polling_action_cb
+    raise exc
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/ext/_updater.py", line 334, in polling_action_cb
+    updates = await self.bot.get_updates(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/ext/_extbot.py", line 565, in get_updates
+    updates = await super().get_updates(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/_bot.py", line 519, in decorator
+    result = await func(self, *args, **kwargs)  # skipcq: PYL-E1102
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/_bot.py", line 3562, in get_updates
+    await self._post(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/_bot.py", line 607, in _post
+    return await self._do_post(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/ext/_extbot.py", line 347, in _do_post
+    return await super()._do_post(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/_bot.py", line 635, in _do_post
+    return await request.post(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/request/_baserequest.py", line 168, in post
+    result = await self._request_wrapper(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/request/_baserequest.py", line 327, in _request_wrapper
+    raise Conflict(message)
+telegram.error.Conflict: Conflict: terminated by other getUpdates request; make sure that only one bot instance is running
+2023-11-04 05:00:48,119 - telegram.ext.Updater - ERROR - Error while getting Updates: Conflict: terminated by other getUpdates request; make sure that only one bot instance is running
+2023-11-04 05:00:48,120 - telegram.ext.Updater - ERROR - Exception happened while polling for updates.
+Traceback (most recent call last):
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/ext/_updater.py", line 640, in _network_loop_retry
+    if not await action_cb():
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/ext/_updater.py", line 345, in polling_action_cb
+    raise exc
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/ext/_updater.py", line 334, in polling_action_cb
+    updates = await self.bot.get_updates(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/ext/_extbot.py", line 565, in get_updates
+    updates = await super().get_updates(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/_bot.py", line 519, in decorator
+    result = await func(self, *args, **kwargs)  # skipcq: PYL-E1102
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/_bot.py", line 3562, in get_updates
+    await self._post(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/_bot.py", line 607, in _post
+    return await self._do_post(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/ext/_extbot.py", line 347, in _do_post
+    return await super()._do_post(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/_bot.py", line 635, in _do_post
+    return await request.post(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/request/_baserequest.py", line 168, in post
+    result = await self._request_wrapper(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/request/_baserequest.py", line 327, in _request_wrapper
+    raise Conflict(message)
+telegram.error.Conflict: Conflict: terminated by other getUpdates request; make sure that only one bot instance is running
+2023-11-04 05:00:55,839 - telegram.ext.Updater - ERROR - Error while getting Updates: Conflict: terminated by other getUpdates request; make sure that only one bot instance is running
+2023-11-04 05:00:55,840 - telegram.ext.Updater - ERROR - Exception happened while polling for updates.
+Traceback (most recent call last):
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/ext/_updater.py", line 640, in _network_loop_retry
+    if not await action_cb():
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/ext/_updater.py", line 345, in polling_action_cb
+    raise exc
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/ext/_updater.py", line 334, in polling_action_cb
+    updates = await self.bot.get_updates(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/ext/_extbot.py", line 565, in get_updates
+    updates = await super().get_updates(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/_bot.py", line 519, in decorator
+    result = await func(self, *args, **kwargs)  # skipcq: PYL-E1102
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/_bot.py", line 3562, in get_updates
+    await self._post(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/_bot.py", line 607, in _post
+    return await self._do_post(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/ext/_extbot.py", line 347, in _do_post
+    return await super()._do_post(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/_bot.py", line 635, in _do_post
+    return await request.post(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/request/_baserequest.py", line 168, in post
+    result = await self._request_wrapper(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/request/_baserequest.py", line 327, in _request_wrapper
+    raise Conflict(message)
+telegram.error.Conflict: Conflict: terminated by other getUpdates request; make sure that only one bot instance is running
+2023-11-04 05:01:05,557 - telegram.ext.Updater - ERROR - Error while getting Updates: Conflict: terminated by other getUpdates request; make sure that only one bot instance is running
+2023-11-04 05:01:05,558 - telegram.ext.Updater - ERROR - Exception happened while polling for updates.
+Traceback (most recent call last):
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/ext/_updater.py", line 640, in _network_loop_retry
+    if not await action_cb():
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/ext/_updater.py", line 345, in polling_action_cb
+    raise exc
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/ext/_updater.py", line 334, in polling_action_cb
+    updates = await self.bot.get_updates(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/ext/_extbot.py", line 565, in get_updates
+    updates = await super().get_updates(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/_bot.py", line 519, in decorator
+    result = await func(self, *args, **kwargs)  # skipcq: PYL-E1102
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/_bot.py", line 3562, in get_updates
+    await self._post(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/_bot.py", line 607, in _post
+    return await self._do_post(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/ext/_extbot.py", line 347, in _do_post
+    return await super()._do_post(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/_bot.py", line 635, in _do_post
+    return await request.post(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/request/_baserequest.py", line 168, in post
+    result = await self._request_wrapper(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/request/_baserequest.py", line 327, in _request_wrapper
+    raise Conflict(message)
+telegram.error.Conflict: Conflict: terminated by other getUpdates request; make sure that only one bot instance is running
+2023-11-04 05:01:18,337 - telegram.ext.Updater - ERROR - Error while getting Updates: Conflict: terminated by other getUpdates request; make sure that only one bot instance is running
+2023-11-04 05:01:18,338 - telegram.ext.Updater - ERROR - Exception happened while polling for updates.
+Traceback (most recent call last):
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/ext/_updater.py", line 640, in _network_loop_retry
+    if not await action_cb():
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/ext/_updater.py", line 345, in polling_action_cb
+    raise exc
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/ext/_updater.py", line 334, in polling_action_cb
+    updates = await self.bot.get_updates(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/ext/_extbot.py", line 565, in get_updates
+    updates = await super().get_updates(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/_bot.py", line 519, in decorator
+    result = await func(self, *args, **kwargs)  # skipcq: PYL-E1102
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/_bot.py", line 3562, in get_updates
+    await self._post(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/_bot.py", line 607, in _post
+    return await self._do_post(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/ext/_extbot.py", line 347, in _do_post
+    return await super()._do_post(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/_bot.py", line 635, in _do_post
+    return await request.post(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/request/_baserequest.py", line 168, in post
+    result = await self._request_wrapper(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/request/_baserequest.py", line 327, in _request_wrapper
+    raise Conflict(message)
+telegram.error.Conflict: Conflict: terminated by other getUpdates request; make sure that only one bot instance is running
+2023-11-04 05:01:29,950 - freqtrade.worker - INFO - Bot heartbeat. PID=1, version='2023.10', state='RUNNING'
+2023-11-04 05:01:35,795 - telegram.ext.Updater - ERROR - Error while getting Updates: Conflict: terminated by other getUpdates request; make sure that only one bot instance is running
+2023-11-04 05:01:35,796 - telegram.ext.Updater - ERROR - Exception happened while polling for updates.
+Traceback (most recent call last):
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/ext/_updater.py", line 640, in _network_loop_retry
+    if not await action_cb():
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/ext/_updater.py", line 345, in polling_action_cb
+    raise exc
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/ext/_updater.py", line 334, in polling_action_cb
+    updates = await self.bot.get_updates(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/ext/_extbot.py", line 565, in get_updates
+    updates = await super().get_updates(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/_bot.py", line 519, in decorator
+    result = await func(self, *args, **kwargs)  # skipcq: PYL-E1102
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/_bot.py", line 3562, in get_updates
+    await self._post(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/_bot.py", line 607, in _post
+    return await self._do_post(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/ext/_extbot.py", line 347, in _do_post
+    return await super()._do_post(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/_bot.py", line 635, in _do_post
+    return await request.post(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/request/_baserequest.py", line 168, in post
+    result = await self._request_wrapper(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/request/_baserequest.py", line 327, in _request_wrapper
+    raise Conflict(message)
+telegram.error.Conflict: Conflict: terminated by other getUpdates request; make sure that only one bot instance is running
+2023-11-04 05:02:04,067 - freqtrade.rpc.telegram - INFO - Rejected unauthorized message from: 6865775698
+2023-11-04 05:02:30,005 - freqtrade.worker - INFO - Bot heartbeat. PID=1, version='2023.10', state='RUNNING'

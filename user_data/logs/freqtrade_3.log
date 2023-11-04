@@ -1,0 +1,397 @@
+2023-11-04 04:57:00,541 - freqtrade.loggers - INFO - Verbosity set to 0
+2023-11-04 04:57:00,542 - freqtrade.configuration.configuration - INFO - Runmode set to dry_run.
+2023-11-04 04:57:00,542 - freqtrade.configuration.configuration - INFO - Parameter --db-url detected ...
+2023-11-04 04:57:00,543 - freqtrade.configuration.configuration - INFO - Dry run is enabled
+2023-11-04 04:57:00,543 - freqtrade.configuration.configuration - INFO - Using DB: "sqlite:////freqtrade/user_data/tradesv3_3.sqlite"
+2023-11-04 04:57:00,544 - freqtrade.configuration.configuration - INFO - Using max_open_trades: 3 ...
+2023-11-04 04:57:00,589 - freqtrade.configuration.configuration - INFO - Using user-data directory: /freqtrade/user_data ...
+2023-11-04 04:57:00,591 - freqtrade.configuration.configuration - INFO - Using data directory: /freqtrade/user_data/data/kraken ...
+2023-11-04 04:57:00,595 - freqtrade.exchange.check_exchange - INFO - Checking exchange...
+2023-11-04 04:57:00,609 - freqtrade.exchange.check_exchange - INFO - Exchange "kraken" is officially supported by the Freqtrade development team.
+2023-11-04 04:57:00,610 - freqtrade.configuration.configuration - INFO - Using pairlist from configuration.
+2023-11-04 04:57:00,663 - freqtrade.resolvers.iresolver - INFO - Using resolved strategy SampleStrategy from '/freqtrade/user_data/strategies/sample_strategy.py'...
+2023-11-04 04:57:00,664 - freqtrade.strategy.hyper - INFO - Found no parameter file.
+2023-11-04 04:57:00,666 - freqtrade.resolvers.strategy_resolver - INFO - Override strategy 'stake_currency' with value in config file: USDT.
+2023-11-04 04:57:00,667 - freqtrade.resolvers.strategy_resolver - INFO - Override strategy 'stake_amount' with value in config file: unlimited.
+2023-11-04 04:57:00,667 - freqtrade.resolvers.strategy_resolver - INFO - Override strategy 'unfilledtimeout' with value in config file: {'entry': 10, 'exit': 10, 'exit_timeout_count': 0, 'unit': 'minutes'}.
+2023-11-04 04:57:00,668 - freqtrade.resolvers.strategy_resolver - INFO - Override strategy 'max_open_trades' with value in config file: 3.
+2023-11-04 04:57:00,668 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using minimal_roi: {'60': 0.01, '30': 0.02, '0': 0.04}
+2023-11-04 04:57:00,668 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using timeframe: 5m
+2023-11-04 04:57:00,669 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using stoploss: -0.1
+2023-11-04 04:57:00,669 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using trailing_stop: False
+2023-11-04 04:57:00,669 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using trailing_stop_positive_offset: 0.0
+2023-11-04 04:57:00,670 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using trailing_only_offset_is_reached: False
+2023-11-04 04:57:00,670 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using use_custom_stoploss: False
+2023-11-04 04:57:00,670 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using process_only_new_candles: True
+2023-11-04 04:57:00,671 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using order_types: {'entry': 'limit', 'exit': 'limit', 'stoploss': 'market', 'stoploss_on_exchange': False}
+2023-11-04 04:57:00,671 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using order_time_in_force: {'entry': 'GTC', 'exit': 'GTC'}
+2023-11-04 04:57:00,671 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using stake_currency: USDT
+2023-11-04 04:57:00,672 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using stake_amount: unlimited
+2023-11-04 04:57:00,672 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using protections: []
+2023-11-04 04:57:00,672 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using startup_candle_count: 200
+2023-11-04 04:57:00,673 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using unfilledtimeout: {'entry': 10, 'exit': 10, 'exit_timeout_count': 0, 'unit': 'minutes'}
+2023-11-04 04:57:00,673 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using use_exit_signal: True
+2023-11-04 04:57:00,673 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using exit_profit_only: False
+2023-11-04 04:57:00,674 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using ignore_roi_if_entry_signal: False
+2023-11-04 04:57:00,674 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using exit_profit_offset: 0.0
+2023-11-04 04:57:00,674 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using disable_dataframe_checks: False
+2023-11-04 04:57:00,675 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using ignore_buying_expired_candle_after: 0
+2023-11-04 04:57:00,675 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using position_adjustment_enable: False
+2023-11-04 04:57:00,675 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using max_entry_position_adjustment: -1
+2023-11-04 04:57:00,676 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using max_open_trades: 3
+2023-11-04 04:57:00,676 - freqtrade.configuration.config_validation - INFO - Validating configuration ...
+2023-11-04 04:57:00,688 - freqtrade.exchange.exchange - INFO - Instance is running with dry_run enabled
+2023-11-04 04:57:00,688 - freqtrade.exchange.exchange - INFO - Using CCXT 4.1.22
+2023-11-04 04:57:00,710 - freqtrade.exchange.exchange - INFO - Using Exchange "Kraken"
+2023-11-04 04:57:03,800 - freqtrade.resolvers.exchange_resolver - INFO - Using resolved exchange 'Kraken'...
+2023-11-04 04:57:04,292 - freqtrade.wallets - INFO - Wallets synced.
+2023-11-04 04:57:04,341 - freqtrade.resolvers.iresolver - INFO - Using resolved pairlist VolumePairList from '/freqtrade/freqtrade/plugins/pairlist/VolumePairList.py'...
+2023-11-04 04:58:12,845 - freqtrade.commands.trade_commands - INFO - SIGINT received, aborting ...
+2023-11-04 04:58:13,079 - asyncio - ERROR - Unclosed connector
+connections: ['[(<aiohttp.client_proto.ResponseHandler object at 0xac0f8a78>, 122572.967373424)]']
+connector: <aiohttp.connector.TCPConnector object at 0xac0f66e8>
+2023-11-04 05:00:22,801 - freqtrade.loggers - INFO - Verbosity set to 0
+2023-11-04 05:00:22,802 - freqtrade.configuration.configuration - INFO - Runmode set to dry_run.
+2023-11-04 05:00:22,803 - freqtrade.configuration.configuration - INFO - Parameter --db-url detected ...
+2023-11-04 05:00:22,804 - freqtrade.configuration.configuration - INFO - Dry run is enabled
+2023-11-04 05:00:22,804 - freqtrade.configuration.configuration - INFO - Using DB: "sqlite:////freqtrade/user_data/tradesv3_3.sqlite"
+2023-11-04 05:00:22,805 - freqtrade.configuration.configuration - INFO - Using max_open_trades: 3 ...
+2023-11-04 05:00:22,855 - freqtrade.configuration.configuration - INFO - Using user-data directory: /freqtrade/user_data ...
+2023-11-04 05:00:22,858 - freqtrade.configuration.configuration - INFO - Using data directory: /freqtrade/user_data/data/kraken ...
+2023-11-04 05:00:22,862 - freqtrade.exchange.check_exchange - INFO - Checking exchange...
+2023-11-04 05:00:22,879 - freqtrade.exchange.check_exchange - INFO - Exchange "kraken" is officially supported by the Freqtrade development team.
+2023-11-04 05:00:22,880 - freqtrade.configuration.configuration - INFO - Using pairlist from configuration.
+2023-11-04 05:00:22,942 - freqtrade.resolvers.iresolver - INFO - Using resolved strategy SampleStrategy from '/freqtrade/user_data/strategies/sample_strategy.py'...
+2023-11-04 05:00:22,943 - freqtrade.strategy.hyper - INFO - Found no parameter file.
+2023-11-04 05:00:22,945 - freqtrade.resolvers.strategy_resolver - INFO - Override strategy 'stake_currency' with value in config file: USDT.
+2023-11-04 05:00:22,946 - freqtrade.resolvers.strategy_resolver - INFO - Override strategy 'stake_amount' with value in config file: unlimited.
+2023-11-04 05:00:22,947 - freqtrade.resolvers.strategy_resolver - INFO - Override strategy 'unfilledtimeout' with value in config file: {'entry': 10, 'exit': 10, 'exit_timeout_count': 0, 'unit': 'minutes'}.
+2023-11-04 05:00:22,947 - freqtrade.resolvers.strategy_resolver - INFO - Override strategy 'max_open_trades' with value in config file: 3.
+2023-11-04 05:00:22,948 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using minimal_roi: {'60': 0.01, '30': 0.02, '0': 0.04}
+2023-11-04 05:00:22,949 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using timeframe: 5m
+2023-11-04 05:00:22,949 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using stoploss: -0.1
+2023-11-04 05:00:22,950 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using trailing_stop: False
+2023-11-04 05:00:22,951 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using trailing_stop_positive_offset: 0.0
+2023-11-04 05:00:22,951 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using trailing_only_offset_is_reached: False
+2023-11-04 05:00:22,952 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using use_custom_stoploss: False
+2023-11-04 05:00:22,953 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using process_only_new_candles: True
+2023-11-04 05:00:22,953 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using order_types: {'entry': 'limit', 'exit': 'limit', 'stoploss': 'market', 'stoploss_on_exchange': False}
+2023-11-04 05:00:22,954 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using order_time_in_force: {'entry': 'GTC', 'exit': 'GTC'}
+2023-11-04 05:00:22,955 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using stake_currency: USDT
+2023-11-04 05:00:22,955 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using stake_amount: unlimited
+2023-11-04 05:00:22,956 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using protections: []
+2023-11-04 05:00:22,957 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using startup_candle_count: 200
+2023-11-04 05:00:22,957 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using unfilledtimeout: {'entry': 10, 'exit': 10, 'exit_timeout_count': 0, 'unit': 'minutes'}
+2023-11-04 05:00:22,958 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using use_exit_signal: True
+2023-11-04 05:00:22,959 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using exit_profit_only: False
+2023-11-04 05:00:22,959 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using ignore_roi_if_entry_signal: False
+2023-11-04 05:00:22,960 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using exit_profit_offset: 0.0
+2023-11-04 05:00:22,961 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using disable_dataframe_checks: False
+2023-11-04 05:00:22,962 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using ignore_buying_expired_candle_after: 0
+2023-11-04 05:00:22,962 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using position_adjustment_enable: False
+2023-11-04 05:00:22,963 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using max_entry_position_adjustment: -1
+2023-11-04 05:00:22,963 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using max_open_trades: 3
+2023-11-04 05:00:22,965 - freqtrade.configuration.config_validation - INFO - Validating configuration ...
+2023-11-04 05:00:22,979 - freqtrade.exchange.exchange - INFO - Instance is running with dry_run enabled
+2023-11-04 05:00:22,979 - freqtrade.exchange.exchange - INFO - Using CCXT 4.1.22
+2023-11-04 05:00:23,005 - freqtrade.exchange.exchange - INFO - Using Exchange "Kraken"
+2023-11-04 05:00:26,139 - freqtrade.resolvers.exchange_resolver - INFO - Using resolved exchange 'Kraken'...
+2023-11-04 05:00:26,248 - freqtrade.wallets - INFO - Wallets synced.
+2023-11-04 05:00:26,285 - freqtrade.resolvers.iresolver - INFO - Using resolved pairlist VolumePairList from '/freqtrade/freqtrade/plugins/pairlist/VolumePairList.py'...
+2023-11-04 05:00:26,495 - freqtrade.rpc.rpc_manager - INFO - Enabling rpc.telegram ...
+2023-11-04 05:00:27,009 - freqtrade.rpc.rpc_manager - INFO - Enabling rpc.api_server
+2023-11-04 05:00:27,127 - freqtrade.rpc.telegram - INFO - rpc.telegram is listening for following commands: [['status'], ['profit'], ['balance'], ['start'], ['stop'], ['forceexit', 'forcesell', 'fx'], ['forcebuy', 'forcelong'], ['forceshort'], ['reload_trade'], ['trades'], ['delete'], ['cancel_open_order', 'coo'], ['performance'], ['buys', 'entries'], ['exits', 'sells'], ['mix_tags'], ['stats'], ['daily'], ['weekly'], ['monthly'], ['count'], ['locks'], ['delete_locks', 'unlock'], ['reload_conf', 'reload_config'], ['show_conf', 'show_config'], ['stopbuy', 'stopentry'], ['whitelist'], ['blacklist'], ['bl_delete', 'blacklist_delete'], ['logs'], ['edge'], ['health'], ['help'], ['version'], ['marketdir']]
+2023-11-04 05:00:27,893 - telegram.ext.Application - INFO - Application started
+2023-11-04 05:00:28,127 - freqtrade.rpc.api_server.webserver - INFO - Starting HTTP Server at 127.0.0.1:8080
+2023-11-04 05:00:28,128 - freqtrade.rpc.api_server.webserver - INFO - Starting Local Rest Server.
+2023-11-04 05:00:28,150 - uvicorn.error - INFO - Started server process [1]
+2023-11-04 05:00:28,150 - uvicorn.error - INFO - Waiting for application startup.
+2023-11-04 05:00:28,151 - uvicorn.error - INFO - Application startup complete.
+2023-11-04 05:00:28,152 - uvicorn.error - INFO - Uvicorn running on http://127.0.0.1:8080 (Press CTRL+C to quit)
+2023-11-04 05:00:28,187 - freqtrade.resolvers.iresolver - INFO - Using resolved pairlist VolumePairList from '/freqtrade/freqtrade/plugins/pairlist/VolumePairList.py'...
+2023-11-04 05:00:28,266 - freqtrade.plugins.pairlistmanager - INFO - Whitelist with 20 pairs: ['BTC/USDT', 'USDC/USDT', 'LINK/USDT', 'ETH/USDT', 'SOL/USDT', 'ADA/USDT', 'DAI/USDT', 'XRP/USDT', 'DOT/USDT', 'LTC/USDT', 'APE/USDT', 'DOGE/USDT', 'ATOM/USDT', 'EURT/USDT', 'AVAX/USDT', 'XMR/USDT', 'MATIC/USDT', 'ALGO/USDT', 'BCH/USDT', 'EOS/USDT']
+2023-11-04 05:00:28,268 - freqtrade.strategy.hyper - INFO - No params for buy found, using default values.
+2023-11-04 05:00:28,269 - freqtrade.strategy.hyper - INFO - Strategy Parameter(default): buy_rsi = 30
+2023-11-04 05:00:28,269 - freqtrade.strategy.hyper - INFO - Strategy Parameter(default): exit_short_rsi = 30
+2023-11-04 05:00:28,270 - freqtrade.strategy.hyper - INFO - No params for sell found, using default values.
+2023-11-04 05:00:28,271 - freqtrade.strategy.hyper - INFO - Strategy Parameter(default): sell_rsi = 70
+2023-11-04 05:00:28,272 - freqtrade.strategy.hyper - INFO - Strategy Parameter(default): short_rsi = 70
+2023-11-04 05:00:28,272 - freqtrade.strategy.hyper - INFO - No params for protection found, using default values.
+2023-11-04 05:00:28,273 - freqtrade.plugins.protectionmanager - INFO - No protection Handlers defined.
+2023-11-04 05:00:28,274 - freqtrade.rpc.rpc_manager - INFO - Sending rpc message: {'type': status, 'status': 'running'}
+2023-11-04 05:00:28,275 - freqtrade.worker - INFO - Changing state to: RUNNING
+2023-11-04 05:00:28,327 - freqtrade.rpc.rpc_manager - INFO - Sending rpc message: {'type': warning, 'status': 'Dry run is enabled. All trades are simulated.'}
+2023-11-04 05:00:28,329 - freqtrade.rpc.rpc_manager - INFO - Sending rpc message: {'type': startup, 'status': "*Exchange:* `kraken`\n*Stake per trade:* `unlimited USDT`\n*Minimum ROI:* `{'60': 0.01, '30': 0.02, '0': 0.04}`\n*Stoploss:* `-0.1`\n*Position adjustment:* `Off`\n*Timeframe:* `5m`\n*Strategy:* `SampleStrategy`"}
+2023-11-04 05:00:28,334 - freqtrade.rpc.rpc_manager - INFO - Sending rpc message: {'type': startup, 'status': "Searching for USDT pairs to buy and sell based on [{'VolumePairList': 'VolumePairList - top 20 volume pairs.'}]"}
+2023-11-04 05:00:32,788 - telegram.ext.Updater - ERROR - Error while getting Updates: Conflict: terminated by other getUpdates request; make sure that only one bot instance is running
+2023-11-04 05:00:32,789 - telegram.ext.Updater - ERROR - Exception happened while polling for updates.
+Traceback (most recent call last):
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/ext/_updater.py", line 640, in _network_loop_retry
+    if not await action_cb():
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/ext/_updater.py", line 345, in polling_action_cb
+    raise exc
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/ext/_updater.py", line 334, in polling_action_cb
+    updates = await self.bot.get_updates(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/ext/_extbot.py", line 565, in get_updates
+    updates = await super().get_updates(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/_bot.py", line 519, in decorator
+    result = await func(self, *args, **kwargs)  # skipcq: PYL-E1102
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/_bot.py", line 3562, in get_updates
+    await self._post(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/_bot.py", line 607, in _post
+    return await self._do_post(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/ext/_extbot.py", line 347, in _do_post
+    return await super()._do_post(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/_bot.py", line 635, in _do_post
+    return await request.post(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/request/_baserequest.py", line 168, in post
+    result = await self._request_wrapper(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/request/_baserequest.py", line 327, in _request_wrapper
+    raise Conflict(message)
+telegram.error.Conflict: Conflict: terminated by other getUpdates request; make sure that only one bot instance is running
+2023-11-04 05:00:38,626 - telegram.ext.Updater - ERROR - Error while getting Updates: Conflict: terminated by other getUpdates request; make sure that only one bot instance is running
+2023-11-04 05:00:38,628 - telegram.ext.Updater - ERROR - Exception happened while polling for updates.
+Traceback (most recent call last):
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/ext/_updater.py", line 640, in _network_loop_retry
+    if not await action_cb():
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/ext/_updater.py", line 345, in polling_action_cb
+    raise exc
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/ext/_updater.py", line 334, in polling_action_cb
+    updates = await self.bot.get_updates(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/ext/_extbot.py", line 565, in get_updates
+    updates = await super().get_updates(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/_bot.py", line 519, in decorator
+    result = await func(self, *args, **kwargs)  # skipcq: PYL-E1102
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/_bot.py", line 3562, in get_updates
+    await self._post(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/_bot.py", line 607, in _post
+    return await self._do_post(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/ext/_extbot.py", line 347, in _do_post
+    return await super()._do_post(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/_bot.py", line 635, in _do_post
+    return await request.post(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/request/_baserequest.py", line 168, in post
+    result = await self._request_wrapper(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/request/_baserequest.py", line 327, in _request_wrapper
+    raise Conflict(message)
+telegram.error.Conflict: Conflict: terminated by other getUpdates request; make sure that only one bot instance is running
+2023-11-04 05:00:45,706 - telegram.ext.Updater - ERROR - Error while getting Updates: Conflict: terminated by other getUpdates request; make sure that only one bot instance is running
+2023-11-04 05:00:45,707 - telegram.ext.Updater - ERROR - Exception happened while polling for updates.
+Traceback (most recent call last):
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/ext/_updater.py", line 640, in _network_loop_retry
+    if not await action_cb():
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/ext/_updater.py", line 345, in polling_action_cb
+    raise exc
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/ext/_updater.py", line 334, in polling_action_cb
+    updates = await self.bot.get_updates(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/ext/_extbot.py", line 565, in get_updates
+    updates = await super().get_updates(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/_bot.py", line 519, in decorator
+    result = await func(self, *args, **kwargs)  # skipcq: PYL-E1102
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/_bot.py", line 3562, in get_updates
+    await self._post(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/_bot.py", line 607, in _post
+    return await self._do_post(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/ext/_extbot.py", line 347, in _do_post
+    return await super()._do_post(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/_bot.py", line 635, in _do_post
+    return await request.post(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/request/_baserequest.py", line 168, in post
+    result = await self._request_wrapper(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/request/_baserequest.py", line 327, in _request_wrapper
+    raise Conflict(message)
+telegram.error.Conflict: Conflict: terminated by other getUpdates request; make sure that only one bot instance is running
+2023-11-04 05:00:50,420 - freqtrade.rpc.telegram - INFO - Rejected unauthorized message from: -1001515144289
+2023-11-04 05:00:50,740 - freqtrade.worker - INFO - Bot heartbeat. PID=1, version='2023.10', state='RUNNING'
+2023-11-04 05:00:51,668 - telegram.ext.Updater - ERROR - Error while getting Updates: Conflict: terminated by other getUpdates request; make sure that only one bot instance is running
+2023-11-04 05:00:51,669 - telegram.ext.Updater - ERROR - Exception happened while polling for updates.
+Traceback (most recent call last):
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/ext/_updater.py", line 640, in _network_loop_retry
+    if not await action_cb():
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/ext/_updater.py", line 345, in polling_action_cb
+    raise exc
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/ext/_updater.py", line 334, in polling_action_cb
+    updates = await self.bot.get_updates(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/ext/_extbot.py", line 565, in get_updates
+    updates = await super().get_updates(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/_bot.py", line 519, in decorator
+    result = await func(self, *args, **kwargs)  # skipcq: PYL-E1102
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/_bot.py", line 3562, in get_updates
+    await self._post(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/_bot.py", line 607, in _post
+    return await self._do_post(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/ext/_extbot.py", line 347, in _do_post
+    return await super()._do_post(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/_bot.py", line 635, in _do_post
+    return await request.post(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/request/_baserequest.py", line 168, in post
+    result = await self._request_wrapper(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/request/_baserequest.py", line 327, in _request_wrapper
+    raise Conflict(message)
+telegram.error.Conflict: Conflict: terminated by other getUpdates request; make sure that only one bot instance is running
+2023-11-04 05:01:01,388 - telegram.ext.Updater - ERROR - Error while getting Updates: Conflict: terminated by other getUpdates request; make sure that only one bot instance is running
+2023-11-04 05:01:01,389 - telegram.ext.Updater - ERROR - Exception happened while polling for updates.
+Traceback (most recent call last):
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/ext/_updater.py", line 640, in _network_loop_retry
+    if not await action_cb():
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/ext/_updater.py", line 345, in polling_action_cb
+    raise exc
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/ext/_updater.py", line 334, in polling_action_cb
+    updates = await self.bot.get_updates(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/ext/_extbot.py", line 565, in get_updates
+    updates = await super().get_updates(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/_bot.py", line 519, in decorator
+    result = await func(self, *args, **kwargs)  # skipcq: PYL-E1102
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/_bot.py", line 3562, in get_updates
+    await self._post(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/_bot.py", line 607, in _post
+    return await self._do_post(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/ext/_extbot.py", line 347, in _do_post
+    return await super()._do_post(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/_bot.py", line 635, in _do_post
+    return await request.post(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/request/_baserequest.py", line 168, in post
+    result = await self._request_wrapper(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/request/_baserequest.py", line 327, in _request_wrapper
+    raise Conflict(message)
+telegram.error.Conflict: Conflict: terminated by other getUpdates request; make sure that only one bot instance is running
+2023-11-04 05:01:13,664 - telegram.ext.Updater - ERROR - Error while getting Updates: Conflict: terminated by other getUpdates request; make sure that only one bot instance is running
+2023-11-04 05:01:13,665 - telegram.ext.Updater - ERROR - Exception happened while polling for updates.
+Traceback (most recent call last):
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/ext/_updater.py", line 640, in _network_loop_retry
+    if not await action_cb():
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/ext/_updater.py", line 345, in polling_action_cb
+    raise exc
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/ext/_updater.py", line 334, in polling_action_cb
+    updates = await self.bot.get_updates(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/ext/_extbot.py", line 565, in get_updates
+    updates = await super().get_updates(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/_bot.py", line 519, in decorator
+    result = await func(self, *args, **kwargs)  # skipcq: PYL-E1102
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/_bot.py", line 3562, in get_updates
+    await self._post(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/_bot.py", line 607, in _post
+    return await self._do_post(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/ext/_extbot.py", line 347, in _do_post
+    return await super()._do_post(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/_bot.py", line 635, in _do_post
+    return await request.post(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/request/_baserequest.py", line 168, in post
+    result = await self._request_wrapper(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/request/_baserequest.py", line 327, in _request_wrapper
+    raise Conflict(message)
+telegram.error.Conflict: Conflict: terminated by other getUpdates request; make sure that only one bot instance is running
+2023-11-04 05:01:30,370 - telegram.ext.Updater - ERROR - Error while getting Updates: Conflict: terminated by other getUpdates request; make sure that only one bot instance is running
+2023-11-04 05:01:30,371 - telegram.ext.Updater - ERROR - Exception happened while polling for updates.
+Traceback (most recent call last):
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/ext/_updater.py", line 640, in _network_loop_retry
+    if not await action_cb():
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/ext/_updater.py", line 345, in polling_action_cb
+    raise exc
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/ext/_updater.py", line 334, in polling_action_cb
+    updates = await self.bot.get_updates(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/ext/_extbot.py", line 565, in get_updates
+    updates = await super().get_updates(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/_bot.py", line 519, in decorator
+    result = await func(self, *args, **kwargs)  # skipcq: PYL-E1102
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/_bot.py", line 3562, in get_updates
+    await self._post(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/_bot.py", line 607, in _post
+    return await self._do_post(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/ext/_extbot.py", line 347, in _do_post
+    return await super()._do_post(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/_bot.py", line 635, in _do_post
+    return await request.post(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/request/_baserequest.py", line 168, in post
+    result = await self._request_wrapper(
+  File "/home/ftuser/.local/lib/python3.9/site-packages/telegram/request/_baserequest.py", line 327, in _request_wrapper
+    raise Conflict(message)
+telegram.error.Conflict: Conflict: terminated by other getUpdates request; make sure that only one bot instance is running
+2023-11-04 05:01:46,415 - freqtrade.commands.trade_commands - INFO - SIGINT received, aborting ...
+2023-11-04 05:01:46,416 - freqtrade.commands.trade_commands - INFO - worker found ... calling exit
+2023-11-04 05:01:46,426 - freqtrade.rpc.rpc_manager - INFO - Sending rpc message: {'type': status, 'status': 'process died'}
+2023-11-04 05:01:46,431 - freqtrade.freqtradebot - INFO - Cleaning up modules ...
+2023-11-04 05:01:46,438 - freqtrade.rpc.rpc_manager - INFO - Cleaning up rpc modules ...
+2023-11-04 05:01:46,438 - freqtrade.rpc.rpc_manager - INFO - Cleaning up rpc.apiserver ...
+2023-11-04 05:01:46,438 - freqtrade.rpc.api_server.webserver - INFO - Stopping API Server
+2023-11-04 05:01:46,515 - uvicorn.error - INFO - Shutting down
+2023-11-04 05:01:46,616 - uvicorn.error - INFO - Waiting for application shutdown.
+2023-11-04 05:01:46,617 - uvicorn.error - INFO - Application shutdown complete.
+2023-11-04 05:01:46,617 - uvicorn.error - INFO - Finished server process [1]
+2023-11-04 05:01:46,618 - freqtrade.rpc.rpc_manager - INFO - Cleaning up rpc.telegram ...
+2023-11-04 05:01:47,131 - telegram.ext.Application - INFO - Application is stopping. This might take a moment.
+2023-11-04 05:01:47,133 - telegram.ext.Application - INFO - Application.stop() complete
+2023-11-04 05:02:00,154 - freqtrade.loggers - INFO - Verbosity set to 0
+2023-11-04 05:02:00,155 - freqtrade.configuration.configuration - INFO - Runmode set to dry_run.
+2023-11-04 05:02:00,156 - freqtrade.configuration.configuration - INFO - Parameter --db-url detected ...
+2023-11-04 05:02:00,156 - freqtrade.configuration.configuration - INFO - Dry run is enabled
+2023-11-04 05:02:00,157 - freqtrade.configuration.configuration - INFO - Using DB: "sqlite:////freqtrade/user_data/tradesv3_3.sqlite"
+2023-11-04 05:02:00,158 - freqtrade.configuration.configuration - INFO - Using max_open_trades: 3 ...
+2023-11-04 05:02:00,214 - freqtrade.configuration.configuration - INFO - Using user-data directory: /freqtrade/user_data ...
+2023-11-04 05:02:00,217 - freqtrade.configuration.configuration - INFO - Using data directory: /freqtrade/user_data/data/kraken ...
+2023-11-04 05:02:00,221 - freqtrade.exchange.check_exchange - INFO - Checking exchange...
+2023-11-04 05:02:00,237 - freqtrade.exchange.check_exchange - INFO - Exchange "kraken" is officially supported by the Freqtrade development team.
+2023-11-04 05:02:00,246 - freqtrade.configuration.configuration - INFO - Using pairlist from configuration.
+2023-11-04 05:02:00,307 - freqtrade.resolvers.iresolver - INFO - Using resolved strategy SampleStrategy from '/freqtrade/user_data/strategies/sample_strategy.py'...
+2023-11-04 05:02:00,308 - freqtrade.strategy.hyper - INFO - Found no parameter file.
+2023-11-04 05:02:00,310 - freqtrade.resolvers.strategy_resolver - INFO - Override strategy 'stake_currency' with value in config file: USDT.
+2023-11-04 05:02:00,311 - freqtrade.resolvers.strategy_resolver - INFO - Override strategy 'stake_amount' with value in config file: unlimited.
+2023-11-04 05:02:00,311 - freqtrade.resolvers.strategy_resolver - INFO - Override strategy 'unfilledtimeout' with value in config file: {'entry': 10, 'exit': 10, 'exit_timeout_count': 0, 'unit': 'minutes'}.
+2023-11-04 05:02:00,312 - freqtrade.resolvers.strategy_resolver - INFO - Override strategy 'max_open_trades' with value in config file: 3.
+2023-11-04 05:02:00,313 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using minimal_roi: {'60': 0.01, '30': 0.02, '0': 0.04}
+2023-11-04 05:02:00,313 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using timeframe: 5m
+2023-11-04 05:02:00,314 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using stoploss: -0.1
+2023-11-04 05:02:00,314 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using trailing_stop: False
+2023-11-04 05:02:00,315 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using trailing_stop_positive_offset: 0.0
+2023-11-04 05:02:00,315 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using trailing_only_offset_is_reached: False
+2023-11-04 05:02:00,316 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using use_custom_stoploss: False
+2023-11-04 05:02:00,316 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using process_only_new_candles: True
+2023-11-04 05:02:00,317 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using order_types: {'entry': 'limit', 'exit': 'limit', 'stoploss': 'market', 'stoploss_on_exchange': False}
+2023-11-04 05:02:00,317 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using order_time_in_force: {'entry': 'GTC', 'exit': 'GTC'}
+2023-11-04 05:02:00,318 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using stake_currency: USDT
+2023-11-04 05:02:00,318 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using stake_amount: unlimited
+2023-11-04 05:02:00,318 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using protections: []
+2023-11-04 05:02:00,319 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using startup_candle_count: 200
+2023-11-04 05:02:00,319 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using unfilledtimeout: {'entry': 10, 'exit': 10, 'exit_timeout_count': 0, 'unit': 'minutes'}
+2023-11-04 05:02:00,320 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using use_exit_signal: True
+2023-11-04 05:02:00,321 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using exit_profit_only: False
+2023-11-04 05:02:00,321 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using ignore_roi_if_entry_signal: False
+2023-11-04 05:02:00,321 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using exit_profit_offset: 0.0
+2023-11-04 05:02:00,322 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using disable_dataframe_checks: False
+2023-11-04 05:02:00,322 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using ignore_buying_expired_candle_after: 0
+2023-11-04 05:02:00,323 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using position_adjustment_enable: False
+2023-11-04 05:02:00,323 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using max_entry_position_adjustment: -1
+2023-11-04 05:02:00,324 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using max_open_trades: 3
+2023-11-04 05:02:00,325 - freqtrade.configuration.config_validation - INFO - Validating configuration ...
+2023-11-04 05:02:00,339 - freqtrade.exchange.exchange - INFO - Instance is running with dry_run enabled
+2023-11-04 05:02:00,339 - freqtrade.exchange.exchange - INFO - Using CCXT 4.1.22
+2023-11-04 05:02:00,363 - freqtrade.exchange.exchange - INFO - Using Exchange "Kraken"
+2023-11-04 05:02:03,468 - freqtrade.resolvers.exchange_resolver - INFO - Using resolved exchange 'Kraken'...
+2023-11-04 05:02:03,596 - freqtrade.wallets - INFO - Wallets synced.
+2023-11-04 05:02:03,635 - freqtrade.resolvers.iresolver - INFO - Using resolved pairlist VolumePairList from '/freqtrade/freqtrade/plugins/pairlist/VolumePairList.py'...
+2023-11-04 05:02:03,838 - freqtrade.rpc.rpc_manager - INFO - Enabling rpc.telegram ...
+2023-11-04 05:02:04,361 - freqtrade.rpc.rpc_manager - INFO - Enabling rpc.api_server
+2023-11-04 05:02:04,486 - freqtrade.rpc.telegram - INFO - rpc.telegram is listening for following commands: [['status'], ['profit'], ['balance'], ['start'], ['stop'], ['forceexit', 'forcesell', 'fx'], ['forcebuy', 'forcelong'], ['forceshort'], ['reload_trade'], ['trades'], ['delete'], ['cancel_open_order', 'coo'], ['performance'], ['buys', 'entries'], ['exits', 'sells'], ['mix_tags'], ['stats'], ['daily'], ['weekly'], ['monthly'], ['count'], ['locks'], ['delete_locks', 'unlock'], ['reload_conf', 'reload_config'], ['show_conf', 'show_config'], ['stopbuy', 'stopentry'], ['whitelist'], ['blacklist'], ['bl_delete', 'blacklist_delete'], ['logs'], ['edge'], ['health'], ['help'], ['version'], ['marketdir']]
+2023-11-04 05:02:05,244 - telegram.ext.Application - INFO - Application started
+2023-11-04 05:02:05,594 - freqtrade.rpc.api_server.webserver - INFO - Starting HTTP Server at 127.0.0.1:8080
+2023-11-04 05:02:05,595 - freqtrade.rpc.api_server.webserver - INFO - Starting Local Rest Server.
+2023-11-04 05:02:05,619 - uvicorn.error - INFO - Started server process [1]
+2023-11-04 05:02:05,620 - uvicorn.error - INFO - Waiting for application startup.
+2023-11-04 05:02:05,622 - uvicorn.error - INFO - Application startup complete.
+2023-11-04 05:02:05,624 - uvicorn.error - INFO - Uvicorn running on http://127.0.0.1:8080 (Press CTRL+C to quit)
+2023-11-04 05:02:05,661 - freqtrade.resolvers.iresolver - INFO - Using resolved pairlist VolumePairList from '/freqtrade/freqtrade/plugins/pairlist/VolumePairList.py'...
+2023-11-04 05:02:05,756 - freqtrade.plugins.pairlistmanager - INFO - Whitelist with 20 pairs: ['BTC/USDT', 'USDC/USDT', 'LINK/USDT', 'ETH/USDT', 'SOL/USDT', 'ADA/USDT', 'DAI/USDT', 'XRP/USDT', 'DOT/USDT', 'LTC/USDT', 'APE/USDT', 'DOGE/USDT', 'ATOM/USDT', 'EURT/USDT', 'AVAX/USDT', 'XMR/USDT', 'MATIC/USDT', 'ALGO/USDT', 'BCH/USDT', 'EOS/USDT']
+2023-11-04 05:02:05,758 - freqtrade.strategy.hyper - INFO - No params for buy found, using default values.
+2023-11-04 05:02:05,759 - freqtrade.strategy.hyper - INFO - Strategy Parameter(default): buy_rsi = 30
+2023-11-04 05:02:05,760 - freqtrade.strategy.hyper - INFO - Strategy Parameter(default): exit_short_rsi = 30
+2023-11-04 05:02:05,761 - freqtrade.strategy.hyper - INFO - No params for sell found, using default values.
+2023-11-04 05:02:05,762 - freqtrade.strategy.hyper - INFO - Strategy Parameter(default): sell_rsi = 70
+2023-11-04 05:02:05,762 - freqtrade.strategy.hyper - INFO - Strategy Parameter(default): short_rsi = 70
+2023-11-04 05:02:05,763 - freqtrade.strategy.hyper - INFO - No params for protection found, using default values.
+2023-11-04 05:02:05,764 - freqtrade.plugins.protectionmanager - INFO - No protection Handlers defined.
+2023-11-04 05:02:05,764 - freqtrade.rpc.rpc_manager - INFO - Sending rpc message: {'type': status, 'status': 'running'}
+2023-11-04 05:02:05,765 - freqtrade.worker - INFO - Changing state to: RUNNING
+2023-11-04 05:02:05,792 - freqtrade.rpc.rpc_manager - INFO - Sending rpc message: {'type': warning, 'status': 'Dry run is enabled. All trades are simulated.'}
+2023-11-04 05:02:05,794 - freqtrade.rpc.rpc_manager - INFO - Sending rpc message: {'type': startup, 'status': "*Exchange:* `kraken`\n*Stake per trade:* `unlimited USDT`\n*Minimum ROI:* `{'60': 0.01, '30': 0.02, '0': 0.04}`\n*Stoploss:* `-0.1`\n*Position adjustment:* `Off`\n*Timeframe:* `5m`\n*Strategy:* `SampleStrategy`"}
+2023-11-04 05:02:05,794 - freqtrade.rpc.rpc_manager - INFO - Sending rpc message: {'type': startup, 'status': "Searching for USDT pairs to buy and sell based on [{'VolumePairList': 'VolumePairList - top 20 volume pairs.'}]"}
+2023-11-04 05:02:28,198 - freqtrade.worker - INFO - Bot heartbeat. PID=1, version='2023.10', state='RUNNING'
