@@ -56,17 +56,17 @@
     "telegram": {
         "enabled": true,
         "token": "6665435149:AAG3qR4CjIp-isJKLhVSkg8lcNMOGpykBcg",
-        "chat_id": "6865775698"
+        "chat_id": "-1001515144289"
     },
     "api_server": {
         "enabled": true,
-        "listen_ip_address": "127.0.0.1",
+        "listen_ip_address": "0.0.0.0",
         "listen_port": 8080,
         "verbosity": "error",
         "enable_openapi": false,
         "jwt_secret_key": "da5178dd6669bb9e66225436d6f6bc1bd3f082c40bf7bb442816d00c58e67c1a",
         "ws_token": "zcMpaB3lH_MvX5wQuM3Jmlz295rRMzfmeg",
-        "CORS_origins": [],
+        "CORS_origins": ["http://192.168.1.26:8080", "http://192.168.1.26:8081", "http://192.168.1.26:8082", "http://192.168.1.26:8083", "http://192.168.1.26:8084", "http://192.168.1.26:8085"], 
         "username": "freqtrader",
         "password": "DrumStick8008"
     },
