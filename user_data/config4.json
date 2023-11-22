@@ -1,10 +1,10 @@
 
 {
     "max_open_trades": 3,
-    "stake_currency": "ETH",
+    "stake_currency": "USDT",
     "stake_amount": "unlimited",
     "tradable_balance_ratio": 0.99,
-    "fiat_display_currency": "ETH",
+    "fiat_display_currency": "USD",
     "dry_run": true,
     "dry_run_wallet": 1000,
     "cancel_open_orders_on_exit": false,
@@ -37,8 +37,9 @@
         "key": "",
         "secret": "",
         "ccxt_config": {},
-        "ccxt_async_config": {},
+	"ccxt_async_config": {},
         "pair_whitelist": [
+		"BTC/USDT", 
         ],
         "pair_blacklist": [
 
@@ -46,7 +47,7 @@
     },
     "pairlists": [
         {
-            "method": "VolumePairList",
+            "method": "StaticPairList",
             "number_assets": 20,
             "sort_key": "quoteVolume",
             "min_value": 0,
@@ -54,7 +55,7 @@
         }
     ],
     "telegram": {
-        "enabled": true,
+        "enabled": false,
         "token": "6623040828:AAH5wS0rIyJXtEuzLu8YIZu-DIXL_tniEBo",
         "chat_id": "-1001515144289"
     },
@@ -66,11 +67,11 @@
         "enable_openapi": false,
         "jwt_secret_key": "da5178dd6669bb9e66225436d6f6bc1bd3f082c40bf7bb442816d00c58e67c1a",
         "ws_token": "zcMpaB3lH_MvX5wQuM3Jmlz295rRMzfmeg",
-	"CORS_origins": ["http://192.168.1.26:8080", "http://192.168.1.26:8081", "http://192.168.1.26:8082", "http://192.168.1.26:8083", "http://192.168.1.26:8084", "http://192.168.1.26:8085"],
+        "CORS_origins": ["http://34.168.149.84:8080", "http://34.168.149.84:8081", "http://34.168.149.84:8082", "http://34.168.149.84:8083", "http://34.168.149.84:8084", "http://34.168.149.84:8085"], 
         "username": "freqtrader",
-        "password": "DrumStick8008"
+        "password": "pooptart7"
     },
-    "bot_name": "freqtrade",
+    "bot_name": "freqtrade-backtesting",
     "initial_state": "running",
     "force_entry_enable": false,
     "internals": {

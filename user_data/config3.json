@@ -54,7 +54,7 @@
         }
     ],
     "telegram": {
-        "enabled": true,
+        "enabled": false,
         "token": "6973921580:AAG3ZZrzTBp8HAacXWEKLqpihAQWGJDwL_k",
         "chat_id": "-1001515144289"
     },
@@ -66,11 +66,11 @@
         "enable_openapi": false,
         "jwt_secret_key": "da5178dd6669bb9e66225436d6f6bc1bd3f082c40bf7bb442816d00c58e67c1a",
         "ws_token": "zcMpaB3lH_MvX5wQuM3Jmlz295rRMzfmeg",
-        "CORS_origins": ["http://192.168.1.26:8080", "http://192.168.1.26:8081", "http://192.168.1.26:8082", "http://192.168.1.26:8083", "http://192.168.1.26:8084", "http://192.168.1.26:8085"],
+        "CORS_origins": ["http://34.168.149.84:8080", "http://34.168.149.84:8081", "http://34.168.149.84:8082", "http://34.168.149.84:8083", "http://34.168.149.84:8084", "http://34.168.149.84:8085"], 
         "username": "freqtrader",
-        "password": "DrumStick8008"
+        "password": "pooptart7"
     },
-    "bot_name": "freqtrade",
+    "bot_name": "hereisbot",
     "initial_state": "running",
     "force_entry_enable": false,
     "internals": {

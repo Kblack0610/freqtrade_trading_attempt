@@ -112,7 +112,7 @@ services:
 ---
 version: '3'
 services:
-  freqtrade4:
+  freqtrade-backtesting:
     image: freqtradeorg/freqtrade:stable
     # image: freqtradeorg/freqtrade:develop
     # Use plotting image
@@ -131,7 +131,7 @@ services:
     #   context: .
     #   dockerfile: "./docker/Dockerfile.custom"
     restart: unless-stopped
-    container_name: freqtrade4
+    container_name: freqtrade-backtesting
     volumes:
       - "./user_data:/freqtrade/user_data"
     # Expose api on port 8080 (localhost only)
