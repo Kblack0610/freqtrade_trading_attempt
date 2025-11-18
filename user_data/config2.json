@@ -66,7 +66,7 @@
         "enable_openapi": false,
         "jwt_secret_key": "da5178dd6669bb9e66225436d6f6bc1bd3f082c40bf7bb442816d00c58e67c1a",
         "ws_token": "zcMpaB3lH_MvX5wQuM3Jmlz295rRMzfmeg",
-        "CORS_origins": ["http://34.168.149.84:8080", "http://34.168.149.84:8081", "http://34.168.149.84:8082", "http://34.168.149.84:8083", "http://34.168.149.84:8084", "http://34.168.149.84:8085"], 
+        "CORS_origins": ["http://34.168.149.84:8080", "http://34.168.149.84:8081", "http://34.168.149.84:8082", "http://34.168.149.84:8083", "http://34.168.149.84:8084", "http://34.168.149.84:8085", "http://34.168.149.84:8086"], 
         "username": "freqtrader",
         "password": "pooptart7"
     },

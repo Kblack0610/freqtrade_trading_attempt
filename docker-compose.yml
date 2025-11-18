@@ -179,8 +179,9 @@ services:
     # Default command used when running `docker compose up`
     command: >
       trade
-      --logfile /freqtrade/user_data/logs/freqtrade_5.log
-      --db-url sqlite:////freqtrade/user_data/tradesv3_5.sqlite
+      --logfile /freqtrade/user_data/logs/freqtrade_real2.log
+      --db-url sqlite:////freqtrade/user_data/tradesv3_real2.sqlite
+      --config /freqtrade/user_data/config_private.json
       --config /freqtrade/user_data/config5.json
       --strategy Strategy001
 ---
@@ -219,5 +220,43 @@ services:
       --logfile /freqtrade/user_data/logs/freqtrade_6.log
       --db-url sqlite:////freqtrade/user_data/tradesv3_6.sqlite
       --config /freqtrade/user_data/config6.json
+      --strategy Strategy001
+---
+version: '3'
+services:
+  freqtrade_real:
+    image: freqtradeorg/freqtrade:stable
+    # image: freqtradeorg/freqtrade:develop
+    # Use plotting image
+    # image: freqtradeorg/freqtrade:develop_plot
+    # # Enable GPU Image and GPU Resources (only relevant for freqAI)
+    # # Make sure to uncomment the whole deploy section
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+    # Build step - only needed when additional dependencies are needed
+    # build:
+    #   context: .
+    #   dockerfile: "./docker/Dockerfile.custom"
+    restart: unless-stopped
+    container_name: freqtrade_real
+    volumes:
+      - "./user_data:/freqtrade/user_data"
+    # Expose api on port 8080 (localhost only)
+    # Please read the https://www.freqtrade.io/en/stable/rest-api/ documentation
+    # for more information.
+    ports:
+      - "8086:8086"
+    # Default command used when running `docker compose up`
+    command: >
+      trade
+      --logfile /freqtrade/user_data/logs/freqtrade_real.log
+      --db-url sqlite:////freqtrade/user_data/tradesv3_real.sqlite
+      --config /freqtrade/user_data/config_private.json
+      --config /freqtrade/user_data/config_real.json
       --strategy Strategy001
 

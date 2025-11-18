@@ -1,11 +1,10 @@
-
 {
     "max_open_trades": 3,
     "stake_currency": "BTC",
     "stake_amount": "unlimited",
     "tradable_balance_ratio": 0.99,
     "fiat_display_currency": "BTC",
-    "dry_run": true,
+    "dry_run": false,
     "dry_run_wallet": 1000,
     "cancel_open_orders_on_exit": false,
     "trading_mode": "spot",
@@ -34,14 +33,11 @@
     "download_trades": true,
     "exchange": {
         "name": "kraken",
-        "key": "",
-        "secret": "",
         "ccxt_config": {},
         "ccxt_async_config": {},
         "pair_whitelist": [
         ],
         "pair_blacklist": [
-
         ]
     },
     "pairlists": [
@@ -54,9 +50,7 @@
         }
     ],
     "telegram": {
-        "enabled": false,
         "token": "6310081208:AAFvaA731i2r_EuSTcYui06IRUdmOmzGRug",
-        "chat_id": "-1001515144289"
     },
     "api_server": {
         "enabled": true,
@@ -66,7 +60,7 @@
         "enable_openapi": false,
         "jwt_secret_key": "da5178dd6669bb9e66225436d6f6bc1bd3f082c40bf7bb442816d00c58e67c1a",
         "ws_token": "zcMpaB3lH_MvX5wQuM3Jmlz295rRMzfmeg",
-        "CORS_origins": ["http://34.168.149.84:8080", "http://34.168.149.84:8081", "http://34.168.149.84:8082", "http://34.168.149.84:8083", "http://34.168.149.84:8084", "http://34.168.149.84:8085"], 
+        "CORS_origins": ["http://34.168.149.84:8080", "http://34.168.149.84:8081", "http://34.168.149.84:8082", "http://34.168.149.84:8083", "http://34.168.149.84:8084", "http://34.168.149.84:8085", "http://34.168.149.84:8086"], 
         "username": "freqtrader",
         "password": "pooptart7"
     },
