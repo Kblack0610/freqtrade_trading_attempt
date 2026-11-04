@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Data coverage{% endblock %}
+{% block body %}
+<h1>Data coverage</h1>
+<p class="muted">The price history the hourly backfill job holds. A series is filled backwards until the exchange has nothing older, then kept current. Kraken serves no deep history, so its archive starts when collection began and grows from there.</p>
+
+<div class="scroll">
+<table>
+  <thead><tr><th>Exchange</th><th>Pair</th><th>Timeframe</th><th>From</th><th>Newest</th><th class="n">Candles</th><th class="n">Gaps</th><th class="n">Missing</th><th>Oldest reached</th></tr></thead>
+  <tbody>
+  {% for s in series %}
+  <tr>
+    <td>{{ s.exchange }}</td><td>{{ s.pair }}</td><td>{{ s.timeframe }}</td>
+    <td>{{ s.first_ts | local("%Y-%m-%d") }}</td>
+    <td class="{{ 'down' if stale(s.last_ts) and s.timeframe not in ('4h', '1d') }}">{{ s.last_ts | local }}</td>
+    <td class="n">{{ "{:,}".format(s.rows) }}</td><td class="n">{{ "{:,}".format(s.gaps) }}</td><td class="n">{{ "{:,}".format(s.missing_candles) }}</td>
+    <td>{{ "yes" if s.oldest_reached else "no" }}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endblock %}

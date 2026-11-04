@@ -4,7 +4,7 @@ Strategy code and tooling for a Freqtrade dry-run league: a set of paper-trading
 
 The league runs on home-k3s. Its deploy (roster, StatefulSet, CronJobs, secrets) lives in home-config at `apps/freqtrade/`. Every pod runs one image, `ghcr.io/kblack0610/trader`: the pinned `freqtradeorg/freqtrade:2026.9` release plus psycopg plus this repo at `/repo`. GitHub Actions builds it on each push to master (tags `sha-<7>` and `latest`), and home-config pins it by digest, so a change here goes live only when home-config bumps the digest.
 
-Results go to the `trader` database in the cluster's shared Postgres, which the nightly `pg_dumpall` backs up.
+Results go to the `trader` database in the cluster's shared Postgres, which the nightly `pg_dumpall` backs up. The site in `web/` shows them, behind a Forgejo sign-in; home-config deploys it.
 
 ## Layout
 
@@ -21,6 +21,7 @@ Results go to the `trader` database in the cluster's shared Postgres, which the 
 | `lab/ingest.py` | Hourly job: every bot's trades (closed and open) and a snapshot (profit, balance, dry-run flag) into Postgres, plus an idempotent import of `runs/*/summary.json` and `league-history.jsonl` from the lab PVC |
 | `lab/migrate.py`, `lab/migrations/` | Schema: numbered SQL files applied once each, in order, under an advisory lock; runs as the init container of every job |
 | `lab/db.py` | The one Postgres connection: `DATABASE_URL` |
+| `web/` | The site: FastAPI and Jinja, read-only, Forgejo sign-in (`web/auth.py`), server-drawn SVG charts (`web/charts.py`); pages Overview, bot detail, Data, Runs (see The site) |
 | `lab/tests/` | pytest; the DB tests need `DATABASE_URL` pointing at a throwaway database |
 | `Dockerfile`, `lab/requirements.txt` | The `trader` image |
 | `.github/workflows/image.yml` | CI: build, migrate twice, tests, every strategy loads; on master also push to GHCR |
@@ -95,6 +96,30 @@ The first run fetches full history (5m since 2019 on binanceus is the long pole)
 
 Tables (`lab/migrations/001_init.sql`): `bots`, `bot_trades` (one row per trade, keyed by bot, trade id and open date, so a bot whose sqlite is lost keeps its old trades), `bot_snapshots` (hourly from ingest, daily rows imported from `league-history.jsonl` have `source = 'report'`), `runs`, `backtests`, `bias_checks`, `hyperopt_runs`; `data_coverage` (`002`): first and last candle, rows, gaps and missing candles per exchange x pair x timeframe, written by every backfill run. A schema change is a new numbered file; never edit an applied one.
 
+## The site
+
+`web/app.py` reads the `trader` database through a role that only has SELECT, and has no trade controls. Every page but `/healthz` needs a Forgejo sign-in: `/login` sends the browser to Forgejo's OAuth2 authorize page, `/oauth/callback` swaps the code for the Forgejo login, and only logins in `ALLOWED_USERS` get a 30-day cookie signed with `SESSION_KEY`. The site keeps no session store, so a restart signs nobody out and rotating `SESSION_KEY` signs everyone out.
+
+| Env | What it is |
+|---|---|
+| `DATABASE_URL` | The read-only role's connection string |
+| `TRADER_WEB_BASE_URL` | The site's own URL; the OAuth redirect is `<base>/oauth/callback`, and cookies are `Secure` when it is https |
+| `FORGEJO_URL` | Forgejo's public URL (its `ROOT_URL`), where the browser signs in |
+| `FORGEJO_API_URL` | Where the server swaps the code and reads the user; defaults to `FORGEJO_URL`, in-cluster it is the Forgejo service |
+| `OAUTH_CLIENT_ID`, `OAUTH_CLIENT_SECRET` | The Forgejo OAuth2 application |
+| `SESSION_KEY` | Cookie signing key, `openssl rand -hex 32` |
+| `ALLOWED_USERS` | Comma-separated Forgejo logins, default `kblack0610` |
+| `TRADER_WEB_TZ` | Time zone pages show times in, default UTC |
+
+The site refuses to start when a sign-in variable is missing. Locally, against a copy of the data:
+
+```sh
+docker run --rm -p 127.0.0.1:18765:8000 --entrypoint uvicorn -e DATABASE_URL=... -e FORGEJO_URL=https://git.example \
+  -e OAUTH_CLIENT_ID=x -e OAUTH_CLIENT_SECRET=x -e SESSION_KEY=$(openssl rand -hex 32) trader web.app:app --host 0.0.0.0 --port 8000
+```
+
+Sign-in cannot complete against a fake Forgejo; mint a cookie with `auth.make_session(auth.Config(), "kblack0610")` under the same `SESSION_KEY` and send it as `trader_session`.
+
 ## Troubleshooting
 
 | Symptom | Cause | Fix |
@@ -111,6 +136,9 @@ Tables (`lab/migrations/001_init.sql`): `bots`, `bot_trades` (one row per trade,
 | `Orderbook not available for Coinbase Advanced` | freqtrade has no order book for coinbase | `exchanges/coinbase.json` sets `use_order_book: false` for entry and exit pricing |
 | A backtest dir has `error.txt` and no zip | freqtrade exits 0 on some config errors | The zip is the proof of a run; read `run.log` in the same dir |
 | `No data found` for a strategy | Its timeframe is not in `TIMEFRAMES` (BinHV45 wants 1m) | Add the timeframe, or accept the failed row |
+| coinbase backfill logs hundreds of `429 Too Many Requests` on its first run | The first deep 5m prepend pulls ten years of candles and outruns coinbase's public rate limit | freqtrade retries; the run that fails is finished by the next hour's run, and later runs append about 300 candles each |
+| The site answers `Sign-in expired or was not started here` (400) | The callback arrived without the state cookie `/login` set, or more than 10 minutes later | Open `/login` again; a link to `/oauth/callback` from history cannot sign in |
+| The site exits with `trader-web: missing ...` | A sign-in variable is not set | home-config `apps/freqtrade/trader-web-oauth.sops.yaml` holds them |
 | `token is a required property` | The config schema checks the telegram block even when disabled | There is no telegram block; do not add one back empty |
 | `'' is too short` or a JWT length error | `api_server` secrets are validated at load | `league.py` writes them from env at start; use `openssl rand -hex 32` for the JWT secret |
 | `ModuleNotFoundError: ta` | The image has no `ta` package | GodStra, Heracles and Zeus were deleted for this |

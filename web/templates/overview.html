@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Overview{% endblock %}
+{% block body %}
+{% if live_bots %}
+<p class="alert">Not dry run: {{ live_bots | join(", ") }}. The league must never trade real money; stop these bots.</p>
+{% endif %}
+
+<section class="tiles">
+  <div class="tile"><span class="label">League profit</span><span class="value {{ 'up' if total_abs >= 0 else 'down' }}">{{ total_abs | num(2, " USD") }}</span></div>
+  <div class="tile"><span class="label">Combined balance</span><span class="value">{{ total_balance | num(0, " USD") }}</span></div>
+  <div class="tile"><span class="label">Bots</span><span class="value">{{ bots | length }}</span></div>
+  <div class="tile"><span class="label">Last ingest</span><span class="value {{ 'down' if stale(last_ingest) }}">{{ last_ingest | ago }}</span></div>
+</section>
+
+<h2>League</h2>
+<div class="scroll">
+<table>
+  <thead><tr><th>Bot</th><th>Exchange</th><th>Strategy</th><th class="n">Profit</th><th class="n">USD</th><th class="n">Closed</th><th class="n">Open</th><th class="n">Win rate</th><th class="n">Max DD</th><th>Snapshot</th></tr></thead>
+  <tbody>
+  {% for b in bots %}
+  <tr>
+    <td><a href="/bots/{{ b.name }}">{{ b.name }}</a></td>
+    <td>{{ b.exchange }}</td>
+    <td>{{ b.strategy }}</td>
+    <td class="n {{ 'up' if (b.profit_all_pct or 0) >= 0 else 'down' }}">{{ b.profit_all_pct | num(2, "%") }}</td>
+    <td class="n">{{ b.profit_all_abs | num(2) }}</td>
+    <td class="n">{{ b.closed_trades if b.closed_trades is not none else "-" }}</td>
+    <td class="n">{{ b.open_trades if b.open_trades is not none else "-" }}</td>
+    <td class="n">{{ b.winrate_pct | num(0, "%") }}</td>
+    <td class="n">{{ b.max_drawdown_pct | num(2, "%") }}</td>
+    <td class="{{ 'down' if b.error or stale(b.ts) }}">{{ "unreachable" if b.error else (b.ts | ago) }}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+
+<h2>Price data</h2>
+<div class="scroll">
+<table>
+  <thead><tr><th>Exchange</th><th class="n">Series</th><th class="n">At oldest candle</th><th>History from</th><th>Newest candle</th></tr></thead>
+  <tbody>
+  {% for c in coverage %}
+  <tr><td>{{ c.exchange }}</td><td class="n">{{ c.series }}</td><td class="n">{{ c.at_oldest }}</td><td>{{ c.first_ts | local("%Y-%m-%d") }}</td>
+      <td class="{{ 'down' if stale(c.last_ts) }}">{{ c.last_ts | ago }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+<p><a href="/data">Every series</a></p>
+
+<h2>Recent research runs</h2>
+{% if runs %}
+<ul class="plain">
+  {% for r in runs %}<li><a href="/runs/{{ r.id }}">{{ r.kind }} {{ r.name }}</a>: {{ r.backtests }} backtests, {{ r.profitable }} profitable, {{ r.biased }} biased</li>{% endfor %}
+</ul>
+{% else %}<p class="muted">No runs yet.</p>{% endif %}
+{% endblock %}

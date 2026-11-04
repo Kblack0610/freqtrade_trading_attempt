@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}{{ bot.name }}{% endblock %}
+{% block body %}
+<h1>{{ bot.name }}</h1>
+<p class="muted">{{ bot.strategy }} on {{ bot.exchange }}, {{ "dry run" if bot.dry_run else "NOT DRY RUN" }}{% if bot.error %}, unreachable at the last ingest: {{ bot.error }}{% endif %}</p>
+
+<section class="tiles">
+  <div class="tile"><span class="label">Profit</span><span class="value {{ 'up' if (bot.profit_all_pct or 0) >= 0 else 'down' }}">{{ bot.profit_all_pct | num(2, "%") }}</span></div>
+  <div class="tile"><span class="label">Balance</span><span class="value">{{ bot.balance_total | num(2, " USD") }}</span></div>
+  <div class="tile"><span class="label">Win rate</span><span class="value">{{ bot.winrate_pct | num(0, "%") }}</span></div>
+  <div class="tile"><span class="label">Max drawdown</span><span class="value">{{ bot.max_drawdown_pct | num(2, "%") }}</span></div>
+</section>
+
+<h2>Profit over time</h2>
+{{ chart | safe }}
+
+<h2>Trades</h2>
+{% if trades %}
+<div class="scroll">
+<table>
+  <thead><tr><th>#</th><th>Pair</th><th>Opened</th><th>Closed</th><th class="n">Stake</th><th class="n">Profit</th><th class="n">USD</th><th>Exit</th></tr></thead>
+  <tbody>
+  {% for t in trades %}
+  <tr>
+    <td>{{ t.trade_id }}</td><td>{{ t.pair }}</td><td>{{ t.open_date | local }}</td>
+    <td>{{ "open" if t.is_open else (t.close_date | local) }}</td>
+    <td class="n">{{ t.stake_amount | num(2) }}</td>
+    <td class="n {{ 'up' if (t.profit_ratio or 0) >= 0 else 'down' }}">{{ (t.profit_ratio * 100 if t.profit_ratio is not none else none) | num(2, "%") }}</td>
+    <td class="n">{{ t.profit_abs | num(2) }}</td>
+    <td>{{ t.exit_reason or "" }}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}<p class="muted">No trades yet.</p>{% endif %}
+{% endblock %}

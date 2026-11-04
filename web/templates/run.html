@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Run {{ run.name }}{% endblock %}
+{% block body %}
+<h1>{{ run.kind }} {{ run.name }}</h1>
+<p class="muted">{{ run.backtests }} backtests, {{ run.profitable }} profitable, {{ run.biased }} bias findings, {{ run.hyperopts }} hyperopts. A strategy with a bias finding cannot be trusted on its backtest.</p>
+
+<h2>Backtests</h2>
+<div class="scroll">
+<table>
+  <thead><tr><th>Strategy</th><th>Exchange</th><th>TF</th><th class="n">Trades</th><th class="n">Profit</th><th class="n">Win rate</th><th class="n">Max DD</th><th class="n">PF</th><th class="n">Sharpe</th><th>Note</th></tr></thead>
+  <tbody>
+  {% for b in backtests %}
+  <tr>
+    <td>{{ b.strategy }}</td><td>{{ b.exchange }}</td><td>{{ b.timeframe or "" }}</td>
+    <td class="n">{{ b.trades if b.trades is not none else "-" }}</td>
+    <td class="n {{ 'up' if (b.profit_pct or 0) > 0 else ('down' if (b.profit_pct or 0) < 0) }}">{{ b.profit_pct | num(2, "%") }}</td>
+    <td class="n">{{ b.winrate_pct | num(0, "%") }}</td><td class="n">{{ b.max_drawdown_pct | num(2, "%") }}</td>
+    <td class="n">{{ b.profit_factor | num(2) }}</td><td class="n">{{ b.sharpe | num(2) }}</td>
+    <td class="{{ 'down' if b.error or b.lookahead_bias }}" title="{{ b.error or '' }}">{{ (b.error | truncate(48)) if b.error else ("lookahead bias" if b.lookahead_bias else "") }}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+
+<h2>Bias checks</h2>
+{% if bias %}
+<div class="scroll">
+<table>
+  <thead><tr><th>Strategy</th><th>Check</th><th>Result</th><th>Indicators</th></tr></thead>
+  <tbody>
+  {% for c in bias %}
+  <tr><td>{{ c.strategy }}</td><td>{{ c.kind }}</td><td class="{{ 'down' if c.has_bias else 'up' }}">{{ "biased" if c.has_bias else "clean" }}</td><td>{{ c.biased_indicators or "" }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}<p class="muted">No bias checks in this run.</p>{% endif %}
+{% endblock %}
