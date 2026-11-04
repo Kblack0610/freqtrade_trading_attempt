@@ -8,4 +8,8 @@ RUN pip install --user --no-cache-dir -r /tmp/lab-requirements.txt
 
 COPY --chown=ftuser:ftuser . /repo
 WORKDIR /repo
+# The userdir subfolders .dockerignore leaves out. freqtrade creates missing ones itself, but its
+# check-then-create races when several freqtrade processes start at once (lab/backfill.py runs one
+# per exchange) and the loser exits with "exists already and is not a directory".
+RUN mkdir -p user_data/logs user_data/data user_data/backtest_results user_data/hyperopt_results user_data/plot
 # The entrypoint stays freqtrade's: every workload in home-config sets its own command.

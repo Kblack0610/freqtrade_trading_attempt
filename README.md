@@ -102,6 +102,7 @@ Tables (`lab/migrations/001_init.sql`): `bots`, `bot_trades` (one row per trade,
 | `migrate: 00N_x.sql changed after it was applied` | An applied migration file was edited | Revert the edit and put the change in the next numbered file |
 | `DATABASE_URL is not set` (exit 2) | The job has no `trader-db` secret mounted | home-config `apps/freqtrade/trader-db-secret.sops.yaml` holds it |
 | An ingest snapshot has `error` set and no trades moved | That bot's API was unreachable that hour | The next run catches up: trades are upserted from the bot's own history |
+| `File /repo/user_data/logs exists already and is not a directory` | freqtrade's userdir check-then-mkdir races when backfill starts one freqtrade per exchange at once | The image creates every userdir subfolder (`Dockerfile`); if it recurs, a new subfolder is missing from that `mkdir` |
 | `Historic klines not available for Kraken` | Kraken serves no OHLCV history through ccxt | Backfill collects Kraken forward (`FORWARD_EXCHANGES`); experiments leave it out of `EXPERIMENT_EXCHANGES` until months of candles exist |
 | Kraken `--dl-trades` crawls (minutes per day of history) | BTC/USD prints about 300k trades a day, and freqtrade reloads and re-converts the whole trades file every run | Not used: forward OHLCV collection gets the same candles in one call per series |
 | A Kraken series in `data_coverage` has `gaps` above 0 | The backfill job did not run for longer than 720 candles of that timeframe (60h at 5m) | The gap is permanent; check why the CronJob stopped |
