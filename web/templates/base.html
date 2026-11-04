@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}trader{% endblock %} - trader</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="top">
+  <a class="brand" href="/">trader</a>
+  {% if user %}
+  <nav>
+    <a href="/" {% if request.url.path == "/" %}aria-current="page"{% endif %}>Overview</a>
+    <a href="/data" {% if request.url.path.startswith("/data") %}aria-current="page"{% endif %}>Data</a>
+    <a href="/runs" {% if request.url.path.startswith("/runs") %}aria-current="page"{% endif %}>Runs</a>
+  </nav>
+  <form class="who" method="post" action="/logout"><span class="muted">{{ user }}</span> <button type="submit">Sign out</button></form>
+  {% endif %}
+</header>
+<main>
+{% block body %}{% endblock %}
+</main>
+<footer class="muted">Dry run only: no real money, no trade controls. Times in {{ tz }}.</footer>
+</body>
+</html>
