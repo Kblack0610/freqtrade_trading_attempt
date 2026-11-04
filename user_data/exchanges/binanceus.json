@@ -1,0 +1,20 @@
+{
+    "exchange": {
+        "name": "binanceus",
+        "key": "",
+        "secret": "",
+        "pair_whitelist": [
+            "BTC/USD",
+            "ETH/USD",
+            "SOL/USD",
+            "XRP/USD",
+            "ADA/USD",
+            "DOGE/USD",
+            "LINK/USD",
+            "LTC/USD",
+            "AVAX/USD",
+            "DOT/USD"
+        ],
+        "pair_blacklist": []
+    }
+}
