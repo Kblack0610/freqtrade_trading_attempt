@@ -6,7 +6,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-TABLES = "hyperopt_runs, bias_checks, backtests, runs, bot_snapshots, bot_trades, bots"
+TABLES = "data_coverage, hyperopt_runs, bias_checks, backtests, runs, bot_snapshots, bot_trades, bots"
 
 
 @pytest.fixture

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Weekly strategy experiments: download data, backtest every strategy on each exchange,
+# Weekly strategy experiments on the data lab/backfill.py keeps: backtest every strategy on each exchange,
 # check every strategy for lookahead bias, hyperopt the best few, then summarize.
 # One strategy per freqtrade call: one broken strategy must not sink the whole run.
 set -uo pipefail
@@ -10,11 +10,9 @@ RESULTS=${LAB_RESULTS:-/lab}
 EXCHANGES=${EXPERIMENT_EXCHANGES:-binanceus coinbase}   # kraken has no historic candles
 BACKTEST_DAYS=${BACKTEST_DAYS:-90}
 LOOKAHEAD_DAYS=${LOOKAHEAD_DAYS:-30}
-TIMEFRAMES=${TIMEFRAMES:-5m 15m 30m 1h 4h 1d}
 HYPEROPT_TOP=${HYPEROPT_TOP:-3}
 HYPEROPT_EPOCHS=${HYPEROPT_EPOCHS:-100}
 HYPEROPT_JOBS=${HYPEROPT_JOBS:-4}
-STARTUP_DAYS=30   # head room for indicator startup candles
 
 run_dir="$RESULTS/runs/$(date -u +%Y-%m-%d)"
 mkdir -p "$run_dir"
@@ -30,16 +28,6 @@ else
 fi
 log "${#STRATEGIES[@]} strategies, exchanges: $EXCHANGES, run dir $run_dir"
 [ "${#STRATEGIES[@]}" -gt 0 ] || { log "no strategies loaded"; exit 1; }
-
-for ex in $EXCHANGES; do
-  log "download-data $ex"
-  # One timeframe per call: an exchange that lacks one (coinbase has no 4h) rejects the whole call.
-  for tf in $TIMEFRAMES; do
-    # shellcheck disable=SC2046
-    freqtrade download-data $(base_args "$ex") --days $((BACKTEST_DAYS + STARTUP_DAYS)) -t "$tf" \
-      >> "$run_dir/download-$ex.log" 2>&1 || log "download-data $ex $tf failed, see download-$ex.log"
-  done
-done
 
 for ex in $EXCHANGES; do
   for s in "${STRATEGIES[@]}"; do
