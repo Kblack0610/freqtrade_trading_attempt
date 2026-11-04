@@ -14,7 +14,8 @@ Results go to the `trader` database in the cluster's shared Postgres, which the 
 | `user_data/config.base.json` | Shared config: dry run, 1000 USD wallet, spot, static pair list |
 | `user_data/exchanges/<name>.json` | Per-exchange overlay: name, pair whitelist, pricing quirks; no keys |
 | `lab/league.py` | Bot entrypoint: picks its roster row from the pod ordinal, refuses anything but key-less spot dry run, writes the API config, execs `freqtrade trade` |
-| `lab/experiments.sh` | Weekly job: download data, backtest every strategy per exchange, lookahead check, hyperopt the best few |
+| `lab/backfill.py` | Hourly job: price history for every exchange x pair x timeframe into `data/<exchange>/` on the lab PVC, and what it holds into `data_coverage` (see Price data) |
+| `lab/experiments.sh` | Weekly job: backtest every strategy per exchange on the backfilled data, lookahead check, hyperopt the best few |
 | `lab/summarize.py` | Turns one experiments run into `summary.json` and `summary.md` |
 | `lab/report.py` | Daily job: reads every bot's REST API, appends `league-history.jsonl`, writes `reports/<date>.md` with the leaderboard and promote candidates |
 | `lab/ingest.py` | Hourly job: every bot's trades (closed and open) and a snapshot (profit, balance, dry-run flag) into Postgres, plus an idempotent import of `runs/*/summary.json` and `league-history.jsonl` from the lab PVC |
@@ -64,7 +65,9 @@ docker run --rm --network trader-test -e DATABASE_URL -v "$PWD:/repo" --entrypoi
 docker rm -f trader-pg && docker network rm trader-test
 ```
 
-Experiment knobs (env): `EXPERIMENT_EXCHANGES` (default `binanceus coinbase`), `EXPERIMENT_STRATEGIES`, `BACKTEST_DAYS` (90), `LOOKAHEAD_DAYS` (30), `TIMEFRAMES` (`5m 15m 30m 1h 4h 1d`), `HYPEROPT_TOP` (3), `HYPEROPT_EPOCHS` (100), `HYPEROPT_JOBS` (4).
+Experiment knobs (env): `EXPERIMENT_EXCHANGES` (default `binanceus coinbase`), `EXPERIMENT_STRATEGIES`, `BACKTEST_DAYS` (90), `LOOKAHEAD_DAYS` (30), `HYPEROPT_TOP` (3), `HYPEROPT_EPOCHS` (100), `HYPEROPT_JOBS` (4).
+
+Backfill knobs (env): `BACKFILL_EXCHANGES` (`binanceus coinbase kraken`), `TIMEFRAMES` (`5m 15m 30m 1h 4h 1d`, each capped at what the exchange offers), `FORWARD_EXCHANGES` (`kraken`), `PREPEND_FROM` (`20150101`), `LAB_RESULTS` (`/lab`). For a quick local run, add `-e TIMEFRAMES='4h 1d' -v "$HOME/.cache/trader-lab:/lab"` to the test container and run `python lab/backfill.py`.
 
 ## Reading the results
 
@@ -77,9 +80,20 @@ Experiment knobs (env): `EXPERIMENT_EXCHANGES` (default `binanceus coinbase`), `
 
 Drop the `.py` in `user_data/strategies/` (any subfolder). It must import on the pinned image: Python 3.14, NumPy 2 (`np.nan`, not `np.NaN`), no `ta` package. Check with `freqtrade list-strategies --recursive-strategy-search --userdir user_data -c user_data/config.base.json -c user_data/exchanges/binanceus.json`. The next experiments run picks it up.
 
+## Price data
+
+`lab/backfill.py` owns the candles; nothing else downloads them. Per exchange and timeframe:
+
+- A series that has not reached the exchange's oldest candle gets a `download-data --prepend --timerange 20150101-` pass. One call reaches the listing date (binanceus from 2019, coinbase from 2015 for BTC).
+- Then every series gets an append pass up to now. A prepend drops a series' newest candle, so the append always runs after it.
+- When a prepend leaves the first candle where it was, the series is marked `oldest_reached` and only appended from then on.
+- Kraken serves no OHLCV history, only its newest 720 candles per timeframe. It is collected forward through ccxt and merged into the same Freqtrade files. A run at least every 60 hours keeps 5m gap-free; a longer outage leaves a gap that `data_coverage` counts. These candles exist nowhere else once they age out.
+
+The first run fetches full history (5m since 2019 on binanceus is the long pole) and can take hours; later runs take under a minute. Exchanges run in parallel, each with its own rate limit.
+
 ## The database
 
-Tables (`lab/migrations/001_init.sql`): `bots`, `bot_trades` (one row per trade, keyed by bot, trade id and open date, so a bot whose sqlite is lost keeps its old trades), `bot_snapshots` (hourly from ingest, daily rows imported from `league-history.jsonl` have `source = 'report'`), `runs`, `backtests`, `bias_checks`, `hyperopt_runs`. A schema change is a new numbered file; never edit an applied one.
+Tables (`lab/migrations/001_init.sql`): `bots`, `bot_trades` (one row per trade, keyed by bot, trade id and open date, so a bot whose sqlite is lost keeps its old trades), `bot_snapshots` (hourly from ingest, daily rows imported from `league-history.jsonl` have `source = 'report'`), `runs`, `backtests`, `bias_checks`, `hyperopt_runs`; `data_coverage` (`002`): first and last candle, rows, gaps and missing candles per exchange x pair x timeframe, written by every backfill run. A schema change is a new numbered file; never edit an applied one.
 
 ## Troubleshooting
 
@@ -88,9 +102,12 @@ Tables (`lab/migrations/001_init.sql`): `bots`, `bot_trades` (one row per trade,
 | `migrate: 00N_x.sql changed after it was applied` | An applied migration file was edited | Revert the edit and put the change in the next numbered file |
 | `DATABASE_URL is not set` (exit 2) | The job has no `trader-db` secret mounted | home-config `apps/freqtrade/trader-db-secret.sops.yaml` holds it |
 | An ingest snapshot has `error` set and no trades moved | That bot's API was unreachable that hour | The next run catches up: trades are upserted from the bot's own history |
-| `Historic klines not available for Kraken` | Kraken serves no OHLCV history through ccxt | Kraken runs live dry-run bots only; it is left out of `EXPERIMENT_EXCHANGES` |
+| `Historic klines not available for Kraken` | Kraken serves no OHLCV history through ccxt | Backfill collects Kraken forward (`FORWARD_EXCHANGES`); experiments leave it out of `EXPERIMENT_EXCHANGES` until months of candles exist |
+| Kraken `--dl-trades` crawls (minutes per day of history) | BTC/USD prints about 300k trades a day, and freqtrade reloads and re-converts the whole trades file every run | Not used: forward OHLCV collection gets the same candles in one call per series |
+| A Kraken series in `data_coverage` has `gaps` above 0 | The backfill job did not run for longer than 720 candles of that timeframe (60h at 5m) | The gap is permanent; check why the CronJob stopped |
+| `backfill: <ex>: no 4h candles on this exchange, skipped` | coinbase offers no 4h | Expected; 4h strategies cannot backtest on coinbase |
+| A series stays `oldest_reached = false` | The prepend pass failed or still moved the first candle | It is retried next hour; the job log line `backfill: <ex>: ... ERROR` says why |
 | `Orderbook not available for Coinbase Advanced` | freqtrade has no order book for coinbase | `exchanges/coinbase.json` sets `use_order_book: false` for entry and exit pricing |
-| `Invalid timeframe '4h'` on coinbase | coinbase offers 1m 5m 15m 30m 1h 2h 6h 1d only | Data downloads one timeframe per call, so only 4h strategies fail on coinbase |
 | A backtest dir has `error.txt` and no zip | freqtrade exits 0 on some config errors | The zip is the proof of a run; read `run.log` in the same dir |
 | `No data found` for a strategy | Its timeframe is not in `TIMEFRAMES` (BinHV45 wants 1m) | Add the timeframe, or accept the failed row |
 | `token is a required property` | The config schema checks the telegram block even when disabled | There is no telegram block; do not add one back empty |
