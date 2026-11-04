@@ -1,0 +1,23 @@
+import os
+import sys
+from pathlib import Path
+
+import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+TABLES = "hyperopt_runs, bias_checks, backtests, runs, bot_snapshots, bot_trades, bots"
+
+
+@pytest.fixture
+def conn():
+    """A migrated, empty trader schema. Needs DATABASE_URL pointing at a throwaway database."""
+    if not os.environ.get("DATABASE_URL"):
+        pytest.skip("DATABASE_URL not set")
+    import db
+    import migrate
+
+    assert migrate.main() == 0
+    with db.connect(autocommit=True) as c:
+        c.execute(f"TRUNCATE {TABLES} RESTART IDENTITY CASCADE")
+        yield c

@@ -1,0 +1,68 @@
+name: image
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: trader
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: docker build -t trader:ci .
+      - name: Migrate twice, then the tests
+        run: >-
+          docker run --rm --network host --entrypoint bash
+          -e DATABASE_URL=postgresql://postgres:test@localhost:5432/trader trader:ci
+          -c 'python lab/migrate.py && python lab/migrate.py | grep -q "0 new" && python -m pytest -q -p no:cacheprovider lab/tests'
+      - name: Every strategy loads
+        run: |
+          docker run --rm --entrypoint freqtrade trader:ci list-strategies --recursive-strategy-search \
+            --userdir /repo/user_data -c /repo/user_data/config.base.json -c /repo/user_data/exchanges/binanceus.json \
+            | tee strategies.txt
+          ! grep -E 'LOAD FAILED|DUPLICATE' strategies.txt
+
+  publish:
+    needs: test
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/kblack0610/trader
+          tags: |
+            type=sha,format=short
+            type=raw,value=latest
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
