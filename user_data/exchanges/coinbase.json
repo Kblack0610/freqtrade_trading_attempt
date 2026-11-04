@@ -1,0 +1,29 @@
+{
+    "exchange": {
+        "name": "coinbase",
+        "key": "",
+        "secret": "",
+        "pair_whitelist": [
+            "BTC/USD",
+            "ETH/USD",
+            "SOL/USD",
+            "XRP/USD",
+            "ADA/USD",
+            "DOGE/USD",
+            "LINK/USD",
+            "LTC/USD",
+            "AVAX/USD",
+            "DOT/USD"
+        ],
+        "pair_blacklist": []
+    },
+    "entry_pricing": {
+        "use_order_book": false,
+        "price_side": "same",
+        "price_last_balance": 0.0
+    },
+    "exit_pricing": {
+        "use_order_book": false,
+        "price_side": "same"
+    }
+}

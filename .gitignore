@@ -1,1 +1,14 @@
+# Runtime output: never commit. The league keeps state on its own volumes.
 user_data/config_private.json
+user_data/data/*
+!user_data/data/.gitkeep
+user_data/logs/*
+!user_data/logs/.gitkeep
+user_data/backtest_results/*
+!user_data/backtest_results/.gitkeep
+user_data/hyperopt_results/
+user_data/hyperopt.lock
+user_data/lab-results/
+user_data/*.sqlite*
+__pycache__/
+*.pyc
