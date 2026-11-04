@@ -149,22 +149,29 @@ class Supertrend(IStrategy):
         df['basic_ub'] = (df['high'] + df['low']) / 2 + multiplier * df['ATR']
         df['basic_lb'] = (df['high'] + df['low']) / 2 - multiplier * df['ATR']
 
-        # Compute final upper and lower bands
-        df['final_ub'] = 0.00
-        df['final_lb'] = 0.00
+        # Compute final upper and lower bands. The loops run on numpy arrays: chained
+        # df[col].iat[i] = x writes to a copy under pandas Copy-on-Write and is lost.
+        close = df['close'].to_numpy()
+        basic_ub = df['basic_ub'].to_numpy()
+        basic_lb = df['basic_lb'].to_numpy()
+        final_ub = np.zeros(len(df))
+        final_lb = np.zeros(len(df))
         for i in range(period, len(df)):
-            df['final_ub'].iat[i] = df['basic_ub'].iat[i] if df['basic_ub'].iat[i] < df['final_ub'].iat[i - 1] or df['close'].iat[i - 1] > df['final_ub'].iat[i - 1] else df['final_ub'].iat[i - 1]
-            df['final_lb'].iat[i] = df['basic_lb'].iat[i] if df['basic_lb'].iat[i] > df['final_lb'].iat[i - 1] or df['close'].iat[i - 1] < df['final_lb'].iat[i - 1] else df['final_lb'].iat[i - 1]
+            final_ub[i] = basic_ub[i] if basic_ub[i] < final_ub[i - 1] or close[i - 1] > final_ub[i - 1] else final_ub[i - 1]
+            final_lb[i] = basic_lb[i] if basic_lb[i] > final_lb[i - 1] or close[i - 1] < final_lb[i - 1] else final_lb[i - 1]
 
         # Set the Supertrend value
-        df[st] = 0.00
+        st_val = np.zeros(len(df))
         for i in range(period, len(df)):
-            df[st].iat[i] = df['final_ub'].iat[i] if df[st].iat[i - 1] == df['final_ub'].iat[i - 1] and df['close'].iat[i] <= df['final_ub'].iat[i] else \
-                            df['final_lb'].iat[i] if df[st].iat[i - 1] == df['final_ub'].iat[i - 1] and df['close'].iat[i] >  df['final_ub'].iat[i] else \
-                            df['final_lb'].iat[i] if df[st].iat[i - 1] == df['final_lb'].iat[i - 1] and df['close'].iat[i] >= df['final_lb'].iat[i] else \
-                            df['final_ub'].iat[i] if df[st].iat[i - 1] == df['final_lb'].iat[i - 1] and df['close'].iat[i] <  df['final_lb'].iat[i] else 0.00
+            st_val[i] = final_ub[i] if st_val[i - 1] == final_ub[i - 1] and close[i] <= final_ub[i] else \
+                        final_lb[i] if st_val[i - 1] == final_ub[i - 1] and close[i] >  final_ub[i] else \
+                        final_lb[i] if st_val[i - 1] == final_lb[i - 1] and close[i] >= final_lb[i] else \
+                        final_ub[i] if st_val[i - 1] == final_lb[i - 1] and close[i] <  final_lb[i] else 0.00
+        df['final_ub'] = final_ub
+        df['final_lb'] = final_lb
+        df[st] = st_val
         # Mark the trend direction up/down
-        df[stx] = np.where((df[st] > 0.00), np.where((df['close'] < df[st]), 'down',  'up'), None)
+        df[stx] = np.where((df[st] > 0.00), np.where((df['close'] < df[st]), 'down',  'up'), '')
 
         # Remove basic and final bands from the columns
         df.drop(['basic_ub', 'basic_lb', 'final_ub', 'final_lb'], inplace=True, axis=1)
