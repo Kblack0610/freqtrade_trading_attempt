@@ -138,7 +138,7 @@ Sign-in cannot complete against a fake Forgejo; mint a cookie with `auth.make_se
 | `No data found` for a strategy | Its timeframe is not in `TIMEFRAMES` (BinHV45 wants 1m) | Add the timeframe, or accept the failed row |
 | coinbase backfill logs hundreds of `429 Too Many Requests` on its first run | The first deep 5m prepend pulls ten years of candles and outruns coinbase's public rate limit | freqtrade retries; the run that fails is finished by the next hour's run, and later runs append about 300 candles each |
 | The site answers `Sign-in expired or was not started here` (400) | The callback arrived without the state cookie `/login` set, or more than 10 minutes later | Open `/login` again; a link to `/oauth/callback` from history cannot sign in |
-| The site exits with `trader-web: missing ...` | A sign-in variable is not set | home-config `apps/freqtrade/trader-web-oauth.sops.yaml` holds them |
+| The site exits with `trader-web: missing ...` | A sign-in variable is not set | home-config `apps/freqtrade/trader-web-oauth-secret.sops.yaml` holds them |
 | `token is a required property` | The config schema checks the telegram block even when disabled | There is no telegram block; do not add one back empty |
 | `'' is too short` or a JWT length error | `api_server` secrets are validated at load | `league.py` writes them from env at start; use `openssl rand -hex 32` for the JWT secret |
 | `ModuleNotFoundError: ta` | The image has no `ta` package | GodStra, Heracles and Zeus were deleted for this |
