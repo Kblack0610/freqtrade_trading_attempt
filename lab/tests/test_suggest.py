@@ -119,3 +119,27 @@ def test_suggestions_persist_their_first_seen_and_drop_when_they_stop_applying(c
     second = suggest.run(conn)
     assert second == {"suggestions": {"promote": 1}, "suggestions_gone": 1}
     assert conn.execute("SELECT first_seen FROM suggestions WHERE kind = 'promote'").fetchone()[0] == seen["promote"]
+
+
+def fold(month, base, tuned, trades=12, params=True):
+    start = dt.date(2026, month, 1)
+    return {"fold_start": start, "train_start": start - dt.timedelta(days=180), "params": {"roi": {"0": 0.02}} if params else None,
+            "base_profit": base, "tuned_profit": tuned, "tuned_trades": trades,
+            "base_returns": [base / trades] * trades, "tuned_returns": [tuned / trades + d for d in (0.001, -0.001)] * (trades // 2)}
+
+
+def test_retune_needs_the_newest_months_beaten_and_a_tuned_interval_above_zero():
+    f = facts()
+    f["walkforward"] = {("Good", "binanceus"): [fold(m, 0.01, 0.05) for m in (7, 8, 9)],
+                        ("Running", "binanceus"): [fold(7, 0.01, 0.05), fold(8, 0.01, 0.05), fold(9, 0.03, 0.02)],
+                        ("NearMiss", "binanceus"): [fold(9, 0.01, 0.05)],
+                        ("Unchecked", "binanceus"): [fold(m, 0.01, 0.05) for m in (7, 8, 9)],
+                        ("Loser", "binanceus"): [fold(m, -0.05, -0.02) for m in (7, 8, 9)]}
+    rows = [r for r in suggest.decide(f, CFG) if r["kind"] == "retune"]
+    assert [(r["strategy"], r["exchange"]) for r in rows] == [("Good", "binanceus")]
+    r = rows[0]
+    assert all(g["pass"] for g in r["gates"]) and r["score"] > 0
+    assert '"ft_stratparam_v": 1' in r["action"] and "user_data/strategies/x.json" in r["action"]
+    assert "2026-03-05 to 2026-09-01" in r["action"]
+    near = suggest.retune_rows({**f, "walkforward": {("NearMiss", "binanceus"): [fold(8, 0.01, 0.05), fold(9, 0.01, 0.05)]}}, CFG)
+    assert near == [], "24 pooled trades are under min_trades"

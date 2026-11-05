@@ -72,6 +72,14 @@
 <p class="muted">A seeded block bootstrap of the last year's daily returns (10-day blocks), so the same data gives the same bands.</p>
 {% else %}<p class="muted">Needs 180 days of results.</p>{% endif %}
 
+<h2 id="walk-forward">Walk-forward</h2>
+{% if wf %}
+{% for r, folds in wf %}
+<p>On {{ r.exchange }}: tuned beat as is in {{ r.beat }} of {{ r.tuned_folds }} months; per trade {{ r.base_mean | pct(2) }} as is ({{ r.base_lo | pct(2) }} to {{ r.base_hi | pct(2) }}) against {{ r.tuned_mean | pct(2) }} tuned ({{ r.tuned_lo | pct(2) }} to {{ r.tuned_hi | pct(2) }}) over {{ r.tuned_trades }} trades; efficiency {{ r.wfe | num(2) }}.</p>
+{% include "_wf_folds.html" %}
+{% endfor %}
+{% else %}<p class="muted">Not a walk-forward candidate yet: the weekly run takes the league's strategies and the promote and watch suggestions.</p>{% endif %}
+
 <h2>By market regime</h2>
 {% if regimes %}
 <div class="scroll">

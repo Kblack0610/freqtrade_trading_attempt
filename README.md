@@ -16,12 +16,13 @@ Results go to the `trader` database in the cluster's shared Postgres, which the 
 | `lab/league.py` | Bot entrypoint: picks its roster row from the pod ordinal, refuses anything but key-less spot dry run, writes the API config, execs `freqtrade trade` |
 | `lab/backfill.py` | Hourly job: price history for every exchange x pair x timeframe into `data/<exchange>/` on the lab PVC, and what it holds into `data_coverage` (see Price data) |
 | `lab/analyze.py` | Nightly job: every strategy x exchange backtested in calendar-year chunks over the whole history, lookahead and recursive bias checks, then the derived tables (see The analysis) |
+| `lab/walkforward.py` | Weekly job: hyperopt on the months before each of the last whole months, then that unseen month backtested as is and tuned (see Walk-forward) |
 | `lab/metrics.py` | Pure functions behind the derived tables: daily returns, Sharpe, Sortino, drawdown, block-bootstrap intervals, deflated Sharpe, Monte Carlo, BTC regimes |
-| `lab/suggest.py`, `lab/suggest.toml` | After each analysis: promote, watch, demote, retire and fix suggestions from the derived tables, with the thresholds as data (see Suggestions) |
+| `lab/suggest.py`, `lab/suggest.toml` | After each analysis and walk-forward: promote, watch, demote, retire, fix and retune suggestions from the derived tables, with the thresholds as data (see Suggestions) |
 | `lab/ingest.py` | Hourly job: every bot's trades (closed and open) and a snapshot (profit, balance, dry-run flag) into Postgres |
 | `lab/migrate.py`, `lab/migrations/` | Schema: numbered SQL files applied once each, in order, under an advisory lock; runs as the init container of every job |
 | `lab/db.py` | The one Postgres connection: `DATABASE_URL` |
-| `web/` | The site: FastAPI and Jinja, read-only, Forgejo sign-in (`web/auth.py`), server-drawn SVG charts (`web/charts.py`); pages Overview, bot detail, Strategies, strategy detail, Suggestions, Data, Runs (see The site) |
+| `web/` | The site: FastAPI and Jinja, read-only, Forgejo sign-in (`web/auth.py`), server-drawn SVG charts (`web/charts.py`); pages Overview, bot detail, Strategies, strategy detail, Walk-forward, Suggestions, Data, Runs (see The site) |
 | `lab/tests/` | pytest; the DB tests need `DATABASE_URL` pointing at a throwaway database |
 | `Dockerfile`, `lab/requirements.txt` | The `trader` image |
 | `.github/workflows/image.yml` | CI: build, migrate twice, tests, every strategy loads; on master also push to GHCR |
@@ -78,6 +79,29 @@ Backfill knobs (env): `BACKFILL_EXCHANGES` (`binanceus coinbase kraken`), `TIMEF
 
 The leaderboard ranks by the low end of the Sharpe interval, so a strategy has to look good on its unlucky draw. Rows under 20 trades sink, and lookahead-biased rows go last. Promoting a strategy is still a human edit to the roster in home-config.
 
+## Walk-forward
+
+A backtest of a strategy as it is says nothing about tuning it, and hyperopt's best result on a span is fitted to that span. `lab/walkforward.py` runs weekly to measure how much of hyperopt's gain survives on data it never saw:
+
+- **Candidates.** The league's strategies, then the promote suggestions, then the watch ones by score, loadable and lookahead-clean, up to `WF_LIMIT`, on `WF_EXCHANGE` only (binanceus: coinbase's 2.4% round trip leaves nothing to tune).
+- **Folds.** For each of the last `WF_FOLDS` whole calendar months, hyperopt tunes the strategy on the `WF_TRAIN_DAYS` before it (`--spaces default`: ROI, stoploss, trailing, max open trades and any declared buy and sell parameters) with a random state seeded by strategy and month, so a rerun gives the same answer. Then the month is backtested as is and with the tuned parameters, and the training span is backtested with them too (in sample). Every per-trade profit ratio is kept.
+- **Isolation.** Hyperopt works on a copy of the strategy's folder in a temporary userdir, because it writes its params file next to the strategy, where every nightly backtest would load it.
+- **Cache.** A fold is keyed by the strategy file, both configs, the freqtrade version, its dates and the hyperopt settings, so a normal week runs only the newest month, and a changed file reruns all of that strategy's months. Failures retry like analysis chunks; a month with no candles is stored once. A fold where no epoch reached `WF_MIN_TRADES` training trades is kept, untuned, with that as its note.
+- **Reading it.** The Walk-forward page pools each strategy's months: how many the tuned parameters beat, the per-trade profit as is and tuned with 90% bootstrap intervals, and walk-forward efficiency, the tuned return per day out of sample over the same in sample. Near 1 the tuning carries over; near 0 or below, hyperopt fitted noise. The strategy page has the months one by one.
+
+| Env | Default | What it is |
+|---|---|---|
+| `WF_EXCHANGE` | `binanceus` | The one exchange folds run on |
+| `WF_FOLDS` | `6` | Test months, the newest whole ones |
+| `WF_TRAIN_DAYS` | `180` | Training span before each test month |
+| `WF_EPOCHS` | `150` | Hyperopt epochs per fold |
+| `WF_LOSS` | `SharpeHyperOptLossDaily` | Hyperopt loss |
+| `WF_MIN_TRADES` | `10` | Training trades an epoch needs to count |
+| `WF_LIMIT` | `16` | Candidates per run |
+| `WF_WORKERS` | `6` | Folds at once; each hyperopt runs on one core (`-j 1`) |
+| `WF_TIMEOUT` | `10800` | Seconds before one hyperopt is killed |
+| `WF_STRATEGIES` | all | Space-separated names to limit a run to |
+
 ## Suggestions
 
 `lab/suggest.py` runs at the end of every analysis (alone: `python lab/suggest.py`) and rebuilds `suggestions` from the derived tables. Every threshold is in `lab/suggest.toml`; each suggestion stores every gate it was held to with the value seen, so the site shows why.
@@ -87,6 +111,7 @@ The leaderboard ranks by the low end of the Sharpe interval, so a strategy has t
 - **Demote**: a league bot whose own dry run lost money over 60 days with at least 20 trades, whose strategy's 365-day backtests on that exchange lose even at the high end of the expectancy interval (kraken has no history, so for its bots every research exchange must agree), or whose strategy has lookahead bias. Rows map to pod ordinals and each pod keeps its own sqlite, so the action says to replace the row in place and clear that pod's PVC, never to delete the row.
 - **Retire**: lookahead bias or a load error. It supersedes a fix for the same file.
 - **Fix**: the recursive check found an indicator still moving at the startup candle count, or could not run because the strategy declares none.
+- **Retune**: a lookahead-clean strategy whose tuned parameters beat it as it is on each of the newest two walk-forward months (at least 5 tuned trades each), and, pooled over every month, has at least 30 tuned trades, a higher per-trade profit than as is, and the low end of its 90% interval above zero. The action is the newest fold's params file, to save next to the strategy.
 
 A suggestion keeps its `first_seen` while it holds, so "since Nov 05" on the site is how long the evidence has pointed the same way; one that stops applying is deleted.
 
@@ -164,6 +189,8 @@ Sign-in cannot complete against a fake Forgejo; mint a cookie with `auth.make_se
 | coinbase backfill logs hundreds of `429 Too Many Requests` on its first run | The first deep 5m prepend pulls ten years of candles and outruns coinbase's public rate limit | freqtrade retries; the run that fails is finished by the next hour's run, and later runs append about 300 candles each |
 | The site answers `Sign-in expired or was not started here` (400) | The callback arrived without the state cookie `/login` set, or more than 10 minutes later | Open `/login` again; a link to `/oauth/callback` from history cannot sign in |
 | The site exits with `trader-web: missing ...` | A sign-in variable is not set | home-config `apps/freqtrade/trader-web-oauth-secret.sops.yaml` holds them |
+| A walk-forward month says `no hyperopt epoch reached N training trades` | The strategy trades too rarely on the training span for any epoch to count | Expected for slow strategies; the month keeps its as-is backtest. Lower `WF_MIN_TRADES` or raise `WF_TRAIN_DAYS` to tune it |
+| `The following spaces were not found in the strategy: buy, sell` in a walk-forward log | The strategy declares no hyperopt parameters | Harmless: `--ignore-missing-spaces` tunes ROI, stoploss, trailing and max open trades anyway |
 | `token is a required property` | The config schema checks the telegram block even when disabled | There is no telegram block; do not add one back empty |
 | `'' is too short` or a JWT length error | `api_server` secrets are validated at load | `league.py` writes them from env at start; use `openssl rand -hex 32` for the JWT secret |
 | `ModuleNotFoundError: ta` | The image has no `ta` package | GodStra, Heracles and Zeus were deleted for this |

@@ -6,12 +6,14 @@ demote   a league bot whose own dry run loses with enough trades, whose backtest
          strategy has lookahead bias
 retire   a strategy with lookahead bias or one that fails to load
 fix      a strategy whose recursive check failed or could not run for want of a startup_candle_count
+retune   a strategy whose walk-forward hyperopt parameters beat it as it is on months hyperopt never saw
 
 Suggestions are advice for a human. Nothing here edits the roster; the action text says what to change.
 Run alone with `python lab/suggest.py`; lab/analyze.py runs it after it derives.
 """
 
 import datetime as dt
+import json
 import math
 import os
 import sys
@@ -20,6 +22,7 @@ from pathlib import Path
 
 from psycopg.types.json import Jsonb
 
+import metrics
 from db import connect
 
 CONFIG = Path(os.environ.get("SUGGEST_CONFIG", Path(__file__).resolve().parent / "suggest.toml"))
@@ -159,8 +162,48 @@ def decide(facts: dict, cfg: dict) -> list[dict]:
                                    "delete that pod's state-freqtrade-league-<N> PVC. Deleting the row instead moves "
                                    "every later bot onto another bot's state.",
                             gates=gates))
+    out += retune_rows(facts, cfg)
     for r in out:
         r.setdefault("bot", "")
+    return out
+
+
+def retune_rows(facts: dict, cfg: dict) -> list[dict]:
+    c, out = cfg["retune"], []
+    for (name, exchange), folds in sorted(facts.get("walkforward", {}).items()):
+        s = facts["strategies"].get(name)
+        if not s or s["load_error"] or s["lookahead"] is not False:
+            continue
+        newest = folds[-c["folds"]:]
+        beat = [f for f in newest if f["params"] and (f["tuned_trades"] or 0) >= c["min_fold_trades"]
+                and f["tuned_profit"] is not None and f["base_profit"] is not None
+                and f["tuned_profit"] > f["base_profit"]]
+        tuned = [x for f in folds if f["params"] for x in (f["tuned_returns"] or [])]
+        base = [x for f in folds if f["params"] for x in (f["base_returns"] or [])]
+        t_mean = sum(tuned) / len(tuned) if tuned else None
+        b_mean = sum(base) / len(base) if base else None
+        t_lo, _ = metrics.mean_ci(tuned, metrics.seed_of(name, exchange, "retune"))
+        gates = [
+            gate(f"tuned beats as-is, newest {c['folds']} months", f"{len(beat)} of {len(newest)}",
+                 f"{c['folds']} of {c['folds']}, >= {c['min_fold_trades']} trades each", len(beat) == c["folds"]),
+            gate("pooled tuned expectancy vs as-is", t_mean, f"> {b_mean:.4f}" if b_mean is not None else "> as-is",
+                 t_mean is not None and (b_mean is None or t_mean > b_mean)),
+            gate("pooled tuned trades", len(tuned), f">= {c['min_trades']}", len(tuned) >= c["min_trades"]),
+            gate("pooled tuned expectancy, 90% low", t_lo, f"> {c['min_oos_expectancy']}",
+                 t_lo is not None and t_lo > c["min_oos_expectancy"]),
+        ]
+        if not all(g["pass"] for g in gates):
+            continue
+        last = newest[-1]
+        params = {"strategy_name": name, "params": last["params"], "ft_stratparam_v": 1}
+        target = str(Path(s["file"]).with_suffix(".json"))
+        out.append(dict(kind="retune", strategy=name, exchange=exchange, score=t_mean - (b_mean or 0.0),
+                        summary=f"Walk-forward on {exchange}: tuned beat as-is on the newest {c['folds']} unseen months; "
+                                f"pooled over {len(folds)} months, {t_mean:.4%} a trade tuned against "
+                                f"{(b_mean or 0.0):.4%} as is ({len(tuned)} trades).",
+                        action=f"Write the newest fold's parameters (trained {last['train_start']} to "
+                               f"{last['fold_start']}) to {target}:\n{json.dumps(params, indent=2)}",
+                        gates=gates))
     return out
 
 
@@ -201,7 +244,13 @@ def load_facts(conn, cfg: dict, now: dt.datetime | None = None) -> dict:
         "SELECT b.name, b.exchange, b.strategy, count(t.trade_id), coalesce(sum(t.profit_abs), 0) FROM bots b "
         "LEFT JOIN bot_trades t ON t.bot = b.name AND NOT t.is_open AND t.close_date >= %s "
         "WHERE b.last_seen >= %s GROUP BY 1, 2, 3", (since, now - ROSTER_STALE))]
-    return {"strategies": strategies, "series": series, "bots": bots}
+    walkforward: dict = {}
+    cur.execute("SELECT * FROM walkforward WHERE ok ORDER BY strategy, exchange, fold_start")
+    cols = [c.name for c in cur.description]
+    for row in cur:
+        r = dict(zip(cols, row))
+        walkforward.setdefault((r["strategy"], r["exchange"]), []).append(r)
+    return {"strategies": strategies, "series": series, "bots": bots, "walkforward": walkforward}
 
 
 def store(conn, rows: list[dict]) -> dict:

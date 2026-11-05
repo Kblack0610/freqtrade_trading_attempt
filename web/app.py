@@ -21,6 +21,7 @@ from fastapi.templating import Jinja2Templates
 from psycopg.rows import dict_row
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lab"))
+import metrics  # noqa: E402
 from db import connect  # noqa: E402
 
 from web import auth, charts  # noqa: E402
@@ -55,6 +56,7 @@ SECTIONS = [
     ("demote", "Demote", "A league bot whose own dry run loses, whose backtests lose confidently, or whose strategy is biased."),
     ("retire", "Retire", "A strategy file whose results are void (lookahead bias) or that does not load."),
     ("fix", "Fix", "A strategy that runs but whose indicators may not match live: its recursive check failed or could not run."),
+    ("retune", "Retune", "Walk-forward: hyperopt's parameters beat the strategy as it is on months hyperopt never saw."),
     ("watch", "Watch", "Lookahead-clean candidates one gate short of promotion, best Sharpe interval first."),
 ]
 SUGGESTIONS = "SELECT * FROM suggestions ORDER BY score DESC NULLS LAST, strategy, exchange, bot"
@@ -294,11 +296,50 @@ def strategy(request: Request, name: str, exchange: str = ""):
         estimates=rows("SELECT * FROM estimates WHERE strategy = %s AND exchange = %s ORDER BY horizon_days", key),
         bias=rows("SELECT * FROM bias_checks WHERE strategy = %s ORDER BY kind", (name,)),
         regimes=regimes,
+        wf=[(pooled(f), f) for f in walkforward_by_pair("WHERE strategy = %s", (name,)).values()],
         suggestions=rows("SELECT * FROM suggestions WHERE strategy = %s ORDER BY kind, exchange, bot", (name,)),
         correlations=rows("SELECT * FROM correlations WHERE strategy = %s AND exchange = %s ORDER BY abs(rho) DESC", key),
         chunks=rows("SELECT * FROM backtest_chunks WHERE strategy = %s AND exchange = %s ORDER BY chunk_start DESC", key),
         trades=rows("SELECT t.* FROM backtest_trades t JOIN backtest_chunks c ON c.id = t.chunk_id "
                     "WHERE c.strategy = %s AND c.exchange = %s ORDER BY t.close_date DESC LIMIT 100", key))
+
+
+def pooled(folds: list[dict]) -> dict:
+    """One strategy x exchange's walk-forward folds as pooled out-of-sample numbers with 90% intervals."""
+    tuned = [f for f in folds if f["ok"] and f["params"]]
+    t = [x for f in tuned for x in (f["tuned_returns"] or [])]
+    b = [x for f in tuned for x in (f["base_returns"] or [])]
+    seed = metrics.seed_of(folds[0]["strategy"], folds[0]["exchange"], "wf")
+    t_lo, t_hi = metrics.mean_ci(t, seed)
+    b_lo, b_hi = metrics.mean_ci(b, seed)
+    test_days = sum((f["test_end"] - f["fold_start"]).days for f in tuned)
+    train_days = sum((f["fold_start"] - f["train_start"]).days for f in tuned)
+    oos = sum(f["tuned_profit"] or 0.0 for f in tuned)
+    ins = sum(f["is_profit"] or 0.0 for f in tuned)
+    return {"strategy": folds[0]["strategy"], "exchange": folds[0]["exchange"], "folds": len(folds),
+            "tuned_folds": len(tuned), "beat": sum((f["tuned_profit"] or 0) > (f["base_profit"] or 0) for f in tuned),
+            "tuned_trades": len(t), "tuned_mean": sum(t) / len(t) if t else None, "tuned_lo": t_lo, "tuned_hi": t_hi,
+            "base_trades": len(b), "base_mean": sum(b) / len(b) if b else None, "base_lo": b_lo, "base_hi": b_hi,
+            # walk-forward efficiency: the tuned return per day out of sample over the same in sample
+            "wfe": (oos / test_days) / (ins / train_days) if test_days and train_days and ins > 0 else None,
+            "failed": sum(not f["ok"] for f in folds)}
+
+
+def walkforward_by_pair(where: str = "", params: tuple = ()) -> dict[tuple[str, str], list[dict]]:
+    out: dict = {}
+    for r in rows(f"SELECT * FROM walkforward {where} ORDER BY strategy, exchange, fold_start", params):
+        out.setdefault((r["strategy"], r["exchange"]), []).append(r)
+    return out
+
+
+@app.get("/walkforward", response_class=HTMLResponse)
+def walkforward(request: Request):
+    user_of(request)
+    board = [pooled(f) for f in walkforward_by_pair().values()]
+    board.sort(key=lambda r: -(r["tuned_lo"] if r["tuned_lo"] is not None else -math.inf))
+    last = (rows("SELECT id, name, started_at, finished_at, ok, raw, finished_at - started_at AS took FROM runs "
+                 "WHERE kind = 'walkforward' ORDER BY started_at DESC NULLS LAST, id DESC LIMIT 1") or [None])[0]
+    return page(request, "walkforward.html", board=board, last_run=last)
 
 
 @app.get("/suggestions", response_class=HTMLResponse)

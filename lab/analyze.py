@@ -139,7 +139,9 @@ class Cli:
                         "load_error": load_error(loc.read_text(encoding="utf-8"), name) if cls else "failed to import"})
         return out
 
-    def backtest(self, strategy: str, exchange: str, start: dt.date, end: dt.date) -> dict:
+    def backtest(self, strategy: str, exchange: str, start: dt.date, end: dt.date,
+                 strategy_path: Path | None = None) -> dict:
+        """strategy_path puts a folder ahead of the repo's, so its copy of the strategy (and params file) loads."""
         from freqtrade.data.btanalysis import load_backtest_data, load_backtest_stats
 
         t0 = time.monotonic()
@@ -149,6 +151,8 @@ class Cli:
                    "--datadir", str(RESULTS / "data" / exchange), "--strategy", strategy,
                    "--timerange", f"{start:%Y%m%d}-{end:%Y%m%d}", "--export", "trades",
                    "--backtest-directory", d, "--cache", "none"]
+            if strategy_path:
+                cmd += ["--strategy-path", str(strategy_path)]
             try:
                 p = subprocess.run(cmd, capture_output=True, text=True, timeout=CHUNK_TIMEOUT)
             except subprocess.TimeoutExpired:
