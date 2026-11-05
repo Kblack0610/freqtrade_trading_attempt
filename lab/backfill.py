@@ -11,9 +11,10 @@ A series is marked oldest_reached when a prepend pass leaves its first candle wh
 listing date, or the floor), and is never prepended again.
 
 An exchange with no OHLCV history (FORWARD_EXCHANGES, i.e. Kraken, which serves only its newest
-720 candles) is collected forward instead: each run fetches those candles through ccxt and merges
+720 candles) takes its past from the exchange's published archive (lab/archive.py), once per series,
+and is collected forward instead: each run fetches those candles through ccxt and merges
 them into the same Freqtrade files. A run at least every 12 hours keeps 1m gap-free (60 hours for 5m). These are the
-candles the live bots trade on, and they exist nowhere else once they age out, so the files are kept
+candles the live bots trade on, and nothing else has them until the next quarterly archive, so the files are kept
 forever. Raw trades (Freqtrade's --dl-trades) do not scale here: Kraken BTC/USD prints about 300k
 trades a day, and every run reloads and re-converts the whole trades file.
 
@@ -27,6 +28,7 @@ import os
 import re
 import subprocess
 import sys
+import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Protocol
@@ -39,6 +41,7 @@ from freqtrade.enums import CandleType
 from freqtrade.exchange import timeframe_to_seconds
 from freqtrade.misc import pair_to_filename
 
+import archive
 from db import connect
 
 REPO = Path(os.environ.get("REPO", "/repo"))
@@ -57,6 +60,7 @@ class Freqtrade(Protocol):
     def download(self, exchange: str, args: list[str]) -> bool: ...
     def timeframes(self, exchange: str) -> list[str]: ...
     def recent(self, exchange: str, pair: str, timeframe: str) -> list[list]: ...
+    def archive(self, exchange: str) -> zipfile.ZipFile | None: ...
 
 
 def datadir(exchange: str) -> Path:
@@ -98,6 +102,9 @@ class Cli:
         """The newest candles the exchange serves, as ccxt [ms, open, high, low, close, volume] rows."""
         return self._client(exchange).fetch_ohlcv(pair, timeframe)
 
+    def archive(self, exchange: str) -> zipfile.ZipFile | None:
+        return zipfile.ZipFile(archive.RangeFile(archive.FULL)) if exchange == "kraken" else None
+
 
 def pairs_of(exchange: str) -> list[str]:
     cfg = json.loads((REPO / "user_data" / "exchanges" / f"{exchange}.json").read_text())
@@ -125,6 +132,13 @@ def scan(path: Path, timeframe: str) -> dict:
     return out
 
 
+def merge_candles(dh, pair: str, tf: str, new: pd.DataFrame) -> None:
+    old = dh.ohlcv_load(pair, tf, CandleType.SPOT, fill_missing=False, warn_no_data=False)
+    merged = new if old.empty else pd.concat([old, new], ignore_index=True)
+    dh.ohlcv_store(pair, tf, clean_ohlcv_dataframe(merged, tf, pair, fill_missing=False, drop_incomplete=False),
+                   CandleType.SPOT)
+
+
 def collect_forward(ft: Freqtrade, exchange: str, pairs: list[str], timeframes: list[str]) -> bool:
     datadir(exchange).mkdir(parents=True, exist_ok=True)
     dh = get_datahandler(datadir(exchange), "feather")
@@ -138,11 +152,24 @@ def collect_forward(ft: Freqtrade, exchange: str, pairs: list[str], timeframes: 
                 print(f"backfill: {exchange}: {pair} {tf}: {type(e).__name__}: {e}", flush=True)
                 ok = False
                 continue
-            old = dh.ohlcv_load(pair, tf, CandleType.SPOT, fill_missing=False, warn_no_data=False)
-            merged = new if old.empty else pd.concat([old, new], ignore_index=True)
-            dh.ohlcv_store(pair, tf, clean_ohlcv_dataframe(merged, tf, pair, fill_missing=False, drop_incomplete=False),
-                           CandleType.SPOT)
+            merge_candles(dh, pair, tf, new)
     return ok
+
+
+def import_archive(z: zipfile.ZipFile, exchange: str, series: list[tuple[str, str]]) -> set[tuple[str, str]]:
+    """Merge the archive into these series; returns the ones it finished. A pair the archive lacks has nothing older."""
+    datadir(exchange).mkdir(parents=True, exist_ok=True)
+    dh = get_datahandler(datadir(exchange), "feather")
+    done = set()
+    for pair, tf in series:
+        try:
+            new = archive.candles(z, pair, tf, PREPEND_FLOORS.get(tf))
+            if new is not None and not new.empty:
+                merge_candles(dh, pair, tf, new)
+            done.add((pair, tf))
+        except Exception as e:
+            print(f"backfill: {exchange}: archive {pair} {tf}: {type(e).__name__}: {e}", flush=True)
+    return done
 
 
 def reached(prior: dict | None, first_ts: dt.datetime | None, prepended: bool) -> bool:
@@ -171,8 +198,19 @@ def backfill_exchange(ft: Freqtrade, conn, exchange: str, pairs: list[str], time
     tfs = [tf for tf in timeframes if tf in supported]
     if skipped := [tf for tf in timeframes if tf not in supported]:
         print(f"backfill: {exchange}: no {' '.join(skipped)} candles on this exchange, skipped", flush=True)
+    archived: set[tuple[str, str]] = set()
     if exchange in FORWARD_EXCHANGES:
-        ok = collect_forward(ft, exchange, pairs, tfs)
+        todo = [(p, tf) for p in pairs for tf in tfs if not prior.get((p, tf), {}).get("oldest_reached")]
+        if todo:
+            try:
+                z = ft.archive(exchange)
+            except Exception as e:
+                print(f"backfill: {exchange}: archive: {type(e).__name__}: {e}", flush=True)
+                z, ok = None, False
+            if z:
+                archived = import_archive(z, exchange, todo)
+                ok = len(archived) == len(todo)
+        ok = collect_forward(ft, exchange, pairs, tfs) and ok
     else:
         for tf in tfs:
             todo = [p for p in pairs if not prior.get((p, tf), {}).get("oldest_reached")]
@@ -188,7 +226,7 @@ def backfill_exchange(ft: Freqtrade, conn, exchange: str, pairs: list[str], time
     for pair, tf in series:
         r = scan(series_file(exchange, pair, tf), tf)
         r.update(exchange=exchange, pair=pair, timeframe=tf,
-                 oldest_reached=reached(prior.get((pair, tf)), r["first_ts"], (pair, tf) in prepended))
+                 oldest_reached=(pair, tf) in archived or reached(prior.get((pair, tf)), r["first_ts"], (pair, tf) in prepended))
         rows.append(r)
     with conn.transaction():
         conn.cursor().executemany(UPSERT, rows)

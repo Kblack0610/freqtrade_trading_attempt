@@ -1,8 +1,11 @@
 import datetime as dt
+import io
+import zipfile
 
 import pandas as pd
 import pytest
 
+import archive
 import backfill
 
 UTC = dt.timezone.utc
@@ -21,8 +24,10 @@ def candles(start: dt.datetime, end: dt.datetime, freq: str, drop: int = 0) -> p
 class FakeExchange:
     """Stands in for freqtrade download-data: every pair is listed at LISTED and trades up to NOW."""
 
-    def __init__(self, supported=("1h", "1d"), fail=False):
+    def __init__(self, supported=("1h", "1d"), fail=False, zipped=None):
         self.supported = list(supported)
+        self.zipped = zipped
+        self.opened = 0
         self.fail = fail
         self.calls: list[list[str]] = []
         self.now = NOW
@@ -35,6 +40,12 @@ class FakeExchange:
 
     def timeframes(self, exchange):
         return self.supported
+
+    def archive(self, exchange):
+        self.opened += 1
+        if isinstance(self.zipped, Exception):
+            raise self.zipped
+        return self.zipped
 
     def download(self, exchange, args):
         self.calls.append(args)
@@ -115,6 +126,96 @@ def test_forward_exchange_merges_the_newest_candles(conn, lab, monkeypatch):
     backfill.backfill_exchange(ex, conn, "kraken", ["BTC/USD"], ["1h"])
     _, _, rows, gaps, missing, _ = coverage(conn, "kraken")[("BTC/USD", "1h")]
     assert (rows, gaps, missing) == (12, 1, 13)
+
+
+def zipped(members: dict[str, list[int]]) -> zipfile.ZipFile:
+    """An archive of members, each a list of candle times, in Kraken's headerless layout."""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        for name, times in members.items():
+            z.writestr(name, "".join(f"{t},1,3,0.5,2,10,4\n" for t in times))
+    return zipfile.ZipFile(buf)
+
+
+def seconds(start: dt.datetime, n: int, minutes: int) -> list[int]:
+    return [int(start.timestamp()) + i * minutes * 60 for i in range(n)]
+
+
+def test_archive_fills_the_past_once_and_collection_continues(conn, lab, monkeypatch):
+    monkeypatch.setattr(backfill, "FORWARD_EXCHANGES", {"kraken"})
+    past = seconds(NOW - dt.timedelta(hours=30), 24, 60)  # stops 6 hours before NOW: the newest 5 are collected
+    ex = FakeExchange(supported=("1h",), zipped=zipped({"XBTUSD_60.csv": past}))
+    assert backfill.backfill_exchange(ex, conn, "kraken", ["BTC/USD"], ["1h"])
+    first, last, rows, gaps, _, done = coverage(conn, "kraken")[("BTC/USD", "1h")]
+    assert first == NOW - dt.timedelta(hours=30) and last == NOW - dt.timedelta(hours=1)
+    assert (rows, gaps, done) == (29, 1, True), "24 archived, 5 collected, the hole between them kept visible"
+
+    assert backfill.backfill_exchange(ex, conn, "kraken", ["BTC/USD"], ["1h"])
+    assert ex.opened == 1, "a series the archive has filled is not read again"
+
+
+def test_archive_keeps_collection_running_when_it_is_down(conn, lab, monkeypatch):
+    monkeypatch.setattr(backfill, "FORWARD_EXCHANGES", {"kraken"})
+    ex = FakeExchange(supported=("1h",), zipped=OSError("no route"))
+    assert not backfill.backfill_exchange(ex, conn, "kraken", ["BTC/USD"], ["1h"])
+    _, _, rows, _, _, done = coverage(conn, "kraken")[("BTC/USD", "1h")]
+    assert (rows, done) == (5, False), "forward candles age out, so they are still taken; the archive is retried"
+
+
+def test_a_pair_the_archive_lacks_has_nothing_older(conn, lab, monkeypatch):
+    monkeypatch.setattr(backfill, "FORWARD_EXCHANGES", {"kraken"})
+    ex = FakeExchange(supported=("1h",), zipped=zipped({}))
+    assert backfill.backfill_exchange(ex, conn, "kraken", ["BTC/USD"], ["1h"])
+    assert coverage(conn, "kraken")[("BTC/USD", "1h")][-1] is True
+
+
+def test_archive_names_and_columns():
+    z = zipped({"XDGUSD_5.csv": seconds(LISTED, 3, 5)})
+    assert archive.member("BTC/USD", "1h") == "XBTUSD_60.csv"
+    df = archive.candles(z, "DOGE/USD", "5m")
+    assert list(df.columns) == ["date", "open", "high", "low", "close", "volume"]
+    assert df["date"].iloc[0] == LISTED and len(df) == 3
+    assert archive.candles(z, "ETH/USD", "5m") is None
+
+
+def test_archive_floor_drops_what_is_older():
+    z = zipped({"XBTUSD_1.csv": seconds(LISTED - dt.timedelta(minutes=2), 5, 1)})
+    df = archive.candles(z, "BTC/USD", "1m", LISTED.strftime("%Y%m%d"))
+    assert df["date"].iloc[0] == LISTED and len(df) == 3
+
+
+def test_archive_builds_30m_from_15m():
+    times = seconds(LISTED, 4, 15)
+    del times[3]  # no trades in the last 15 minutes: the bucket is built from what there is
+    times.append(int((LISTED + dt.timedelta(hours=2)).timestamp()))  # and an empty hour stays empty
+    df = archive.candles(zipped({"XBTUSD_15.csv": times}), "BTC/USD", "30m")
+    assert list(df["date"]) == [LISTED, LISTED + dt.timedelta(minutes=30), LISTED + dt.timedelta(hours=2)]
+    assert list(df["volume"]) == [20, 10, 10]
+
+
+def test_range_file_reads_a_zip_split_across_urls(monkeypatch):
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("XBTUSD_60.csv", "".join(f"{t},1,1,1,1,1,1\n" for t in range(5000)))
+    data = buf.getvalue()
+    third = len(data) // 3
+    parts = {f"http://x/{i}": data[i * third:(i + 1) * third if i < 2 else None] for i in range(3)}
+
+    class Response(io.BytesIO):
+        def __init__(self, body, length):
+            super().__init__(body)
+            self.headers = {"Content-Length": str(length)}
+
+    def urlopen(req, timeout):
+        body = parts[req.full_url]
+        if req.get_method() == "HEAD":
+            return Response(b"", len(body))
+        a, b = req.get_header("Range").removeprefix("bytes=").split("-")
+        return Response(body[int(a):int(b) + 1], int(b) + 1 - int(a))
+
+    monkeypatch.setattr(archive.urllib.request, "urlopen", urlopen)
+    z = zipfile.ZipFile(archive.RangeFile(list(parts)))
+    assert z.read("XBTUSD_60.csv").count(b"\n") == 5000, "zipfile checks the CRC on read"
 
 
 def test_failed_download_still_records_what_is_on_disk(conn, lab):
