@@ -52,3 +52,47 @@ min_fold_trades = 5
 min_trades = 30
 # tuned trades, and the low end of its 90% bootstrap interval must clear this.
 min_oos_expectancy = 0.0
+
+[confidence]
+# Whether a strategy has earned real money, from lab/confidence.py. Stricter than [promote], which only decides
+# who enters the dry-run league. No literature sets these numbers; each one is a judgment call.
+# Every gate here passes and the score reaches this, or the strategy is not ready.
+ready_score = 90
+# The window the whole-history gates read.
+window = "all"
+# The empirical-Bayes prior needs this many strategies with at least this many out-of-sample trades. Six gave
+# scores near 100 on the 2026-11-05 data: too few to estimate a spread, so almost nothing shrank.
+min_population = 20
+min_member_trades = 30
+# Pooled tuned walk-forward trades: detects 0.2 SD per trade at z = 3.14, Bonferroni over about 56 tests.
+min_oos_trades = 250
+# The low end of this block-bootstrap interval on out-of-sample expectancy must clear zero.
+expectancy_level = 0.95
+# Deflated Sharpe on daily net returns, with the trial count from the register.
+min_dsr = 0.95
+# Probability of backtest overfitting on the venue. 0.5 is the convention; this is tighter on purpose.
+max_pbo = 0.25
+# Walk-forward months: at least this many, and this share of them with a positive expectancy.
+min_folds = 6
+min_folds_positive = 0.70
+# BTC trend buckets: up or down when the close is this far from its 200-day mean, flat between. Each needs
+# enough days to count, at most this many may lose, and no bucket may earn over this share of the profit.
+trend_band = 0.05
+min_regime_days = 30
+max_negative_regimes = 1
+max_regime_share = 0.60
+# The low end of the 90% interval on the annual return over holding the same share of BTC.
+hold_excess_lo_above = 0.0
+# The deepest any trade may go against its entry. strategies holds no stoploss to compare with, so this is flat.
+max_open_loss = 0.25
+# fee_per_trade must sit this close to twice the venue's configured fee, or the rows predate the real fees.
+fee_tolerance = 0.20
+# Out-of-sample expectancy must stay positive with only this share of the edge before fees.
+stress_gross_share = 0.5
+# Dry run against backtest: enough matched trades, and the mean gap inside the expectancy interval's half width.
+min_drift_trades = 20
+# A dry run tests behaviour, not edge: this long, this many trades, through a BTC fall this deep, with real stops.
+min_live_days = 90
+min_live_trades = 60
+min_live_btc_drop = 0.10
+min_live_stopouts = 1

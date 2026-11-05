@@ -3,6 +3,7 @@ import json
 import urllib.parse
 
 import pytest
+from psycopg.types.json import Jsonb
 
 NOW = dt.datetime.now(dt.timezone.utc)
 ENV = {"TRADER_WEB_BASE_URL": "http://testserver", "FORGEJO_URL": "https://git.example", "OAUTH_CLIENT_ID": "cid",
@@ -79,7 +80,7 @@ def test_healthz_needs_no_sign_in(site):
     assert site[1].get("/healthz").text == "ok"
 
 
-@pytest.mark.parametrize("path", ["/", "/bots/x", "/strategies", "/strategies/x", "/suggestions", "/data", "/runs", "/runs/1"])
+@pytest.mark.parametrize("path", ["/", "/bots/x", "/strategies", "/strategies/x", "/suggestions", "/confidence", "/data", "/runs", "/runs/1"])
 def test_signed_out_goes_to_login(site, path):
     r = site[1].get(path)
     assert r.status_code == 303 and r.headers["location"] == "/login"
@@ -216,6 +217,16 @@ def test_suggestions_show_each_kind_with_its_gates(conn, signed_in):
         assert needle in text, needle
     assert "1 fix, 2 retire" in signed_in[1].get("/").text
     assert "startup_candle_count" in signed_in[1].get("/strategies/Strategy001").text
+
+
+def test_confidence_shows_every_gate_and_the_first_it_fails(conn, signed_in):
+    assert "Nothing scored yet" in signed_in[1].get("/confidence").text
+    gates = [{"gate": "bias", "value": "clean", "need": "clean", "pass": True},
+             {"gate": "drift", "value": None, "need": "inside the interval", "pass": False}]
+    conn.execute("INSERT INTO confidence (strategy, exchange, score, ready, passed, oos_trades, gates) "
+                 "VALUES ('Alpha', 'binanceus', 71.4, false, 1, 42, %s)", (Jsonb(gates),))
+    body = signed_in[1].get("/confidence").text
+    assert "not ready: drift" in body and "1 of 2 gates" in body and "inside the interval" in body
 
 
 def test_chart_draws_only_with_two_points():

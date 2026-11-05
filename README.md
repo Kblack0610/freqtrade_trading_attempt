@@ -20,6 +20,7 @@ Results go to the `trader` database in the cluster's shared Postgres, which the 
 | `lab/walkforward.py` | Weekly job: hyperopt on the months before each of the last whole months, then that unseen month backtested as is and tuned (see Walk-forward) |
 | `lab/metrics.py` | Pure functions behind the derived tables: daily returns, Sharpe, Sortino, drawdown, block-bootstrap intervals, deflated Sharpe with effective trials, overfit probability (CSCV), trades still needed, Monte Carlo, BTC regimes |
 | `lab/suggest.py`, `lab/suggest.toml` | After each analysis and walk-forward: promote, watch, demote, retire, fix and retune suggestions from the derived tables, with the thresholds as data (see Suggestions) |
+| `lab/confidence.py` | After each analysis and walk-forward: the score and gates that say whether a strategy has earned real money, and the trial register (see Confidence) |
 | `lab/ingest.py` | Hourly job: every bot's trades (closed and open) and a snapshot (profit, balance, dry-run flag) into Postgres |
 | `lab/migrate.py`, `lab/migrations/` | Schema: numbered SQL files applied once each, in order, under an advisory lock; runs as the init container of every job |
 | `lab/db.py` | The one Postgres connection: `DATABASE_URL` |
@@ -124,6 +125,16 @@ A backtest of a strategy as it is says nothing about tuning it, and hyperopt's b
 
 A suggestion keeps its `first_seen` while it holds, so "since Nov 05" on the site is how long the evidence has pointed the same way; one that stops applying is deleted.
 
+## Confidence
+
+`lab/confidence.py` runs after suggestions (alone: `python lab/confidence.py`) and rebuilds `confidence`, one row per strategy and exchange, shown on `/confidence`. Promote decides who enters the dry-run league; this decides who could touch money, so its gates are stricter. It is advice: nothing here touches a bot, and `lab/league.py` still refuses real money.
+
+- **Score**: 100 x P(true net expectancy per trade > 0). Each strategy's pooled tuned walk-forward trades, shrunk toward every strategy walk-forward has tried. The population mean is capped at zero, so a rising market does not lift everyone. No score below 20 strategies with 30 trades each.
+- **Ready**: every gate passes and the score is at least 90. A failed gate shows as "not ready: <gate>" whatever the score. Ready means worth a small capped experiment, not safe.
+- **Gates**, thresholds in `lab/suggest.toml` [confidence]: bias, costs at the venue's configured fee, 250 out-of-sample trades, expectancy interval low above zero, deflated Sharpe, overfit probability, months positive, BTC regime spread, excess over hold, worst open loss, cost stress, drift, dry run length, score.
+- **Out of sample** means the tuned returns, months hyperopt never saw. So the score speaks for tuning monthly and trading the next month, not for the file as it stands, and candidates were chosen on a trailing year that overlaps those months.
+- **Trial register**: `trials` counts every strategy, exchange and tuned parameter set ever tried, and keeps a row when its strategy goes, so the bar never falls. The deflated Sharpe uses that count at the window's effective share.
+
 ## Adding a strategy
 
 Drop the `.py` in `user_data/strategies/` (any subfolder). It must import on the pinned image: Python 3.14, NumPy 2 (`np.nan`, not `np.NaN`), no `ta` package. Check with `freqtrade list-strategies --recursive-strategy-search --userdir user_data -c user_data/config.base.json -c user_data/exchanges/binanceus.json`. The next nightly analysis backtests its whole history and checks it for bias.
@@ -164,6 +175,7 @@ The first run fetches full history (5m since 2019 on binanceus is the long pole)
 - `003`: the analysis. `strategies` (every file found, its hash and load error), `backtest_chunks` and `backtest_trades` (the cache and its trades), `bias_checks`; derived, rebuilt in one transaction at the end of each run: `strategy_daily`, `strategy_windows`, `estimates`, `regimes`, `correlations`. `runs` rows of kind `analysis` carry the run summary in `raw`.
 - `004`: clears bias checks that errored before subfolder strategies could load, so they rerun.
 - `005`: `suggestions`, one row per kind, strategy, exchange and bot, with its gates as JSON and when it was first and last seen.
+- `012`: `trials`, the register of everything tried, and `confidence`, the score and gates per strategy and exchange.
 
  A schema change is a new numbered file; never edit an applied one.
 
