@@ -1,0 +1,30 @@
+{
+    "stake_currency": "USDT",
+    "fee": 0.0015,
+    "exchange": {
+        "name": "kucoin",
+        "key": "",
+        "secret": "",
+        "pair_whitelist": [
+            "BTC/USDT",
+            "ETH/USDT",
+            "XMR/USDT",
+            "XRP/USDT",
+            "ZEC/USDT",
+            "NEAR/USDT",
+            "SOL/USDT",
+            "AAVE/USDT",
+            "UNI/USDT",
+            "LINK/USDT",
+            "AVAX/USDT",
+            "DOT/USDT",
+            "BNB/USDT",
+            "LTC/USDT",
+            "DOGE/USDT",
+            "SHIB/USDT",
+            "KCS/USDT",
+            "TRX/USDT"
+        ],
+        "pair_blacklist": []
+    }
+}

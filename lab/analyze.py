@@ -4,7 +4,8 @@
 1. Strategies: every file the resolver finds under user_data/strategies, with its hash, into
    `strategies`.
 2. Backtests: each strategy x exchange over its whole history, one calendar year per chunk, run in
-   parallel (ANALYZE_WORKERS freqtrade processes). A chunk is cached by its cache_key (strategy file,
+   parallel (up to ANALYZE_WORKERS freqtrade processes, fewer when their estimated memory would pass
+   ANALYZE_MEMORY_GB: a year of 1m candles needs about four times a year of 5m). A chunk is cached by its cache_key (strategy file,
    config files, Freqtrade version, range): past years run once, the current year reruns each night.
    Its trades go to `backtest_trades`. A chunk starts from the config's wallet, so a long history is
    many short compounding runs chained by their daily returns, not one run that compounds for years.
@@ -34,8 +35,11 @@ import os
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextlib import contextmanager
+from functools import cache
 from pathlib import Path
 from typing import Protocol
 
@@ -53,6 +57,8 @@ USER_DATA = REPO / "user_data"
 EXCHANGES = os.environ.get("ANALYZE_EXCHANGES", "binanceus coinbase").split()
 ONLY = set(os.environ.get("ANALYZE_STRATEGIES", "").split())
 WORKERS = int(os.environ.get("ANALYZE_WORKERS", "6"))
+# What the freqtrade processes in flight may hold together, under the pod's memory limit with room for this one.
+MEMORY_GB = float(os.environ.get("ANALYZE_MEMORY_GB", "10"))
 BIAS_EXCHANGE = os.environ.get("BIAS_EXCHANGE", "binanceus")
 LOOKAHEAD_DAYS = int(os.environ.get("LOOKAHEAD_DAYS", "120"))
 RECURSIVE_DAYS = int(os.environ.get("RECURSIVE_DAYS", "30"))
@@ -65,6 +71,10 @@ HORIZONS = (30, 90)
 ESTIMATE_BASIS, ESTIMATE_MIN_DAYS = 365, 180
 CORR_DAYS, CORR_MIN_DAYS = 365, 60
 FAIL_SHARE = 0.10
+# A task's peak memory grows with the candles it loads. Measured in the image (2026-11-05): a year of 5m on
+# 10 pairs peaks at 1.1 GB, a year of 1m on 10 pairs at 4.0 GB.
+TASK_BASE_GB, GB_PER_MCANDLE = 0.4, 0.69
+BIAS_LOAD = 2  # lookahead-analysis keeps the full frame and a sliced copy per signal
 NO_DATA = "no candles in this period"
 
 
@@ -78,6 +88,43 @@ def config_files(exchange: str) -> list[Path]:
 
 def wallet() -> float:
     return float(json.loads((USER_DATA / "config.base.json").read_text()).get("dry_run_wallet", 1000))
+
+
+@cache
+def pair_count(exchange: str) -> int:
+    return len(json.loads((USER_DATA / "exchanges" / f"{exchange}.json").read_text())["exchange"]["pair_whitelist"])
+
+
+def task_gb(exchange: str, timeframe: str | None, days: int, load: float = 1) -> float:
+    from freqtrade.exchange import timeframe_to_seconds
+
+    candles = pair_count(exchange) * days * 86400 / timeframe_to_seconds(timeframe or "5m")
+    return TASK_BASE_GB + GB_PER_MCANDLE * load * candles / 1e6
+
+
+class Budget:
+    """Lets tasks run while their estimated memory together stays within a total. A task estimated above
+    the total runs alone, so nothing waits forever."""
+
+    def __init__(self, total: float):
+        self.total, self.used, self.waiting = total, 0.0, 0
+        self.cv = threading.Condition()
+
+    @contextmanager
+    def hold(self, gb: float):
+        gb = min(gb, self.total)
+        with self.cv:
+            self.waiting += 1
+            self.cv.notify_all()
+            self.cv.wait_for(lambda: self.used + gb <= self.total)
+            self.waiting -= 1
+            self.used += gb
+        try:
+            yield
+        finally:
+            with self.cv:
+                self.used -= gb
+                self.cv.notify_all()
 
 
 def chunk_key(file_hash: str, exchange: str, start: dt.date, end: dt.date, ft_version: str) -> str:
@@ -529,12 +576,22 @@ def main(runner: Runner | None = None, today: dt.date | None = None) -> int:
             print(f"analyze: {len(found)} strategies, {len(todo)} chunks to run, {cached} cached, "
                   f"{len(bias)} bias checks, {WORKERS} workers", flush=True)
             failed, empty, done, failures = 0, 0, 0, []
+            budget, tf = Budget(MEMORY_GB), {s["name"]: s["timeframe"] for s in found}
+
+            def held(gb, fn, *args):
+                with budget.hold(gb):
+                    return fn(*args)
+
+            def bt(t):
+                gb = task_gb(t["exchange"], tf.get(t["strategy"]), (t["end"] - t["start"]).days)
+                return held, gb, runner.backtest, t["strategy"], t["exchange"], t["start"], t["end"]
+
             with ThreadPoolExecutor(max_workers=WORKERS) as pool:
-                futs = {pool.submit(runner.bias, kind, s): ("bias", (s, kind, h)) for s, kind, h in bias}
-                futs.update({pool.submit(runner.backtest, t["strategy"], t["exchange"], t["start"], t["end"]): ("drift", t)
-                             for t in drifts})
-                futs.update({pool.submit(runner.backtest, t["strategy"], t["exchange"], t["start"], t["end"]): ("chunk", t)
-                             for t in todo})
+                futs = {pool.submit(held, task_gb(BIAS_EXCHANGE, tf.get(s), LOOKAHEAD_DAYS if kind == "lookahead"
+                                                  else RECURSIVE_DAYS, BIAS_LOAD), runner.bias, kind, s):
+                        ("bias", (s, kind, h)) for s, kind, h in bias}
+                futs.update({pool.submit(*bt(t)): ("drift", t) for t in drifts})
+                futs.update({pool.submit(*bt(t)): ("chunk", t) for t in todo})
                 try:
                     for fut in as_completed(futs):
                         what, task = futs[fut]

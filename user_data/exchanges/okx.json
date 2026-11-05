@@ -1,0 +1,34 @@
+{
+    "stake_currency": "USDT",
+    "fee": 0.002,
+    "exchange": {
+        "name": "okx",
+        "key": "",
+        "secret": "",
+        "pair_whitelist": [
+            "BTC/USDT",
+            "ETH/USDT",
+            "SOL/USDT",
+            "XRP/USDT",
+            "DOGE/USDT",
+            "NEAR/USDT",
+            "UNI/USDT",
+            "OKB/USDT",
+            "FIL/USDT",
+            "TRX/USDT",
+            "LINK/USDT",
+            "LTC/USDT",
+            "ADA/USDT",
+            "BCH/USDT",
+            "AVAX/USDT",
+            "XLM/USDT",
+            "AAVE/USDT",
+            "DOT/USDT",
+            "HBAR/USDT",
+            "SHIB/USDT",
+            "RAY/USDT",
+            "STX/USDT"
+        ],
+        "pair_blacklist": []
+    }
+}
