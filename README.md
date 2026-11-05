@@ -21,6 +21,7 @@ Results go to the `trader` database in the cluster's shared Postgres, which the 
 | `lab/metrics.py` | Pure functions behind the derived tables: daily returns, Sharpe, Sortino, drawdown, block-bootstrap intervals, deflated Sharpe with effective trials, overfit probability (CSCV), trades still needed, Monte Carlo, BTC regimes |
 | `lab/suggest.py`, `lab/suggest.toml` | After each analysis and walk-forward: promote, watch, demote, retire, fix and retune suggestions from the derived tables, with the thresholds as data (see Suggestions) |
 | `lab/confidence.py` | After each analysis and walk-forward: the score and gates that say whether a strategy has earned real money, and the trial register (see Confidence) |
+| `lab/book.py` | After the score: what each scored strategy might return beside holding BTC, and what each stage costs and can lose. |
 | `lab/ingest.py` | Hourly job: every bot's trades (closed and open) and a snapshot (profit, balance, dry-run flag) into Postgres |
 | `lab/watcher.py` | Daily loss watch: each bot's marked-to-market equity every 60 s into `watch`, and the kill drill. See Watcher |
 | `lab/migrate.py`, `lab/migrations/` | Schema: numbered SQL files applied once each, in order, under an advisory lock; runs as the init container of every job |
@@ -126,6 +127,10 @@ A backtest of a strategy as it is says nothing about tuning it, and hyperopt's b
 
 A suggestion keeps its `first_seen` while it holds, so "since Nov 05" on the site is how long the evidence has pointed the same way; one that stops applying is deleted.
 
+## Book
+
+`lab/book.py` runs after the score (alone: `python lab/book.py`) and rebuilds `book`, shown at `/book`. Each scored strategy with enough walk-forward months gets a 5th, 50th and 95th percentile return over 1 and 5 years, from a block bootstrap of its out-of-sample monthly wallet returns, and the same for BTC over those months. With no score there is no number: the page says there is not enough evidence. The ranges assume the tested months repeat, so a short basis makes a 5-year range look firmer than it is. The page also lists each stage's capital, what it can lose at each limit and its running costs, from `lab/suggest.toml` [book].
+
 ## Confidence
 
 `lab/confidence.py` runs after suggestions (alone: `python lab/confidence.py`) and rebuilds `confidence`, one row per strategy and exchange, shown on `/confidence`. Promote decides who enters the dry-run league; this decides who could touch money, so its gates are stricter. It is advice: nothing here touches a bot, and `lab/league.py` still refuses real money.
@@ -178,6 +183,7 @@ The first run fetches full history (5m since 2019 on binanceus is the long pole)
 - `005`: `suggestions`, one row per kind, strategy, exchange and bot, with its gates as JSON and when it was first and last seen.
 - `012`: `trials`, the register of everything tried, and `confidence`, the score and gates per strategy and exchange.
 - `013`: `watch`, one row per bot rewritten by `lab/watcher.py`: equity, the day's opening equity, breach, drill
+- `014`: `book`, projected return ranges per scored strategy and for holding BTC.
 
  A schema change is a new numbered file; never edit an applied one.
 

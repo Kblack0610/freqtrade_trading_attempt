@@ -341,16 +341,28 @@ def trades_needed(x: np.ndarray, z: float = 1.645) -> int | None:
     return max(0, math.ceil((z * x.std(ddof=1) / x.mean()) ** 2) - len(x))
 
 
-def monte_carlo(ret: np.ndarray, horizon: int, seed: int, paths: int = 5000, block: int = 10) -> dict:
-    """Projected return bands over `horizon` days from a block bootstrap of past daily returns."""
+def _paths(ret: np.ndarray, horizon: int, seed: int, paths: int, block: int) -> tuple[np.ndarray, np.ndarray]:
+    """Each bootstrapped path's total return and its deepest drawdown over `horizon` steps."""
     r = np.asarray(ret, dtype=float)
     res = r[block_indices(len(r), block, paths, np.random.default_rng(seed), horizon)]
     eq = np.cumprod(1.0 + res, axis=1)
-    total = eq[:, -1] - 1.0
     peak = np.maximum.accumulate(np.concatenate([np.ones((paths, 1)), eq], axis=1), axis=1)[:, 1:]
-    mdd = np.max(1.0 - eq / peak, axis=1)
+    return eq[:, -1] - 1.0, np.max(1.0 - eq / peak, axis=1)
+
+
+def monte_carlo(ret: np.ndarray, horizon: int, seed: int, paths: int = 5000, block: int = 10) -> dict:
+    """Projected return bands over `horizon` days from a block bootstrap of past daily returns."""
+    total, mdd = _paths(ret, horizon, seed, paths, block)
     p10, p50, p90 = np.quantile(total, [0.1, 0.5, 0.9])
     return {"p10": float(p10), "p50": float(p50), "p90": float(p90), "prob_loss": float((total < 0).mean()),
+            "exp_max_drawdown": float(mdd.mean()), "paths": paths}
+
+
+def projection(ret: np.ndarray, horizon: int, seed: int, paths: int = 5000, block: int = 3) -> dict:
+    """The 5th, 50th and 95th percentile return over `horizon` months from a block bootstrap of monthly returns."""
+    total, mdd = _paths(ret, horizon, seed, paths, block)
+    p5, p50, p95 = np.quantile(total, [0.05, 0.5, 0.95])
+    return {"p5": float(p5), "p50": float(p50), "p95": float(p95), "prob_loss": float((total < 0).mean()),
             "exp_max_drawdown": float(mdd.mean()), "paths": paths}
 
 
