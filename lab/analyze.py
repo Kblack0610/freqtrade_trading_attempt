@@ -130,7 +130,7 @@ class Cli:
 
         t0 = time.monotonic()
         with tempfile.TemporaryDirectory(prefix="bt-") as d:
-            cmd = ["freqtrade", "backtesting", "--userdir", str(USER_DATA),
+            cmd = ["freqtrade", "backtesting", "--userdir", str(USER_DATA), "--recursive-strategy-search",
                    *[a for p in config_files(exchange) for a in ("-c", str(p))],
                    "--datadir", str(RESULTS / "data" / exchange), "--strategy", strategy,
                    "--timerange", f"{start:%Y%m%d}-{end:%Y%m%d}", "--export", "trades",
@@ -175,7 +175,7 @@ def bias_one(kind: str, strategy: str, strategy_path: str | None) -> dict:
 
     days = LOOKAHEAD_DAYS if kind == "lookahead" else RECURSIVE_DAYS
     since = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=days)).strftime("%Y%m%d")
-    argv = [f"{kind}-analysis", "--userdir", str(USER_DATA), *[a for p in config_files(BIAS_EXCHANGE) for a in ("-c", str(p))],
+    argv = [f"{kind}-analysis", "--userdir", str(USER_DATA), "--recursive-strategy-search", *[a for p in config_files(BIAS_EXCHANGE) for a in ("-c", str(p))],
             "--datadir", str(RESULTS / "data" / BIAS_EXCHANGE), "--strategy", strategy, "--timerange", f"{since}-"]
     if strategy_path:
         argv += ["--strategy-path", strategy_path]
