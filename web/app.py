@@ -32,9 +32,11 @@ TF_ORDER = ["1m", "5m", "15m", "30m", "1h", "4h", "1d"]
 
 BOTS = """
 SELECT b.name, b.exchange, b.strategy, s.ts, s.dry_run, s.closed_trades, s.open_trades,
-       s.profit_all_pct, s.profit_all_abs, s.winrate_pct, s.max_drawdown_pct, s.balance_total, s.error
+       s.profit_all_pct, s.profit_all_abs, s.winrate_pct, s.max_drawdown_pct, s.balance_total, s.error,
+       d.matched, d.live_entries, d.bt_entries
 FROM bots b
 LEFT JOIN LATERAL (SELECT * FROM bot_snapshots WHERE bot = b.name ORDER BY ts DESC LIMIT 1) s ON true
+LEFT JOIN drift d ON d.bot = b.name
 ORDER BY s.profit_all_pct DESC NULLS LAST, b.name
 """
 COVERAGE_BY_EXCHANGE = """
@@ -236,7 +238,8 @@ def bot(request: Request, name: str):
     trades = rows("SELECT * FROM bot_trades WHERE bot = %s ORDER BY is_open DESC, "
                   "coalesce(close_date, open_date) DESC LIMIT 500", (name,))
     chart = charts.line([(r["ts"].astimezone(TZ), r["profit_all_pct"]) for r in series], label=f"{name} profit over time")
-    return page(request, "bot.html", bot=found[0], trades=trades, chart=chart)
+    return page(request, "bot.html", bot=found[0], trades=trades, chart=chart,
+                drift=(rows("SELECT * FROM drift WHERE bot = %s", (name,)) or [None])[0])
 
 
 @app.get("/data", response_class=HTMLResponse)

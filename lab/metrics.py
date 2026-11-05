@@ -225,3 +225,36 @@ def regimes(close: pd.Series) -> pd.DataFrame:
     bucket = pd.Series(np.select([vol <= lo, vol <= hi], ["low", "mid"], "high"), index=close.index).where(vol.notna())
     return pd.DataFrame({"day": close.index, "btc_close": close.to_numpy(), "trend": trend.to_numpy(),
                          "vol_30d": vol.to_numpy(), "vol_bucket": bucket.to_numpy()})
+
+
+def drift(live: pd.DataFrame, bt: pd.DataFrame, tolerance: pd.Timedelta) -> dict:
+    """A league bot's dry run against a backtest of the same strategy, exchange and period.
+
+    live: pair, open_date, is_open, profit_ratio, profit_abs. bt: pair, open_date, exit_reason,
+    profit_ratio, profit_abs. A live entry matches the backtest entry on the same pair nearest in
+    time, within `tolerance` (one candle). A backtest trade still open at the end is closed there
+    with exit_reason force_exit, so it counts as an entry but not as a closed trade. The gap is the
+    mean live minus backtest profit ratio over matched trades closed on both sides.
+    """
+    lc = live[~live["is_open"].astype(bool)] if len(live) else live
+    bc = bt[bt["exit_reason"] != "force_exit"] if len(bt) else bt
+    out = {"live_entries": len(live), "bt_entries": len(bt), "matched": 0, "live_closed": len(lc), "bt_closed": len(bc),
+           "live_expectancy": float(lc["profit_ratio"].mean()) if len(lc) else None,
+           "bt_expectancy": float(bc["profit_ratio"].mean()) if len(bc) else None,
+           "live_profit": float(lc["profit_abs"].sum()) if len(lc) else 0.0,
+           "bt_profit": float(bc["profit_abs"].sum()) if len(bc) else 0.0, "gap": None, "gap_trades": 0}
+    if not len(live) or not len(bt):
+        return out
+    side = bt[["pair", "open_date", "profit_ratio", "exit_reason"]].rename(
+        columns={"profit_ratio": "bt_ratio", "exit_reason": "bt_exit"})
+    # pandas keeps each source's time resolution, and merge_asof needs one
+    side = side.assign(open_date=pd.to_datetime(side["open_date"], utc=True).astype("datetime64[ns, UTC]"),
+                       bt_open=lambda x: x["open_date"])
+    mine = live.assign(open_date=pd.to_datetime(live["open_date"], utc=True).astype("datetime64[ns, UTC]"))
+    m = pd.merge_asof(mine.sort_values("open_date"), side.sort_values("open_date"), on="open_date", by="pair",
+                      tolerance=tolerance, direction="nearest")
+    hit = m[m["bt_open"].notna()]
+    both = hit[~hit["is_open"].astype(bool) & (hit["bt_exit"] != "force_exit")]
+    out.update(matched=len(hit), gap_trades=len(both),
+               gap=float((both["profit_ratio"] - both["bt_ratio"]).mean()) if len(both) else None)
+    return out

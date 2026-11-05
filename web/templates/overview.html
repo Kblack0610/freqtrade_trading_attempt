@@ -16,7 +16,7 @@
 <h2>League</h2>
 <div class="scroll">
 <table>
-  <thead><tr><th>Bot</th><th>Exchange</th><th>Strategy</th><th class="n">Profit</th><th class="n">USD</th><th class="n">Closed</th><th class="n">Open</th><th class="n">Win rate</th><th class="n">Max DD</th><th>Snapshot</th></tr></thead>
+  <thead><tr><th>Bot</th><th>Exchange</th><th>Strategy</th><th class="n">Profit</th><th class="n">USD</th><th class="n">Closed</th><th class="n">Open</th><th class="n">Win rate</th><th class="n">Max DD</th><th class="n" title="Live entries the backtest of the same period also took, within one candle">Backtest match</th><th>Snapshot</th></tr></thead>
   <tbody>
   {% for b in bots %}
   <tr>
@@ -29,6 +29,7 @@
     <td class="n">{{ b.open_trades if b.open_trades is not none else "-" }}</td>
     <td class="n">{{ b.winrate_pct | num(0, "%") }}</td>
     <td class="n">{{ b.max_drawdown_pct | num(2, "%") }}</td>
+    <td class="n">{% if b.live_entries %}{{ b.matched }} of {{ b.live_entries }}{% else %}-{% endif %}</td>
     <td class="{{ 'down' if b.error or stale(b.ts) }}">{{ "unreachable" if b.error else (b.ts | ago) }}</td>
   </tr>
   {% endfor %}
