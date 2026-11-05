@@ -68,6 +68,15 @@ def sortino(ret: np.ndarray) -> float | None:
     return None if downside == 0 else float(r.mean() / downside * math.sqrt(YEAR))
 
 
+def worst_open(trades: pd.DataFrame) -> float | None:
+    """The deepest any trade went against its entry, from the candle lows it lived through. Returns
+    and drawdown are realized on close, so a strategy that holds its losers shows neither until a stop hits."""
+    if not len(trades):
+        return None
+    loss = (trades["min_rate"].astype(float) / trades["open_rate"].astype(float) - 1.0).min()
+    return None if pd.isna(loss) else float(loss)
+
+
 def capital_exposure(trades: pd.DataFrame, start: pd.Timestamp, end: pd.Timestamp) -> float:
     """Mean share of the wallet in positions over the window: each trade's `share` of its wallet,
     weighted by its time inside the window. `exposure` counts a day with one trade of three as fully
@@ -204,6 +213,7 @@ def window_metrics(daily: pd.DataFrame, trades: pd.DataFrame, seed: int) -> dict
         "fee_per_trade": float((gross - priced["profit_ratio"].to_numpy(dtype=float)).mean()) if len(gross) else None,
         "winrate": float((trades["profit_abs"] > 0).mean()) if len(trades) else None,
         "exposure": exposure(trades, start, end) if n else 0.0,
+        "worst_open": worst_open(trades),
         "months_profitable": float((months > 0).mean()) if len(months) else None,
         # inputs to the deflated Sharpe, which needs every trial in the window first
         "_sr_daily": None if sd == 0 or n < 2 else float(r.mean() / sd),
