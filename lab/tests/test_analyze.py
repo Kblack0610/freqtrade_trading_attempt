@@ -254,3 +254,10 @@ def test_a_store_error_ends_the_run_without_running_the_queue(lab, monkeypatch):
         analyze.main(r, TODAY)
     assert len(r.backtests) <= 1
     assert one(lab, "SELECT NOT ok AND raw->>'error' = 'RuntimeError: cannot store' FROM runs WHERE kind = 'analysis'")
+
+
+def test_errors_keep_an_exception_message_whole():
+    out = ("2026-11-05 03:17:02,455 - freqtrade - ERROR - Fatal exception!\n"
+           "Traceback (most recent call last):\n"
+           "ValueError: Seed must be between 0 and 2**32 - 1\n")
+    assert analyze._errors(out) == "Fatal exception! | ValueError: Seed must be between 0 and 2**32 - 1"

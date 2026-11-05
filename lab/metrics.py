@@ -17,8 +17,9 @@ EULER_GAMMA = 0.5772156649015329
 
 
 def seed_of(*parts: object) -> int:
-    """A seed that depends only on its parts, not on run order or the process."""
-    return int(hashlib.sha256("|".join(map(str, parts)).encode()).hexdigest()[:12], 16)
+    """A seed that depends only on its parts, not on run order or the process. 32 bits, the most
+    numpy's RandomState, and so hyperopt's optuna samplers, accept."""
+    return int(hashlib.sha256("|".join(map(str, parts)).encode()).hexdigest()[:8], 16)
 
 
 def utc(t) -> pd.Timestamp:
@@ -182,16 +183,17 @@ def window_metrics(daily: pd.DataFrame, trades: pd.DataFrame, seed: int) -> dict
     }
 
 
-def deflated_sharpe(sr: float, n: int, skew: float, kurt: float, trial_srs: list[float]) -> float | None:
+def deflated_sharpe(sr: float, n: int, skew: float, kurt: float, trials: int) -> float | None:
     """Bailey and Lopez de Prado's deflated Sharpe ratio: the probability that the true Sharpe is
-    above the best one expected by luck alone among this many trials. All Sharpes per period."""
+    above the best one `trials` strategies with a true Sharpe of zero would show by luck. Sharpes
+    are per period over n periods. Under that null each estimate's variance is 1 / (n - 1); the
+    spread of the trials' own estimates would also count real differences, such as fee drag, as luck.
+    """
     if sr is None or n < 3:
         return None
-    srs = [s for s in trial_srs if s is not None]
-    k = len(srs)
-    if k >= 2:
-        var = float(np.var(srs, ddof=1))
-        sr0 = math.sqrt(var) * ((1 - EULER_GAMMA) * norm.ppf(1 - 1 / k) + EULER_GAMMA * norm.ppf(1 - 1 / (k * math.e)))
+    if trials >= 2:
+        emax = (1 - EULER_GAMMA) * norm.ppf(1 - 1 / trials) + EULER_GAMMA * norm.ppf(1 - 1 / (trials * math.e))
+        sr0 = emax / math.sqrt(n - 1)
     else:
         sr0 = 0.0
     denom = 1 - skew * sr + (kurt - 1) / 4 * sr ** 2

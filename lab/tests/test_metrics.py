@@ -64,10 +64,18 @@ def test_intervals_and_monte_carlo_repeat_for_a_seed():
 
 def test_deflated_sharpe_falls_as_trials_grow():
     sr, n = 0.08, 365
-    alone = metrics.deflated_sharpe(sr, n, 0.0, 3.0, [sr])
-    crowd = metrics.deflated_sharpe(sr, n, 0.0, 3.0, list(np.random.default_rng(0).normal(0, 0.05, 60)) + [sr])
+    alone = metrics.deflated_sharpe(sr, n, 0.0, 3.0, 1)
+    crowd = metrics.deflated_sharpe(sr, n, 0.0, 3.0, 61)
     assert alone > 0.9 and crowd < alone
-    assert metrics.deflated_sharpe(None, n, 0, 3, []) is None
+    assert metrics.deflated_sharpe(None, n, 0, 3, 5) is None
+
+
+def test_deflated_sharpe_clears_a_real_edge_and_not_luck():
+    n, k = 365, 89
+    luck_bar = 2.5 / math.sqrt(n - 1)  # about the expected best of 89 zero-Sharpe trials over a year
+    assert metrics.deflated_sharpe(0.25, n, 0.0, 3.0, k) > 0.95  # annualized 4.8
+    assert metrics.deflated_sharpe(luck_bar, n, 0.0, 3.0, k) < 0.6
+    assert metrics.deflated_sharpe(0.05, n, 0.0, 3.0, k) < 0.1  # annualized 1.0 is luck among 89
 
 
 def test_window_metrics_on_a_known_series():
@@ -105,3 +113,9 @@ def test_drift_matches_entries_within_a_candle():
     assert d["gap_trades"] == 1 and math.isclose(d["gap"], -0.005)
     assert math.isclose(d["live_expectancy"], -0.005) and math.isclose(d["bt_profit"], 10.5)
     assert metrics.drift(live.iloc[0:0], bt, pd.Timedelta("5m"))["matched"] == 0
+
+
+def test_seeds_fit_the_hyperopt_samplers():
+    seeds = [metrics.seed_of("Strategy001", "binanceus", dt.date(2026, m, 1)) for m in range(1, 13)]
+    assert all(0 <= s < 2 ** 32 for s in seeds)
+    np.random.RandomState(max(seeds))  # optuna's samplers seed numpy's RandomState, which refuses 2**32 and up
