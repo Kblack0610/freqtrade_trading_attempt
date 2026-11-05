@@ -153,7 +153,16 @@ def gv(v) -> str:
     return str(v)
 
 
-templates.env.filters.update(local=local, ago=ago, num=num, pct=pct, tone=tone, gv=gv)
+def skip_groups(skipped: list[str]) -> list[tuple[str, list[str]]]:
+    """Skip lines ("<strategy> on <where>: <why>") grouped by where and why, so a venue still backfilling is one line."""
+    groups: dict[str, list[str]] = {}
+    for line in skipped:
+        name, on, rest = line.partition(" on ")
+        groups.setdefault(rest if on else line, []).extend([name] if on else [])
+    return [(why, sorted(names)) for why, names in groups.items()]
+
+
+templates.env.filters.update(local=local, ago=ago, num=num, pct=pct, tone=tone, gv=gv, skip_groups=skip_groups)
 templates.env.globals.update(stale=stale, tz=str(TZ), min_trades=MIN_TRADES)
 
 

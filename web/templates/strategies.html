@@ -28,7 +28,7 @@
 <h2>Not analyzed</h2>
 <ul class="plain">
   {% for b in broken %}<li>{{ b.name }} ({{ b.file }}): {{ b.load_error }}</li>{% endfor %}
-  {% for s in skipped %}<li>{{ s }}</li>{% endfor %}
+  {% for why, names in skipped | skip_groups %}<li>{{ why }}{% if names | length > 3 %}: <span title="{{ names | join(', ') }}">{{ names | length }} strategies</span>{% elif names %}: {{ names | join(', ') }}{% endif %}</li>{% endfor %}
 </ul>
 {% endif %}
 {% if last_run %}<p class="muted">From analysis run <a href="/runs/{{ last_run.id }}">{{ last_run.name }}</a>.</p>{% endif %}
