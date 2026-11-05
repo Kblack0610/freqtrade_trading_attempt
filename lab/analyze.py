@@ -91,8 +91,12 @@ def wallet() -> float:
 
 
 @cache
+def whitelist(exchange: str) -> frozenset[str]:
+    return frozenset(json.loads((USER_DATA / "exchanges" / f"{exchange}.json").read_text())["exchange"]["pair_whitelist"])
+
+
 def pair_count(exchange: str) -> int:
-    return len(json.loads((USER_DATA / "exchanges" / f"{exchange}.json").read_text())["exchange"]["pair_whitelist"])
+    return len(whitelist(exchange))
 
 
 def task_gb(exchange: str, timeframe: str | None, days: int, load: float = 1) -> float:
@@ -339,9 +343,11 @@ def sync_strategies(conn, found: list[dict]) -> None:
 
 
 def coverage(conn) -> dict[tuple[str, str], dt.datetime]:
-    """The first candle per exchange x timeframe."""
-    return {(ex, tf): f for ex, tf, f in conn.execute(
-        "SELECT exchange, timeframe, min(first_ts) FROM data_coverage WHERE first_ts IS NOT NULL GROUP BY 1, 2")}
+    """The first candle per exchange x timeframe, once every whitelisted pair is backfilled to its oldest candle.
+    A venue still mid-backfill would otherwise run its years on the few pairs done so far and cache them as ok."""
+    return {(ex, tf): f for ex, tf, f, pairs in conn.execute(
+        "SELECT exchange, timeframe, min(first_ts), array_agg(pair) FROM data_coverage "
+        "WHERE first_ts IS NOT NULL AND oldest_reached GROUP BY 1, 2") if whitelist(ex) <= set(pairs)}
 
 
 def plan(conn, found: list[dict], first: dict, today: dt.date, ft_version: str) -> tuple[list[dict], int, list[str]]:
@@ -355,7 +361,7 @@ def plan(conn, found: list[dict], first: dict, today: dt.date, ft_version: str) 
         for ex in EXCHANGES:
             since = first.get((ex, s["timeframe"]))
             if since is None:
-                skipped.append(f"{s['name']} on {ex}: no {s['timeframe']} candles")
+                skipped.append(f"{s['name']} on {ex}: {s['timeframe']} not fully backfilled")
                 continue
             for start, end in chunks(since.date(), today):
                 key = chunk_key(s["file_hash"], ex, start, end, ft_version)

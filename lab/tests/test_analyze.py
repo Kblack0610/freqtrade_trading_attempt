@@ -73,8 +73,9 @@ def lab(conn, monkeypatch, tmp_path):
     monkeypatch.setattr(analyze, "ONLY", set())
     monkeypatch.setattr(analyze, "WORKERS", 3)
     for ex, first in (("binanceus", "2024-03-01"), ("coinbase", "2025-01-01")):
-        conn.execute("INSERT INTO data_coverage (exchange, pair, timeframe, first_ts, last_ts, rows, oldest_reached) "
-                     "VALUES (%s, 'BTC/USD', '5m', %s, now(), 1, true)", (ex, first))
+        for i, pair in enumerate(sorted(analyze.whitelist(ex))):
+            conn.execute("INSERT INTO data_coverage (exchange, pair, timeframe, first_ts, last_ts, rows, oldest_reached) "
+                         "VALUES (%s, %s, '5m', %s::timestamptz + %s * interval '1 day', now(), 1, true)", (ex, pair, first, i))
     days = pd.date_range("2023-01-01", "2026-11-03", freq="D", tz="UTC")
     (tmp_path / "data" / "coinbase").mkdir(parents=True)
     pd.DataFrame({"date": days, "close": np.linspace(20000, 90000, len(days))}).to_feather(
@@ -85,6 +86,15 @@ def lab(conn, monkeypatch, tmp_path):
 
 def one(conn, sql, *args):
     return conn.execute(sql, args).fetchone()[0]
+
+
+def test_a_venue_is_planned_only_once_every_pair_reached_its_oldest_candle(lab):
+    assert set(analyze.coverage(lab)) == {("binanceus", "5m"), ("coinbase", "5m")}
+    assert analyze.coverage(lab)["binanceus", "5m"].date() == dt.date(2024, 3, 1)
+    lab.execute("UPDATE data_coverage SET oldest_reached = false WHERE exchange = 'binanceus' AND pair = 'ETH/USD'")
+    assert set(analyze.coverage(lab)) == {("coinbase", "5m")}
+    lab.execute("DELETE FROM data_coverage WHERE exchange = 'coinbase' AND pair = 'ETH/USD'")
+    assert analyze.coverage(lab) == {}
 
 
 def test_full_history_in_yearly_chunks_then_cached(lab):
@@ -99,7 +109,7 @@ def test_full_history_in_yearly_chunks_then_cached(lab):
     assert one(lab, "SELECT count(*) FROM backtest_trades") > 0
     raw = one(lab, "SELECT raw FROM runs WHERE kind = 'analysis'")
     assert raw["chunks_run"] == 15 and raw["load_failed"] == 1
-    assert sorted(raw["skipped"]) == ["Scalper on binanceus: no 1m candles", "Scalper on coinbase: no 1m candles"]
+    assert sorted(raw["skipped"]) == ["Scalper on binanceus: 1m not fully backfilled", "Scalper on coinbase: 1m not fully backfilled"]
     assert one(lab, "SELECT bool_and(ok AND finished_at IS NOT NULL) FROM runs")
 
     # 2024-03-01 to today is more than 365 days on binanceus; coinbase starts 2025-01-01, so also yes
