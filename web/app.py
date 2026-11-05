@@ -48,6 +48,14 @@ SELECT id, name, started_at, finished_at, ok, raw, finished_at - started_at AS t
 FROM runs WHERE kind = 'analysis' ORDER BY started_at DESC NULLS LAST, id DESC
 """
 WINDOWS = ["30d", "90d", "180d", "365d", "all"]
+SECTIONS = [
+    ("promote", "Promote", "Clears every gate on an exchange where the league does not run it yet."),
+    ("demote", "Demote", "A league bot whose own dry run loses, whose backtests lose confidently, or whose strategy is biased."),
+    ("retire", "Retire", "A strategy file whose results are void (lookahead bias) or that does not load."),
+    ("fix", "Fix", "A strategy that runs but whose indicators may not match live: its recursive check failed or could not run."),
+    ("watch", "Watch", "Lookahead-clean candidates one gate short of promotion, best Sharpe interval first."),
+]
+SUGGESTIONS = "SELECT * FROM suggestions ORDER BY score DESC NULLS LAST, strategy, exchange, bot"
 MIN_TRADES = 20  # below this a window's numbers are shown but not ranked
 # Lookahead bias voids the backtest, so it ranks last. Recursive bias only warns: the flagged indicator may not feed a signal.
 BIAS = """SELECT strategy, bool_or(has_bias) FILTER (WHERE kind = 'lookahead') AS biased,
@@ -117,7 +125,16 @@ def tone(v: float | None) -> str:
     return "" if not v else ("up" if v > 0 else "down")
 
 
-templates.env.filters.update(local=local, ago=ago, num=num, pct=pct, tone=tone)
+def gv(v) -> str:
+    """A gate's value: numbers to four significant digits, anything else as stored."""
+    if v is None:
+        return "-"
+    if isinstance(v, float):
+        return f"{v:.4g}"
+    return str(v)
+
+
+templates.env.filters.update(local=local, ago=ago, num=num, pct=pct, tone=tone, gv=gv)
 templates.env.globals.update(stale=stale, tz=str(TZ), min_trades=MIN_TRADES)
 
 
@@ -195,7 +212,8 @@ def overview(request: Request):
                 total_balance=sum(b["balance_total"] or 0 for b in snaps),
                 live_bots=[b["name"] for b in snaps if b["dry_run"] is False],
                 coverage=rows(COVERAGE_BY_EXCHANGE), last_run=(rows(RUNS) or [None])[0],
-                top=[r for r in rows(LEADERBOARD, ("365d",)) if not r["biased"] and r["trades"] >= MIN_TRADES][:5])
+                top=[r for r in rows(LEADERBOARD, ("365d",)) if not r["biased"] and r["trades"] >= MIN_TRADES][:5],
+                suggested=rows("SELECT kind, count(*) AS n FROM suggestions GROUP BY kind"))
 
 
 @app.get("/bots/{name}", response_class=HTMLResponse)
@@ -263,10 +281,20 @@ def strategy(request: Request, name: str, exchange: str = ""):
         estimates=rows("SELECT * FROM estimates WHERE strategy = %s AND exchange = %s ORDER BY horizon_days", key),
         bias=rows("SELECT * FROM bias_checks WHERE strategy = %s ORDER BY kind", (name,)),
         regimes=regimes,
+        suggestions=rows("SELECT * FROM suggestions WHERE strategy = %s ORDER BY kind, exchange, bot", (name,)),
         correlations=rows("SELECT * FROM correlations WHERE strategy = %s AND exchange = %s ORDER BY abs(rho) DESC", key),
         chunks=rows("SELECT * FROM backtest_chunks WHERE strategy = %s AND exchange = %s ORDER BY chunk_start DESC", key),
         trades=rows("SELECT t.* FROM backtest_trades t JOIN backtest_chunks c ON c.id = t.chunk_id "
                     "WHERE c.strategy = %s AND c.exchange = %s ORDER BY t.close_date DESC LIMIT 100", key))
+
+
+@app.get("/suggestions", response_class=HTMLResponse)
+def suggestions(request: Request):
+    user_of(request)
+    by_kind = {k: [] for k, _, _ in SECTIONS}
+    for r in rows(SUGGESTIONS):
+        by_kind.setdefault(r["kind"], []).append(r)
+    return page(request, "suggestions.html", sections=SECTIONS, by_kind=by_kind)
 
 
 @app.get("/runs", response_class=HTMLResponse)

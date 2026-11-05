@@ -9,6 +9,7 @@
   <div class="tile"><span class="label">League profit</span><span class="value {{ 'up' if total_abs >= 0 else 'down' }}">{{ total_abs | num(2, " USD") }}</span></div>
   <div class="tile"><span class="label">Combined balance</span><span class="value">{{ total_balance | num(0, " USD") }}</span></div>
   <div class="tile"><span class="label">Bots</span><span class="value">{{ bots | length }}</span></div>
+  <a class="tile" href="/suggestions"><span class="label">Suggestions</span><span class="value">{% for k in suggested | sort(attribute="kind") %}{{ k.n }} {{ k.kind }}{% if not loop.last %}, {% endif %}{% else %}none{% endfor %}</span></a>
   <div class="tile"><span class="label">Last ingest</span><span class="value {{ 'down' if stale(last_ingest) }}">{{ last_ingest | ago }}</span></div>
 </section>
 

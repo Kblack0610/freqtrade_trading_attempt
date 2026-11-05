@@ -1,0 +1,37 @@
+# Thresholds for lab/suggest.py. Each suggestion stores the value it saw next to the threshold it was held to,
+# so the site can show why. Change a number here, rerun `python lab/suggest.py`, and the Suggestions page follows.
+
+[promote]
+# The trailing backtest window every gate reads.
+window = "365d"
+# Enough closed trades that the intervals mean something.
+min_trades = 30
+# The low end of the 90% block-bootstrap interval on mean profit per trade must clear this.
+expectancy_lo_above = 0.0
+# The low end of the 90% interval on the annualized Sharpe must clear this.
+sharpe_lo_above = 0.0
+# Deflated Sharpe: the chance the Sharpe beats the best one luck gives among every strategy tested.
+min_dsr = 0.90
+# Calendar years with at least min_year_days of returns count; this share of them must be profitable.
+min_years = 2
+min_year_days = 180
+min_years_profitable = 0.70
+# Largest peak-to-trough fall allowed in the window, as a fraction.
+max_drawdown = 0.35
+# A candidate whose daily returns track a strategy already in the league adds little.
+max_rho = 0.70
+
+[watch]
+# Near misses: loadable, lookahead-clean candidates that fail this many promote gates or fewer.
+max_failed_gates = 1
+# How many to show, best Sharpe interval first.
+limit = 12
+
+[demote]
+# A league bot is demoted when its own dry run has lost money over this many days with enough trades,
+live_days = 60
+min_live_trades = 20
+# or when every backtest of its strategy on that exchange (or on every research exchange, for one with no
+# history such as kraken) has the high end of its expectancy interval below zero, with enough trades.
+window = "365d"
+min_trades = 30
