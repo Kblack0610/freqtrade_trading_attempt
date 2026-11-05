@@ -36,7 +36,7 @@
 {% if windows %}
 <div class="scroll">
 <table>
-  <thead><tr><th>Window</th><th>From</th><th class="n">Days</th><th class="n">Trades</th><th class="n">Return</th><th class="n">CAGR</th><th class="n">Sharpe (90% CI)</th><th class="n">DSR</th><th class="n">Sortino</th><th class="n">Calmar</th><th class="n">Max DD</th><th class="n">PF</th><th class="n">Per trade (90% CI)</th><th class="n" title="Mean price move per trade before fees. A venue whose round-trip fee is below the low end keeps the edge.">Before fees (90% CI)</th><th class="n" title="Mean round-trip fee a trade paid">Fee</th><th class="n">Win</th><th class="n">Exposure</th><th class="n">Months up</th></tr></thead>
+  <thead><tr><th>Window</th><th>From</th><th class="n">Days</th><th class="n">Trades</th><th class="n">Return</th><th class="n">CAGR</th><th class="n">Sharpe (90% CI)</th><th class="n">DSR</th><th class="n">Sortino</th><th class="n">Calmar</th><th class="n">Max DD</th><th class="n">PF</th><th class="n">Per trade (90% CI)</th><th class="n" title="Mean price move per trade before fees. A venue whose round-trip fee is below the low end keeps the edge.">Before fees (90% CI)</th><th class="n" title="Mean round-trip fee a trade paid">Fee</th><th class="n">Win</th><th class="n" title="Share of the window with any position open">Exposure</th><th class="n" title="Mean share of the wallet in positions">Capital</th><th class="n" title="Annual return over holding BTC with the same share of capital. A low end above zero is skill, not the market.">Over hold (90% CI)</th><th class="n">Months up</th></tr></thead>
   <tbody>
   {% for w in windows %}
   <tr class="{{ 'muted' if w.trades < min_trades }}">
@@ -48,7 +48,9 @@
     <td class="n">{{ w.expectancy | pct(2) }} <span class="muted">({{ w.expectancy_lo | pct(2) }}, {{ w.expectancy_hi | pct(2) }})</span></td>
     <td class="n">{{ w.gross_expectancy | pct(2) }} <span class="muted">({{ w.gross_expectancy_lo | pct(2) }}, {{ w.gross_expectancy_hi | pct(2) }})</span></td>
     <td class="n">{{ w.fee_per_trade | pct(2) }}</td>
-    <td class="n">{{ w.winrate | pct(0) }}</td><td class="n">{{ w.exposure | pct(0) }}</td><td class="n">{{ w.months_profitable | pct(0) }}</td>
+    <td class="n">{{ w.winrate | pct(0) }}</td><td class="n">{{ w.exposure | pct(0) }}</td><td class="n">{{ w.capital_exposure | pct(0) }}</td>
+    <td class="n {{ w.hold_excess | tone }}">{{ w.hold_excess | pct }} <span class="muted">({{ w.hold_excess_lo | pct }}, {{ w.hold_excess_hi | pct }})</span></td>
+    <td class="n">{{ w.months_profitable | pct(0) }}</td>
   </tr>
   {% endfor %}
   </tbody>

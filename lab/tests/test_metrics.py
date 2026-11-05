@@ -78,6 +78,39 @@ def test_deflated_sharpe_clears_a_real_edge_and_not_luck():
     assert metrics.deflated_sharpe(0.05, n, 0.0, 3.0, k) < 0.1  # annualized 1.0 is luck among 89
 
 
+def test_capital_exposure_weights_each_trade_by_its_share_and_time():
+    start, end = pd.Timestamp("2026-01-01", tz="UTC"), pd.Timestamp("2026-01-11", tz="UTC")
+    t = trades((start, start + pd.Timedelta(days=5), 1.0), (start, start + pd.Timedelta(days=5), 1.0),
+               (start - pd.Timedelta(days=5), start + pd.Timedelta(days=1), 1.0)).assign(share=[0.3, 0.3, 0.5])
+    assert math.isclose(metrics.capital_exposure(t, start, end), (0.3 * 5 + 0.3 * 5 + 0.5 * 1) / 10)
+    assert metrics.exposure(t, start, end) == 0.5
+    assert metrics.capital_exposure(t.iloc[0:0], start, end) == 0.0
+
+
+def hold_series(n=400, seed=1):
+    days = pd.date_range("2025-01-01", periods=n, freq="D").date
+    btc = np.random.default_rng(seed).normal(0.002, 0.03, n)
+    close = pd.Series(100.0 * np.cumprod(1 + btc), index=days)
+    return days, btc, close
+
+
+def test_riding_the_market_is_no_excess_over_hold():
+    days, btc, close = hold_series()
+    daily = pd.DataFrame({"day": days, "ret": 0.5 * btc})
+    x, lo, hi = metrics.hold_excess(daily, close, 0.5, 3)
+    assert abs(x) < 1e-9 and abs(lo) < 1e-9 and abs(hi) < 1e-9
+    assert metrics.hold_excess(daily, close, 0.5, 3) == (x, lo, hi)
+
+
+def test_a_real_edge_clears_hold_and_short_history_gives_nothing():
+    days, btc, close = hold_series()
+    daily = pd.DataFrame({"day": days, "ret": 0.5 * btc + 0.003})
+    x, lo, hi = metrics.hold_excess(daily, close, 0.5, 3)
+    assert math.isclose(x, 0.003 * 365) and lo <= x <= hi and lo > 0
+    assert metrics.hold_excess(daily.tail(10), close, 0.5, 3) == (None, None, None)
+    assert metrics.hold_excess(daily, pd.Series(dtype=float), 0.5, 3) == (None, None, None)
+
+
 def test_window_metrics_on_a_known_series():
     days = pd.date_range("2026-01-01", periods=60, freq="D", tz="UTC")
     t = trades(*[(d, d + pd.Timedelta(hours=6), 10.0 if i % 3 else -5.0) for i, d in enumerate(days[::2])])
