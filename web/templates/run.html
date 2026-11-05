@@ -30,6 +30,6 @@
 
 {% if run.raw.skipped %}
 <h2>Skipped</h2>
-<ul class="plain">{% for s in run.raw.skipped %}<li>{{ s }}</li>{% endfor %}</ul>
+<ul class="plain">{% for why, names in run.raw.skipped | skip_groups %}<li>{{ why }}{% if names | length > 3 %}: <span title="{{ names | join(', ') }}">{{ names | length }} strategies</span>{% elif names %}: {{ names | join(', ') }}{% endif %}</li>{% endfor %}</ul>
 {% endif %}
 {% endblock %}

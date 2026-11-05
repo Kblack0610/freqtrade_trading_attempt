@@ -43,7 +43,7 @@ def seed(c):
     c.execute("INSERT INTO runs (kind, name, raw, started_at, finished_at, ok) VALUES ('analysis', '2026-11-04 03:00:00', "
               "%s, now() - interval '1 hour', now(), true)",
               (json.dumps({"strategies": 3, "chunks_run": 4, "chunks_cached": 10, "chunks_failed": 1, "bias_run": 2,
-                           "skipped": ["Scalp on binanceus: no 1m candles"]}),))
+                           "skipped": ["Scalp on binanceus: no 1m candles"] + [f"S{i} on okx: 5m not fully backfilled" for i in range(4)]}),))
     c.execute("INSERT INTO strategies (name, file, file_hash, timeframe, load_error) VALUES "
               "('Strategy001', 'user_data/strategies/Strategy001.py', 'h1', '5m', NULL), "
               "('Planted', 'user_data/strategies/Planted.py', 'h2', '5m', NULL), "
@@ -156,7 +156,7 @@ def test_every_page_renders_with_data(conn, signed_in):
              "/bots/kraken-s001": ["Strategy001 on kraken", "<svg", "BTC/USD", "1.20%", "Live against backtest", "1.85%",
                                    "3 of 4 live entries matched; gap -0.65%"],
              "/strategies": ["Strategy001", "0.40", "62%", "-5% / ", "3.2%", "1.20%", "biased", "Broken", "failed to import",
-                             "Scalp on binanceus: no 1m candles", "Fees by venue", "0.25%", "1.45%", "worth 1.7 independent",
+                             "binanceus: no 1m candles: Scalp", 'okx: 5m not fully backfilled: <span title="S0, S1, S2, S3">4 strategies</span>', "Fees by venue", "0.25%", "1.45%", "worth 1.7 independent",
                              "4321", '<td class="n down" title="2 strategies">64%</td>'],
              "/strategies?win=all": ["No results for this window yet"],
              "/strategies/Strategy001": ["binanceus", "<svg", "3.2%", "Strategy002: 0.83", "bull", "ETH/USD",
@@ -164,7 +164,7 @@ def test_every_page_renders_with_data(conn, signed_in):
                                          "-5.0%", "-27.1%", "4321"],
              "/data": ["BTC/USD", "700,000", "2019-09-01"],
              "/runs": ["2026-11-04 03:00:00", "ok", "60 min"],
-             "/runs/1": ["exit 2: boom", "Scalp on binanceus", "Strategy001"]}
+             "/runs/1": ["exit 2: boom", "binanceus: no 1m candles: Scalp", "4 strategies", "Strategy001"]}
     for path, needles in pages.items():
         r = client.get(path)
         assert r.status_code == 200, path
