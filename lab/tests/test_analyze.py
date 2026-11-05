@@ -175,3 +175,10 @@ def test_a_strategy_in_a_subfolder_backtests_and_checks(monkeypatch):
     assert r["ok"], r["error"]
     res = analyze.bias_one("lookahead", "BbandRsi", None)
     assert "Impossible to load" not in (res.get("error") or ""), res
+
+
+def test_a_class_freqtrade_cannot_find_by_name_is_a_load_error():
+    assert analyze.load_error("class Foo(IStrategy):", "Foo") is None
+    assert "no space" in analyze.load_error("class Foo (IStrategy):", "Foo")
+    found = {s["name"]: s for s in analyze.Cli().discover()}
+    assert found["multi_tf"]["load_error"] is None
