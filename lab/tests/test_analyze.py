@@ -1,4 +1,5 @@
 import datetime as dt
+import json
 import os
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -14,6 +15,12 @@ import metrics
 TODAY = dt.date(2026, 11, 4)
 REPO = Path(__file__).resolve().parents[2]
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "strategies"
+
+
+@pytest.mark.parametrize("path", sorted((REPO / "user_data" / "exchanges").glob("*.json")), ids=lambda p: p.stem)
+def test_every_exchange_sets_its_fee(path):
+    """Without one, backtests and dry runs use ccxt's default fee, not the venue's schedule."""
+    assert 0 < json.loads(path.read_text())["fee"] < 0.1
 
 
 def strat(name: str, tf: str = "5m", load_error: str | None = None, rev: str = "1") -> dict:
