@@ -59,7 +59,7 @@ A quick analysis of two strategies: run a backfill into the mounted `/lab` first
 
 Analysis knobs (env): `ANALYZE_EXCHANGES` (`binanceus coinbase`), `ANALYZE_STRATEGIES` (empty means all), `ANALYZE_WORKERS` (6 backtests at once), `BIAS_EXCHANGE` (`binanceus`), `LOOKAHEAD_DAYS` (120), `RECURSIVE_DAYS` (30), `REGIME_EXCHANGE` (`coinbase`, the longest BTC history), `CHUNK_TIMEOUT` (3600 s).
 
-Backfill knobs (env): `BACKFILL_EXCHANGES` (`binanceus coinbase kraken`), `TIMEFRAMES` (`5m 15m 30m 1h 4h 1d`, each capped at what the exchange offers), `FORWARD_EXCHANGES` (`kraken`), `PREPEND_FROM` (`20150101`), `LAB_RESULTS` (`/lab`). For a quick local run, add `-e TIMEFRAMES='4h 1d' -v "$HOME/.cache/trader-lab:/lab"` to the test container and run `python lab/backfill.py`.
+Backfill knobs (env): `BACKFILL_EXCHANGES` (`binanceus coinbase kraken`), `TIMEFRAMES` (`1m 5m 15m 30m 1h 4h 1d`, each capped at what the exchange offers), `FORWARD_EXCHANGES` (`kraken`), `PREPEND_FROM` (`20150101`), `PREPEND_FLOORS` (`1m=20240101`: space-separated `<timeframe>=<date>` pairs, the oldest candle a timeframe is prepended to), `LAB_RESULTS` (`/lab`). For a quick local run, add `-e TIMEFRAMES='4h 1d' -v "$HOME/.cache/trader-lab:/lab"` to the test container and run `python lab/backfill.py`.
 
 ## The analysis
 
@@ -98,7 +98,7 @@ Drop the `.py` in `user_data/strategies/` (any subfolder). It must import on the
 
 `lab/backfill.py` owns the candles; nothing else downloads them. Per exchange and timeframe:
 
-- A series that has not reached the exchange's oldest candle gets a `download-data --prepend --timerange 20150101-` pass. One call reaches the listing date (binanceus from 2019, coinbase from 2015 for BTC).
+- A series that has not reached the exchange's oldest candle gets a `download-data --prepend --timerange 20150101-` pass. One call reaches the listing date (binanceus from 2019, coinbase from 2015 for BTC). 1m stops at its `PREPEND_FLOORS` date, 2024-01-01: the 1m files are about 30 times the 30m ones, and only a few scalping strategies (BinHV45, CCIStrategy, Low_BB, ReinforcedSmoothScalp, Scalp, SmoothScalp) trade on 1m.
 - Then every series gets an append pass up to now. A prepend drops a series' newest candle, so the append always runs after it.
 - When a prepend leaves the first candle where it was, the series is marked `oldest_reached` and only appended from then on.
 - Kraken serves no OHLCV history, only its newest 720 candles per timeframe. It is collected forward through ccxt and merged into the same Freqtrade files. A run at least every 60 hours keeps 5m gap-free; a longer outage leaves a gap that `data_coverage` counts. These candles exist nowhere else once they age out.
@@ -154,7 +154,7 @@ Sign-in cannot complete against a fake Forgejo; mint a cookie with `auth.make_se
 | A series stays `oldest_reached = false` | The prepend pass failed or still moved the first candle | It is retried next hour; the job log line `backfill: <ex>: ... ERROR` says why |
 | `Orderbook not available for Coinbase Advanced` | freqtrade has no order book for coinbase | `exchanges/coinbase.json` sets `use_order_book: false` for entry and exit pricing |
 | A chunk failed with `exit 0: ...` | freqtrade exited 0 on an error and wrote no result zip | The zip is the proof of a run; the chunk's `error` holds freqtrade's last error lines, shown on the run page |
-| A run's Skipped list says `<strategy> on <ex>: no 1m candles` | The strategy's timeframe is not backfilled there (BinHV45 wants 1m) | Expected until 1m is added to backfill's `TIMEFRAMES` |
+| A run's Skipped list says `<strategy> on <ex>: no 1m candles` | The strategy's timeframe is not backfilled there (BinHV45 wants 1m) | 1m is backfilled from 2024-01-01; until the first pass finishes, or on an exchange that serves no 1m, this is expected |
 | Bias checks or chunks fail with `Impossible to load Strategy '<name>'` while `list-strategies` finds it | The command ran without `--recursive-strategy-search`, so only top-level files resolve | Every freqtrade call in `lab/` passes it; `test_a_strategy_in_a_subfolder_backtests_and_checks` covers backtest and bias |
 | One strategy still fails with `Impossible to load Strategy` even with recursive search | freqtrade finds a strategy by grepping its file for the literal `class <name>(`; `class <name> (IStrategy)` imports fine but never matches | Remove the space. Discovery stores this as the strategy's load error, so it shows on the site instead of failing every chunk (`test_a_class_freqtrade_cannot_find_by_name_is_a_load_error`) |
 | A strategy shows `fails to load` | It does not import on the pinned image | Fix it or delete it; CI fails on a load error, so this only shows for a file that broke after a freqtrade bump |

@@ -2,16 +2,17 @@
 """Hourly price-data backfill into LAB_RESULTS/data/<exchange>, with its coverage in data_coverage.
 
 Per exchange and timeframe, using Freqtrade's own download-data:
-- a series that has not reached the exchange's oldest candle gets a prepend pass from PREPEND_FROM
-  (one call reaches the listing date on binanceus and coinbase);
+- a series that has not reached the exchange's oldest candle gets a prepend pass from PREPEND_FROM,
+  or from its timeframe's PREPEND_FLOORS date (1m from 2024: a full 1m history is about 30x the 30m
+  one for a few scalping strategies); one call reaches the listing date or the floor;
 - then every series gets an append pass up to now. Prepend drops a series' newest candle, so the
   append always runs after it.
-A series is marked oldest_reached when a prepend pass leaves its first candle where it was, and
-is never prepended again.
+A series is marked oldest_reached when a prepend pass leaves its first candle where it was (the
+listing date, or the floor), and is never prepended again.
 
 An exchange with no OHLCV history (FORWARD_EXCHANGES, i.e. Kraken, which serves only its newest
 720 candles) is collected forward instead: each run fetches those candles through ccxt and merges
-them into the same Freqtrade files. A run at least every 60 hours keeps 5m gap-free. These are the
+them into the same Freqtrade files. A run at least every 12 hours keeps 1m gap-free (60 hours for 5m). These are the
 candles the live bots trade on, and they exist nowhere else once they age out, so the files are kept
 forever. Raw trades (Freqtrade's --dl-trades) do not scale here: Kraken BTC/USD prints about 300k
 trades a day, and every run reloads and re-converts the whole trades file.
@@ -43,9 +44,10 @@ from db import connect
 REPO = Path(os.environ.get("REPO", "/repo"))
 RESULTS = Path(os.environ.get("LAB_RESULTS", "/lab"))
 EXCHANGES = os.environ.get("BACKFILL_EXCHANGES", "binanceus coinbase kraken").split()
-TIMEFRAMES = os.environ.get("TIMEFRAMES", "5m 15m 30m 1h 4h 1d").split()
+TIMEFRAMES = os.environ.get("TIMEFRAMES", "1m 5m 15m 30m 1h 4h 1d").split()
 FORWARD_EXCHANGES = set(os.environ.get("FORWARD_EXCHANGES", "kraken").split())
 PREPEND_FROM = os.environ.get("PREPEND_FROM", "20150101")
+PREPEND_FLOORS = dict(f.split("=", 1) for f in os.environ.get("PREPEND_FLOORS", "1m=20240101").split())
 # Freqtrade lines worth keeping in the job log; the rest is progress bars and config chatter.
 KEEP = re.compile(r"Downloaded data for| - (ERROR|WARNING) - ")
 SKIP = re.compile(r"not officially supported")
@@ -175,7 +177,7 @@ def backfill_exchange(ft: Freqtrade, conn, exchange: str, pairs: list[str], time
         for tf in tfs:
             todo = [p for p in pairs if not prior.get((p, tf), {}).get("oldest_reached")]
             if todo:
-                if ft.download(exchange, ["--prepend", "--timerange", f"{PREPEND_FROM}-", "-t", tf, "--pairs", *todo]):
+                if ft.download(exchange, ["--prepend", "--timerange", f"{PREPEND_FLOORS.get(tf, PREPEND_FROM)}-", "-t", tf, "--pairs", *todo]):
                     prepended.update((p, tf) for p in todo)
                 else:
                     ok = False

@@ -82,6 +82,14 @@ def test_prepend_until_the_first_candle_stops_moving(conn, lab):
     assert ex.calls and not any("--prepend" in c for c in ex.calls), "a series at its oldest candle is not prepended"
 
 
+def test_a_timeframe_floor_bounds_its_prepend(conn, lab, monkeypatch):
+    monkeypatch.setattr(backfill, "PREPEND_FLOORS", {"1h": "20260101"})
+    ex = FakeExchange()
+    assert backfill.backfill_exchange(ex, conn, "binanceus", ["BTC/USD"], ["1h", "1d"])
+    ranges = {c[c.index("-t") + 1]: c[c.index("--timerange") + 1] for c in ex.calls if "--prepend" in c}
+    assert ranges == {"1h": "20260101-", "1d": f"{backfill.PREPEND_FROM}-"}
+
+
 def test_unsupported_timeframe_is_skipped(conn, lab):
     ex = FakeExchange(supported=("1h",))
     assert backfill.backfill_exchange(ex, conn, "coinbase", ["BTC/USD"], ["1h", "1d"])
