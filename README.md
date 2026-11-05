@@ -27,7 +27,7 @@ Results go to the `trader` database in the cluster's shared Postgres, which the 
 | `lab/watcher.py` | Daily loss watch: each bot's marked-to-market equity every 60 s into `watch`, and the kill drill. See Watcher |
 | `lab/migrate.py`, `lab/migrations/` | Schema: numbered SQL files applied once each, in order, under an advisory lock; runs as the init container of every job |
 | `lab/db.py` | The one Postgres connection: `DATABASE_URL` |
-| `web/` | The site: FastAPI and Jinja, read-only, Forgejo sign-in (`web/auth.py`), server-drawn SVG charts (`web/charts.py`); pages Overview, bot detail, Strategies, strategy detail, Walk-forward, Suggestions, Data, Runs (see The site) |
+| `web/` | The site: FastAPI and Jinja, read-only, Forgejo sign-in (`web/auth.py`), server-drawn SVG charts (`web/charts.py`); pages Overview, bot detail, Strategies, strategy detail, Walk-forward, Suggestions, Confidence, Book, Guide, Data, Runs; `/guide` is the reading order (see The site) |
 | `lab/tests/` | pytest; the DB tests need `DATABASE_URL` pointing at a throwaway database |
 | `Dockerfile`, `lab/requirements.txt` | The `trader` image |
 | `.github/workflows/image.yml` | CI: build, migrate twice, tests, every strategy loads; on master also push to GHCR |
@@ -142,7 +142,7 @@ Analysis also fills `benchmarks` from the regime venue's daily closes: holding B
 
 `lab/confidence.py` runs after suggestions (alone: `python lab/confidence.py`) and rebuilds `confidence`, one row per strategy and exchange, shown on `/confidence`. Promote decides who enters the dry-run league; this decides who could touch money, so its gates are stricter. It is advice: nothing here touches a bot, and `lab/league.py` still refuses real money.
 
-- **Score**: 100 x P(true net expectancy per trade > 0). Each strategy's pooled tuned walk-forward trades, shrunk toward every strategy walk-forward has tried. The population mean is capped at zero, so a rising market does not lift everyone. No score below 20 strategies with 30 trades each.
+- **Score**: 100 x P(true net expectancy per trade > 0). Each strategy's pooled tuned walk-forward trades, shrunk toward every strategy walk-forward has tried. The population mean is capped at zero, so a rising market does not lift everyone. No score below 20 strategies with 30 trades each. Until then `/confidence` and `/book` show how many count so far and each strategy's raw out-of-sample average per trade, marked unscored.
 - **Ready**: every gate passes and the score is at least 90. A failed gate shows as "not ready: <gate>" whatever the score. Ready means worth a small capped experiment, not safe.
 - **Gates**, thresholds in `lab/suggest.toml` [confidence]: bias, costs at the venue's configured fee, 250 out-of-sample trades, expectancy interval low above zero, deflated Sharpe, overfit probability, months positive, BTC regime spread, excess over hold, worst open loss, cost stress, drift, dry run length, score.
 - **Out of sample** means the tuned returns, months hyperopt never saw. So the score speaks for tuning monthly and trading the next month, not for the file as it stands, and candidates were chosen on a trailing year that overlaps those months.

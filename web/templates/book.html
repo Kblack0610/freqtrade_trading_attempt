@@ -24,7 +24,8 @@
 </table>
 </div>
 {% else %}
-<p><strong>Not enough evidence.</strong> 0 of {{ need }} strategies needed have a score, so no projection is shown. A score needs walk-forward results on at least {{ need }} strategies.</p>
+<p><strong>Not enough evidence.</strong> No strategy has a score yet, so no projection is shown.</p>
+{% include "_population.html" %}
 {% endif %}
 <p>The hurdle is cash: T-bills at {{ yield_ | pct(1) }} a year{% for h in hurdle %}, {{ h.total | pct(0) }} over {{ h.months // 12 }} year{{ "s" if h.months > 12 }} ({{ h.after_tax | pct(0) }} after tax){% endfor %}, with no chance of a loss if held to maturity. The rate is held flat, which no real rate does. After tax uses a guessed {{ tax | pct(0) }} rate: a strategy pays it every year, and hold once, on selling.</p>
 <h2>Running bots together</h2>
