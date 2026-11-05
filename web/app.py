@@ -76,14 +76,17 @@ LEFT JOIN ({BIAS}) b ON b.strategy = w.strategy
 WHERE w.win = %s
 ORDER BY b.biased IS TRUE, w.trades < {MIN_TRADES}, w.sharpe_lo DESC NULLS LAST, w.sharpe DESC NULLS LAST
 """
-# Fees differ about tenfold between venues, so this sets each venue's fee against how many strategies keep an edge.
+# Fees differ about tenfold between venues, so this sets each venue's fee against how many strategies keep an edge,
+# next to how likely the best backtest there is overfit.
 VENUES = f"""
 SELECT w.exchange, count(*) AS strategies, avg(w.fee_per_trade) AS fee,
        count(*) FILTER (WHERE w.gross_expectancy_lo > 0) AS gross_edge,
-       count(*) FILTER (WHERE w.expectancy_lo > 0) AS net_edge
+       count(*) FILTER (WHERE w.expectancy_lo > 0) AS net_edge,
+       o.pbo, o.strategies AS pbo_strategies
 FROM strategy_windows w LEFT JOIN ({BIAS}) b ON b.strategy = w.strategy
+LEFT JOIN overfit o ON o.exchange = w.exchange AND o.win = w.win
 WHERE w.win = %s AND w.trades >= {MIN_TRADES} AND b.biased IS NOT TRUE
-GROUP BY w.exchange ORDER BY w.exchange
+GROUP BY w.exchange, o.pbo, o.strategies ORDER BY w.exchange
 """
 REGIME_SPLIT = """
 SELECT coalesce(r.trend, 'any') AS trend, coalesce(r.vol_bucket, 'any') AS vol, count(*) AS days, sum(d.trades) AS trades,

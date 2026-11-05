@@ -6,6 +6,7 @@ Every resampling takes a seed, so a re-run over the same data gives the same num
 """
 
 import hashlib
+import itertools
 import math
 
 import numpy as np
@@ -215,6 +216,7 @@ def window_metrics(daily: pd.DataFrame, trades: pd.DataFrame, seed: int) -> dict
         "exposure": exposure(trades, start, end) if n else 0.0,
         "worst_open": worst_open(trades),
         "months_profitable": float((months > 0).mean()) if len(months) else None,
+        "trades_needed": trades_needed(trades["profit_ratio"].to_numpy()) if len(trades) else None,
         # inputs to the deflated Sharpe, which needs every trial in the window first
         "_sr_daily": None if sd == 0 or n < 2 else float(r.mean() / sd),
         "_skew": skew,
@@ -239,6 +241,66 @@ def deflated_sharpe(sr: float, n: int, skew: float, kurt: float, trials: int) ->
     if denom <= 0:
         return None
     return float(norm.cdf((sr - sr0) * math.sqrt(n - 1) / math.sqrt(denom)))
+
+
+def effective_trials(returns: pd.DataFrame, min_overlap: int = 30) -> float:
+    """How many independent trials a set of return series is worth: the participation ratio of the
+    eigenvalues of their correlation matrix, (sum l)^2 / sum l^2. Independent series count once each,
+    identical ones count once together. Pairs that overlap fewer than min_overlap days count as independent.
+    """
+    k = returns.shape[1]
+    if k < 2:
+        return float(k)
+    rho = returns.corr(min_periods=min_overlap).to_numpy(dtype=float)
+    rho = np.where(np.isfinite(rho), rho, 0.0)
+    np.fill_diagonal(rho, 1.0)
+    lam = np.clip(np.linalg.eigvalsh(rho), 0.0, None)
+    return float(lam.sum() ** 2 / (lam ** 2).sum())
+
+
+def pbo(returns: np.ndarray, blocks: int = 16) -> dict | None:
+    """Probability of backtest overfitting by combinatorially symmetric cross-validation (Bailey,
+    Borwein, Lopez de Prado and Zhu 2017). returns is days x strategies. The days split into `blocks`
+    contiguous blocks; every half of them is in sample once and the rest out of sample. In each split
+    the strategy with the best in-sample Sharpe is ranked out of sample, and the logit of its relative
+    rank is negative when it lands below the median. PBO is the share of splits where it does.
+    """
+    t, n = returns.shape
+    if n < 2 or t < blocks * 2:
+        return None
+    parts = np.array_split(np.arange(t), blocks)
+    s1 = np.stack([returns[p].sum(axis=0) for p in parts])
+    s2 = np.stack([(returns[p] ** 2).sum(axis=0) for p in parts])
+    cnt = np.array([len(p) for p in parts], dtype=float)
+    combos = np.array([[i in c for i in range(blocks)] for c in itertools.combinations(range(blocks), blocks // 2)],
+                      dtype=float)
+
+    def sharpe_of(mask: np.ndarray) -> np.ndarray:
+        m = mask @ cnt
+        mean = (mask @ s1) / m[:, None]
+        var = (mask @ s2) / m[:, None] - mean ** 2
+        sd = np.sqrt(np.clip(var, 0.0, None))
+        return np.divide(mean, sd, out=np.zeros_like(mean), where=sd > 0)
+
+    is_sr, oos_sr = sharpe_of(combos), sharpe_of(1.0 - combos)
+    best = is_sr.argmax(axis=1)
+    picked = oos_sr[np.arange(len(combos)), best]
+    below = (oos_sr < picked[:, None]).sum(axis=1)
+    ties = (oos_sr == picked[:, None]).sum(axis=1)
+    omega = (below + (ties + 1) / 2) / (n + 1)
+    logit = np.log(omega / (1 - omega))
+    return {"pbo": float((logit <= 0).mean()), "logit_median": float(np.median(logit)), "splits": len(combos)}
+
+
+def trades_needed(x: np.ndarray, z: float = 1.645) -> int | None:
+    """More trades needed before the low end of a 90% interval on the mean per-trade return clears
+    zero, if the mean and spread hold: (z sd / mean)^2 less the trades so far. None when the mean is
+    not positive, since then no number of trades gets there.
+    """
+    x = np.asarray(x, dtype=float)
+    if len(x) < 2 or x.mean() <= 0:
+        return None
+    return max(0, math.ceil((z * x.std(ddof=1) / x.mean()) ** 2) - len(x))
 
 
 def monte_carlo(ret: np.ndarray, horizon: int, seed: int, paths: int = 5000, block: int = 10) -> dict:

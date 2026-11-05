@@ -39,9 +39,17 @@ def gate(name: str, value, need: str, ok: bool) -> dict:
     return {"gate": name, "value": value, "need": need, "pass": bool(ok)}
 
 
-def promote_gates(s: dict, series: dict, cfg: dict) -> list[dict]:
-    """Every [promote] gate for one strategy and exchange, passed or not, in a fixed order."""
+def edge_on(series: dict, p: dict) -> bool:
+    w = series["windows"].get(p["window"]) or {}
+    lo = w.get("expectancy_lo")
+    return (w.get("trades") or 0) >= p["min_trades"] and lo is not None and lo > p["expectancy_lo_above"]
+
+
+def promote_gates(s: dict, series: dict, cfg: dict, venues: list[str] | None = None, pbo: float | None = None) -> list[dict]:
+    """Every [promote] gate for one strategy and exchange, passed or not, in a fixed order. venues are the
+    exchanges where the strategy clears the trades and expectancy gates; pbo is this exchange's overfit probability."""
     p = cfg["promote"]
+    venues = venues or []
     w = series["windows"].get(p["window"]) or {}
     look = s["lookahead"]
     trades = w.get("trades") or 0
@@ -64,6 +72,9 @@ def promote_gates(s: dict, series: dict, cfg: dict) -> list[dict]:
         gate("max drawdown", mdd, f"<= {p['max_drawdown']}", mdd is not None and mdd <= p["max_drawdown"]),
         gate("overlap with league" + (f" ({other})" if other else ""), rho, f"|rho| <= {p['max_rho']}",
              rho is None or abs(rho) <= p["max_rho"]),
+        gate("venues with an edge", ", ".join(venues) or "none", f">= {p['min_venues']}",
+             len(venues) >= p["min_venues"]),
+        gate(f"venue overfit probability, {p['window']}", pbo, f"<= {p['max_pbo']}", pbo is None or pbo <= p["max_pbo"]),
     ]
 
 
@@ -112,7 +123,8 @@ def decide(facts: dict, cfg: dict) -> list[dict]:
         s = strategies.get(name)
         if not s or s["load_error"] or (name, exchange) in league:
             continue
-        gates = promote_gates(s, ser, cfg)
+        venues = sorted(e for (n, e), x in series.items() if n == name and edge_on(x, cfg["promote"]))
+        gates = promote_gates(s, ser, cfg, venues, facts.get("overfit", {}).get((exchange, cfg["promote"]["window"])))
         failed = [g for g in gates if not g["pass"]]
         w = ser["windows"].get(cfg["promote"]["window"]) or {}
         score = w.get("sharpe_lo")
@@ -250,7 +262,8 @@ def load_facts(conn, cfg: dict, now: dt.datetime | None = None) -> dict:
     for row in cur:
         r = dict(zip(cols, row))
         walkforward.setdefault((r["strategy"], r["exchange"]), []).append(r)
-    return {"strategies": strategies, "series": series, "bots": bots, "walkforward": walkforward}
+    overfit = {(e, w): pbo for e, w, pbo in conn.execute("SELECT exchange, win, pbo FROM overfit")}
+    return {"strategies": strategies, "series": series, "bots": bots, "walkforward": walkforward, "overfit": overfit}
 
 
 def store(conn, rows: list[dict]) -> dict:
