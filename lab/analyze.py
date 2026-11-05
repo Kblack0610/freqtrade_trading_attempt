@@ -228,7 +228,7 @@ def bias_one(kind: str, strategy: str, strategy_path: str | None) -> dict:
     return {"has_bias": bool(biased), "biased_indicators": ", ".join(biased) or None, "detail": detail}
 
 
-TRADE_COLS = ["pair", "open_date", "close_date", "open_rate", "close_rate", "stake_amount", "profit_ratio",
+TRADE_COLS = ["pair", "open_date", "close_date", "open_rate", "close_rate", "min_rate", "stake_amount", "profit_ratio",
               "profit_abs", "exit_reason", "enter_tag"]
 
 
@@ -387,10 +387,10 @@ def load_series(conn) -> dict[tuple[str, str], tuple[pd.DataFrame, pd.DataFrame]
         " JOIN strategies s ON s.name = c.strategy AND s.load_error IS NULL"
         " WHERE c.ok AND c.exchange = ANY(%s) ORDER BY c.strategy, c.exchange, c.chunk_start", (EXCHANGES,)).fetchall()
     trades = pd.DataFrame(conn.execute(
-        "SELECT chunk_id, open_date, close_date, open_rate, close_rate, stake_amount, profit_ratio, profit_abs"
+        "SELECT chunk_id, open_date, close_date, open_rate, close_rate, min_rate, stake_amount, profit_ratio, profit_abs"
         " FROM backtest_trades"
-    ).fetchall(), columns=["chunk_id", "open_date", "close_date", "open_rate", "close_rate", "stake_amount", "profit_ratio",
-                           "profit_abs"])
+    ).fetchall(), columns=["chunk_id", "open_date", "close_date", "open_rate", "close_rate", "min_rate", "stake_amount",
+                           "profit_ratio", "profit_abs"])
     by_chunk = dict(tuple(trades.groupby("chunk_id"))) if len(trades) else {}
     empty = trades.iloc[0:0]
     parts: dict[tuple[str, str], list] = {}
@@ -504,7 +504,7 @@ def insert_many(conn, table: str, rows: list[dict], cols: list[str]) -> None:
 WINDOW_COLS = ["strategy", "exchange", "win", "days", "start_day", "end_day", "trades", "total_return", "cagr", "sharpe",
                "sharpe_lo", "sharpe_hi", "sortino", "calmar", "max_drawdown", "profit_factor", "expectancy",
                "expectancy_lo", "expectancy_hi", "gross_expectancy", "gross_expectancy_lo", "gross_expectancy_hi",
-               "fee_per_trade", "winrate", "exposure", "capital_exposure", "hold_excess", "hold_excess_lo", "hold_excess_hi",
+               "fee_per_trade", "winrate", "exposure", "worst_open", "capital_exposure", "hold_excess", "hold_excess_lo", "hold_excess_hi",
                "months_profitable", "dsr", "trials"]
 ESTIMATE_COLS = ["strategy", "exchange", "horizon_days", "p10", "p50", "p90", "prob_loss", "exp_max_drawdown", "paths",
                  "seed", "basis_days"]

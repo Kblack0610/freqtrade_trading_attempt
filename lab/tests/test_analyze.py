@@ -53,7 +53,7 @@ class FakeRunner:
         opens = pd.date_range(pd.Timestamp(start, tz="UTC"), pd.Timestamp(end, tz="UTC"), freq="2D", inclusive="left")
         ratio = rng.normal(0.002, 0.01, len(opens))
         t = pd.DataFrame({"pair": "BTC/USD", "open_date": opens, "close_date": opens + pd.Timedelta(hours=8),
-                          "open_rate": 100.0, "close_rate": 100.0 * (1 + ratio), "stake_amount": 300.0,
+                          "open_rate": 100.0, "close_rate": 100.0 * (1 + ratio), "min_rate": 95.0, "stake_amount": 300.0,
                           "profit_ratio": ratio, "profit_abs": 300.0 * ratio, "exit_reason": "roi", "enter_tag": None})
         return {"ok": True, "error": None, "duration_s": 0.1, "trades": t, "bt_start": pd.Timestamp(start, tz="UTC"),
                 "bt_end": pd.Timestamp(end, tz="UTC"), "start_balance": 1000.0,
@@ -110,6 +110,7 @@ def test_full_history_in_yearly_chunks_then_cached(lab):
     # every trade stakes 300 of a 1000 wallet for 8 hours in 48, so 5% of capital is in the market
     assert one(lab, "SELECT bool_and(abs(capital_exposure - 0.05) < 0.002) FROM strategy_windows WHERE win = '365d'")
     assert one(lab, "SELECT bool_and(hold_excess_lo < hold_excess AND hold_excess < hold_excess_hi) FROM strategy_windows")
+    assert one(lab, "SELECT bool_and(abs(worst_open + 0.05) < 1e-9) FROM strategy_windows WHERE trades > 0")
     assert one(lab, "SELECT count(*) FROM estimates") == 12
     assert one(lab, "SELECT count(*) FROM regimes WHERE trend = 'bull'") > 0
     assert one(lab, "SELECT count(*) FROM correlations WHERE other = 'Good' AND exchange = 'binanceus'") == 2

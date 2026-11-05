@@ -60,9 +60,9 @@ def seed(c):
     for name, trades, sharpe_lo in (("Strategy001", 40, 0.4), ("Planted", 90, 3.0)):
         c.execute("INSERT INTO strategy_windows (strategy, exchange, win, days, start_day, trades, total_return, sharpe, "
                   "sharpe_lo, sharpe_hi, dsr, trials, max_drawdown, expectancy, gross_expectancy, gross_expectancy_lo, "
-                  "fee_per_trade, capital_exposure, hold_excess, hold_excess_lo, hold_excess_hi) VALUES "
+                  "fee_per_trade, capital_exposure, hold_excess, hold_excess_lo, hold_excess_hi, worst_open) VALUES "
                   "(%s, 'binanceus', '365d', 365, '2025-11-04', %s, 0.032, 1.1, %s, 1.8, 0.62, 2, 0.04, 0.012, 0.0145, "
-                  "0.004, 0.0025, 0.2, 0.123, -0.05, 0.3)",
+                  "0.004, 0.0025, 0.2, 0.123, -0.05, 0.3, -0.271)",
                   (name, trades, sharpe_lo))
     c.execute("INSERT INTO estimates VALUES ('Strategy001', 'binanceus', 90, -0.05, 0.021, 0.09, 0.31, 0.06, 5000, 1, 365)")
     c.execute("INSERT INTO correlations VALUES ('Strategy001', 'binanceus', 'Strategy002', 0.83, 300)")
@@ -157,7 +157,7 @@ def test_every_page_renders_with_data(conn, signed_in):
              "/strategies?win=all": ["No results for this window yet"],
              "/strategies/Strategy001": ["binanceus", "<svg", "3.2%", "Strategy002: 0.83", "bull", "ETH/USD",
                                          "exit 2: boom", "not checked", "clean", "31%", "1.45%", "0.25%", "20%", "12.3%",
-                                         "-5.0%"],
+                                         "-5.0%", "-27.1%"],
              "/data": ["BTC/USD", "700,000", "2019-09-01"],
              "/runs": ["2026-11-04 03:00:00", "ok", "60 min"],
              "/runs/1": ["exit 2: boom", "Scalp on binanceus", "Strategy001"]}

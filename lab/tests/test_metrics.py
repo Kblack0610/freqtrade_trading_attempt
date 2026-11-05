@@ -12,7 +12,7 @@ FEE = 0.002  # round trip
 
 def trades(*rows) -> pd.DataFrame:
     return pd.DataFrame([{"open_date": metrics.utc(o), "close_date": metrics.utc(c), "open_rate": 100.0,
-                          "close_rate": 100.0 * (1 + p / 100 + FEE), "profit_abs": p, "profit_ratio": p / 100}
+                          "close_rate": 100.0 * (1 + p / 100 + FEE), "min_rate": 100.0 + min(p, 0), "profit_abs": p, "profit_ratio": p / 100}
                          for o, c, p in rows])
 
 
@@ -76,6 +76,14 @@ def test_deflated_sharpe_clears_a_real_edge_and_not_luck():
     assert metrics.deflated_sharpe(0.25, n, 0.0, 3.0, k) > 0.95  # annualized 4.8
     assert metrics.deflated_sharpe(luck_bar, n, 0.0, 3.0, k) < 0.6
     assert metrics.deflated_sharpe(0.05, n, 0.0, 3.0, k) < 0.1  # annualized 1.0 is luck among 89
+
+
+def test_worst_open_sees_a_loss_that_closed_as_a_win():
+    d = pd.Timestamp("2026-01-01", tz="UTC")
+    t = trades((d, d, 1.0), (d, d, -2.0)).assign(min_rate=[70.0, 98.0])
+    assert t["profit_abs"].iloc[0] > 0 and math.isclose(metrics.worst_open(t), -0.30)
+    assert metrics.worst_open(t.iloc[0:0]) is None
+    assert metrics.worst_open(t.assign(min_rate=None)) is None
 
 
 def test_capital_exposure_weights_each_trade_by_its_share_and_time():
