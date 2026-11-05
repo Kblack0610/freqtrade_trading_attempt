@@ -35,3 +35,14 @@ min_live_trades = 20
 # history such as kraken) has the high end of its expectancy interval below zero, with enough trades.
 window = "365d"
 min_trades = 30
+
+[retune]
+# From lab/walkforward.py: hyperopt tunes on the months before each test month, which it never sees.
+# The tuned parameters must beat the strategy as it is on each of the newest this-many months,
+folds = 2
+# each with at least this many tuned trades in the month,
+min_fold_trades = 5
+# Pooled over every month, the tuned per-trade expectancy must beat the untuned one, over at least
+min_trades = 30
+# tuned trades, and the low end of its 90% bootstrap interval must clear this.
+min_oos_expectancy = 0.0

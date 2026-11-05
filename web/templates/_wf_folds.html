@@ -1,0 +1,14 @@
+<div class="scroll">
+<table>
+  <thead><tr><th>Test month</th><th>Trained on</th><th class="n">In sample</th><th class="n">As is</th><th class="n">Tuned</th><th class="n">Trades as is</th><th class="n">Trades tuned</th><th>Note</th></tr></thead>
+  <tbody>
+  {% for f in folds %}
+  <tr><td>{{ f.fold_start.strftime("%Y-%m") }}</td><td>{{ f.train_start }} to {{ f.fold_start }}</td>
+      <td class="n {{ f.is_profit | tone }}">{{ f.is_profit | pct }}</td><td class="n {{ f.base_profit | tone }}">{{ f.base_profit | pct }}</td>
+      <td class="n {{ f.tuned_profit | tone }}">{{ f.tuned_profit | pct }}</td><td class="n">{{ f.base_trades if f.base_trades is not none else "-" }}</td>
+      <td class="n">{{ f.tuned_trades if f.tuned_trades is not none else "-" }}</td>
+      <td class="{{ 'down' if not f.ok }}">{{ f.error or "" }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>

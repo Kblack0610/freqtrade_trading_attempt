@@ -197,7 +197,7 @@ def test_overview_warns_when_a_bot_is_not_dry_run(conn, signed_in):
 
 
 def test_pages_render_on_an_empty_database(conn, signed_in):
-    for path in ("/", "/data", "/runs", "/strategies", "/suggestions"):
+    for path in ("/", "/data", "/runs", "/strategies", "/suggestions", "/walkforward"):
         assert signed_in[1].get(path).status_code == 200, path
 
 
@@ -220,3 +220,27 @@ def test_chart_draws_only_with_two_points():
     assert "Not enough points" in charts.line([])
     svg = charts.line([(NOW - dt.timedelta(hours=1), -1.0), (NOW, 2.0)], label="x")
     assert svg.startswith("<svg") and "series up" in svg and json.dumps("x")[1:-1] in svg
+
+
+def test_walkforward_pools_the_months_with_intervals_and_efficiency(conn, signed_in):
+    seed(conn)
+    for month, base, tuned, err in ((9, 0.01, 0.03, None), (10, 0.02, 0.01, None), (8, None, None, "hyperopt exit 2: boom")):
+        start = dt.date(2026, month, 1)
+        ok = err is None
+        conn.execute("INSERT INTO walkforward (strategy, exchange, fold_start, train_start, test_end, cache_key, ok, attempts, "
+                     "error, epochs, loss, params, is_trades, is_profit, base_trades, base_profit, base_returns, tuned_trades, "
+                     "tuned_profit, tuned_returns) VALUES ('Strategy001', 'binanceus', %s, %s, %s, 'k', %s, 1, %s, 150, 'L', "
+                     "%s, 60, 0.18, 4, %s, %s, 4, %s, %s)",
+                     (start, start - dt.timedelta(days=180), (start + dt.timedelta(days=31)).replace(day=1), ok, err,
+                      json.dumps({"roi": {"0": 0.02}}) if ok else None, base, [base / 4] * 4 if ok else None, tuned,
+                      [tuned / 4 + d for d in (0.001, -0.001, 0.001, -0.001)] if ok else None))
+    conn.execute("INSERT INTO runs (kind, name, raw, started_at, finished_at, ok) VALUES ('walkforward', 'wf-1', %s, now(), "
+                 "now(), true)", (json.dumps({"folds_run": 3, "folds_cached": 0, "folds_failed": 1}),))
+    text = signed_in[1].get("/walkforward").text
+    for needle in ("/strategies/Strategy001?exchange=binanceus#walk-forward", "1 of 2", "(1 failed)", "0.50%",
+                   "3 folds run, 0 cached, 1 failed", ">8<", "0.66"):
+        assert needle in text, needle
+    page = signed_in[1].get("/strategies/Strategy001").text
+    for needle in ('id="walk-forward"', "2026-09", "2026-03-05 to 2026-09-01", "hyperopt exit 2: boom", "beat as is in 1 of 2"):
+        assert needle in page, needle
+    assert "Not a walk-forward candidate yet" in signed_in[1].get("/strategies/Planted").text
