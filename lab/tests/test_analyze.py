@@ -107,6 +107,9 @@ def test_full_history_in_yearly_chunks_then_cached(lab):
     assert one(lab, "SELECT count(*) FROM strategy_windows WHERE win = 'all' AND strategy = 'Good'") == 2
     assert one(lab, "SELECT min(trials) = max(trials) AND min(trials) = 6 FROM strategy_windows WHERE win = '365d'")
     assert one(lab, "SELECT bool_and(dsr BETWEEN 0 AND 1) FROM strategy_windows WHERE dsr IS NOT NULL")
+    # every trade stakes 300 of a 1000 wallet for 8 hours in 48, so 5% of capital is in the market
+    assert one(lab, "SELECT bool_and(abs(capital_exposure - 0.05) < 0.002) FROM strategy_windows WHERE win = '365d'")
+    assert one(lab, "SELECT bool_and(hold_excess_lo < hold_excess AND hold_excess < hold_excess_hi) FROM strategy_windows")
     assert one(lab, "SELECT count(*) FROM estimates") == 12
     assert one(lab, "SELECT count(*) FROM regimes WHERE trend = 'bull'") > 0
     assert one(lab, "SELECT count(*) FROM correlations WHERE other = 'Good' AND exchange = 'binanceus'") == 2

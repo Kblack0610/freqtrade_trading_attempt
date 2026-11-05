@@ -68,6 +68,19 @@ def sortino(ret: np.ndarray) -> float | None:
     return None if downside == 0 else float(r.mean() / downside * math.sqrt(YEAR))
 
 
+def capital_exposure(trades: pd.DataFrame, start: pd.Timestamp, end: pd.Timestamp) -> float:
+    """Mean share of the wallet in positions over the window: each trade's `share` of its wallet,
+    weighted by its time inside the window. `exposure` counts a day with one trade of three as fully
+    in the market; this counts a third."""
+    span = (end - start).total_seconds()
+    if not len(trades) or span <= 0:
+        return 0.0
+    opened = pd.to_datetime(trades["open_date"], utc=True).clip(lower=start)
+    closed = pd.to_datetime(trades["close_date"], utc=True).clip(upper=end)
+    held = (closed - opened).dt.total_seconds().clip(lower=0)
+    return min(1.0, float((trades["share"] * held).sum() / span))
+
+
 def block_indices(n: int, block: int, samples: int, rng: np.random.Generator, length: int | None = None) -> np.ndarray:
     """Circular block bootstrap: `samples` rows of `length` indices into a series of n, drawn in
     runs of `block` consecutive days so volatility clusters and streaks survive the resample."""
@@ -124,6 +137,22 @@ def exposure(trades: pd.DataFrame, start: pd.Timestamp, end: pd.Timestamp) -> fl
     if cur_e is not None:
         covered += (cur_e - cur_s).total_seconds()
     return covered / span
+
+
+def hold_excess(daily: pd.DataFrame, close: pd.Series, capital: float, seed: int, samples: int = 1000, block: int = 10,
+                level: float = 0.90) -> tuple:
+    """Annual return over holding BTC with the same share of capital, with a block-bootstrap interval.
+
+    daily: day, ret. close: BTC daily close by day. Each day's excess is the strategy's return less
+    `capital` times BTC's, so a long-only strategy that only rode the market scores about zero.
+    """
+    both = daily.set_index("day")[["ret"]].join(close.pct_change().rename("btc"), how="inner").dropna()
+    if len(both) < 2 * block:
+        return None, None, None
+    x = (both["ret"] - capital * both["btc"]).to_numpy(dtype=float)
+    means = x[block_indices(len(x), block, samples, np.random.default_rng(seed))].mean(axis=1)
+    lo, hi = np.quantile(means, [(1 - level) / 2, (1 + level) / 2])
+    return float(x.mean() * YEAR), float(lo * YEAR), float(hi * YEAR)
 
 
 def window_metrics(daily: pd.DataFrame, trades: pd.DataFrame, seed: int) -> dict:

@@ -387,13 +387,16 @@ def load_series(conn) -> dict[tuple[str, str], tuple[pd.DataFrame, pd.DataFrame]
         " JOIN strategies s ON s.name = c.strategy AND s.load_error IS NULL"
         " WHERE c.ok AND c.exchange = ANY(%s) ORDER BY c.strategy, c.exchange, c.chunk_start", (EXCHANGES,)).fetchall()
     trades = pd.DataFrame(conn.execute(
-        "SELECT chunk_id, open_date, close_date, open_rate, close_rate, profit_ratio, profit_abs FROM backtest_trades"
-    ).fetchall(), columns=["chunk_id", "open_date", "close_date", "open_rate", "close_rate", "profit_ratio", "profit_abs"])
+        "SELECT chunk_id, open_date, close_date, open_rate, close_rate, stake_amount, profit_ratio, profit_abs"
+        " FROM backtest_trades"
+    ).fetchall(), columns=["chunk_id", "open_date", "close_date", "open_rate", "close_rate", "stake_amount", "profit_ratio",
+                           "profit_abs"])
     by_chunk = dict(tuple(trades.groupby("chunk_id"))) if len(trades) else {}
     empty = trades.iloc[0:0]
     parts: dict[tuple[str, str], list] = {}
     for cid, s, e, t0, t1, bal in chunk_rows:
         t = by_chunk.get(cid, empty)
+        t = t.assign(share=t["stake_amount"].astype(float) / (bal or wallet()))
         parts.setdefault((s, e), []).append((metrics.daily_returns(t, t0, t1, bal or wallet()), t))
     out = {}
     for k, ps in parts.items():
@@ -422,6 +425,19 @@ def window_rows(series: dict) -> list[dict]:
             r["dsr"] = metrics.deflated_sharpe(r["_sr_daily"], r["days"], r["_skew"], r["_kurt"], len(trial))
             r["trials"] = len(trial)
     return rows
+
+
+def hold_columns(rows: list[dict], series: dict, close: pd.Series) -> None:
+    """Add each window's share of capital in the market and its return over holding that share of BTC."""
+    for r in rows:
+        daily, trades = series[(r["strategy"], r["exchange"])]
+        start = pd.Timestamp(r["start_day"], tz="UTC")
+        end = pd.Timestamp(r["end_day"], tz="UTC") + pd.Timedelta(days=1)
+        t = trades[pd.to_datetime(trades["close_date"], utc=True) >= start]
+        capital = metrics.capital_exposure(t, start, end)
+        excess = metrics.hold_excess(daily[daily["day"] >= r["start_day"]], close, capital,
+                                     metrics.seed_of(r["strategy"], r["exchange"], r["win"], "hold"))
+        r.update(zip(("hold_excess", "hold_excess_lo", "hold_excess_hi"), excess), capital_exposure=capital)
 
 
 def estimate_rows(series: dict) -> list[dict]:
@@ -453,12 +469,17 @@ def correlation_rows(series: dict, league: set[str]) -> list[dict]:
     return rows
 
 
-def regime_rows() -> list[dict]:
+def btc_close() -> pd.Series:
     path = RESULTS / "data" / REGIME_EXCHANGE / "BTC_USD-1d.feather"
     if not path.exists():
-        return []
+        return pd.Series(dtype=float)
     df = pd.read_feather(path, columns=["date", "close"])
-    close = pd.Series(df["close"].to_numpy(), index=pd.to_datetime(df["date"], utc=True).dt.date)
+    return pd.Series(df["close"].to_numpy(), index=pd.to_datetime(df["date"], utc=True).dt.date)
+
+
+def regime_rows(close: pd.Series) -> list[dict]:
+    if close.empty:
+        return []
     r = metrics.regimes(close)
     return [{k: (None if isinstance(v, float) and math.isnan(v) else v) for k, v in row.items()}
             for row in r.to_dict("records")]
@@ -483,7 +504,8 @@ def insert_many(conn, table: str, rows: list[dict], cols: list[str]) -> None:
 WINDOW_COLS = ["strategy", "exchange", "win", "days", "start_day", "end_day", "trades", "total_return", "cagr", "sharpe",
                "sharpe_lo", "sharpe_hi", "sortino", "calmar", "max_drawdown", "profit_factor", "expectancy",
                "expectancy_lo", "expectancy_hi", "gross_expectancy", "gross_expectancy_lo", "gross_expectancy_hi",
-               "fee_per_trade", "winrate", "exposure", "months_profitable", "dsr", "trials"]
+               "fee_per_trade", "winrate", "exposure", "capital_exposure", "hold_excess", "hold_excess_lo", "hold_excess_hi",
+               "months_profitable", "dsr", "trials"]
 ESTIMATE_COLS = ["strategy", "exchange", "horizon_days", "p10", "p50", "p90", "prob_loss", "exp_max_drawdown", "paths",
                  "seed", "basis_days"]
 
@@ -493,7 +515,9 @@ def derive(conn) -> dict:
     league = {r[0] for r in conn.execute("SELECT DISTINCT strategy FROM bots")}
     daily = [{"strategy": s, "exchange": e, **r} for (s, e), (d, _) in series.items() for r in d.to_dict("records")]
     windows, estimates = window_rows(series), estimate_rows(series)
-    corr, reg = correlation_rows(series, league), regime_rows()
+    close = btc_close()
+    hold_columns(windows, series, close)
+    corr, reg = correlation_rows(series, league), regime_rows(close)
     with conn.transaction():
         conn.execute("TRUNCATE strategy_daily, strategy_windows, estimates, correlations, regimes")
         insert_many(conn, "strategy_daily", daily, ["strategy", "exchange", "day", "ret", "pnl", "trades"])
