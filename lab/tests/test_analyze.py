@@ -24,8 +24,9 @@ def strat(name: str, tf: str = "5m", load_error: str | None = None, rev: str = "
 class FakeRunner:
     """Deterministic trades per strategy x exchange x day; `fail` names strategies whose backtests fail."""
 
-    def __init__(self, found: list[dict], fail: set[str] = frozenset(), biased: set[str] = frozenset()):
-        self.found, self.fail, self.biased = found, set(fail), set(biased)
+    def __init__(self, found: list[dict], fail: set[str] = frozenset(), biased: set[str] = frozenset(),
+                 hole: set[tuple[str, int]] = frozenset()):
+        self.found, self.fail, self.biased, self.hole = found, set(fail), set(biased), set(hole)
         self.backtests: list[tuple] = []
         self.checks: list[tuple] = []
 
@@ -39,6 +40,8 @@ class FakeRunner:
         self.backtests.append((strategy, exchange, start))
         if strategy in self.fail:
             return {"ok": False, "error": "boom", "duration_s": 0.1}
+        if (exchange, start.year) in self.hole:
+            return {"ok": False, "no_data": True, "error": analyze.NO_DATA, "duration_s": 0.1}
         rng = np.random.default_rng(metrics.seed_of(strategy, exchange, start))
         opens = pd.date_range(pd.Timestamp(start, tz="UTC"), pd.Timestamp(end, tz="UTC"), freq="2D", inclusive="left")
         ratio = rng.normal(0.002, 0.01, len(opens))
@@ -151,6 +154,17 @@ def test_failed_chunks_retry_three_times_and_fail_the_run(lab):
     assert one(lab, "SELECT max(attempts) FROM backtest_chunks WHERE strategy = 'Flaky'") == 3
     assert one(lab, "SELECT count(*) FROM backtest_chunks WHERE strategy = 'Flaky' AND ok") == 0
     assert one(lab, "SELECT count(*) FROM strategy_windows WHERE strategy = 'Flaky'") == 0
+
+
+def test_a_year_with_no_candles_is_stored_once_and_is_no_failure(lab):
+    found = [strat("Good")]
+    r = FakeRunner(found, hole={("binanceus", 2025)})
+    assert analyze.main(r, TODAY) == 0
+    assert one(lab, "SELECT attempts FROM backtest_chunks WHERE exchange = 'binanceus' AND chunk_start = '2025-01-01'") == 3
+    r = FakeRunner(found, hole={("binanceus", 2025)})
+    assert analyze.main(r, TODAY) == 0
+    assert ("Good", "binanceus", dt.date(2025, 1, 1)) not in r.backtests
+    assert one(lab, "SELECT count(*) FROM strategy_windows WHERE strategy = 'Good' AND exchange = 'binanceus'") > 0
 
 
 def test_a_deleted_strategy_takes_its_results(lab):

@@ -18,6 +18,8 @@
    with the thresholds in lab/suggest.toml.
 
 Returns are realized (on trade close); a trade still open at a chunk's end is closed there.
+A year with no candles in the data (binanceus has none from 2023-07 to 2025-02, when its USD pairs were
+suspended) is stored as empty, never retried, and is not a failure.
 Exits 1 when more than a tenth of the chunks run this time failed, or on a crash.
 
 `python lab/analyze.py bias-one <lookahead|recursive> <strategy> [--strategy-path DIR]` runs one bias
@@ -63,6 +65,7 @@ HORIZONS = (30, 90)
 ESTIMATE_BASIS, ESTIMATE_MIN_DAYS = 365, 180
 CORR_DAYS, CORR_MIN_DAYS = 365, 60
 FAIL_SHARE = 0.10
+NO_DATA = "no candles in this period"
 
 
 def sha256(data: bytes) -> str:
@@ -150,6 +153,8 @@ class Cli:
                 p = subprocess.run(cmd, capture_output=True, text=True, timeout=CHUNK_TIMEOUT)
             except subprocess.TimeoutExpired:
                 return {"ok": False, "error": f"timed out after {CHUNK_TIMEOUT}s", "duration_s": time.monotonic() - t0}
+            if p.returncode and "No data found" in p.stdout + p.stderr:
+                return {"ok": False, "no_data": True, "error": NO_DATA, "duration_s": time.monotonic() - t0}
             # freqtrade exits 0 on some errors; the result zip is the proof of a run
             if p.returncode or not list(Path(d).glob("*.zip")):
                 return {"ok": False, "error": f"exit {p.returncode}: {_errors(p.stdout + p.stderr)}",
@@ -224,7 +229,7 @@ TRADE_COLS = ["pair", "open_date", "close_date", "open_rate", "close_rate", "sta
 
 
 def store_chunk(conn, task: dict, res: dict, run_id: int) -> None:
-    attempts = task["attempts"] + 1 if not res["ok"] else 1
+    attempts = MAX_ATTEMPTS if res.get("no_data") else task["attempts"] + 1 if not res["ok"] else 1
     with conn.transaction():
         conn.execute("DELETE FROM backtest_chunks WHERE strategy = %s AND exchange = %s AND chunk_start = %s",
                      (task["strategy"], task["exchange"], task["start"]))
@@ -520,7 +525,7 @@ def main(runner: Runner | None = None, today: dt.date | None = None) -> int:
                            drift_run=len(drifts))
             print(f"analyze: {len(found)} strategies, {len(todo)} chunks to run, {cached} cached, "
                   f"{len(bias)} bias checks, {WORKERS} workers", flush=True)
-            failed, done, failures = 0, 0, []
+            failed, empty, done, failures = 0, 0, 0, []
             with ThreadPoolExecutor(max_workers=WORKERS) as pool:
                 futs = {pool.submit(runner.bias, kind, s): ("bias", (s, kind, h)) for s, kind, h in bias}
                 futs.update({pool.submit(runner.backtest, t["strategy"], t["exchange"], t["start"], t["end"]): ("drift", t)
@@ -542,17 +547,19 @@ def main(runner: Runner | None = None, today: dt.date | None = None) -> int:
                             continue
                         store_chunk(conn, task, res, run_id)
                         done += 1
-                        if not res["ok"]:
+                        if res.get("no_data"):
+                            empty += 1
+                        elif not res["ok"]:
                             failed += 1
                             if len(failures) < 100:
                                 failures.append(f"{task['strategy']} {task['exchange']} {task['start'].year}: {res['error']}")
                         if done % 25 == 0 or done == len(todo):
-                            print(f"analyze: {done}/{len(todo)} chunks, {failed} failed", flush=True)
+                            print(f"analyze: {done}/{len(todo)} chunks, {failed} failed, {empty} with no candles", flush=True)
                 except BaseException:
                     # leaving the with block waits for every queued task, hours of work whose results cannot be stored
                     pool.shutdown(cancel_futures=True)
                     raise
-            summary.update(chunks_failed=failed, failures=failures, bias_failed=conn.execute(
+            summary.update(chunks_failed=failed, chunks_empty=empty, failures=failures, bias_failed=conn.execute(
                 "SELECT count(*) FROM bias_checks WHERE has_bias IS NULL").fetchone()[0])
             summary.update(derive(conn))
             summary.update(suggest.run(conn))
