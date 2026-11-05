@@ -5,6 +5,12 @@
         "name": "kucoin",
         "key": "",
         "secret": "",
+        "ccxt_config": {
+            "rateLimit": 25
+        },
+        "ccxt_async_config": {
+            "rateLimit": 25
+        },
         "pair_whitelist": [
             "BTC/USDT",
             "ETH/USDT",
