@@ -30,7 +30,8 @@ a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; }
 .top { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 1.5rem; padding: 0.75rem 1rem; background: var(--panel); border-bottom: 1px solid var(--line); }
 .brand { font-weight: 700; color: var(--fg); }
-nav { display: flex; gap: 1rem; }
+nav { display: flex; flex-wrap: wrap; gap: 0.25rem 1rem; }
+nav a { white-space: nowrap; }
 nav a[aria-current="page"] { color: var(--fg); font-weight: 600; }
 .who { margin-left: auto; display: flex; align-items: center; gap: 0.5rem; }
 button { font: inherit; padding: 0.2rem 0.6rem; background: transparent; color: var(--fg); border: 1px solid var(--line); border-radius: 6px; cursor: pointer; }
@@ -60,7 +61,7 @@ ul.plain { padding-left: 1.2rem; }
 .chart .series.down { stroke: var(--down); }
 .chart .axis { fill: var(--muted); font-size: 11px; }
 .chart .axis.end { text-anchor: end; }
-nav.tabs { flex-wrap: wrap; margin: 0.5rem 0 1rem; }
+nav.tabs { margin: 0.5rem 0 1rem; }
 tr.muted td { color: var(--muted); }
 a.tile { color: var(--fg); }
 a.tile:hover { text-decoration: none; border-color: var(--accent); }
