@@ -48,9 +48,11 @@ min_trades = 30
 folds = 2
 # each with at least this many tuned trades in the month,
 min_fold_trades = 5
-# Pooled over every month, the tuned per-trade expectancy must beat the untuned one, over at least
+# Pooled over every month, the low end of the 90% bootstrap interval of the tuned minus the untuned
+# per-trade expectancy must clear this (a month or two of luck in the tuner's favour is not a gain),
+min_gain = 0.0
+# over at least this many tuned trades, and the low end of the tuned expectancy's own interval must clear this.
 min_trades = 30
-# tuned trades, and the low end of its 90% bootstrap interval must clear this.
 min_oos_expectancy = 0.0
 
 [confidence]

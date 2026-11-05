@@ -137,6 +137,19 @@ def block_mean_ci(x: np.ndarray, seed: int, samples: int = 1000, block: int = 10
     return float(lo), float(hi)
 
 
+def diff_ci(a: np.ndarray, b: np.ndarray, seed: int, samples: int = 1000, level: float = 0.90):
+    """Bootstrap interval of mean(a) - mean(b) for two independent samples of trades."""
+    a, b = np.asarray(a, dtype=float), np.asarray(b, dtype=float)
+    if len(a) < 2 or len(b) < 2:
+        return None, None
+    rng = np.random.default_rng(seed)
+    diffs = np.concatenate([a[rng.integers(0, len(a), size=(n, len(a)))].mean(axis=1)
+                            - b[rng.integers(0, len(b), size=(n, len(b)))].mean(axis=1)
+                            for n in (min(100, samples - i) for i in range(0, samples, 100))])
+    lo, hi = np.quantile(diffs, [(1 - level) / 2, (1 + level) / 2])
+    return float(lo), float(hi)
+
+
 def exposure(trades: pd.DataFrame, start: pd.Timestamp, end: pd.Timestamp) -> float:
     """Share of the window with at least one position open."""
     span = (end - start).total_seconds()

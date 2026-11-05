@@ -193,3 +193,13 @@ def test_trades_needed_matches_the_closed_form():
     small = np.array([0.05, -0.04, 0.03, -0.02])
     assert metrics.trades_needed(small) == math.ceil((1.645 * small.std(ddof=1) / small.mean()) ** 2) - 4
     assert metrics.trades_needed(np.array([-0.01, 0.005])) is None
+
+
+def test_diff_ci_straddles_zero_for_one_sample_and_clears_it_for_a_shifted_one():
+    rng = np.random.default_rng(3)
+    x = rng.normal(0.001, 0.01, 400)
+    lo, hi = metrics.diff_ci(x, x, 7)
+    assert lo < 0 < hi
+    lo, _ = metrics.diff_ci(x + 0.01, x, 7)
+    assert lo > 0
+    assert metrics.diff_ci(x, np.array([1.0]), 7) == (None, None)

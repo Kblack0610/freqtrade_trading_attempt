@@ -195,11 +195,12 @@ def retune_rows(facts: dict, cfg: dict) -> list[dict]:
         t_mean = sum(tuned) / len(tuned) if tuned else None
         b_mean = sum(base) / len(base) if base else None
         t_lo, _ = metrics.mean_ci(tuned, metrics.seed_of(name, exchange, "retune"))
+        g_lo, _ = metrics.diff_ci(tuned, base, metrics.seed_of(name, exchange, "retune gain"))
         gates = [
             gate(f"tuned beats as-is, newest {c['folds']} months", f"{len(beat)} of {len(newest)}",
                  f"{c['folds']} of {c['folds']}, >= {c['min_fold_trades']} trades each", len(beat) == c["folds"]),
-            gate("pooled tuned expectancy vs as-is", t_mean, f"> {b_mean:.4f}" if b_mean is not None else "> as-is",
-                 t_mean is not None and (b_mean is None or t_mean > b_mean)),
+            gate("pooled gain a trade over as-is, 90% low", g_lo, f"> {c['min_gain']}",
+                 t_mean is not None and (not base or (g_lo is not None and g_lo > c["min_gain"]))),
             gate("pooled tuned trades", len(tuned), f">= {c['min_trades']}", len(tuned) >= c["min_trades"]),
             gate("pooled tuned expectancy, 90% low", t_lo, f"> {c['min_oos_expectancy']}",
                  t_lo is not None and t_lo > c["min_oos_expectancy"]),
