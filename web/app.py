@@ -24,7 +24,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lab"))
 import metrics  # noqa: E402
 from db import connect  # noqa: E402
 
-from web import auth, charts  # noqa: E402
+from web import auth, charts, exporter  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 TZ = ZoneInfo(os.environ.get("TRADER_WEB_TZ", "UTC"))
@@ -99,6 +99,8 @@ cfg = auth.Config()
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     cfg.check()
+    if os.environ.get("METRICS_PORT"):
+        exporter.serve()
     yield
 
 
