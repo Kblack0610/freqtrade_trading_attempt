@@ -131,6 +131,8 @@ A suggestion keeps its `first_seen` while it holds, so "since Nov 05" on the sit
 
 `lab/book.py` runs after the score (alone: `python lab/book.py`) and rebuilds `book`, shown at `/book`. Each scored strategy with enough walk-forward months gets a 5th, 50th and 95th percentile return over 1 and 5 years, from a block bootstrap of its out-of-sample monthly wallet returns, and the same for BTC over those months. With no score there is no number: the page says there is not enough evidence. The ranges assume the tested months repeat, so a short basis makes a 5-year range look firmer than it is. The page also lists each stage's capital, what it can lose at each limit and its running costs, from `lab/suggest.toml` [book].
 
+Analysis also fills `benchmarks` from the regime venue's daily closes: holding BTC, holding BTC and ETH, monthly DCA into BTC, and BTC only above its 200-day mean, each over the last 1, 3 and 5 years and the whole shared history. Tax rates there are guesses, in config.
+
 ## Confidence
 
 `lab/confidence.py` runs after suggestions (alone: `python lab/confidence.py`) and rebuilds `confidence`, one row per strategy and exchange, shown on `/confidence`. Promote decides who enters the dry-run league; this decides who could touch money, so its gates are stricter. It is advice: nothing here touches a bot, and `lab/league.py` still refuses real money.
@@ -184,6 +186,7 @@ The first run fetches full history (5m since 2019 on binanceus is the long pole)
 - `012`: `trials`, the register of everything tried, and `confidence`, the score and gates per strategy and exchange.
 - `013`: `watch`, one row per bot rewritten by `lab/watcher.py`: equity, the day's opening equity, breach, drill
 - `014`: `book`, projected return ranges per scored strategy and for holding BTC.
+- `015`: `benchmarks`, the plain alternatives to an active strategy.
 
  A schema change is a new numbered file; never edit an applied one.
 

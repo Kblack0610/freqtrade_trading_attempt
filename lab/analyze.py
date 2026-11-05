@@ -560,8 +560,8 @@ def correlation_rows(series: dict, league: set[str]) -> list[dict]:
     return rows
 
 
-def btc_close() -> pd.Series:
-    path = RESULTS / "data" / REGIME_EXCHANGE / "BTC_USD-1d.feather"
+def daily_close(coin: str) -> pd.Series:
+    path = RESULTS / "data" / REGIME_EXCHANGE / f"{coin}_USD-1d.feather"
     if not path.exists():
         return pd.Series(dtype=float)
     df = pd.read_feather(path, columns=["date", "close"])
@@ -600,17 +600,20 @@ WINDOW_COLS = ["strategy", "exchange", "win", "days", "start_day", "end_day", "t
 ESTIMATE_COLS = ["strategy", "exchange", "horizon_days", "p10", "p50", "p90", "prob_loss", "exp_max_drawdown", "paths",
                  "seed", "basis_days"]
 
+BENCHMARK_COLS = ["name", "win", "start_day", "end_day", "total_return", "cagr", "max_drawdown", "after_tax_return", "trades"]
+
 
 def derive(conn) -> dict:
     series = load_series(conn)
     league = {r[0] for r in conn.execute("SELECT DISTINCT strategy FROM bots")}
     daily = [{"strategy": s, "exchange": e, **r} for (s, e), (d, _) in series.items() for r in d.to_dict("records")]
     windows, estimates = window_rows(series), estimate_rows(series)
-    close = btc_close()
+    close = daily_close("BTC")
+    bench = book.benchmark_rows(close, daily_close("ETH"), suggest.load_config())
     hold_columns(windows, series, close)
     corr, reg, overfit = correlation_rows(series, league), regime_rows(close), overfit_rows(series)
     with conn.transaction():
-        conn.execute("TRUNCATE strategy_daily, strategy_windows, estimates, correlations, regimes, overfit")
+        conn.execute("TRUNCATE strategy_daily, strategy_windows, estimates, correlations, regimes, overfit, benchmarks")
         insert_many(conn, "strategy_daily", daily, ["strategy", "exchange", "day", "ret", "pnl", "trades"])
         insert_many(conn, "strategy_windows", windows, WINDOW_COLS)
         insert_many(conn, "estimates", estimates, ESTIMATE_COLS)
@@ -618,8 +621,9 @@ def derive(conn) -> dict:
         insert_many(conn, "regimes", reg, ["day", "btc_close", "trend", "vol_30d", "vol_bucket"])
         insert_many(conn, "overfit", overfit, ["exchange", "win", "strategies", "days", "blocks", "splits", "pbo",
                                                "logit_median"])
+        insert_many(conn, "benchmarks", bench, BENCHMARK_COLS)
     return {"series": len(series), "daily_rows": len(daily), "windows": len(windows), "estimates": len(estimates),
-            "correlations": len(corr), "regime_days": len(reg), "overfit": len(overfit)}
+            "correlations": len(corr), "regime_days": len(reg), "overfit": len(overfit), "benchmarks": len(bench)}
 
 
 def main(runner: Runner | None = None, today: dt.date | None = None) -> int:
