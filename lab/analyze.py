@@ -104,7 +104,7 @@ class Runner(Protocol):
 
 def _errors(text: str) -> str:
     lines = text.splitlines()
-    bad = [ln.split(" - ", 3)[-1] for ln in lines if " - ERROR - " in ln or "Error" in ln]
+    bad = [ln.split(" - ERROR - ", 1)[-1] for ln in lines if " - ERROR - " in ln or "Error" in ln]
     return " | ".join(bad[-3:] or lines[-3:])[:800]
 
 
@@ -418,9 +418,8 @@ def window_rows(series: dict) -> list[dict]:
             rows.append({"strategy": s, "exchange": e, "win": win, **m})
     for win in WINDOWS:
         trial = [r for r in rows if r["win"] == win]
-        srs = [r["_sr_daily"] for r in trial]
         for r in trial:
-            r["dsr"] = metrics.deflated_sharpe(r["_sr_daily"], r["days"], r["_skew"], r["_kurt"], srs)
+            r["dsr"] = metrics.deflated_sharpe(r["_sr_daily"], r["days"], r["_skew"], r["_kurt"], len(trial))
             r["trials"] = len(trial)
     return rows
 
