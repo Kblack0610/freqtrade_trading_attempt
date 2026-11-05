@@ -67,6 +67,10 @@ SELECT c.strategy, c.exchange, c.score, c.ready, c.passed, jsonb_array_length(c.
 FROM confidence c LEFT JOIN strategy_windows w ON w.strategy = c.strategy AND w.exchange = c.exchange AND w.win = '365d'
 WHERE c.score IS NOT NULL ORDER BY c.ready DESC, c.score DESC, c.strategy, c.exchange
 """
+# Until confidence.scores() has min_population members it scores nobody; these show how far off that is.
+MEMBERS = "SELECT count(*) AS n FROM confidence WHERE oos_trades >= %s"
+NEAR = """SELECT strategy, exchange, oos_trades, oos_expectancy FROM confidence WHERE oos_trades > 0
+ORDER BY oos_trades DESC, strategy, exchange LIMIT 30"""
 SUGGESTIONS = "SELECT * FROM suggestions ORDER BY score DESC NULLS LAST, strategy, exchange, bot"
 MIN_TRADES = 20  # below this a window's numbers are shown but not ranked
 # Lookahead bias voids the backtest, so it ranks last. Recursive bias only warns: the flagged indicator may not feed a signal.
@@ -373,10 +377,26 @@ def suggestions(request: Request):
     return page(request, "suggestions.html", sections=SECTIONS, by_kind=by_kind)
 
 
+def population(c: dict) -> dict:
+    """How many strategies count toward the score's population, and the ones with out-of-sample trades so far."""
+    return {"have": rows(MEMBERS, (c["min_member_trades"],))[0]["n"], "need": c["min_population"],
+            "member_trades": c["min_member_trades"], "rows": rows(NEAR)}
+
+
+@app.get("/guide", response_class=HTMLResponse)
+def guide(request: Request):
+    user_of(request)
+    c = suggest.load_config()["confidence"]
+    return page(request, "guide.html", need=c["min_population"], member_trades=c["min_member_trades"],
+                ready=c["ready_score"], oos=c["min_oos_trades"])
+
+
 @app.get("/confidence", response_class=HTMLResponse)
 def confidence(request: Request):
     user_of(request)
-    return page(request, "confidence.html", board=rows(CONFIDENCE))
+    board = rows(CONFIDENCE)
+    pop = None if any(r["score"] is not None for r in board) else population(suggest.load_config()["confidence"])
+    return page(request, "confidence.html", board=board, pop=pop)
 
 
 @app.get("/book", response_class=HTMLResponse)
@@ -385,12 +405,13 @@ def book(request: Request):
     cfg = suggest.load_config()
     bands = {(r["strategy"], r["exchange"], r["basis"], r["horizon_months"]): {**r, "after_tax": book_lab.median_after_tax(r, cfg)}
              for r in rows("SELECT * FROM book")}
-    return page(request, "book.html", board=rows(BOOK), bands=bands, budget=book_lab.budget(cfg),
+    board = rows(BOOK)
+    return page(request, "book.html", board=board, bands=bands, pop=None if board else population(cfg["confidence"]), budget=book_lab.budget(cfg),
                 hurdle=book_lab.hurdle(cfg), yield_=cfg["book"]["tbill_yield"], tax=cfg["book"]["tax_short"],
                 portfolio=rows("SELECT * FROM portfolio ORDER BY worst_corr"),
                 benchmarks=rows("SELECT * FROM benchmarks ORDER BY end_day - start_day, name"),
                 short=cfg["book"]["horizon_months"][0], long=cfg["book"]["horizon_months"][-1],
-                need=cfg["confidence"]["min_population"], stake=cfg["book"]["stages"][0]["stake"])
+                stake=cfg["book"]["stages"][0]["stake"])
 
 
 @app.get("/runs", response_class=HTMLResponse)

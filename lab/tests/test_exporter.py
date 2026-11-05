@@ -65,9 +65,10 @@ def test_watch_metrics(conn):
     import db
     from web.exporter import TraderCollector
 
+    now = dt.datetime.now(dt.timezone.utc)  # not the module's NOW: the age check is relative to the scrape
     conn.execute("INSERT INTO watch (bot, checked_at, seen_at, state, capital, equity, day_open, breached_at) VALUES "
-                 "('a', %s, %s, 'paused', 1000, 960, 1000, %s)", (NOW, NOW - dt.timedelta(minutes=6), NOW))
-    conn.execute("INSERT INTO watch (bot, checked_at, seen_at, error) VALUES ('new', %s, %s, 'refused')", (NOW, NOW))
+                 "('a', %s, %s, 'paused', 1000, 960, 1000, %s)", (now, now - dt.timedelta(minutes=6), now))
+    conn.execute("INSERT INTO watch (bot, checked_at, seen_at, error) VALUES ('new', %s, %s, 'refused')", (now, now))
     conn.commit()
     m = scrape(TraderCollector(db.connect))
     assert m['trader_watch_day_loss_ratio{bot="a"}'] == 0.04

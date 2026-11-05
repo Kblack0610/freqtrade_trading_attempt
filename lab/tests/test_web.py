@@ -80,7 +80,7 @@ def test_healthz_needs_no_sign_in(site):
     assert site[1].get("/healthz").text == "ok"
 
 
-@pytest.mark.parametrize("path", ["/", "/bots/x", "/strategies", "/strategies/x", "/suggestions", "/confidence", "/book", "/data", "/runs", "/runs/1"])
+@pytest.mark.parametrize("path", ["/", "/bots/x", "/strategies", "/strategies/x", "/suggestions", "/confidence", "/book", "/guide", "/data", "/runs", "/runs/1"])
 def test_signed_out_goes_to_login(site, path):
     r = site[1].get(path)
     assert r.status_code == 303 and r.headers["location"] == "/login"
@@ -237,6 +237,29 @@ def test_book_shows_no_number_until_a_strategy_is_scored(conn, signed_in):
     assert "not enough months" in signed_in[1].get("/book").text
 
 
+def test_until_scored_both_pages_show_how_far_the_population_is(conn, signed_in):
+    gates = Jsonb([{"gate": "bias", "pass": True}, {"gate": "score", "pass": False}])
+    for name, trades, mean in (("Alpha", 42, 0.0123), ("Beta", 12, -0.004)):
+        conn.execute("INSERT INTO confidence (strategy, exchange, score, ready, passed, oos_trades, oos_expectancy, gates) "
+                     "VALUES (%s, 'okx', NULL, false, 1, %s, %s, %s)", (name, trades, mean, gates))
+    for path in ("/book", "/confidence"):
+        body = signed_in[1].get(path).text
+        assert "<strong>1 of 20</strong>" in body and "Unscored" in body, path
+        assert "1.23%" in body and "-0.40%" in body and "no, 18 short" in body, path
+        assert body.index("Alpha") < body.index("Beta"), path
+    # Negative control: once anything is scored, the scored board replaces the panel.
+    conn.execute("UPDATE confidence SET score = 71.4 WHERE strategy = 'Alpha'")
+    for path in ("/book", "/confidence"):
+        assert "How close the score is" not in signed_in[1].get(path).text, path
+
+
+def test_guide_lists_every_page_in_reading_order(conn, signed_in):
+    body = signed_in[1].get("/guide").text
+    order = [body.index(f'<li><a href="{p}">') for p in ("/", "/data", "/strategies", "/walkforward", "/suggestions",
+                                                          "/confidence", "/book", "/runs")]
+    assert order == sorted(order) and "needs 20 strategies with at least 30" in body and "trial register" in body
+
+
 def test_book_sets_a_strategy_beside_hold(conn, signed_in):
     conn.execute("INSERT INTO confidence (strategy, exchange, score, ready, passed, oos_trades, gates) "
                  "VALUES ('Alpha', 'binanceus', 71.4, false, 1, 42, %s)", (Jsonb([{"gate": "bias", "pass": True}],),))
@@ -247,7 +270,8 @@ def test_book_sets_a_strategy_beside_hold(conn, signed_in):
                          "0.25, 0.3, 5000, 12)", (basis, months, mid))
     body = signed_in[1].get("/book").text
     assert "Alpha" in body and "31%" in body and "12%" in body and "Not enough evidence" not in body
-    assert "24% / 9%" in body and "T-bills at 4.4%" in body and "USDT" in body and "No set yet" in body
+    for needle in ("24% / 9%", "T-bills at 4.4%", "USDT", "No set yet"):
+        assert needle in body, needle
     conn.execute("INSERT INTO portfolio VALUES ('Alpha', 'binanceus', 0.21, 0.4, 0.25, 900)")
     assert "0.21" in signed_in[1].get("/book").text
 

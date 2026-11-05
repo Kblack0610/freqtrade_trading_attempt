@@ -1,0 +1,17 @@
+<h2>How close the score is</h2>
+<p><strong>{{ pop.have }} of {{ pop.need }}</strong> strategies have at least {{ pop.member_trades }} out-of-sample trades. The score needs {{ pop.need }}: it judges each strategy against the spread of all of them, and with fewer that spread is guessed, so nearly everything scores high. The bar is not lowered to get a number sooner (<code>lab/suggest.toml</code> [confidence]). More walk-forward months and venues fill it.</p>
+{% if pop.rows %}
+<p class="muted">Unscored: each strategy's raw average net return per trade on months tuning never saw, before shrinking toward the rest. A high one with few trades is usually luck. These are not projections.</p>
+<div class="scroll">
+<table>
+  <thead><tr><th>Strategy</th><th>Exchange</th><th class="n">Out-of-sample trades</th><th class="n">Counts toward the {{ pop.need }}</th><th class="n">Average per trade, unscored</th></tr></thead>
+  <tbody>
+  {% for r in pop.rows %}
+  <tr><td><a href="/strategies/{{ r.strategy }}?exchange={{ r.exchange }}">{{ r.strategy }}</a></td><td>{{ r.exchange }}</td><td class="n">{{ r.oos_trades }}</td><td class="n">{{ "yes" if r.oos_trades >= pop.member_trades else "no, " ~ (pop.member_trades - r.oos_trades) ~ " short" }}</td><td class="n {{ r.oos_expectancy | tone }}">{{ r.oos_expectancy | pct(2) }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}
+<p class="muted">No strategy has out-of-sample trades yet: they come from the weekly walk-forward.</p>
+{% endif %}

@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Guide{% endblock %}
+{% block body %}
+<h1>How to read this site</h1>
+<p class="muted">Read the pages in this order. Each one narrows what the one before it showed. Nothing here trades: the league is paper only.</p>
+<ol>
+  <li><a href="/">Overview</a>: the dry-run bots and their paper profit. This is a few weeks of live prices, too short to judge a strategy on.</li>
+  <li><a href="/data">Data</a>: which exchanges, pairs and timeframes have candles, and from when. A strategy is only tested where its data is complete.</li>
+  <li><a href="/strategies">Strategies</a>: every strategy backtested on all stored history, ranked by the low end of its Sharpe interval, so it has to look good even on an unlucky draw. Grey rows have under 20 trades. A backtest is in sample: the strategy may have been written or tuned on these same years, so treat this page as a shortlist, not proof.</li>
+  <li><a href="/walkforward">Walk-forward</a>: each month is tuned on the months before it, then traded on that month, which tuning never saw. This is the first page whose numbers are out of sample.</li>
+  <li><a href="/suggestions">Suggestions</a>: promote, demote, retire, fix and retune, for the dry-run league only.</li>
+  <li><a href="/confidence">Confidence</a>: whether a strategy has earned a small real-money test. The score is the chance its true net return per trade is above zero. It needs {{ need }} strategies with at least {{ member_trades }} out-of-sample trades each before it scores anyone; until then the page shows how far off that is. Ready means every gate passes, including {{ oos }} out-of-sample trades, and a score of at least {{ ready }}.</li>
+  <li><a href="/book">Book</a>: for scored strategies only, a range of returns over one and five years beside holding BTC and beside cash, after a guessed tax, and what each stage of a real-money test would cost.</li>
+  <li><a href="/runs">Runs</a>: when each analysis ran and what failed.</li>
+</ol>
+<h2>What no page can tell you</h2>
+<p>No test proves a strategy will keep working. The most this lab can show is that one made money on months it was never tuned on, on more than one venue, after fees and slippage, and that it still did on the locked-away months from <code>[lockbox] start</code>. Every strategy, venue and parameter set ever tried is counted in the trial register, and the more there are, the higher the bar each one must clear, because some of a large number of tries will look good by chance.</p>
+{% endblock %}
