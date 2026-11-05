@@ -100,6 +100,11 @@ def _errors(text: str) -> str:
     return " | ".join(bad[-3:] or lines[-3:])[:800]
 
 
+def load_error(source: str, name: str) -> str | None:
+    """freqtrade loads a strategy by name only from a file containing the literal `class <name>(`, so a space before the paren imports fine yet never loads."""
+    return None if f"class {name}(" in source else f"freqtrade cannot load it by name: write `class {name}(` with no space"
+
+
 class Cli:
     """The real thing: freqtrade subprocesses, so one strategy's crash or leak stays in its process."""
 
@@ -118,11 +123,12 @@ class Cli:
         for o in StrategyResolver.search_all_objects(cfg, enum_failed=True, recursive=True):
             loc = Path(o["location"])
             cls = o.get("class")
-            out.append({"name": o.get("name") or loc.stem, "file": str(loc.relative_to(REPO)),
+            name = o.get("name") or loc.stem
+            out.append({"name": name, "file": str(loc.relative_to(REPO)),
                         "file_hash": sha256(loc.read_bytes()),
                         "timeframe": getattr(cls, "timeframe", None) if cls else None,
                         "startup_candle_count": getattr(cls, "startup_candle_count", None) if cls else None,
-                        "load_error": None if cls else "failed to import"})
+                        "load_error": load_error(loc.read_text(encoding="utf-8"), name) if cls else "failed to import"})
         return out
 
     def backtest(self, strategy: str, exchange: str, start: dt.date, end: dt.date) -> dict:

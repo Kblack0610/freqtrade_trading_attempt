@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 # NOT TO BE USED FOR LIVE!!!!!!
 
-class multi_tf (IStrategy):
+class multi_tf(IStrategy):
 
     def version(self) -> str:
         return "v1"
