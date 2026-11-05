@@ -22,6 +22,7 @@ Results go to the `trader` database in the cluster's shared Postgres, which the 
 | `lab/suggest.py`, `lab/suggest.toml` | After each analysis and walk-forward: promote, watch, demote, retire, fix and retune suggestions from the derived tables, with the thresholds as data (see Suggestions) |
 | `lab/confidence.py` | After each analysis and walk-forward: the score and gates that say whether a strategy has earned real money, and the trial register (see Confidence) |
 | `lab/book.py` | After the score: what each scored strategy might return beside holding BTC, and what each stage costs and can lose. |
+| `lab/live.py` | Live bot entry point: always refuses, nothing deploys it. See `docs/live.md` |
 | `lab/ingest.py` | Hourly job: every bot's trades (closed and open) and a snapshot (profit, balance, dry-run flag) into Postgres |
 | `lab/watcher.py` | Daily loss watch: each bot's marked-to-market equity every 60 s into `watch`, and the kill drill. See Watcher |
 | `lab/migrate.py`, `lab/migrations/` | Schema: numbered SQL files applied once each, in order, under an advisory lock; runs as the init container of every job |
@@ -33,7 +34,7 @@ Results go to the `trader` database in the cluster's shared Postgres, which the 
 
 ## The no-real-money guard
 
-`lab/league.py` exits 2 before freqtrade starts if any `FREQTRADE__` env var is set, if the merged config is not `dry_run: true`, if it is not spot, or if the exchange block carries a key, secret, password, uid, private key or wallet address. Public market data needs no keys, so the exchange files keep them empty. `lab/ingest.py` exits 1 if any bot's `show_config` says it is not dry run.
+`lab/league.py` exits 2 before freqtrade starts if any `FREQTRADE__` env var is set, if the merged config is not `dry_run: true`, if it is not spot, or if the exchange block carries a key, secret, password, uid, private key or wallet address. Public market data needs no keys, so the exchange files keep them empty. `lab/ingest.py` exits 1 if any bot's `show_config` says it is not dry run. `lab/live.py` is the entry point a live bot would use: it refuses while its own guard is on, and nothing deploys it (`docs/live.md`).
 
 ## Run locally
 
