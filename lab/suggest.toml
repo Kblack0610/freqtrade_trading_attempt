@@ -140,6 +140,22 @@ capital = 2000.0
 stake = 200.0
 max_open = 3
 
+[live]
+# What lab/live.py would run. Nothing deploys it, and its guard is on. Stake and slots come from this stage.
+stage = "Stage 1"
+# Both keep a stop on the exchange through an outage; coinbase cannot, and okx and kucoin are research venues.
+venues = ["binanceus", "kraken"]
+# Over $1M traded in 24 hours on both venues, measured 2026-11-05. Binance.US ADA was $156k and DOT $4k.
+pairs = ["BTC/USD", "ETH/USD", "SOL/USD", "XRP/USD"]
+
+[live.order_types]
+entry = "limit"
+exit = "limit"
+emergency_exit = "market"
+stoploss = "limit"
+stoploss_on_exchange = true
+stoploss_on_exchange_interval = 60
+
 [watcher]
 # One pass over every bot. A bot has no equity event, so this is a poll.
 cadence_seconds = 60
