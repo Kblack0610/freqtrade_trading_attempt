@@ -56,10 +56,11 @@ MAX_ATTEMPTS = analyze.MAX_ATTEMPTS
 FAIL_SHARE = analyze.FAIL_SHARE
 
 
-def folds(today: dt.date, n: int | None = None, train_days: int | None = None) -> list[tuple[dt.date, dt.date, dt.date]]:
-    """(train_start, test_start, test_end) for the last n (FOLDS) whole calendar months, oldest first."""
+def folds(today: dt.date, n: int | None = None, train_days: int | None = None,
+          lockbox: dt.date | None = None) -> list[tuple[dt.date, dt.date, dt.date]]:
+    """(train_start, test_start, test_end) for the last n (FOLDS) whole months before the lockbox, oldest first."""
     n, train_days = n or FOLDS, train_days or TRAIN_DAYS
-    out, end = [], today.replace(day=1)
+    out, end = [], min(today.replace(day=1), lockbox or today)
     for _ in range(n):
         start = (end - dt.timedelta(days=1)).replace(day=1)
         out.append((start - dt.timedelta(days=train_days), start, end))
@@ -165,13 +166,14 @@ def plan(conn, found: list[dict], first: dict, today: dt.date, ft_version: str) 
     done = {(s, e, f): (k, ok, n) for s, e, f, k, ok, n in conn.execute(
         "SELECT strategy, exchange, fold_start, cache_key, ok, attempts FROM walkforward")}
     todo, cached, skipped = [], 0, []
+    lockbox = suggest.load_config()["lockbox"]["start"]
     for s in found:
         for ex in EXCHANGES:
             since = first.get((ex, s["timeframe"]))
             if since is None:
                 skipped.append(f"{s['name']} on {ex}: {s['timeframe']} not fully backfilled")
                 continue
-            for fold in folds(today):
+            for fold in folds(today, lockbox=lockbox):
                 if fold[0] < since.date():
                     skipped.append(f"{s['name']} on {ex} {fold[1]:%Y-%m}: training starts before its first candle")
                     continue

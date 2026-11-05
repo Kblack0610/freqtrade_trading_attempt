@@ -261,7 +261,8 @@ def load_facts(conn, cfg: dict, now: dt.datetime | None = None) -> dict:
         "LEFT JOIN bot_trades t ON t.bot = b.name AND NOT t.is_open AND t.close_date >= %s "
         "WHERE b.last_seen >= %s GROUP BY 1, 2, 3", (since, now - ROSTER_STALE))]
     walkforward: dict = {}
-    cur.execute("SELECT * FROM walkforward WHERE ok ORDER BY strategy, exchange, fold_start")
+    cur.execute("SELECT * FROM walkforward WHERE ok AND test_end <= %s ORDER BY strategy, exchange, fold_start",
+                (cfg["lockbox"]["start"],))
     cols = [c.name for c in cur.description]
     for row in cur:
         r = dict(zip(cols, row))

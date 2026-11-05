@@ -50,7 +50,8 @@ FROM bots b JOIN bot_trades t ON t.bot = b.name GROUP BY 1, 2
 
 PAIRS = """
 SELECT c.strategy, c.exchange, count(*), sum(t.profit_ratio)
-FROM backtest_trades t JOIN backtest_chunks c ON c.id = t.chunk_id GROUP BY c.strategy, c.exchange, t.pair
+FROM backtest_trades t JOIN backtest_chunks c ON c.id = t.chunk_id WHERE t.close_date < %s
+GROUP BY c.strategy, c.exchange, t.pair
 """
 
 
@@ -69,7 +70,9 @@ def load(conn, cfg: dict, now: dt.datetime | None = None) -> dict:
     now = now or dt.datetime.now(dt.timezone.utc)
     facts = suggest.load_facts(conn, cfg, now)
     daily: dict = {}
-    for s, e, day, ret in conn.execute("SELECT strategy, exchange, day, ret FROM strategy_daily ORDER BY 1, 2, 3"):
+    lockbox = cfg["lockbox"]["start"]
+    for s, e, day, ret in conn.execute("SELECT strategy, exchange, day, ret FROM strategy_daily WHERE day < %s "
+                                       "ORDER BY 1, 2, 3", (lockbox,)):
         daily.setdefault((s, e), []).append((day, ret))
     facts["daily"] = {k: pd.Series(dict(v), dtype=float) for k, v in daily.items()}
     close = dict(conn.execute("SELECT day, btc_close FROM regimes ORDER BY day").fetchall())
@@ -81,7 +84,7 @@ def load(conn, cfg: dict, now: dt.datetime | None = None) -> dict:
     facts["live"] = {(s, e): {"since": since, "closed": closed, "stopouts": stops}
                      for s, e, since, closed, stops in conn.execute(LIVE)}
     facts["pairs"] = {}
-    for s, e, n, total in conn.execute(PAIRS):
+    for s, e, n, total in conn.execute(PAIRS, (lockbox,)):
         facts["pairs"].setdefault((s, e), []).append((n, total))
     facts["now"] = now
     return facts
