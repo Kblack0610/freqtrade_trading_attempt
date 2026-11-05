@@ -171,3 +171,5 @@ def test_retune_needs_the_newest_months_beaten_and_a_tuned_interval_above_zero()
     assert "2026-03-05 to 2026-09-01" in r["action"]
     near = suggest.retune_rows({**f, "walkforward": {("NearMiss", "binanceus"): [fold(8, 0.01, 0.05), fold(9, 0.01, 0.05)]}}, CFG)
     assert near == [], "24 pooled trades are under min_trades"
+    tie = suggest.retune_rows({**f, "walkforward": {("Good", "binanceus"): [fold(m, 0.01, 0.0101) for m in (7, 8, 9)]}}, CFG)
+    assert tie == [], "beating as-is by noise every month is not a gain"
