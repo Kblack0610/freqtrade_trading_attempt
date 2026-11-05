@@ -166,3 +166,12 @@ def test_planted_lookahead_is_flagged_and_a_clean_strategy_is_not():
     planted = analyze.bias_one("lookahead", "PlantedLookahead", str(FIXTURES))
     assert planted["has_bias"] is True and "next_close" in planted["biased_indicators"]
     assert analyze.bias_one("lookahead", "Strategy001", None)["has_bias"] is False
+
+
+@pytest.mark.skipif(not DATA.exists(), reason="needs backfilled binanceus data under LAB_RESULTS")
+def test_a_strategy_in_a_subfolder_backtests_and_checks(monkeypatch):
+    monkeypatch.setattr(analyze, "EXCHANGES", ["binanceus"])
+    r = analyze.Cli().backtest("BbandRsi", "binanceus", dt.date(2025, 9, 1), dt.date(2025, 11, 1))
+    assert r["ok"], r["error"]
+    res = analyze.bias_one("lookahead", "BbandRsi", None)
+    assert "Impossible to load" not in (res.get("error") or ""), res

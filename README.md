@@ -138,6 +138,7 @@ Sign-in cannot complete against a fake Forgejo; mint a cookie with `auth.make_se
 | `Orderbook not available for Coinbase Advanced` | freqtrade has no order book for coinbase | `exchanges/coinbase.json` sets `use_order_book: false` for entry and exit pricing |
 | A chunk failed with `exit 0: ...` | freqtrade exited 0 on an error and wrote no result zip | The zip is the proof of a run; the chunk's `error` holds freqtrade's last error lines, shown on the run page |
 | A run's Skipped list says `<strategy> on <ex>: no 1m candles` | The strategy's timeframe is not backfilled there (BinHV45 wants 1m) | Expected until 1m is added to backfill's `TIMEFRAMES` |
+| Bias checks or chunks fail with `Impossible to load Strategy '<name>'` while `list-strategies` finds it | The command ran without `--recursive-strategy-search`, so only top-level files resolve | Every freqtrade call in `lab/` passes it; `test_a_strategy_in_a_subfolder_backtests_and_checks` covers backtest and bias |
 | A strategy shows `fails to load` | It does not import on the pinned image | Fix it or delete it; CI fails on a load error, so this only shows for a file that broke after a freqtrade bump |
 | Recursive check `not checked: invalid startup candle count of 0` | The strategy sets no `startup_candle_count` | Set one in the strategy; the lookahead verdict still counts |
 | `pandas` `get_loc() got an unexpected keyword argument 'method'` or `fillna(method=...)` | pandas 3 removed both | Use `get_indexer(..., method=...)` and `ffill()`; FixedRiskRewardLoss was deleted for the first |
