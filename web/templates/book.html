@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Book{% endblock %}
 {% macro band(b) %}{% if b %}{{ b.p5 | pct(0) }} / <span class="{{ b.p50 | tone }}">{{ b.p50 | pct(0) }}</span> / {{ b.p95 | pct(0) }}{% else %}<span class="muted">not enough months</span>{% endif %}{% endmacro %}
+{% macro taxed(s, h) %}{{ s.after_tax | pct(0) if s else "-" }} / {{ h.after_tax | pct(0) if h else "-" }}{% endmacro %}
 {% block body %}
 <h1>Strategy book</h1>
 <p class="muted">What each scored strategy might return if the months it was tested on repeat, beside holding BTC over the same months. Each range is the 5th, 50th and 95th percentile. These are estimates from a small number of months, not promises. Nothing here trades: the league is paper only.</p>
@@ -8,13 +9,14 @@
 <p>{{ board | selectattr("ready") | list | length }} of {{ board | length }} scored strategy and exchange pairs are ready for a small real-money test.</p>
 <div class="scroll">
 <table>
-  <thead><tr><th>Strategy</th><th>Exchange</th><th class="n">Score</th><th class="n">Gates passed</th><th class="n">Months tested</th><th class="n">{{ short // 12 }} year</th><th class="n">Hold, {{ short // 12 }} year</th><th class="n">{{ long // 12 }} years</th><th class="n">Hold, {{ long // 12 }} years</th><th class="n">Chance of a losing year</th><th class="n">Typical worst fall in a year</th><th class="n">Fees a year at a ${{ stake | int }} stake</th></tr></thead>
+  <thead><tr><th>Strategy</th><th>Exchange</th><th class="n">Score</th><th class="n">Gates passed</th><th class="n">Months tested</th><th class="n">{{ short // 12 }} year</th><th class="n">Hold, {{ short // 12 }} year</th><th class="n">{{ long // 12 }} years</th><th class="n">Hold, {{ long // 12 }} years</th><th class="n">Median after tax, {{ short // 12 }} year, strategy / hold</th><th class="n">Median after tax, {{ long // 12 }} years, strategy / hold</th><th class="n">Chance of a losing year</th><th class="n">Typical worst fall in a year</th><th class="n">Fees a year at a ${{ stake | int }} stake</th></tr></thead>
   <tbody>
   {% for r in board %}
   {% set y = bands.get((r.strategy, r.exchange, "strategy", short)) %}
   <tr><td><a href="/strategies/{{ r.strategy }}?exchange={{ r.exchange }}">{{ r.strategy }}</a></td><td>{{ r.exchange }}</td><td class="n">{{ "%.0f" | format(r.score) }}</td><td class="n">{{ r.passed }} of {{ r.gates }}</td><td class="n">{{ y.basis_months if y else "-" }}</td>
     <td class="n">{{ band(y) }}</td><td class="n">{{ band(bands.get((r.strategy, r.exchange, "hold", short))) }}</td>
     <td class="n">{{ band(bands.get((r.strategy, r.exchange, "strategy", long))) }}</td><td class="n">{{ band(bands.get((r.strategy, r.exchange, "hold", long))) }}</td>
+    <td class="n">{{ taxed(y, bands.get((r.strategy, r.exchange, "hold", short))) }}</td><td class="n">{{ taxed(bands.get((r.strategy, r.exchange, "strategy", long)), bands.get((r.strategy, r.exchange, "hold", long))) }}</td>
     <td class="n">{{ y.prob_loss | pct(0) if y else "-" }}</td><td class="n">{{ y.exp_max_drawdown | pct(0) if y else "-" }}</td>
     <td class="n">{% if r.trades and r.fee_per_trade is not none %}${{ "%.0f" | format(r.trades * r.fee_per_trade * stake) }}{% else %}-{% endif %}</td></tr>
   {% endfor %}
@@ -23,6 +25,23 @@
 </div>
 {% else %}
 <p><strong>Not enough evidence.</strong> 0 of {{ need }} strategies needed have a score, so no projection is shown. A score needs walk-forward results on at least {{ need }} strategies.</p>
+{% endif %}
+<p>The hurdle is cash: T-bills at {{ yield_ | pct(1) }} a year{% for h in hurdle %}, {{ h.total | pct(0) }} over {{ h.months // 12 }} year{{ "s" if h.months > 12 }} ({{ h.after_tax | pct(0) }} after tax){% endfor %}, with no chance of a loss if held to maturity. The rate is held flat, which no real rate does. After tax uses a guessed {{ tax | pct(0) }} rate: a strategy pays it every year, and hold once, on selling.</p>
+<h2>Running bots together</h2>
+{% if portfolio %}
+<p class="muted">The best scored pairs that do not move alike, in equal shares, up to the Stage 2 limit. These use each strategy's whole backtest before the lockbox, not its tuned months, so treat the falls as a comparison, not an estimate.</p>
+<div class="scroll">
+<table>
+  <thead><tr><th>Strategy</th><th>Exchange</th><th class="n">Highest correlation with another bot</th><th class="n">Worst fall alone</th><th class="n">Worst fall together</th><th class="n">Days</th></tr></thead>
+  <tbody>
+  {% for p in portfolio %}
+  <tr><td>{{ p.strategy }}</td><td>{{ p.exchange }}</td><td class="n">{{ "%.2f" | format(p.worst_corr) }}</td><td class="n">{{ p.alone_drawdown | pct(0) }}</td><td class="n">{{ p.combined_drawdown | pct(0) }}</td><td class="n">{{ p.days }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}
+<p class="muted">No set yet: it needs two scored pairs that do not move alike.</p>
 {% endif %}
 <h2>Long term against short term</h2>
 {% if benchmarks %}
@@ -52,5 +71,5 @@
   </tbody>
 </table>
 </div>
-<p>Running costs: about ${{ budget.vps_year | int }} a year for a server with a fixed address, and about ${{ budget.cpa_once | int }} once for an accountant. A gap or an exchange failure can lose more than these limits.</p>
+<p>Running costs: about ${{ budget.vps_year | int }} a year for a server with a fixed address, and about ${{ budget.cpa_once | int }} once for an accountant. A gap or an exchange failure can lose more than these limits. Balances on okx and kucoin are in USDT, not dollars: if USDT loses its peg, those balances fall with it, and no test here covers that.</p>
 {% endblock %}

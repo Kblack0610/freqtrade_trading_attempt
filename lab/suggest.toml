@@ -125,6 +125,12 @@ benchmark_fee = 0.004
 trend_days = 200
 tax_short = 0.24
 tax_long = 0.15
+# What cash earns, the hurdle under everything on /book: the 1-year Treasury near 4.4% on 2026-11-04, read from
+# secondary sources. Refresh it by hand; a projection holds it flat, which no real rate does.
+tbill_yield = 0.044
+# Stage 2's set: at most this many bots, and none correlated above this with one already in. Judgment calls.
+portfolio_bots = 3
+portfolio_max_corr = 0.5
 
 # Proposed in the plan, set by the human. Paper only: lab/league.py refuses real money whatever this says.
 [[book.stages]]

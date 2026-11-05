@@ -383,8 +383,11 @@ def confidence(request: Request):
 def book(request: Request):
     user_of(request)
     cfg = suggest.load_config()
-    bands = {(r["strategy"], r["exchange"], r["basis"], r["horizon_months"]): r for r in rows("SELECT * FROM book")}
+    bands = {(r["strategy"], r["exchange"], r["basis"], r["horizon_months"]): {**r, "after_tax": book_lab.median_after_tax(r, cfg)}
+             for r in rows("SELECT * FROM book")}
     return page(request, "book.html", board=rows(BOOK), bands=bands, budget=book_lab.budget(cfg),
+                hurdle=book_lab.hurdle(cfg), yield_=cfg["book"]["tbill_yield"], tax=cfg["book"]["tax_short"],
+                portfolio=rows("SELECT * FROM portfolio ORDER BY worst_corr"),
                 benchmarks=rows("SELECT * FROM benchmarks ORDER BY end_day - start_day, name"),
                 short=cfg["book"]["horizon_months"][0], long=cfg["book"]["horizon_months"][-1],
                 need=cfg["confidence"]["min_population"], stake=cfg["book"]["stages"][0]["stake"])
