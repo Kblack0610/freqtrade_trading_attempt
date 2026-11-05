@@ -2,3 +2,4 @@
 # sqlalchemy, fastapi, uvicorn, jinja2, httpx and requests.
 psycopg[binary]==3.2.12
 pytest==8.4.2
+prometheus-client==0.22.1

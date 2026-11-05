@@ -154,6 +154,7 @@ The first run fetches full history (5m since 2019 on binanceus is the long pole)
 | `SESSION_KEY` | Cookie signing key, `openssl rand -hex 32` |
 | `ALLOWED_USERS` | Comma-separated Forgejo logins, default `kblack0610` |
 | `TRADER_WEB_TZ` | Time zone pages show times in, default UTC |
+| `METRICS_PORT` | When set, Prometheus metrics are served on this port (home-config uses 9100), apart from the site port so the Ingress never exposes them |
 
 The site refuses to start when a sign-in variable is missing. Locally, against a copy of the data:
 
@@ -163,6 +164,21 @@ docker run --rm -p 127.0.0.1:18765:8000 --entrypoint uvicorn -e DATABASE_URL=...
 ```
 
 Sign-in cannot complete against a fake Forgejo; mint a cookie with `auth.make_session(auth.Config(), "kblack0610")` under the same `SESSION_KEY` and send it as `trader_session`.
+
+### Metrics
+
+`web/exporter.py` reads the database on each scrape, so the numbers are as fresh as the tables: bot state is as old as the newest hourly ingest. home-config alerts on these:
+
+| Metric | Labels | Meaning |
+|---|---|---|
+| `trader_db_up` | | 0 when the scrape could not read the database; every other metric is absent then |
+| `trader_bot_dry_run` | `bot` | 1 dry run, 0 trading real money, per the newest snapshot |
+| `trader_bot_snapshot_age_seconds`, `trader_bot_snapshot_error` | `bot` | Age of the newest snapshot, and 1 when ingest got an API error instead of numbers |
+| `trader_bot_open_trades`, `trader_bot_closed_trades`, `trader_bot_profit_pct` | `bot` | The newest snapshot's numbers |
+| `trader_ingest_age_seconds` | | Since any snapshot was written |
+| `trader_run_started_timestamp_seconds`, `trader_run_finished_timestamp_seconds`, `trader_run_ok`, `trader_run_last_ok_timestamp_seconds` | `kind` (`analysis`, `walkforward`) | Newest run started, newest run finished and whether it succeeded, newest success |
+| `trader_candle_age_seconds`, `trader_coverage_age_seconds`, `trader_coverage_series` | `exchange` | Newest stored candle, newest backfill write, series stored |
+| `trader_suggestions` | `kind` | Open suggestions |
 
 ## Troubleshooting
 
