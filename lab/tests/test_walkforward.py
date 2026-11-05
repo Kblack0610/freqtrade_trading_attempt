@@ -22,7 +22,7 @@ class FakeRunner:
         return "test"
 
     def fold(self, strategy, file, exchange, fold, seed):
-        self.calls.append((strategy, fold[1], seed))
+        self.calls.append((strategy, fold[1], seed, exchange))
         if strategy in self.fail:
             return {"ok": False, "error": "hyperopt exit 2: boom", "duration_s": 1.0}
         if strategy in self.hole:
@@ -40,7 +40,9 @@ def wlab(conn, monkeypatch):
     monkeypatch.setattr(wf, "ONLY", set())
     monkeypatch.setattr(wf, "FOLDS", 3)
     monkeypatch.setattr(wf, "WORKERS", 2)
+    monkeypatch.setattr(wf, "EXCHANGES", ["binanceus"])
     monkeypatch.setattr(wf.suggest, "run", lambda c: {})  # keeps the fixture's suggestions, which pick the candidates
+    backfilled(conn, "binanceus", "2019-09-01")
     now = dt.datetime.now(dt.timezone.utc)
     for name in ("Live", "Promising", "Watched", "Leaky", "Broken", "Idle"):
         conn.execute("INSERT INTO strategies (name, file, file_hash, timeframe, load_error) VALUES (%s, %s, %s, '5m', %s)",
@@ -55,6 +57,12 @@ def wlab(conn, monkeypatch):
     return conn
 
 
+def backfilled(conn, ex, first):
+    for pair in analyze.whitelist(ex):
+        conn.execute("INSERT INTO data_coverage (exchange, pair, timeframe, first_ts, last_ts, rows, oldest_reached) "
+                     "VALUES (%s, %s, '5m', %s, now(), 1, true)", (ex, pair, first))
+
+
 def test_folds_are_the_last_whole_months_oldest_first():
     assert wf.folds(TODAY, 3, 180) == [
         (dt.date(2026, 2, 2), dt.date(2026, 8, 1), dt.date(2026, 9, 1)),
@@ -67,13 +75,43 @@ def test_candidates_are_the_league_then_promote_then_watch_and_skip_biased_or_br
     assert [c["name"] for c in wf.candidates(wlab)] == ["Live", "Promising", "Watched"]
 
 
+def test_then_each_venues_best_year_in_turn_up_to_the_limit(wlab, monkeypatch):
+    monkeypatch.setattr(wf, "EXCHANGES", ["binanceus", "okx"])
+    for name in ("Okx1", "Okx2", "Bus1", "Coin1"):
+        wlab.execute("INSERT INTO strategies (name, file, file_hash, timeframe) VALUES (%s, 'f.py', 'h', '5m')", (name,))
+    for name, ex, lo in (("Okx1", "okx", 0.003), ("Okx2", "okx", 0.002), ("Bus1", "binanceus", 0.001),
+                         ("Leaky", "okx", 0.009), ("Coin1", "coinbase", 0.05), ("Live", "binanceus", 0.004)):
+        wlab.execute("INSERT INTO strategy_windows (strategy, exchange, win, days, trades, expectancy_lo) "
+                     "VALUES (%s, %s, '365d', 365, 100, %s)", (name, ex, lo))
+    assert [c["name"] for c in wf.candidates(wlab)] == ["Live", "Promising", "Watched", "Okx1", "Bus1", "Okx2"]
+    monkeypatch.setattr(wf, "LIMIT", 4)
+    assert [c["name"] for c in wf.candidates(wlab)] == ["Live", "Promising", "Watched", "Okx1"]
+
+
+def test_every_backfilled_venue_gets_its_own_folds(wlab, monkeypatch):
+    monkeypatch.setattr(wf, "EXCHANGES", ["binanceus", "okx", "kucoin"])
+    monkeypatch.setattr(wf, "ONLY", {"Live"})
+    backfilled(wlab, "okx", "2026-03-01")  # the oldest fold trains from 2026-02-02, so it is skipped there
+    runner = FakeRunner()
+    assert wf.main(runner, TODAY) == 0
+    assert sorted((c[3], c[1]) for c in runner.calls) == [
+        ("binanceus", dt.date(2026, 8, 1)), ("binanceus", dt.date(2026, 9, 1)), ("binanceus", dt.date(2026, 10, 1)),
+        ("okx", dt.date(2026, 9, 1)), ("okx", dt.date(2026, 10, 1))]
+    assert all(seed == metrics.seed_of(s, ex, start) for s, start, seed, ex in runner.calls)
+    assert dict(wlab.execute("SELECT exchange, count(*) FROM walkforward GROUP BY 1").fetchall()) == {"binanceus": 3, "okx": 2}
+    raw = wlab.execute("SELECT raw FROM runs WHERE kind = 'walkforward'").fetchone()[0]
+    assert raw["exchanges"] == ["binanceus", "okx", "kucoin"]
+    assert "Live on kucoin: 5m not fully backfilled" in raw["skipped"]
+    assert "Live on okx 2026-08: training starts before its first candle" in raw["skipped"]
+
+
 def test_a_run_stores_each_fold_and_the_next_run_reuses_it(wlab):
     runner = FakeRunner()
     assert wf.main(runner, TODAY) == 0
     assert len(runner.calls) == 9
     assert sorted({c[1] for c in runner.calls}) == [dt.date(2026, 8, 1), dt.date(2026, 9, 1), dt.date(2026, 10, 1)]
     assert runner.calls[0][1] == dt.date(2026, 10, 1), "the newest month runs first"
-    assert all(seed == metrics.seed_of(s, "binanceus", start) for s, start, seed in runner.calls)
+    assert all(seed == metrics.seed_of(s, "binanceus", start) for s, start, seed, _ in runner.calls)
     row = wlab.execute("SELECT ok, params, base_trades, tuned_profit, is_trades, array_length(tuned_returns, 1), train_start "
                        "FROM walkforward WHERE strategy = 'Live' AND fold_start = '2026-10-01'").fetchone()
     assert row == (True, {"roi": {"0": 0.03}, "stoploss": -0.08}, 10, 0.04, 70, 12, dt.date(2026, 4, 4))
