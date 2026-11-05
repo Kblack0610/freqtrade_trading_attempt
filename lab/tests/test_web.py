@@ -247,6 +247,9 @@ def test_book_sets_a_strategy_beside_hold(conn, signed_in):
                          "0.25, 0.3, 5000, 12)", (basis, months, mid))
     body = signed_in[1].get("/book").text
     assert "Alpha" in body and "31%" in body and "12%" in body and "Not enough evidence" not in body
+    assert "24% / 9%" in body and "T-bills at 4.4%" in body and "USDT" in body and "No set yet" in body
+    conn.execute("INSERT INTO portfolio VALUES ('Alpha', 'binanceus', 0.21, 0.4, 0.25, 900)")
+    assert "0.21" in signed_in[1].get("/book").text
 
 
 def test_chart_draws_only_with_two_points():

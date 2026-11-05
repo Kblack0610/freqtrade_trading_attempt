@@ -86,7 +86,7 @@ def test_run_stores_only_scored_pairs_and_replaces_the_last(conn):
                          (name, start, start, end, r))
     for d, c in closes().items():
         conn.execute("INSERT INTO regimes (day, btc_close) VALUES (%s, %s)", (d.date(), float(c)))
-    assert book.run(conn, CFG) == {"book": 1} and book.run(conn, CFG) == {"book": 1}
+    assert book.run(conn, CFG) == {"book": 1, "portfolio": 0} == book.run(conn, CFG)
     assert conn.execute("SELECT count(*), min(strategy) FROM book").fetchone() == (4, "Good")
     book.run(conn, {**CFG, "lockbox": {"start": dt.date(2000, 1, 1)}})
     assert conn.execute("SELECT count(*) FROM book").fetchone() == (0,)
@@ -136,3 +136,64 @@ def test_every_benchmark_starts_together_and_a_short_history_gets_none():
     hold = next(r for r in out if r["name"] == "Hold BTC" and r["win"] == "1y")
     assert hold["max_drawdown"] == 0 and hold["after_tax_return"] < hold["total_return"]
     assert book.benchmark_rows(series(rising[:100]), series(rising[:100]), CFG) == []
+
+
+def test_run_stores_the_set_from_days_before_the_lockbox(conn):
+    conn.execute("INSERT INTO strategies (name, file, file_hash) VALUES ('A', 'x', 'h'), ('B', 'y', 'h')")
+    returns = daily_returns()
+    for name in ("A", "B"):
+        conn.execute("INSERT INTO confidence (strategy, exchange, score, ready, passed, oos_trades, gates) VALUES "
+                     "(%s, 'x', 80, false, 3, 300, '[]')", (name,))
+        for start, end, r in folds([0.02, -0.01] * 4):
+            conn.execute("INSERT INTO walkforward (strategy, exchange, fold_start, train_start, test_end, cache_key, ok, params, "
+                         "tuned_profit) VALUES (%s, 'x', %s, %s, %s, 'k', true, '{\"buy\": {}}', %s)", (name, start, start, end, r))
+        for i, r in enumerate(returns[(name, "x")]):
+            conn.execute("INSERT INTO strategy_daily (strategy, exchange, day, ret, pnl, trades) VALUES (%s, 'x', %s, %s, 0, 1)",
+                         (name, dt.date(2024, 1, 1) + dt.timedelta(days=i), float(r)))
+    conn.execute("INSERT INTO strategy_daily (strategy, exchange, day, ret, pnl, trades) VALUES ('A', 'x', %s, -0.9, 0, 1)",
+                 (CFG["lockbox"]["start"],))
+    for d, c in closes().items():
+        conn.execute("INSERT INTO regimes (day, btc_close) VALUES (%s, %s)", (d.date(), float(c)))
+    assert book.run(conn, CFG) == {"book": 2, "portfolio": 2}
+    days, fall = conn.execute("SELECT max(days), max(alone_drawdown) FROM portfolio").fetchone()
+    assert days == 400 and fall < 0.5
+
+
+def test_a_strategy_pays_tax_every_year_and_hold_once():
+    band = {"horizon_months": 60, "p50": 1.0}
+    strategy = book.median_after_tax({**band, "basis": "strategy"}, CFG)
+    hold = book.median_after_tax({**band, "basis": "hold"}, CFG)
+    assert hold == pytest.approx(1.0 * (1 - CFG["book"]["tax_long"]))
+    assert strategy < hold
+
+
+def test_a_loss_pays_no_tax():
+    band = {"horizon_months": 12, "p50": -0.2, "basis": "strategy"}
+    assert book.median_after_tax(band, CFG) == pytest.approx(-0.2)
+
+
+def test_the_hurdle_compounds_and_tax_lowers_it():
+    one, five = book.hurdle(CFG)
+    assert one["total"] == pytest.approx(CFG["book"]["tbill_yield"])
+    assert five["total"] > 5 * one["total"]
+    assert one["after_tax"] == pytest.approx(one["total"] * (1 - CFG["book"]["tax_short"]))
+
+
+def daily_returns():
+    rng = np.random.default_rng(3)
+    a, b = rng.normal(0.001, 0.01, 400), rng.normal(0.001, 0.01, 400)
+    return pd.DataFrame({("A", "x"): a, ("Twin", "x"): a + rng.normal(0, 0.0005, 400), ("B", "x"): b})
+
+
+def test_a_near_copy_stays_out_of_the_set():
+    out = book.portfolio(daily_returns(), [("A", "x"), ("Twin", "x"), ("B", "x")], CFG)
+    assert [r["strategy"] for r in out] == ["A", "B"]
+
+
+def test_unrelated_bots_fall_less_together():
+    out = book.portfolio(daily_returns(), [("A", "x"), ("B", "x")], CFG)
+    assert all(r["combined_drawdown"] < r["alone_drawdown"] for r in out)
+
+
+def test_one_bot_is_not_a_set():
+    assert book.portfolio(daily_returns(), [("A", "x"), ("Twin", "x")], CFG) == []
