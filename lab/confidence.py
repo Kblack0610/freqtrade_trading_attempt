@@ -48,6 +48,12 @@ FROM bots b JOIN bot_trades t ON t.bot = b.name GROUP BY 1, 2
 """
 
 
+PAIRS = """
+SELECT c.strategy, c.exchange, count(*), sum(t.profit_ratio)
+FROM backtest_trades t JOIN backtest_chunks c ON c.id = t.chunk_id GROUP BY c.strategy, c.exchange, t.pair
+"""
+
+
 def venue_fee(exchange: str) -> float | None:
     path = USER_DATA / "exchanges" / f"{exchange}.json"
     return json.loads(path.read_text()).get("fee") if path.is_file() else None
@@ -74,6 +80,9 @@ def load(conn, cfg: dict, now: dt.datetime | None = None) -> dict:
         facts["drift"][(s, e)] = {"gap": gap, "trades": n}  # most trades last, so that bot's gap stands
     facts["live"] = {(s, e): {"since": since, "closed": closed, "stopouts": stops}
                      for s, e, since, closed, stops in conn.execute(LIVE)}
+    facts["pairs"] = {}
+    for s, e, n, total in conn.execute(PAIRS):
+        facts["pairs"].setdefault((s, e), []).append((n, total))
     facts["now"] = now
     return facts
 
@@ -84,7 +93,7 @@ def evidence(walkforward: dict, cfg: dict) -> dict:
     for (s, e), folds in walkforward.items():
         x = np.concatenate([np.asarray(f["tuned_returns"] or [], dtype=float) for f in folds])
         lo, hi = metrics.block_mean_ci(x, metrics.seed_of(s, e, "confidence"), level=cfg["expectancy_level"])
-        out[(s, e)] = {"trades": len(x), "mean": float(x.mean()) if len(x) else None, "lo": lo, "hi": hi,
+        out[(s, e)] = {"returns": x, "trades": len(x), "mean": float(x.mean()) if len(x) else None, "lo": lo, "hi": hi,
                        "months": [f["tuned_expectancy"] for f in folds if f["tuned_trades"]]}
     return out
 
@@ -138,7 +147,22 @@ def live_gate(live: dict | None, close: pd.Series, now: dt.datetime, c: dict) ->
                 and drop >= c["min_live_btc_drop"] and live["stopouts"] >= c["min_live_stopouts"])
 
 
-def gates(pair: tuple, facts: dict, ev: dict | None, score: float | None, trials: int, cfg: dict) -> list[dict]:
+def without_best_pair(pairs: list[tuple] | None) -> float | None:
+    """Expectancy of every trade outside the strategy's most profitable pair, from (trades, summed return) per pair."""
+    if not pairs or len(pairs) < 2:
+        return None
+    rest = sorted(pairs, key=lambda p: p[1])[:-1]
+    return sum(p[1] for p in rest) / sum(p[0] for p in rest)
+
+
+def venue_agreement(strategy: str, ev: dict, cfg: dict) -> tuple[int, int]:
+    """On how many venues this strategy's out-of-sample expectancy is positive, of those with enough trades."""
+    means = [v["mean"] for (s, _), v in ev.items() if s == strategy and v["trades"] >= cfg["min_member_trades"]]
+    return sum(m > 0 for m in means), len(means)
+
+
+def gates(pair: tuple, facts: dict, ev: dict | None, score: float | None, trials: int, cfg: dict,
+          venues: tuple[int, int] = (0, 0)) -> list[dict]:
     """Every gate for one strategy and exchange, passed or not, in a fixed order."""
     c = cfg["confidence"]
     strategy, exchange = pair
@@ -146,7 +170,7 @@ def gates(pair: tuple, facts: dict, ev: dict | None, score: float | None, trials
     series = facts["series"].get(pair) or {"windows": {}}
     w = series["windows"].get(c["window"]) or {}
     daily = facts["daily"].get(pair)
-    ev = ev or {"trades": 0, "mean": None, "lo": None, "hi": None, "months": []}
+    ev = ev or {"returns": [], "trades": 0, "mean": None, "lo": None, "hi": None, "months": []}
     pbo = facts["overfit"].get((exchange, c["window"]))
     dsr, n = deflated(daily, w, trials)
     months = ev["months"]
@@ -158,6 +182,10 @@ def gates(pair: tuple, facts: dict, ev: dict | None, score: float | None, trials
     d = facts["drift"].get(pair)
     width = None if ev["lo"] is None else (ev["hi"] - ev["lo"]) / 2
     bias = [k for k in ("lookahead", "recursive") if s[k] is not False]
+    stage = cfg["book"]["stages"][0]
+    fall = metrics.reorder_drawdown(np.asarray(ev["returns"]) * stage["stake"] / stage["capital"],
+                                    metrics.seed_of(strategy, exchange, "reorder")) if ev["trades"] else None
+    rest = without_best_pair(facts["pairs"].get(pair))
     return [
         gate("bias", ("not clean: " + ", ".join(bias)) if bias else "clean", "lookahead and recursive clean", not bias),
         gate("costs", paid, f"within {c['fee_tolerance']:.0%} of 2 x {fee}",
@@ -177,6 +205,13 @@ def gates(pair: tuple, facts: dict, ev: dict | None, score: float | None, trials
         gate("worst open loss", worst, f">= -{c['max_open_loss']}", worst is not None and worst >= -c["max_open_loss"]),
         gate("cost stress", stressed, f"> 0 at {c['stress_gross_share']:.0%} of the gross edge",
              stressed is not None and stressed > 0),
+        gate("slippage room", ev["lo"], f"> {c['slippage_per_trade']} a trade",
+             ev["lo"] is not None and ev["lo"] > c["slippage_per_trade"]),
+        gate("trades reordered, worst fall", fall, f"<= {cfg['book']['hard_stop']} at Stage 1 stake",
+             fall is not None and fall <= cfg["book"]["hard_stop"]),
+        gate("without its best pair", rest, "> 0", rest is not None and rest > 0),
+        gate("venues agreeing", f"{venues[0]} of {venues[1]}", f">= {c['min_venues_agreeing']}",
+             venues[0] >= c["min_venues_agreeing"]),
         gate("drift", None if d is None else d["gap"], f"inside the interval, >= {c['min_drift_trades']} trades",
              d is not None and width is not None and d["trades"] >= c["min_drift_trades"] and abs(d["gap"]) <= width),
         live_gate(facts["live"].get(pair), facts["close"], facts["now"], c),
@@ -189,7 +224,7 @@ def rows(facts: dict, trials: int, cfg: dict) -> list[dict]:
     score = scores(ev, cfg["confidence"])
     out = []
     for pair in sorted(set(facts["series"]) | set(ev)):
-        g = gates(pair, facts, ev.get(pair), score.get(pair), trials, cfg)
+        g = gates(pair, facts, ev.get(pair), score.get(pair), trials, cfg, venue_agreement(pair[0], ev, cfg["confidence"]))
         e = ev.get(pair) or {}
         out.append({"strategy": pair[0], "exchange": pair[1], "score": score.get(pair), "ready": all(x["pass"] for x in g),
                     "passed": sum(x["pass"] for x in g), "oos_trades": e.get("trades", 0),

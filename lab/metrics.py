@@ -366,6 +366,11 @@ def projection(ret: np.ndarray, horizon: int, seed: int, paths: int = 5000, bloc
             "exp_max_drawdown": float(mdd.mean()), "paths": paths}
 
 
+def reorder_drawdown(ret: np.ndarray, seed: int, level: float = 0.95, paths: int = 2000) -> float:
+    """The drawdown at `level` when the same trades arrive in a random order, resampled one at a time."""
+    return float(np.quantile(_paths(ret, len(ret), seed, paths, 1)[1], level))
+
+
 def regimes(close: pd.Series) -> pd.DataFrame:
     """Market regime per day from BTC daily closes (index: day). Trend is the close against its
     200-day mean; volatility is 30-day realized volatility, cut into terciles of its own history.

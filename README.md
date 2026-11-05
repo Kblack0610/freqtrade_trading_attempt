@@ -127,6 +127,10 @@ A backtest of a strategy as it is says nothing about tuning it, and hyperopt's b
 
 A suggestion keeps its `first_seen` while it holds, so "since Nov 05" on the site is how long the evidence has pointed the same way; one that stops applying is deleted.
 
+## Stress gates
+
+Four gates in `lab/confidence.py` reuse trades already stored, so they add no trial to the register: the low end of expectancy must clear a slippage guess, the same trades in random order must stay inside the hard stop at Stage 1 stake, the strategy must stay positive without its best pair, and it must be positive on at least two venues.
+
 ## Book
 
 `lab/book.py` runs after the score (alone: `python lab/book.py`) and rebuilds `book`, shown at `/book`. Each scored strategy with enough walk-forward months gets a 5th, 50th and 95th percentile return over 1 and 5 years, from a block bootstrap of its out-of-sample monthly wallet returns, and the same for BTC over those months. With no score there is no number: the page says there is not enough evidence. The ranges assume the tested months repeat, so a short basis makes a 5-year range look firmer than it is. The page also lists each stage's capital, what it can lose at each limit and its running costs, from `lab/suggest.toml` [book].
