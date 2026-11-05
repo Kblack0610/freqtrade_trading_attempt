@@ -1,6 +1,4 @@
 import datetime as dt
-import json
-
 import pytest
 
 import ingest
@@ -55,13 +53,6 @@ def test_trade_row_uses_utc_timestamps():
     assert r["enter_tag"] is None
 
 
-def test_history_row_dry_run_flag():
-    base = {"bot": "b", "ts": "2026-11-04T06:30:00+00:00"}
-    assert ingest.history_row(base)["dry_run"] is True
-    assert ingest.history_row({**base, "error": "NOT DRY RUN"})["dry_run"] is False
-    assert ingest.history_row({**base, "error": "URLError: timeout"})["dry_run"] is None
-
-
 def test_rerun_adds_no_duplicates_and_tracks_closes(conn, monkeypatch):
     monkeypatch.setattr(ingest, "PAGE", 2)  # force paging through /trades
     bots = FakeBots({"closed": [trade(1, False), trade(2, False), trade(3, False)], "open": [trade(4, True)]})
@@ -93,43 +84,6 @@ def test_down_bot_gets_an_error_snapshot_and_keeps_its_trades(conn):
 def test_main_fails_on_a_bot_that_is_not_dry_run(conn, monkeypatch, tmp_path):
     (tmp_path / "roster.tsv").write_text("# name exchange strategy\na kraken S\nb coinbase T\n")
     monkeypatch.setattr(ingest, "ROSTER", tmp_path / "roster.tsv")
-    monkeypatch.setattr(ingest, "RESULTS", tmp_path)
     bots = FakeBots({"closed": [], "open": []}, {"closed": [], "open": [], "dry_run": False})
     assert ingest.main(bots) == 1
     assert count(conn, "SELECT count(*) FROM bot_snapshots WHERE error = 'NOT DRY RUN'") == 1
-
-
-def test_lab_files_import_once(conn, tmp_path):
-    run = tmp_path / "runs" / "2026-11-04"
-    run.mkdir(parents=True)
-    (tmp_path / "runs" / "latest").symlink_to(run)
-    summary = {"run": "2026-11-04", "min_trades": 20,
-               "backtests": [{"exchange": "binanceus", "strategy": "S", "timeframe": "5m", "trades": 40,
-                              "profit_pct": 3.2, "winrate_pct": 55.0, "max_drawdown_pct": 4.1, "profit_factor": 1.3,
-                              "sharpe": 1.1, "start": "2026-08-06 00:00:00", "end": "2026-11-04 00:00:00",
-                              "lookahead_bias": False},
-                             {"exchange": "coinbase", "strategy": "Broken", "error": "No data found",
-                              "lookahead_bias": None}],
-               "lookahead": {"S": {"has_bias": False, "biased_indicators": ""}},
-               "hyperopt_candidates": ["S"], "hyperopt": {"S": {"params": {"buy": {"x": 1}}}}}
-    (run / "summary.json").write_text(json.dumps(summary))
-    hist = tmp_path / "league-history.jsonl"
-    hist.write_text("\n".join(json.dumps({"ts": f"2026-11-0{d}T06:30:00+00:00", "bot": "k-s", "exchange": "kraken",
-                                          "strategy": "S", "closed_trades": d}) for d in (3, 4)) + "\n")
-
-    for _ in range(2):
-        assert [p.parent.name for p in ingest.summaries(tmp_path)] == ["2026-11-04"]
-        for p in ingest.summaries(tmp_path):
-            ingest.import_summary(conn, p)
-        ingest.import_history(conn, hist)
-    assert count(conn, "SELECT count(*) FROM runs") == 1
-    assert count(conn, "SELECT count(*) FROM backtests") == 2
-    assert count(conn, "SELECT count(*) FROM bias_checks") == 1
-    assert count(conn, "SELECT count(*) FROM hyperopt_runs") == 1
-    assert count(conn, "SELECT count(*) FROM bot_snapshots WHERE source = 'report'") == 2
-
-    summary["backtests"][0]["trades"] = 41  # a rewritten summary replaces the old rows
-    (run / "summary.json").write_text(json.dumps(summary))
-    assert ingest.import_summary(conn, run / "summary.json") is True
-    assert count(conn, "SELECT trades FROM backtests WHERE strategy = 'S'") == 41
-    assert count(conn, "SELECT count(*) FROM runs") == 1

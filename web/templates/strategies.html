@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Strategies{% endblock %}
+{% block body %}
+<h1>Strategies</h1>
+<p class="muted">Every strategy backtested on each exchange's whole price history, rebuilt nightly. Ranked by the low end of the Sharpe interval, so a strategy has to look good on its unlucky draw too. Greyed rows have a bias finding or fewer than {{ min_trades }} trades in the window. DSR is the chance the Sharpe is more than the best one luck would give among the {{ board[0].trials if board else 0 }} strategy and exchange pairs tested. The estimates resample the last year of daily returns: they describe that year, they do not promise the next.</p>
+
+<nav class="tabs">{% for w in windows %}<a href="/strategies?win={{ w }}" {% if w == win %}aria-current="page"{% endif %}>{{ "whole history" if w == "all" else w }}</a>{% endfor %}</nav>
+
+{% if board %}{% include "_board.html" %}{% else %}<p class="muted">No results for this window yet.</p>{% endif %}
+
+{% if broken or skipped %}
+<h2>Not analyzed</h2>
+<ul class="plain">
+  {% for b in broken %}<li>{{ b.name }} ({{ b.file }}): {{ b.load_error }}</li>{% endfor %}
+  {% for s in skipped %}<li>{{ s }}</li>{% endfor %}
+</ul>
+{% endif %}
+{% if last_run %}<p class="muted">From analysis run <a href="/runs/{{ last_run.id }}">{{ last_run.name }}</a>.</p>{% endif %}
+{% endblock %}
