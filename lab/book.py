@@ -51,6 +51,94 @@ def rows(folds: dict, close: pd.Series, cfg: dict) -> list[dict]:
     return out
 
 
+def tax_rate(days: int, cfg: dict) -> float:
+    return cfg["book"]["tax_long"] if days > 365 else cfg["book"]["tax_short"]
+
+
+def after_tax(growth: float, days: int, cfg: dict) -> float:
+    """What one lot's growth multiple leaves after tax on selling it."""
+    return growth - max(growth - 1.0, 0.0) * tax_rate(days, cfg)
+
+
+def lot(close: pd.Series, start, cfg: dict) -> tuple[float, float]:
+    """One buy at `start` held to the last close, net of a fee each way: its growth, and that after tax."""
+    growth = close.iloc[-1] / close[start] * (1.0 - cfg["book"]["benchmark_fee"]) ** 2
+    return growth, after_tax(growth, (close.index[-1] - start).days, cfg)
+
+
+def trend_filter(close: pd.Series, long_mean: pd.Series, cfg: dict) -> tuple[pd.Series, float, int]:
+    """BTC while yesterday's close is above its long mean, else cash, selling on the last day: the
+    equity curve, the wallet after tax with losses carried to later gains, and how many trades it took."""
+    fee = cfg["book"]["benchmark_fee"]
+    held = (close > long_mean).shift(1, fill_value=False)
+    flips = held.astype(int).diff().abs().fillna(0.0).astype(bool)
+    flips.iloc[-1] = flips.iloc[-1] or held.iloc[-1]
+    equity = ((close.pct_change().fillna(0.0) * held + 1.0) * (1.0 - fee * flips)).cumprod()
+    wallet, losses, before, base, start = 1.0, 0.0, 1.0, None, None
+    for day, flip, value in zip(close.index, flips, equity):
+        if flip and base is None:
+            base, start = before, day
+        elif flip:
+            gain = wallet * (value / base - 1.0)
+            used = min(losses, max(gain, 0.0))
+            wallet += gain - max(gain - used, 0.0) * tax_rate((day - start).days, cfg)
+            losses += max(-gain, 0.0) - used
+            base = None
+        before = value
+    return equity, wallet, int(flips.sum())
+
+
+def dca(close: pd.Series, cfg: dict) -> tuple[pd.Series, float, float]:
+    """The same amount into BTC on each month's first day: value per dollar paid in, and the final
+    return before and after tax."""
+    firsts = close.groupby([close.index.year, close.index.month]).head(1).index
+    units = (1.0 / close[firsts]).reindex(close.index, fill_value=0.0).cumsum()
+    paid = pd.Series(1.0, index=firsts).reindex(close.index, fill_value=0.0).cumsum()
+    lots = [lot(close, d, cfg) for d in firsts]
+    return units * close / paid, sum(g for g, _ in lots) / len(lots) - 1.0, sum(t for _, t in lots) / len(lots) - 1.0
+
+
+def drawdown(equity: pd.Series) -> float:
+    return float((1.0 - equity / equity.cummax()).max())
+
+
+def benchmark_rows(btc: pd.Series, eth: pd.Series, cfg: dict) -> list[dict]:
+    """The plain alternatives to an active strategy, over the last few years and the whole shared history.
+
+    btc and eth: daily closes indexed by date. Every benchmark in a window starts on the same day,
+    after the long mean has enough days. Tax rates are guesses in [book], and this is not tax advice.
+    """
+    c = cfg["book"]
+    days = btc.index.intersection(eth.index)
+    if len(days) <= c["trend_days"]:
+        return []
+    btc, eth = (s.loc[days].astype(float).set_axis(pd.to_datetime(days)).sort_index() for s in (btc, eth))
+    long_mean = btc.rolling(c["trend_days"]).mean()
+    first, end = long_mean.first_valid_index(), btc.index[-1]
+    spans = {f"{y}y": end - pd.DateOffset(years=y) for y in c["benchmark_years"]} | {"all": first}
+    out = []
+    for win, start in spans.items():
+        if start < first:
+            continue
+        b, e = btc[start:], eth[start:]
+        years = (end - b.index[0]).days / 365.25
+        t0 = b.index[0]
+        hold_after = lot(b, t0, cfg)
+        pair = [lot(b, t0, cfg), lot(e, t0, cfg)]
+        trend, trend_after, trades = trend_filter(b, long_mean[start:], cfg)
+        dca_curve, dca_total, dca_after = dca(b, cfg)
+        rows = [("Hold BTC", b / b.iloc[0], hold_after[0] - 1.0, hold_after[1] - 1.0, 2),
+                ("Hold BTC and ETH, half each", 0.5 * (b / b.iloc[0] + e / e.iloc[0]), sum(g for g, _ in pair) / 2 - 1.0,
+                 sum(t for _, t in pair) / 2 - 1.0, 4),
+                ("Monthly DCA into BTC", dca_curve, dca_total, dca_after, None),
+                (f"BTC above its {c['trend_days']}-day mean", trend, float(trend.iloc[-1]) - 1.0, trend_after - 1.0, trades)]
+        for name, curve, total, taxed, n in rows:
+            out.append({"name": name, "win": win, "start_day": b.index[0].date(), "end_day": end.date(), "total_return": total,
+                        "cagr": None if name.startswith("Monthly") else (1.0 + total) ** (1.0 / years) - 1.0,
+                        "max_drawdown": drawdown(curve), "after_tax_return": taxed, "trades": n})
+    return out
+
+
 def budget(cfg: dict) -> dict:
     """Each stage's capital and what it can lose at each limit, and the yearly cost of running at all."""
     c = cfg["book"]

@@ -2,6 +2,7 @@ import datetime as dt
 
 import numpy as np
 import pandas as pd
+import pytest
 
 import book
 import metrics
@@ -87,3 +88,49 @@ def test_run_stores_only_scored_pairs_and_replaces_the_last(conn):
         conn.execute("INSERT INTO regimes (day, btc_close) VALUES (%s, %s)", (d.date(), float(c)))
     assert book.run(conn, CFG) == {"book": 1} and book.run(conn, CFG) == {"book": 1}
     assert conn.execute("SELECT count(*), min(strategy) FROM book").fetchone() == (4, "Good")
+
+
+def series(values, start="2020-01-01"):
+    index = pd.date_range(start, periods=len(values), freq="D")
+    return pd.Series(np.asarray(values, dtype=float), index=index.date)
+
+
+def timed(values):
+    return series(values).set_axis(pd.date_range("2020-01-01", periods=len(values), freq="D"))
+
+
+def cfg(**kw):
+    return {"book": {**CFG["book"], "benchmark_fee": 0.0, "tax_short": 0.3, "tax_long": 0.1, **kw}}
+
+
+def test_tax_is_on_the_gain_at_the_rate_for_the_holding_time():
+    assert book.after_tax(2.0, 100, cfg()) == 2.0 - 0.3 and book.after_tax(2.0, 400, cfg()) == 2.0 - 0.1
+    assert book.after_tax(0.5, 400, cfg()) == 0.5
+
+
+def test_trend_filter_acts_a_day_late_and_sits_out_the_rest_of_a_fall():
+    equity, wallet, trades = book.trend_filter(timed([100, 110, 121, 60, 30, 30]), timed([90] * 6), cfg())
+    assert list(equity.round(9)) == [1.0, 1.1, 1.21, 0.6, 0.6, 0.6]
+    assert wallet == pytest.approx(0.6) and trades == 2
+
+
+def test_a_loss_shelters_the_next_gain():
+    _, wallet, trades = book.trend_filter(timed([100, 100, 50, 50, 100, 120, 240, 240, 240]), timed([90] * 9), cfg())
+    assert wallet == pytest.approx(0.5 + 0.7 - 0.3 * 0.2) and trades == 4
+
+
+def test_dca_counts_every_lot():
+    close = timed([100.0] * 31 + [200.0] * 29)
+    curve, total, after = book.dca(close, cfg())
+    assert total == pytest.approx((2.0 + 1.0) / 2 - 1.0) and curve.iloc[-1] == pytest.approx(1.5)
+    assert after == pytest.approx(0.5 - 0.3 * 1.0 / 2)
+
+
+def test_every_benchmark_starts_together_and_a_short_history_gets_none():
+    rising = (1.001 ** np.arange(1400)) * 100
+    out = book.benchmark_rows(series(rising), series(rising * 2), CFG)
+    assert {r["win"] for r in out} == {"1y", "3y", "all"} and len(out) == 12
+    assert len({r["start_day"] for r in out if r["win"] == "all"}) == 1
+    hold = next(r for r in out if r["name"] == "Hold BTC" and r["win"] == "1y")
+    assert hold["max_drawdown"] == 0 and hold["after_tax_return"] < hold["total_return"]
+    assert book.benchmark_rows(series(rising[:100]), series(rising[:100]), CFG) == []

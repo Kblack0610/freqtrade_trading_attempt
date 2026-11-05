@@ -108,6 +108,13 @@ hard_stop = 0.15
 # Guesses until there is a quote: a small VPS for a fixed exit IP, and a CPA once before Stage 1.
 vps_per_month = 6.0
 cpa_once = 500.0
+# The plain alternatives on /book. Fee per side is Kraken's entry maker tier. Tax rates are guesses at a
+# middle US bracket, short and long term, until a CPA says otherwise: they are not tax advice.
+benchmark_years = [1, 3, 5]
+benchmark_fee = 0.004
+trend_days = 200
+tax_short = 0.24
+tax_long = 0.15
 
 # Proposed in the plan, set by the human. Paper only: lab/league.py refuses real money whatever this says.
 [[book.stages]]
