@@ -34,6 +34,7 @@ from typing import Protocol
 from psycopg.types.json import Jsonb
 
 import analyze
+import book
 import confidence
 import metrics
 import suggest
@@ -256,6 +257,7 @@ def main(runner: Runner | None = None, today: dt.date | None = None) -> int:
             report.update(folds_failed=failed, failures=failures[:100])
             report.update(suggest.run(conn))
             report.update(confidence.run(conn))
+            report.update(book.run(conn))
             ok = failed <= FAIL_SHARE * max(len(todo), 1)
             print(f"walkforward: done: {json.dumps({k: v for k, v in report.items() if k not in ('failures', 'skipped')})}",
                   flush=True)

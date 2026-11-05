@@ -80,7 +80,7 @@ def test_healthz_needs_no_sign_in(site):
     assert site[1].get("/healthz").text == "ok"
 
 
-@pytest.mark.parametrize("path", ["/", "/bots/x", "/strategies", "/strategies/x", "/suggestions", "/confidence", "/data", "/runs", "/runs/1"])
+@pytest.mark.parametrize("path", ["/", "/bots/x", "/strategies", "/strategies/x", "/suggestions", "/confidence", "/book", "/data", "/runs", "/runs/1"])
 def test_signed_out_goes_to_login(site, path):
     r = site[1].get(path)
     assert r.status_code == 303 and r.headers["location"] == "/login"
@@ -227,6 +227,26 @@ def test_confidence_shows_every_gate_and_the_first_it_fails(conn, signed_in):
                  "VALUES ('Alpha', 'binanceus', 71.4, false, 1, 42, %s)", (Jsonb(gates),))
     body = signed_in[1].get("/confidence").text
     assert "not ready: drift" in body and "1 of 2 gates" in body and "inside the interval" in body
+
+
+def test_book_shows_no_number_until_a_strategy_is_scored(conn, signed_in):
+    body = signed_in[1].get("/book").text
+    assert "Not enough evidence" in body and "0 of 20" in body and "Stage 1" in body
+    conn.execute("INSERT INTO confidence (strategy, exchange, score, ready, passed, oos_trades, gates) "
+                 "VALUES ('Alpha', 'binanceus', 71.4, false, 1, 42, %s)", (Jsonb([{"gate": "bias", "pass": True}],),))
+    assert "not enough months" in signed_in[1].get("/book").text
+
+
+def test_book_sets_a_strategy_beside_hold(conn, signed_in):
+    conn.execute("INSERT INTO confidence (strategy, exchange, score, ready, passed, oos_trades, gates) "
+                 "VALUES ('Alpha', 'binanceus', 71.4, false, 1, 42, %s)", (Jsonb([{"gate": "bias", "pass": True}],),))
+    for basis, mid in (("strategy", 0.31), ("hold", 0.12)):
+        for months in (12, 60):
+            conn.execute("INSERT INTO book (strategy, exchange, basis, horizon_months, p5, p50, p95, prob_loss, "
+                         "exp_max_drawdown, paths, basis_months) VALUES ('Alpha', 'binanceus', %s, %s, -0.2, %s, 0.9, "
+                         "0.25, 0.3, 5000, 12)", (basis, months, mid))
+    body = signed_in[1].get("/book").text
+    assert "Alpha" in body and "31%" in body and "12%" in body and "Not enough evidence" not in body
 
 
 def test_chart_draws_only_with_two_points():

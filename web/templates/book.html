@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Book{% endblock %}
+{% macro band(b) %}{% if b %}{{ b.p5 | pct(0) }} / <span class="{{ b.p50 | tone }}">{{ b.p50 | pct(0) }}</span> / {{ b.p95 | pct(0) }}{% else %}<span class="muted">not enough months</span>{% endif %}{% endmacro %}
+{% block body %}
+<h1>Strategy book</h1>
+<p class="muted">What each scored strategy might return if the months it was tested on repeat, beside holding BTC over the same months. Each range is the 5th, 50th and 95th percentile. These are estimates from a small number of months, not promises. Nothing here trades: the league is paper only.</p>
+{% if board %}
+<p>{{ board | selectattr("ready") | list | length }} of {{ board | length }} scored strategy and exchange pairs are ready for a small real-money test.</p>
+<div class="scroll">
+<table>
+  <thead><tr><th>Strategy</th><th>Exchange</th><th class="n">Score</th><th class="n">Gates passed</th><th class="n">Months tested</th><th class="n">{{ short // 12 }} year</th><th class="n">Hold, {{ short // 12 }} year</th><th class="n">{{ long // 12 }} years</th><th class="n">Hold, {{ long // 12 }} years</th><th class="n">Chance of a losing year</th><th class="n">Typical worst fall in a year</th><th class="n">Fees a year at a ${{ stake | int }} stake</th></tr></thead>
+  <tbody>
+  {% for r in board %}
+  {% set y = bands.get((r.strategy, r.exchange, "strategy", short)) %}
+  <tr><td><a href="/strategies/{{ r.strategy }}?exchange={{ r.exchange }}">{{ r.strategy }}</a></td><td>{{ r.exchange }}</td><td class="n">{{ "%.0f" | format(r.score) }}</td><td class="n">{{ r.passed }} of {{ r.gates }}</td><td class="n">{{ y.basis_months if y else "-" }}</td>
+    <td class="n">{{ band(y) }}</td><td class="n">{{ band(bands.get((r.strategy, r.exchange, "hold", short))) }}</td>
+    <td class="n">{{ band(bands.get((r.strategy, r.exchange, "strategy", long))) }}</td><td class="n">{{ band(bands.get((r.strategy, r.exchange, "hold", long))) }}</td>
+    <td class="n">{{ y.prob_loss | pct(0) if y else "-" }}</td><td class="n">{{ y.exp_max_drawdown | pct(0) if y else "-" }}</td>
+    <td class="n">{% if r.trades and r.fee_per_trade is not none %}${{ "%.0f" | format(r.trades * r.fee_per_trade * stake) }}{% else %}-{% endif %}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}
+<p><strong>Not enough evidence.</strong> 0 of {{ need }} strategies needed have a score, so no projection is shown. A score needs walk-forward results on at least {{ need }} strategies.</p>
+{% endif %}
+<h2>Budget</h2>
+<p class="muted">Proposed amounts, from <code>lab/suggest.toml</code> [book]. No money is in use. The server and accountant figures are guesses until there is a quote.</p>
+<div class="scroll">
+<table>
+  <thead><tr><th>Stage</th><th class="n">Capital</th><th class="n">Per trade</th><th class="n">Most in open trades</th><th class="n">Daily limit stops entries at</th><th class="n">Hard stop exits at</th><th class="n">Server cost as a share of capital, per year</th></tr></thead>
+  <tbody>
+  {% for s in budget.stages %}
+  <tr><td>{{ s.name }}</td><td class="n">${{ s.capital | int }}</td><td class="n">${{ s.stake | int }}</td><td class="n">${{ s.at_risk | int }}</td><td class="n">-${{ s.day_loss | int }}</td><td class="n">-${{ s.hard_stop | int }}</td><td class="n">{{ s.vps_share | pct(1) }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+<p>Running costs: about ${{ budget.vps_year | int }} a year for a server with a fixed address, and about ${{ budget.cpa_once | int }} once for an accountant. A gap or an exchange failure can lose more than these limits.</p>
+{% endblock %}

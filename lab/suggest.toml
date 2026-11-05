@@ -99,6 +99,35 @@ min_live_trades = 60
 min_live_btc_drop = 0.10
 min_live_stopouts = 1
 
+[book]
+# What a scored strategy might return, from lab/book.py. Paths resample runs of this many months.
+horizon_months = [12, 60]
+block_months = 3
+# Down this share of capital from peak: exit everything and stay stopped. The day limit is [watcher] day_loss.
+hard_stop = 0.15
+# Guesses until there is a quote: a small VPS for a fixed exit IP, and a CPA once before Stage 1.
+vps_per_month = 6.0
+cpa_once = 500.0
+
+# Proposed in the plan, set by the human. Paper only: lab/league.py refuses real money whatever this says.
+[[book.stages]]
+name = "Stage 1"
+capital = 500.0
+stake = 50.0
+max_open = 3
+
+[[book.stages]]
+name = "Stage 2, first step"
+capital = 1000.0
+stake = 100.0
+max_open = 3
+
+[[book.stages]]
+name = "Stage 2, second step"
+capital = 2000.0
+stake = 200.0
+max_open = 3
+
 [watcher]
 # One pass over every bot. A bot has no equity event, so this is a poll.
 cadence_seconds = 60

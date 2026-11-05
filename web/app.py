@@ -21,7 +21,9 @@ from fastapi.templating import Jinja2Templates
 from psycopg.rows import dict_row
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lab"))
+import book as book_lab  # noqa: E402
 import metrics  # noqa: E402
+import suggest  # noqa: E402
 from db import connect  # noqa: E402
 
 from web import auth, charts, exporter  # noqa: E402
@@ -60,6 +62,11 @@ SECTIONS = [
     ("watch", "Watch", "Lookahead-clean candidates one gate short of promotion, best Sharpe interval first."),
 ]
 CONFIDENCE = "SELECT * FROM confidence ORDER BY ready DESC, score DESC NULLS LAST, passed DESC, strategy, exchange"
+BOOK = """
+SELECT c.strategy, c.exchange, c.score, c.ready, c.passed, jsonb_array_length(c.gates) AS gates, w.trades, w.fee_per_trade
+FROM confidence c LEFT JOIN strategy_windows w ON w.strategy = c.strategy AND w.exchange = c.exchange AND w.win = '365d'
+WHERE c.score IS NOT NULL ORDER BY c.ready DESC, c.score DESC, c.strategy, c.exchange
+"""
 SUGGESTIONS = "SELECT * FROM suggestions ORDER BY score DESC NULLS LAST, strategy, exchange, bot"
 MIN_TRADES = 20  # below this a window's numbers are shown but not ranked
 # Lookahead bias voids the backtest, so it ranks last. Recursive bias only warns: the flagged indicator may not feed a signal.
@@ -370,6 +377,16 @@ def suggestions(request: Request):
 def confidence(request: Request):
     user_of(request)
     return page(request, "confidence.html", board=rows(CONFIDENCE))
+
+
+@app.get("/book", response_class=HTMLResponse)
+def book(request: Request):
+    user_of(request)
+    cfg = suggest.load_config()
+    bands = {(r["strategy"], r["exchange"], r["basis"], r["horizon_months"]): r for r in rows("SELECT * FROM book")}
+    return page(request, "book.html", board=rows(BOOK), bands=bands, budget=book_lab.budget(cfg),
+                short=cfg["book"]["horizon_months"][0], long=cfg["book"]["horizon_months"][-1],
+                need=cfg["confidence"]["min_population"], stake=cfg["book"]["stages"][0]["stake"])
 
 
 @app.get("/runs", response_class=HTMLResponse)
