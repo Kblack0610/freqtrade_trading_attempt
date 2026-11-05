@@ -241,6 +241,17 @@ def store_chunk(conn, task: dict, res: dict, run_id: int) -> None:
                     cp.write_row([chunk_id, *[None if isinstance(v, float) and math.isnan(v) else v for v in row]])
 
 
+def finite(v):
+    """jsonb has no NaN or Infinity, which Python's json writes, so a non-finite number is stored as null."""
+    if isinstance(v, float):
+        return v if math.isfinite(v) else None
+    if isinstance(v, dict):
+        return {k: finite(x) for k, x in v.items()}
+    if isinstance(v, (list, tuple)):
+        return [finite(x) for x in v]
+    return v
+
+
 def store_bias(conn, strategy: str, kind: str, file_hash: str, res: dict) -> None:
     conn.execute(
         "INSERT INTO bias_checks (strategy, kind, file_hash, has_bias, biased_indicators, detail, error, checked_at)"
@@ -248,7 +259,7 @@ def store_bias(conn, strategy: str, kind: str, file_hash: str, res: dict) -> Non
         " file_hash = EXCLUDED.file_hash, has_bias = EXCLUDED.has_bias, biased_indicators = EXCLUDED.biased_indicators,"
         " detail = EXCLUDED.detail, error = EXCLUDED.error, checked_at = now()",
         (strategy, kind, file_hash, res.get("has_bias"), res.get("biased_indicators"),
-         Jsonb(res.get("detail")) if res.get("detail") is not None else None, res.get("error")))
+         Jsonb(finite(res["detail"])) if res.get("detail") is not None else None, res.get("error")))
 
 
 def sync_strategies(conn, found: list[dict]) -> None:
@@ -469,23 +480,28 @@ def main(runner: Runner | None = None, today: dt.date | None = None) -> int:
                 futs = {pool.submit(runner.bias, kind, s): ("bias", (s, kind, h)) for s, kind, h in bias}
                 futs.update({pool.submit(runner.backtest, t["strategy"], t["exchange"], t["start"], t["end"]): ("chunk", t)
                              for t in todo})
-                for fut in as_completed(futs):
-                    what, task = futs[fut]
-                    try:
-                        res = fut.result()
-                    except Exception as e:  # a runner bug in one task must not lose the others
-                        res = {"ok": False, "has_bias": None, "error": f"{type(e).__name__}: {e}"}
-                    if what == "bias":
-                        store_bias(conn, task[0], task[1], task[2], res)
-                        continue
-                    store_chunk(conn, task, res, run_id)
-                    done += 1
-                    if not res["ok"]:
-                        failed += 1
-                        if len(failures) < 100:
-                            failures.append(f"{task['strategy']} {task['exchange']} {task['start'].year}: {res['error']}")
-                    if done % 25 == 0 or done == len(todo):
-                        print(f"analyze: {done}/{len(todo)} chunks, {failed} failed", flush=True)
+                try:
+                    for fut in as_completed(futs):
+                        what, task = futs[fut]
+                        try:
+                            res = fut.result()
+                        except Exception as e:  # a runner bug in one task must not lose the others
+                            res = {"ok": False, "has_bias": None, "error": f"{type(e).__name__}: {e}"}
+                        if what == "bias":
+                            store_bias(conn, task[0], task[1], task[2], res)
+                            continue
+                        store_chunk(conn, task, res, run_id)
+                        done += 1
+                        if not res["ok"]:
+                            failed += 1
+                            if len(failures) < 100:
+                                failures.append(f"{task['strategy']} {task['exchange']} {task['start'].year}: {res['error']}")
+                        if done % 25 == 0 or done == len(todo):
+                            print(f"analyze: {done}/{len(todo)} chunks, {failed} failed", flush=True)
+                except BaseException:
+                    # leaving the with block waits for every queued task, hours of work whose results cannot be stored
+                    pool.shutdown(cancel_futures=True)
+                    raise
             summary.update(chunks_failed=failed, failures=failures, bias_failed=conn.execute(
                 "SELECT count(*) FROM bias_checks WHERE has_bias IS NULL").fetchone()[0])
             summary.update(derive(conn))

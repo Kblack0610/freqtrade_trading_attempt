@@ -1,5 +1,7 @@
 import datetime as dt
 import os
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import numpy as np
@@ -182,3 +184,42 @@ def test_a_class_freqtrade_cannot_find_by_name_is_a_load_error():
     assert "no space" in analyze.load_error("class Foo (IStrategy):", "Foo")
     found = {s["name"]: s for s in analyze.Cli().discover()}
     assert found["multi_tf"]["load_error"] is None
+
+
+def test_a_non_finite_number_in_a_check_is_stored_as_null(lab):
+    class Nan(FakeRunner):
+        def bias(self, kind, strategy):
+            return {"has_bias": False, "detail": {"diff": {"rsi": {"30": float("nan"), "60": float("inf"), "90": 0.0}}}}
+
+    assert analyze.main(Nan([strat("Good")]), TODAY) == 0
+    assert one(lab, "SELECT detail->'diff'->'rsi' FROM bias_checks WHERE strategy = 'Good' AND kind = 'recursive'") == \
+        {"30": None, "60": None, "90": 0.0}
+
+
+def test_a_store_error_ends_the_run_without_running_the_queue(lab, monkeypatch):
+    """One worker: the first check's store raises, so of the five chunks queued at most the one already running runs."""
+    cancelled = threading.Event()
+
+    class Pool(ThreadPoolExecutor):
+        def shutdown(self, wait=True, *, cancel_futures=False):
+            super().shutdown(wait=False, cancel_futures=cancel_futures)
+            if cancel_futures:
+                cancelled.set()
+            super().shutdown(wait=wait)
+
+    class Held(FakeRunner):
+        def backtest(self, strategy, exchange, start, end):
+            cancelled.wait(10)
+            return super().backtest(strategy, exchange, start, end)
+
+    def store_bias(*_):
+        raise RuntimeError("cannot store")
+
+    monkeypatch.setattr(analyze, "WORKERS", 1)
+    monkeypatch.setattr(analyze, "ThreadPoolExecutor", Pool)
+    monkeypatch.setattr(analyze, "store_bias", store_bias)
+    r = Held([strat("Good")])
+    with pytest.raises(RuntimeError, match="cannot store"):
+        analyze.main(r, TODAY)
+    assert len(r.backtests) <= 1
+    assert one(lab, "SELECT NOT ok AND raw->>'error' = 'RuntimeError: cannot store' FROM runs WHERE kind = 'analysis'")
