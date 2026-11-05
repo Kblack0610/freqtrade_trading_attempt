@@ -42,6 +42,11 @@ min_live_trades = 20
 window = "365d"
 min_trades = 30
 
+[lockbox]
+# Months from this day on stay out of walk-forward, scoring and the book. A strategy that clears everything
+# else gets one look: move this date by PR, with a migration adding that look to `trials` (see README).
+start = 2026-05-01
+
 [retune]
 # From lab/walkforward.py: hyperopt tunes on the months before each test month, which it never sees.
 # The tuned parameters must beat the strategy as it is on each of the newest this-many months,

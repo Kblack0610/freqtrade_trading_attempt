@@ -21,7 +21,7 @@ from db import connect
 FOLDS = """
 SELECT w.strategy, w.exchange, w.fold_start, w.test_end, coalesce(w.tuned_profit, 0)
 FROM walkforward w JOIN confidence c USING (strategy, exchange)
-WHERE c.score IS NOT NULL AND w.ok AND w.params IS NOT NULL ORDER BY 1, 2, 3
+WHERE c.score IS NOT NULL AND w.ok AND w.params IS NOT NULL AND w.test_end <= %s ORDER BY 1, 2, 3
 """
 COLS = ["strategy", "exchange", "basis", "horizon_months", "p5", "p50", "p95", "prob_loss", "exp_max_drawdown", "paths",
         "basis_months"]
@@ -151,7 +151,7 @@ def budget(cfg: dict) -> dict:
 def run(conn, cfg: dict | None = None) -> dict:
     cfg = cfg or suggest.load_config()
     folds: dict = {}
-    for s, e, start, end, profit in conn.execute(FOLDS):
+    for s, e, start, end, profit in conn.execute(FOLDS, (cfg["lockbox"]["start"],)):
         folds.setdefault((s, e), []).append((start, end, profit))
     days = conn.execute("SELECT day, btc_close FROM regimes ORDER BY day").fetchall()
     close = pd.Series([c for _, c in days], index=pd.to_datetime([d for d, _ in days]), dtype=float)

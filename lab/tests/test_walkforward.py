@@ -41,6 +41,8 @@ def wlab(conn, monkeypatch):
     monkeypatch.setattr(wf, "FOLDS", 3)
     monkeypatch.setattr(wf, "WORKERS", 2)
     monkeypatch.setattr(wf, "EXCHANGES", ["binanceus"])
+    box = dict(wf.suggest.load_config(), lockbox={"start": dt.date(2099, 1, 1)})
+    monkeypatch.setattr(wf.suggest, "load_config", lambda: box)
     monkeypatch.setattr(wf.suggest, "run", lambda c: {})  # keeps the fixture's suggestions, which pick the candidates
     backfilled(conn, "binanceus", "2019-09-01")
     now = dt.datetime.now(dt.timezone.utc)
@@ -55,6 +57,16 @@ def wlab(conn, monkeypatch):
                      "VALUES (%s, %s, 'binanceus', '', %s, 's', 'a', '[]')", (kind, name, score))
     conn.execute("INSERT INTO bias_checks (strategy, kind, file_hash, has_bias) VALUES ('Leaky', 'lookahead', 'Leaky-1', true)")
     return conn
+
+
+def test_folds_stop_at_the_lockbox():
+    got = wf.folds(dt.date(2026, 11, 5), n=2, train_days=180, lockbox=dt.date(2026, 5, 1))
+    assert [(f[1], f[2]) for f in got] == [(dt.date(2026, 3, 1), dt.date(2026, 4, 1)), (dt.date(2026, 4, 1), dt.date(2026, 5, 1))]
+
+
+def test_a_lockbox_in_the_future_changes_nothing():
+    today = dt.date(2026, 3, 5)
+    assert wf.folds(today, n=2, train_days=180, lockbox=dt.date(2026, 5, 1)) == wf.folds(today, n=2, train_days=180)
 
 
 def backfilled(conn, ex, first):
@@ -135,6 +147,14 @@ def test_a_new_month_or_a_changed_file_reruns_only_what_it_touches(wlab):
     assert {c[0] for c in edited.calls} == {"Live"}
 
 
+def test_a_run_tests_no_month_inside_the_lockbox(wlab, monkeypatch):
+    box = dict(wf.suggest.load_config(), lockbox={"start": dt.date(2026, 9, 1)})
+    monkeypatch.setattr(wf.suggest, "load_config", lambda: box)
+    runner = FakeRunner()
+    wf.main(runner, TODAY)
+    assert runner.calls and max(c[1] for c in runner.calls) == dt.date(2026, 8, 1)
+
+
 def test_failures_retry_up_to_the_cap_and_a_month_with_no_candles_is_stored_once(wlab, monkeypatch):
     monkeypatch.setattr(wf, "ONLY", {"Live", "Watched"})
     assert wf.main(FakeRunner(fail={"Live"}, hole={"Watched"}), TODAY) == 1
@@ -161,7 +181,9 @@ def test_retune_rows_come_from_stored_folds(wlab, monkeypatch):
 
     monkeypatch.setattr(wf, "ONLY", {"Live"})
     wf.main(FakeRunner(), TODAY)
+    box = suggest.load_config()
     monkeypatch.undo()
+    monkeypatch.setattr(suggest, "load_config", lambda: box)
     assert "retune" not in suggest.run(wlab)["suggestions"], "no lookahead verdict yet, so no retune"
     wlab.execute("INSERT INTO bias_checks (strategy, kind, file_hash, has_bias) VALUES ('Live', 'lookahead', 'Live-1', false)")
     assert suggest.run(wlab)["suggestions"]["retune"] == 1

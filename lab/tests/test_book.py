@@ -88,6 +88,8 @@ def test_run_stores_only_scored_pairs_and_replaces_the_last(conn):
         conn.execute("INSERT INTO regimes (day, btc_close) VALUES (%s, %s)", (d.date(), float(c)))
     assert book.run(conn, CFG) == {"book": 1} and book.run(conn, CFG) == {"book": 1}
     assert conn.execute("SELECT count(*), min(strategy) FROM book").fetchone() == (4, "Good")
+    book.run(conn, {**CFG, "lockbox": {"start": dt.date(2000, 1, 1)}})
+    assert conn.execute("SELECT count(*) FROM book").fetchone() == (0,)
 
 
 def series(values, start="2020-01-01"):

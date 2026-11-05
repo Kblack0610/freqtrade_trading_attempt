@@ -186,3 +186,24 @@ def test_run_stores_a_row_and_replaces_the_last(conn):
     conn.execute("DELETE FROM strategy_windows")
     assert confidence.run(conn)["confidence"] == 0
     assert conn.execute("SELECT count(*) FROM confidence").fetchone()[0] == 0
+
+
+def test_nothing_inside_the_lockbox_reaches_the_score(conn):
+    cfg = {**suggest.load_config(), "lockbox": {"start": dt.date(2026, 5, 1)}}
+    conn.execute("INSERT INTO strategies (name, file, file_hash) VALUES ('S', 'x', 'h')")
+    for start, end in ((dt.date(2026, 4, 1), dt.date(2026, 5, 1)), (dt.date(2026, 5, 1), dt.date(2026, 6, 1))):
+        conn.execute("INSERT INTO walkforward (strategy, exchange, fold_start, train_start, test_end, cache_key, ok) "
+                     "VALUES ('S', 'kraken', %s, %s, %s, 'k', true)", (start, start, end))
+    for day in (dt.date(2026, 4, 30), dt.date(2026, 5, 1)):
+        conn.execute("INSERT INTO strategy_daily (strategy, exchange, day, ret, pnl, trades) "
+                     "VALUES ('S', 'kraken', %s, 0.01, 1, 1)", (day,))
+    chunk = conn.execute("INSERT INTO backtest_chunks (strategy, exchange, chunk_start, chunk_end, cache_key, ok) "
+                         "VALUES ('S', 'kraken', '2026-01-01', '2026-12-31', 'k', true) RETURNING id").fetchone()[0]
+    for day in ("2026-04-30", "2026-05-01"):
+        conn.execute("INSERT INTO backtest_trades (chunk_id, pair, open_date, close_date, profit_ratio, profit_abs) "
+                     "VALUES (%s, %s, %s, %s, 0.01, 1)", (chunk, f"P{day}", day, day))
+    facts = confidence.load(conn, cfg)
+    key = ("S", "kraken")
+    assert [f["fold_start"] for f in facts["walkforward"][key]] == [dt.date(2026, 4, 1)]
+    assert list(facts["daily"][key].index) == [dt.date(2026, 4, 30)]
+    assert len(facts["pairs"][key]) == 1
