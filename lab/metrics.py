@@ -128,7 +128,8 @@ def exposure(trades: pd.DataFrame, start: pd.Timestamp, end: pd.Timestamp) -> fl
 def window_metrics(daily: pd.DataFrame, trades: pd.DataFrame, seed: int) -> dict:
     """Everything the Strategies page shows for one strategy x exchange x window.
 
-    daily: day, ret (one row per day). trades: open_date, close_date, profit_ratio, profit_abs.
+    daily: day, ret (one row per day). trades: open_date, close_date, open_rate, close_rate, profit_ratio,
+    profit_abs. The research config trades spot, long only, so a trade's edge before fees is close over open.
     """
     r = daily["ret"].to_numpy(dtype=float)
     n = len(r)
@@ -139,6 +140,9 @@ def window_metrics(daily: pd.DataFrame, trades: pd.DataFrame, seed: int) -> dict
     wins = trades.loc[trades["profit_abs"] > 0, "profit_abs"].sum() if len(trades) else 0.0
     losses = -trades.loc[trades["profit_abs"] < 0, "profit_abs"].sum() if len(trades) else 0.0
     exp_lo, exp_hi = mean_ci(trades["profit_ratio"].to_numpy(), seed_of(seed, "expectancy"))
+    priced = trades[(trades["open_rate"] > 0) & trades["close_rate"].notna()] if len(trades) else trades
+    gross = (priced["close_rate"] / priced["open_rate"] - 1.0).to_numpy(dtype=float) if len(priced) else np.array([])
+    gross_lo, gross_hi = mean_ci(gross, seed_of(seed, "gross"))
     sh_lo, sh_hi = sharpe_ci(r, seed_of(seed, "sharpe"))
     months = daily.assign(m=pd.to_datetime(daily["day"]).dt.to_period("M")).groupby("m")["ret"].apply(
         lambda x: float(np.prod(1.0 + x.to_numpy()) - 1.0))
@@ -164,6 +168,10 @@ def window_metrics(daily: pd.DataFrame, trades: pd.DataFrame, seed: int) -> dict
         "expectancy": float(trades["profit_ratio"].mean()) if len(trades) else None,
         "expectancy_lo": exp_lo,
         "expectancy_hi": exp_hi,
+        "gross_expectancy": float(gross.mean()) if len(gross) else None,
+        "gross_expectancy_lo": gross_lo,
+        "gross_expectancy_hi": gross_hi,
+        "fee_per_trade": float((gross - priced["profit_ratio"].to_numpy(dtype=float)).mean()) if len(gross) else None,
         "winrate": float((trades["profit_abs"] > 0).mean()) if len(trades) else None,
         "exposure": exposure(trades, start, end) if n else 0.0,
         "months_profitable": float((months > 0).mean()) if len(months) else None,

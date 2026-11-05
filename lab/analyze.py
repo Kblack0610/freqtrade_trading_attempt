@@ -336,8 +336,8 @@ def load_series(conn) -> dict[tuple[str, str], tuple[pd.DataFrame, pd.DataFrame]
         " JOIN strategies s ON s.name = c.strategy AND s.load_error IS NULL"
         " WHERE c.ok AND c.exchange = ANY(%s) ORDER BY c.strategy, c.exchange, c.chunk_start", (EXCHANGES,)).fetchall()
     trades = pd.DataFrame(conn.execute(
-        "SELECT chunk_id, open_date, close_date, profit_ratio, profit_abs FROM backtest_trades").fetchall(),
-        columns=["chunk_id", "open_date", "close_date", "profit_ratio", "profit_abs"])
+        "SELECT chunk_id, open_date, close_date, open_rate, close_rate, profit_ratio, profit_abs FROM backtest_trades"
+    ).fetchall(), columns=["chunk_id", "open_date", "close_date", "open_rate", "close_rate", "profit_ratio", "profit_abs"])
     by_chunk = dict(tuple(trades.groupby("chunk_id"))) if len(trades) else {}
     empty = trades.iloc[0:0]
     parts: dict[tuple[str, str], list] = {}
@@ -432,7 +432,8 @@ def insert_many(conn, table: str, rows: list[dict], cols: list[str]) -> None:
 
 WINDOW_COLS = ["strategy", "exchange", "win", "days", "start_day", "end_day", "trades", "total_return", "cagr", "sharpe",
                "sharpe_lo", "sharpe_hi", "sortino", "calmar", "max_drawdown", "profit_factor", "expectancy",
-               "expectancy_lo", "expectancy_hi", "winrate", "exposure", "months_profitable", "dsr", "trials"]
+               "expectancy_lo", "expectancy_hi", "gross_expectancy", "gross_expectancy_lo", "gross_expectancy_hi",
+               "fee_per_trade", "winrate", "exposure", "months_profitable", "dsr", "trials"]
 ESTIMATE_COLS = ["strategy", "exchange", "horizon_days", "p10", "p50", "p90", "prob_loss", "exp_max_drawdown", "paths",
                  "seed", "basis_days"]
 

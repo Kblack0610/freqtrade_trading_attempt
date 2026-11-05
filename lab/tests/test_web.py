@@ -55,8 +55,10 @@ def seed(c):
         c.execute("INSERT INTO regimes VALUES (%s, 80000, 'bull', 0.5, 'mid')", (day,))
     for name, trades, sharpe_lo in (("Strategy001", 40, 0.4), ("Planted", 90, 3.0)):
         c.execute("INSERT INTO strategy_windows (strategy, exchange, win, days, start_day, trades, total_return, sharpe, "
-                  "sharpe_lo, sharpe_hi, dsr, trials, max_drawdown, expectancy) VALUES "
-                  "(%s, 'binanceus', '365d', 365, '2025-11-04', %s, 0.032, 1.1, %s, 1.8, 0.62, 2, 0.04, 0.012)",
+                  "sharpe_lo, sharpe_hi, dsr, trials, max_drawdown, expectancy, gross_expectancy, gross_expectancy_lo, "
+                  "fee_per_trade) VALUES "
+                  "(%s, 'binanceus', '365d', 365, '2025-11-04', %s, 0.032, 1.1, %s, 1.8, 0.62, 2, 0.04, 0.012, 0.0145, "
+                  "0.004, 0.0025)",
                   (name, trades, sharpe_lo))
     c.execute("INSERT INTO estimates VALUES ('Strategy001', 'binanceus', 90, -0.05, 0.021, 0.09, 0.31, 0.06, 5000, 1, 365)")
     c.execute("INSERT INTO correlations VALUES ('Strategy001', 'binanceus', 'Strategy002', 0.83, 300)")
@@ -146,10 +148,10 @@ def test_every_page_renders_with_data(conn, signed_in):
                    "2026-11-04 03:00:00"],
              "/bots/kraken-s001": ["Strategy001 on kraken", "<svg", "BTC/USD", "1.20%"],
              "/strategies": ["Strategy001", "0.40", "62%", "-5% / ", "3.2%", "1.20%", "biased", "Broken", "failed to import",
-                             "Scalp on binanceus: no 1m candles"],
+                             "Scalp on binanceus: no 1m candles", "Fees by venue", "0.25%", "1.45%"],
              "/strategies?win=all": ["No results for this window yet"],
              "/strategies/Strategy001": ["binanceus", "<svg", "3.2%", "Strategy002: 0.83", "bull", "ETH/USD",
-                                         "exit 2: boom", "not checked", "clean", "31%"],
+                                         "exit 2: boom", "not checked", "clean", "31%", "1.45%", "0.25%"],
              "/data": ["BTC/USD", "700,000", "2019-09-01"],
              "/runs": ["2026-11-04 03:00:00", "ok", "60 min"],
              "/runs/1": ["exit 2: boom", "Scalp on binanceus", "Strategy001"]}

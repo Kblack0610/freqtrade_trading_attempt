@@ -3,7 +3,8 @@
   <thead><tr><th>Strategy</th><th>Exchange</th><th>TF</th><th class="n">Trades</th><th class="n">Return</th><th class="n">CAGR</th>
     <th class="n" title="Annualized Sharpe and its 90% bootstrap interval">Sharpe (90% CI)</th>
     <th class="n" title="Deflated Sharpe: probability the Sharpe beats the best one luck gives among all strategies tested">DSR</th>
-    <th class="n">Max DD</th><th class="n">PF</th><th class="n" title="Mean profit per trade and its 90% interval">Per trade</th><th class="n">Win</th>
+    <th class="n">Max DD</th><th class="n">PF</th><th class="n" title="Mean profit per trade after fees and its 90% interval">Per trade</th>
+    <th class="n" title="Mean price move per trade before fees and its 90% interval. A venue whose round-trip fee is below the low end keeps the edge.">Before fees</th><th class="n">Win</th>
     <th class="n" title="90-day Monte Carlo, p10 / p50 / p90">90d est.</th><th class="n">P(loss)</th><th>Note</th></tr></thead>
   <tbody>
   {% for w in board %}
@@ -18,6 +19,7 @@
     <td class="n">{{ w.max_drawdown | pct }}</td>
     <td class="n">{{ w.profit_factor | num(2) }}</td>
     <td class="n">{{ w.expectancy | pct(2) }} <span class="muted">({{ w.expectancy_lo | pct(2) }}, {{ w.expectancy_hi | pct(2) }})</span></td>
+    <td class="n">{{ w.gross_expectancy | pct(2) }} <span class="muted">({{ w.gross_expectancy_lo | pct(2) }}, {{ w.gross_expectancy_hi | pct(2) }})</span></td>
     <td class="n">{{ w.winrate | pct(0) }}</td>
     <td class="n">{% if w.p50 is not none %}{{ w.p10 | pct(0) }} / <span class="{{ w.p50 | tone }}">{{ w.p50 | pct(0) }}</span> / {{ w.p90 | pct(0) }}{% else %}-{% endif %}</td>
     <td class="n">{{ w.prob_loss | pct(0) }}</td>

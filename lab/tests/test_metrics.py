@@ -7,9 +7,13 @@ import pandas as pd
 import metrics
 
 
+FEE = 0.002  # round trip
+
+
 def trades(*rows) -> pd.DataFrame:
-    return pd.DataFrame([{"open_date": metrics.utc(o), "close_date": metrics.utc(c),
-                          "profit_abs": p, "profit_ratio": p / 100} for o, c, p in rows])
+    return pd.DataFrame([{"open_date": metrics.utc(o), "close_date": metrics.utc(c), "open_rate": 100.0,
+                          "close_rate": 100.0 * (1 + p / 100 + FEE), "profit_abs": p, "profit_ratio": p / 100}
+                         for o, c, p in rows])
 
 
 def test_daily_returns_compound_on_the_running_balance():
@@ -74,6 +78,8 @@ def test_window_metrics_on_a_known_series():
     assert m["days"] == 60 and m["trades"] == 30 and m["total_return"] > 0
     assert m["profit_factor"] == 200 / 50 and math.isclose(m["winrate"], 20 / 30)
     assert m["expectancy_lo"] < m["expectancy"] < m["expectancy_hi"]
+    assert math.isclose(m["gross_expectancy"], m["expectancy"] + FEE) and math.isclose(m["fee_per_trade"], FEE)
+    assert m["gross_expectancy_lo"] < m["gross_expectancy"] < m["gross_expectancy_hi"]
     assert math.isclose(m["exposure"], 30 * 6 / (60 * 24))
     assert m == metrics.window_metrics(daily, t, 5)
 
