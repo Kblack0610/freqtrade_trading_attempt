@@ -155,7 +155,7 @@ def decide(facts: dict, cfg: dict) -> list[dict]:
                           f">= 0 over >= {d['min_live_trades']} trades",
                           not live_ok or b["live_pnl"] >= 0))
         if live_ok and b["live_pnl"] < 0:
-            reasons.append(f"the dry run lost {-b['live_pnl']:.2f} USD over {b['live_trades']} trades in {d['live_days']} days")
+            reasons.append(f"the dry run lost {-b['live_pnl']:.2f} over {b['live_trades']} trades in {d['live_days']} days")
         on = [b["exchange"]] if b["exchange"] in research else sorted(research)
         bt = [series[(b["strategy"], e)]["windows"].get(d["window"]) for e in on if (b["strategy"], e) in series]
         bt = [w for w in bt if w and (w.get("trades") or 0) >= d["min_trades"]]
