@@ -29,14 +29,14 @@ ROSTER = Path(os.environ.get("LEAGUE_ROSTER", "/etc/freqtrade-league/roster.tsv"
 HOST_FMT = os.environ.get("LEAGUE_HOST_FMT", "freqtrade-league-{i}.freqtrade-league:8080")
 PAGE = 500  # the most /trades returns per call
 
-Fetch = Callable[[int, str], object]
+Fetch = Callable[..., object]
 
 
-def http_fetch(i: int, path: str) -> object:
+def http_fetch(i: int, path: str, post: bool = False) -> object:
     user = os.environ.get("FT_API_USERNAME", "freqtrader")
     auth = base64.b64encode(f"{user}:{os.environ.get('FT_API_PASSWORD', '')}".encode()).decode()
     req = urllib.request.Request(f"http://{HOST_FMT.format(i=i)}/api/v1/{path}",
-                                 headers={"Authorization": f"Basic {auth}"})
+                                 headers={"Authorization": f"Basic {auth}"}, method="POST" if post else "GET")
     with urllib.request.urlopen(req, timeout=20) as resp:
         return json.load(resp)
 
