@@ -96,3 +96,9 @@ min_live_days = 90
 min_live_trades = 60
 min_live_btc_drop = 0.10
 min_live_stopouts = 1
+
+[watcher]
+# One pass over every bot. A bot has no equity event, so this is a poll.
+cadence_seconds = 60
+# Equity down this share of capital since the UTC day's first reading. Alert only at Stage 0.
+day_loss = 0.03

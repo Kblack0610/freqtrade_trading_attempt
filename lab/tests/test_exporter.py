@@ -59,3 +59,18 @@ def test_an_unreadable_database_reports_down():
         raise OSError("no route to host")
 
     assert scrape(TraderCollector(broken)) == {"trader_db_up": 0.0}
+
+
+def test_watch_metrics(conn):
+    import db
+    from web.exporter import TraderCollector
+
+    conn.execute("INSERT INTO watch (bot, checked_at, seen_at, state, capital, equity, day_open, breached_at) VALUES "
+                 "('a', %s, %s, 'paused', 1000, 960, 1000, %s)", (NOW, NOW - dt.timedelta(minutes=6), NOW))
+    conn.execute("INSERT INTO watch (bot, checked_at, seen_at, error) VALUES ('new', %s, %s, 'refused')", (NOW, NOW))
+    conn.commit()
+    m = scrape(TraderCollector(db.connect))
+    assert m['trader_watch_day_loss_ratio{bot="a"}'] == 0.04
+    assert m['trader_watch_breached{bot="a"}'] == 1 and m['trader_watch_breached{bot="new"}'] == 0
+    assert m['trader_watch_running{bot="a"}'] == 0 and 'trader_watch_running{bot="new"}' not in m
+    assert m['trader_watch_unseen_seconds{bot="a"}'] >= 360 and m["trader_watch_age_seconds"] < 60
