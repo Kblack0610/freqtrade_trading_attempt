@@ -1,0 +1,8 @@
+    <div class="scroll">
+    <table>
+      <thead><tr><th>Gate</th><th class="n">Seen</th><th>Needs</th><th>Result</th></tr></thead>
+      <tbody>
+      {% for g in gates %}<tr><td>{{ g.gate }}</td><td class="n">{{ g.value | gv }}</td><td>{{ g.need }}</td><td class="{{ 'up' if g.pass else 'down' }}">{{ "pass" if g.pass else "fail" }}</td></tr>{% endfor %}
+      </tbody>
+    </table>
+    </div>
