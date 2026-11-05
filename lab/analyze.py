@@ -12,6 +12,8 @@
 4. Derived, rebuilt in one transaction from the stored trades: daily returns, metrics over 30d, 90d,
    180d, 365d and all (with bootstrap intervals and the deflated Sharpe across every strategy x
    exchange), Monte Carlo estimates, BTC regimes, and correlation with the strategies the league runs.
+5. Suggestions: lab/suggest.py turns those tables into promote, watch, demote, retire and fix rows,
+   with the thresholds in lab/suggest.toml.
 
 Returns are realized (on trade close); a trade still open at a chunk's end is closed there.
 Exits 1 when more than a tenth of the chunks run this time failed, or on a crash.
@@ -38,6 +40,7 @@ import pandas as pd
 from psycopg.types.json import Jsonb
 
 import metrics
+import suggest
 from db import connect
 
 REPO = Path(os.environ.get("REPO", "/repo"))
@@ -486,6 +489,7 @@ def main(runner: Runner | None = None, today: dt.date | None = None) -> int:
             summary.update(chunks_failed=failed, failures=failures, bias_failed=conn.execute(
                 "SELECT count(*) FROM bias_checks WHERE has_bias IS NULL").fetchone()[0])
             summary.update(derive(conn))
+            summary.update(suggest.run(conn))
             ok = failed <= FAIL_SHARE * max(len(todo), 1)
             print(f"analyze: done: {json.dumps({k: v for k, v in summary.items() if k not in ('failures', 'skipped')})}",
                   flush=True)

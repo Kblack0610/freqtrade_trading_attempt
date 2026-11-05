@@ -71,7 +71,7 @@ def test_healthz_needs_no_sign_in(site):
     assert site[1].get("/healthz").text == "ok"
 
 
-@pytest.mark.parametrize("path", ["/", "/bots/x", "/strategies", "/strategies/x", "/data", "/runs", "/runs/1"])
+@pytest.mark.parametrize("path", ["/", "/bots/x", "/strategies", "/strategies/x", "/suggestions", "/data", "/runs", "/runs/1"])
 def test_signed_out_goes_to_login(site, path):
     r = site[1].get(path)
     assert r.status_code == 303 and r.headers["location"] == "/login"
@@ -190,8 +190,21 @@ def test_overview_warns_when_a_bot_is_not_dry_run(conn, signed_in):
 
 
 def test_pages_render_on_an_empty_database(conn, signed_in):
-    for path in ("/", "/data", "/runs", "/strategies"):
+    for path in ("/", "/data", "/runs", "/strategies", "/suggestions"):
         assert signed_in[1].get(path).status_code == 200, path
+
+
+def test_suggestions_show_each_kind_with_its_gates(conn, signed_in):
+    import suggest
+
+    seed(conn)
+    assert suggest.run(conn)["suggestions"] == {"retire": 2, "fix": 1}
+    text = signed_in[1].get("/suggestions").text
+    for needle in ("Retire <span", "next_close", "Broken", "failed to import", "Fix <span", "startup_candle_count",
+                   "Gates (0 of 1 pass)", "Promote <span"):
+        assert needle in text, needle
+    assert "1 fix, 2 retire" in signed_in[1].get("/").text
+    assert "startup_candle_count" in signed_in[1].get("/strategies/Strategy001").text
 
 
 def test_chart_draws_only_with_two_points():

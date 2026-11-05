@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}Suggestions{% endblock %}
+{% block body %}
+<h1>Suggestions</h1>
+<p class="muted">Rebuilt after every analysis run from rules in <code>lab/suggest.toml</code>. Each one lists every gate it was held to, the value seen, and the threshold. They are advice: nothing here changes the league, and promotion is a roster edit you make in home-config.</p>
+
+{% for kind, title, blurb in sections %}
+<h2 id="{{ kind }}">{{ title }} <span class="muted">({{ by_kind[kind] | length }})</span></h2>
+<p class="muted">{{ blurb }}</p>
+{% for sg in by_kind[kind] %}{% include "_suggestion.html" %}{% else %}<p class="muted">None.</p>{% endfor %}
+{% endfor %}
+{% endblock %}

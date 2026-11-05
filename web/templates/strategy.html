@@ -6,6 +6,11 @@
 
 {% if exchanges %}<nav class="tabs">{% for e in exchanges %}<a href="/strategies/{{ s.name }}?exchange={{ e }}" {% if e == exchange %}aria-current="page"{% endif %}>{{ e }}</a>{% endfor %}</nav>{% endif %}
 
+{% if suggestions %}
+<h2>Suggestions</h2>
+{% for sg in suggestions %}{% include "_suggestion.html" %}{% endfor %}
+{% endif %}
+
 <h2>Bias checks</h2>
 {% if bias %}
 <div class="scroll">

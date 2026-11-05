@@ -17,10 +17,11 @@ Results go to the `trader` database in the cluster's shared Postgres, which the 
 | `lab/backfill.py` | Hourly job: price history for every exchange x pair x timeframe into `data/<exchange>/` on the lab PVC, and what it holds into `data_coverage` (see Price data) |
 | `lab/analyze.py` | Nightly job: every strategy x exchange backtested in calendar-year chunks over the whole history, lookahead and recursive bias checks, then the derived tables (see The analysis) |
 | `lab/metrics.py` | Pure functions behind the derived tables: daily returns, Sharpe, Sortino, drawdown, block-bootstrap intervals, deflated Sharpe, Monte Carlo, BTC regimes |
+| `lab/suggest.py`, `lab/suggest.toml` | After each analysis: promote, watch, demote, retire and fix suggestions from the derived tables, with the thresholds as data (see Suggestions) |
 | `lab/ingest.py` | Hourly job: every bot's trades (closed and open) and a snapshot (profit, balance, dry-run flag) into Postgres |
 | `lab/migrate.py`, `lab/migrations/` | Schema: numbered SQL files applied once each, in order, under an advisory lock; runs as the init container of every job |
 | `lab/db.py` | The one Postgres connection: `DATABASE_URL` |
-| `web/` | The site: FastAPI and Jinja, read-only, Forgejo sign-in (`web/auth.py`), server-drawn SVG charts (`web/charts.py`); pages Overview, bot detail, Strategies, strategy detail, Data, Runs (see The site) |
+| `web/` | The site: FastAPI and Jinja, read-only, Forgejo sign-in (`web/auth.py`), server-drawn SVG charts (`web/charts.py`); pages Overview, bot detail, Strategies, strategy detail, Suggestions, Data, Runs (see The site) |
 | `lab/tests/` | pytest; the DB tests need `DATABASE_URL` pointing at a throwaway database |
 | `Dockerfile`, `lab/requirements.txt` | The `trader` image |
 | `.github/workflows/image.yml` | CI: build, migrate twice, tests, every strategy loads; on master also push to GHCR |
@@ -75,6 +76,18 @@ Backfill knobs (env): `BACKFILL_EXCHANGES` (`binanceus coinbase kraken`), `TIMEF
 
 The leaderboard ranks by the low end of the Sharpe interval, so a strategy has to look good on its unlucky draw. Rows under 20 trades sink, and lookahead-biased rows go last. Promoting a strategy is still a human edit to the roster in home-config.
 
+## Suggestions
+
+`lab/suggest.py` runs at the end of every analysis (alone: `python lab/suggest.py`) and rebuilds `suggestions` from the derived tables. Every threshold is in `lab/suggest.toml`; each suggestion stores every gate it was held to with the value seen, so the site shows why.
+
+- **Promote**: a strategy and exchange the league does not run yet that is lookahead-clean, has at least 30 trades in the last 365 days, has the low ends of its expectancy and Sharpe intervals above zero, a deflated Sharpe of at least 0.90, at least 70% of at least two full calendar years profitable, a drawdown under 35%, and daily returns that do not track a league strategy (|rho| at most 0.70). The action is the exact `roster.tsv` line and the new replica count.
+- **Watch**: lookahead-clean candidates one gate short, best Sharpe interval first, so a near miss is visible before it qualifies.
+- **Demote**: a league bot whose own dry run lost money over 60 days with at least 20 trades, whose strategy's 365-day backtests on that exchange lose even at the high end of the expectancy interval (kraken has no history, so for its bots every research exchange must agree), or whose strategy has lookahead bias. Rows map to pod ordinals and each pod keeps its own sqlite, so the action says to replace the row in place and clear that pod's PVC, never to delete the row.
+- **Retire**: lookahead bias or a load error. It supersedes a fix for the same file.
+- **Fix**: the recursive check found an indicator still moving at the startup candle count, or could not run because the strategy declares none.
+
+A suggestion keeps its `first_seen` while it holds, so "since Nov 05" on the site is how long the evidence has pointed the same way; one that stops applying is deleted.
+
 ## Adding a strategy
 
 Drop the `.py` in `user_data/strategies/` (any subfolder). It must import on the pinned image: Python 3.14, NumPy 2 (`np.nan`, not `np.NaN`), no `ta` package. Check with `freqtrade list-strategies --recursive-strategy-search --userdir user_data -c user_data/config.base.json -c user_data/exchanges/binanceus.json`. The next nightly analysis backtests its whole history and checks it for bias.
@@ -95,6 +108,8 @@ The first run fetches full history (5m since 2019 on binanceus is the long pole)
 - `001`: `bots`, `bot_trades` (one row per trade, keyed by bot, trade id and open date, so a bot whose sqlite is lost keeps its old trades), `bot_snapshots` (hourly from ingest; rows with `source = 'report'` came from the retired daily report), `runs`.
 - `002`: `data_coverage`, first and last candle, rows, gaps and missing candles per exchange x pair x timeframe, written by every backfill run.
 - `003`: the analysis. `strategies` (every file found, its hash and load error), `backtest_chunks` and `backtest_trades` (the cache and its trades), `bias_checks`; derived, rebuilt in one transaction at the end of each run: `strategy_daily`, `strategy_windows`, `estimates`, `regimes`, `correlations`. `runs` rows of kind `analysis` carry the run summary in `raw`.
+- `004`: clears bias checks that errored before subfolder strategies could load, so they rerun.
+- `005`: `suggestions`, one row per kind, strategy, exchange and bot, with its gates as JSON and when it was first and last seen.
 
  A schema change is a new numbered file; never edit an applied one.
 

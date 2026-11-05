@@ -62,3 +62,11 @@ ul.plain { padding-left: 1.2rem; }
 .chart .axis.end { text-anchor: end; }
 nav.tabs { flex-wrap: wrap; margin: 0.5rem 0 1rem; }
 tr.muted td { color: var(--muted); }
+a.tile { color: var(--fg); }
+a.tile:hover { text-decoration: none; border-color: var(--accent); }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 0.75rem 1rem; margin: 0 0 0.75rem; }
+.card h3 { margin: 0 0 0.25rem; font-size: 1rem; }
+.card p { margin: 0.25rem 0 0.5rem; }
+.card details > summary { cursor: pointer; margin: 0.5rem 0; }
+pre { margin: 0; padding: 0.5rem 0.75rem; overflow-x: auto; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; font-size: 0.85rem; }
+code { font-size: 0.9em; }
