@@ -72,6 +72,15 @@ LEFT JOIN ({BIAS}) b ON b.strategy = w.strategy
 WHERE w.win = %s
 ORDER BY b.biased IS TRUE, w.trades < {MIN_TRADES}, w.sharpe_lo DESC NULLS LAST, w.sharpe DESC NULLS LAST
 """
+# Fees differ about tenfold between venues, so this sets each venue's fee against how many strategies keep an edge.
+VENUES = f"""
+SELECT w.exchange, count(*) AS strategies, avg(w.fee_per_trade) AS fee,
+       count(*) FILTER (WHERE w.gross_expectancy_lo > 0) AS gross_edge,
+       count(*) FILTER (WHERE w.expectancy_lo > 0) AS net_edge
+FROM strategy_windows w LEFT JOIN ({BIAS}) b ON b.strategy = w.strategy
+WHERE w.win = %s AND w.trades >= {MIN_TRADES} AND b.biased IS NOT TRUE
+GROUP BY w.exchange ORDER BY w.exchange
+"""
 REGIME_SPLIT = """
 SELECT coalesce(r.trend, 'any') AS trend, coalesce(r.vol_bucket, 'any') AS vol, count(*) AS days, sum(d.trades) AS trades,
        avg(d.ret) AS mean, stddev_samp(d.ret) AS sd
@@ -243,6 +252,7 @@ def strategies(request: Request, win: str = "365d"):
         raise HTTPException(404, f"No window {win}")
     last = (rows(RUNS) or [None])[0]
     return page(request, "strategies.html", win=win, windows=WINDOWS, board=rows(LEADERBOARD, (win,)),
+                venues=rows(VENUES, (win,)),
                 broken=rows("SELECT name, file, load_error FROM strategies WHERE load_error IS NOT NULL ORDER BY name"),
                 skipped=last["raw"].get("skipped", []) if last else [], last_run=last)
 

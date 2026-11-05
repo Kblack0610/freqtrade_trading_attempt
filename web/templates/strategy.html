@@ -36,7 +36,7 @@
 {% if windows %}
 <div class="scroll">
 <table>
-  <thead><tr><th>Window</th><th>From</th><th class="n">Days</th><th class="n">Trades</th><th class="n">Return</th><th class="n">CAGR</th><th class="n">Sharpe (90% CI)</th><th class="n">DSR</th><th class="n">Sortino</th><th class="n">Calmar</th><th class="n">Max DD</th><th class="n">PF</th><th class="n">Per trade (90% CI)</th><th class="n">Win</th><th class="n">Exposure</th><th class="n">Months up</th></tr></thead>
+  <thead><tr><th>Window</th><th>From</th><th class="n">Days</th><th class="n">Trades</th><th class="n">Return</th><th class="n">CAGR</th><th class="n">Sharpe (90% CI)</th><th class="n">DSR</th><th class="n">Sortino</th><th class="n">Calmar</th><th class="n">Max DD</th><th class="n">PF</th><th class="n">Per trade (90% CI)</th><th class="n" title="Mean price move per trade before fees. A venue whose round-trip fee is below the low end keeps the edge.">Before fees (90% CI)</th><th class="n" title="Mean round-trip fee a trade paid">Fee</th><th class="n">Win</th><th class="n">Exposure</th><th class="n">Months up</th></tr></thead>
   <tbody>
   {% for w in windows %}
   <tr class="{{ 'muted' if w.trades < min_trades }}">
@@ -46,6 +46,8 @@
     <td class="n">{{ w.dsr | pct(0) }}</td><td class="n">{{ w.sortino | num(2) }}</td><td class="n">{{ w.calmar | num(2) }}</td>
     <td class="n">{{ w.max_drawdown | pct }}</td><td class="n">{{ w.profit_factor | num(2) }}</td>
     <td class="n">{{ w.expectancy | pct(2) }} <span class="muted">({{ w.expectancy_lo | pct(2) }}, {{ w.expectancy_hi | pct(2) }})</span></td>
+    <td class="n">{{ w.gross_expectancy | pct(2) }} <span class="muted">({{ w.gross_expectancy_lo | pct(2) }}, {{ w.gross_expectancy_hi | pct(2) }})</span></td>
+    <td class="n">{{ w.fee_per_trade | pct(2) }}</td>
     <td class="n">{{ w.winrate | pct(0) }}</td><td class="n">{{ w.exposure | pct(0) }}</td><td class="n">{{ w.months_profitable | pct(0) }}</td>
   </tr>
   {% endfor %}
