@@ -3,7 +3,7 @@
   <p>{{ sg.summary }}</p>
   <pre>{{ sg.action }}</pre>
   <details>
-    <summary>Gates ({{ sg.gates | selectattr("pass") | list | length }} of {{ sg.gates | length }} pass) <span class="muted">since {{ sg.first_seen | local("%b %d") }}</span></summary>
+    <summary>Gates: {{ sg.gates | selectattr("pass") | list | length }} of {{ sg.gates | length }} pass <span class="muted">since {{ sg.first_seen | local("%b %d") }}</span></summary>
     {% set gates = sg.gates %}{% include "_gates.html" %}
   </details>
 </article>

@@ -70,7 +70,7 @@ def promote_gates(s: dict, series: dict, cfg: dict, venues: list[str] | None = N
              f">= {p['min_years_profitable']:.0%} of >= {p['min_years']}",
              len(full) >= p["min_years"] and share is not None and share >= p["min_years_profitable"]),
         gate("max drawdown", mdd, f"<= {p['max_drawdown']}", mdd is not None and mdd <= p["max_drawdown"]),
-        gate("overlap with league" + (f" ({other})" if other else ""), rho, f"|rho| <= {p['max_rho']}",
+        gate("correlation with league" + (f" ({other})" if other else ""), rho, f"|rho| <= {p['max_rho']}",
              rho is None or abs(rho) <= p["max_rho"]),
         gate("venues with an edge", ", ".join(venues) or "none", f">= {p['min_venues']}",
              len(venues) >= p["min_venues"]),
@@ -92,31 +92,31 @@ def decide(facts: dict, cfg: dict) -> list[dict]:
     for name, s in sorted(strategies.items()):
         if s["load_error"]:
             out.append(dict(kind="retire", strategy=name, exchange="", score=None,
-                            summary=f"Fails to load: {s['load_error']}",
-                            action=f"Fix or delete {s['file']}; it is skipped by every backtest and check.",
+                            summary=f"The strategy fails to load: {s['load_error']}",
+                            action=f"Fix or delete {s['file']}: every backtest and bias check skips it until it loads.",
                             gates=[gate("loads", s["load_error"], "loads", False)]))
             continue
         if s["lookahead"] is True:
             out.append(dict(kind="retire", strategy=name, exchange="", score=None,
-                            summary=f"Lookahead bias in {s['lookahead_indicators'] or 'its signals'}: its backtests "
-                                    "read candles that had not closed yet, so every result is void.",
+                            summary=f"Every backtest of it is void: {s['lookahead_indicators'] or 'its signals'} read candles "
+                                    "that had not closed yet (lookahead bias).",
                             action=f"Delete {s['file']}, or rewrite those indicators so each candle uses only "
                                    "earlier ones, then let the next run recheck it.",
                             gates=[gate("lookahead clean", "biased", "clean", False)]))
             continue  # retiring it supersedes fixing it
         if s["recursive"] is True:
             out.append(dict(kind="fix", strategy=name, exchange="", score=None,
-                            summary=f"Recursive check: {s['recursive_indicators'] or 'an indicator'} still moves at "
-                                    f"the declared startup_candle_count ({s['startup']}).",
+                            summary=f"Live values can differ from the backtest: {s['recursive_indicators'] or 'an indicator'} "
+                                    f"still moves after the {s['startup']} startup candles the strategy declares.",
                             action=f"Raise startup_candle_count in {s['file']} until the recursive check is clean; "
                                    "if the indicator is only plotted, this changes nothing.",
-                            gates=[gate("recursive stable", "unstable", "stable", False)]))
+                            gates=[gate("indicators stable after startup", "unstable", "stable", False)]))
         elif s["recursive"] is None and not s["startup"]:
             out.append(dict(kind="fix", strategy=name, exchange="", score=None,
-                            summary="Declares no startup_candle_count, so the recursive check cannot run and its "
-                                    "first candles feed unwarmed indicators.",
+                            summary="The strategy declares no startup candle count, so the recursive check cannot run and its "
+                                    "first candles feed indicators that have not warmed up.",
                             action=f"Set startup_candle_count in {s['file']} to the longest indicator period it uses.",
-                            gates=[gate("startup_candle_count", s["startup"], "> 0", False)]))
+                            gates=[gate("startup candles declared", s["startup"], "> 0", False)]))
 
     candidates = []
     for (name, exchange), ser in sorted(series.items()):
@@ -130,16 +130,18 @@ def decide(facts: dict, cfg: dict) -> list[dict]:
         score = w.get("sharpe_lo")
         if not failed:
             out.append(dict(kind="promote", strategy=name, exchange=exchange, score=score,
-                            summary=f"Clears every gate on {exchange}: {w.get('trades')} trades in "
-                                    f"{cfg['promote']['window']}, expectancy interval low {w.get('expectancy_lo'):.4f}, "
-                                    f"deflated Sharpe {w.get('dsr'):.2f}.",
-                            action=f"Append to apps/freqtrade/roster.tsv:\n{roster_line(name, exchange)}\n"
+                            summary=f"Passes every promote gate on {exchange}: {w.get('trades')} trades in "
+                                    f"{cfg['promote']['window']}, per-trade expectancy {w.get('expectancy_lo'):+.2%} at "
+                                    f"the 90% low (needs above {cfg['promote']['expectancy_lo_above']:.2%}), deflated "
+                                    f"Sharpe {w.get('dsr'):.2f} (needs {cfg['promote']['min_dsr']:.2f}).",
+                            action=f"In home-config, append to apps/freqtrade/roster.tsv:\n{roster_line(name, exchange)}\n"
                                    f"then set replicas in statefulset.yaml to {replicas + 1}.",
                             gates=gates))
         elif s["lookahead"] is False and len(failed) <= cfg["watch"]["max_failed_gates"]:
             candidates.append(dict(kind="watch", strategy=name, exchange=exchange, score=score,
-                                   summary="Misses " + ", ".join(g["gate"] for g in failed) + ".",
-                                   action="Nothing yet; promote when the next runs clear the rest.", gates=gates))
+                                   summary="Held back from promotion by: " + ", ".join(g["gate"] for g in failed) + ".",
+                                   action="Nothing to do yet; it moves to Promote when a later run clears the rest.",
+                                   gates=gates))
     rank = sorted(candidates, key=lambda r: -(r["score"] if r["score"] is not None else -math.inf))
     out += rank[:cfg["watch"]["limit"]]
 
@@ -153,7 +155,7 @@ def decide(facts: dict, cfg: dict) -> list[dict]:
                           f">= 0 over >= {d['min_live_trades']} trades",
                           not live_ok or b["live_pnl"] >= 0))
         if live_ok and b["live_pnl"] < 0:
-            reasons.append(f"its dry run lost {b['live_pnl']:.2f} over {b['live_trades']} trades in {d['live_days']}d")
+            reasons.append(f"the dry run lost {-b['live_pnl']:.2f} USD over {b['live_trades']} trades in {d['live_days']} days")
         on = [b["exchange"]] if b["exchange"] in research else sorted(research)
         bt = [series[(b["strategy"], e)]["windows"].get(d["window"]) for e in on if (b["strategy"], e) in series]
         bt = [w for w in bt if w and (w.get("trades") or 0) >= d["min_trades"]]
@@ -163,13 +165,14 @@ def decide(facts: dict, cfg: dict) -> list[dict]:
                           ">= 0", not losing))
         if losing:
             where = b["exchange"] if b["exchange"] in research else "every research exchange"
-            reasons.append(f"its {d['window']} backtests on {where} lose even at the high end of the interval")
+            reasons.append(f"the {d['window']} backtests on {where} lose money even at the 90% high")
         if s.get("lookahead") is True:
             gates.append(gate("lookahead clean", "biased", "clean", False))
-            reasons.append("its strategy has lookahead bias")
+            reasons.append("the strategy has lookahead bias")
         if reasons:
+            why = "; ".join(reasons)
             out.append(dict(kind="demote", strategy=b["strategy"], exchange=b["exchange"], bot=b["name"], score=None,
-                            summary=f"{b['name']}: " + "; ".join(reasons) + ".",
+                            summary=why[0].upper() + why[1:] + ".",
                             action=f"Replace the {b['name']} row of roster.tsv in place with a promoted candidate and "
                                    "delete that pod's state-freqtrade-league-<N> PVC. Deleting the row instead moves "
                                    "every later bot onto another bot's state.",
@@ -197,12 +200,12 @@ def retune_rows(facts: dict, cfg: dict) -> list[dict]:
         t_lo, _ = metrics.mean_ci(tuned, metrics.seed_of(name, exchange, "retune"))
         g_lo, _ = metrics.diff_ci(tuned, base, metrics.seed_of(name, exchange, "retune gain"))
         gates = [
-            gate(f"tuned beats as-is, newest {c['folds']} months", f"{len(beat)} of {len(newest)}",
+            gate(f"tuned beats as is, newest {c['folds']} months", f"{len(beat)} of {len(newest)}",
                  f"{c['folds']} of {c['folds']}, >= {c['min_fold_trades']} trades each", len(beat) == c["folds"]),
-            gate("pooled gain a trade over as-is, 90% low", g_lo, f"> {c['min_gain']}",
+            gate("gain per trade over as is, interval low, all months", g_lo, f"> {c['min_gain']}",
                  t_mean is not None and (not base or (g_lo is not None and g_lo > c["min_gain"]))),
-            gate("pooled tuned trades", len(tuned), f">= {c['min_trades']}", len(tuned) >= c["min_trades"]),
-            gate("pooled tuned expectancy, 90% low", t_lo, f"> {c['min_oos_expectancy']}",
+            gate("tuned trades, all months", len(tuned), f">= {c['min_trades']}", len(tuned) >= c["min_trades"]),
+            gate("tuned expectancy interval low, all months", t_lo, f"> {c['min_oos_expectancy']}",
                  t_lo is not None and t_lo > c["min_oos_expectancy"]),
         ]
         if not all(g["pass"] for g in gates):
@@ -211,11 +214,11 @@ def retune_rows(facts: dict, cfg: dict) -> list[dict]:
         params = {"strategy_name": name, "params": last["params"], "ft_stratparam_v": 1}
         target = str(Path(s["file"]).with_suffix(".json"))
         out.append(dict(kind="retune", strategy=name, exchange=exchange, score=t_mean - (b_mean or 0.0),
-                        summary=f"Walk-forward on {exchange}: tuned beat as-is on the newest {c['folds']} unseen months; "
-                                f"pooled over {len(folds)} months, {t_mean:.4%} a trade tuned against "
-                                f"{(b_mean or 0.0):.4%} as is ({len(tuned)} trades).",
-                        action=f"Write the newest fold's parameters (trained {last['train_start']} to "
-                               f"{last['fold_start']}) to {target}:\n{json.dumps(params, indent=2)}",
+                        summary=f"Tuned parameters beat the strategy as is on {exchange} in each of the newest {c['folds']} "
+                                f"unseen months; over all {len(folds)} months, {t_mean:+.2%} per trade tuned against "
+                                f"{(b_mean or 0.0):+.2%} as is ({len(tuned)} trades).",
+                        action=f"Save the newest month's tuned parameters (trained {last['train_start']} to "
+                               f"{last['fold_start']}) as {target}:\n{json.dumps(params, indent=2)}",
                         gates=gates))
     return out
 

@@ -7,6 +7,6 @@
 {% for kind, title, blurb in sections %}
 <h2 id="{{ kind }}">{{ title }} <span class="muted">({{ by_kind[kind] | length }})</span></h2>
 <p class="muted">{{ blurb }}</p>
-{% for sg in by_kind[kind] %}{% include "_suggestion.html" %}{% else %}<p class="muted">None.</p>{% endfor %}
+{% for sg in by_kind[kind] %}{% include "_suggestion.html" %}{% else %}<p class="muted">None right now.</p>{% endfor %}
 {% endfor %}
 {% endblock %}

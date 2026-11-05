@@ -166,6 +166,6 @@ def test_retune_rows_come_from_stored_folds(wlab, monkeypatch):
     wlab.execute("INSERT INTO bias_checks (strategy, kind, file_hash, has_bias) VALUES ('Live', 'lookahead', 'Live-1', false)")
     assert suggest.run(wlab)["suggestions"]["retune"] == 1
     summary, action = wlab.execute("SELECT summary, action FROM suggestions WHERE kind = 'retune'").fetchone()
-    assert "tuned beat as-is on the newest 2 unseen months" in summary
+    assert "in each of the newest 2 unseen months" in summary
     params = json.loads(action.split(":\n", 1)[1])
     assert params == {"strategy_name": "Live", "params": {"roi": {"0": 0.03}, "stoploss": -0.08}, "ft_stratparam_v": 1}

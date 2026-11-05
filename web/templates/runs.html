@@ -2,11 +2,11 @@
 {% block title %}Runs{% endblock %}
 {% block body %}
 <h1>Analysis runs</h1>
-<p class="muted">One row per nightly lab/analyze.py run. A past year's backtest is cached, so most runs only redo the current year.</p>
+<p class="muted">One row per nightly analysis. A past year's backtest is cached, so most runs only redo the current year.</p>
 {% if runs %}
 <div class="scroll">
 <table>
-  <thead><tr><th>Run</th><th>Result</th><th>Took</th><th class="n">Strategies</th><th class="n">Chunks run</th><th class="n">Cached</th><th class="n">Failed</th><th class="n">Bias checks</th></tr></thead>
+  <thead><tr><th>Run</th><th>Result</th><th>Took</th><th class="n">Strategies</th><th class="n">Years backtested</th><th class="n">Years cached</th><th class="n">Years failed</th><th class="n">Bias checks</th></tr></thead>
   <tbody>
   {% for r in runs %}
   <tr><td><a href="/runs/{{ r.id }}">{{ r.name }}</a></td>
@@ -20,5 +20,5 @@
   </tbody>
 </table>
 </div>
-{% else %}<p class="muted">No runs yet.</p>{% endif %}
+{% else %}<p class="muted">No analysis has run yet: the nightly job adds a row here when it finishes.</p>{% endif %}
 {% endblock %}

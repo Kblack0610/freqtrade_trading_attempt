@@ -86,7 +86,7 @@ def test_each_suggestion_explains_itself():
     near = rows[("watch", "NearMiss", "")]
     assert [g["gate"] for g in near["gates"] if not g["pass"]] == ["deflated Sharpe"]
     copy = rows[("watch", "Copycat", "")]
-    assert [g["gate"] for g in copy["gates"] if not g["pass"]] == ["overlap with league (Running)"]
+    assert [g["gate"] for g in copy["gates"] if not g["pass"]] == ["correlation with league (Running)"]
     assert "in place" in rows[("demote", "Running", "coinbase-running")]["action"]
     assert "every research exchange" in rows[("demote", "Loser", "kraken-loser")]["summary"]
     assert "next_close" in rows[("retire", "Leaky", "")]["summary"]

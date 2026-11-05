@@ -2,7 +2,7 @@
 {% block title %}{{ s.name }}{% endblock %}
 {% block body %}
 <h1>{{ s.name }}</h1>
-<p class="muted">{{ s.file }}, {{ s.timeframe or "no timeframe" }}, {{ s.startup_candle_count or 0 }} startup candles{% if s.load_error %}, <span class="down">fails to load: {{ s.load_error }}</span>{% endif %}</p>
+<p class="muted">{{ (s.timeframe ~ " timeframe") if s.timeframe else "No timeframe" }}, {{ s.startup_candle_count or 0 }} startup candles, in {{ s.file }}{% if s.load_error %}, <span class="down">fails to load: {{ s.load_error }}</span>{% endif %}</p>
 
 {% if exchanges %}<nav class="tabs">{% for e in exchanges %}<a href="/strategies/{{ s.name }}?exchange={{ e }}" {% if e == exchange %}aria-current="page"{% endif %}>{{ e }}</a>{% endfor %}</nav>{% endif %}
 
@@ -26,17 +26,17 @@
 </table>
 </div>
 <p class="muted">Lookahead: a signal changes when later candles are hidden, so the backtest saw the future. Recursive: an indicator still moves at the strategy's own startup candle count, so live values differ from the backtest.</p>
-{% else %}<p class="muted">Not checked yet.</p>{% endif %}
+{% else %}<p class="muted">Not checked yet: the nightly analysis runs the lookahead and recursive checks on new and changed files.</p>{% endif %}
 
 <h2>Cumulative return on {{ exchange or "-" }}</h2>
 {{ chart | safe }}
 <p class="muted">Realized on trade close. Each calendar year is its own backtest from the same starting wallet, chained by daily return.</p>
 
-<h2>Windows</h2>
+<h2>Results by window</h2>
 {% if windows %}
 <div class="scroll">
 <table>
-  <thead><tr><th>Window</th><th>From</th><th class="n">Days</th><th class="n">Trades</th><th class="n">Return</th><th class="n">CAGR</th><th class="n">Sharpe (90% CI)</th><th class="n">DSR</th><th class="n">Sortino</th><th class="n">Calmar</th><th class="n" title="Realized on trade close, so open losses do not count">Max DD</th><th class="n" title="Deepest any trade went against its entry before it closed">Worst open</th><th class="n">PF</th><th class="n">Per trade (90% CI)</th><th class="n" title="Mean price move per trade before fees. A venue whose round-trip fee is below the low end keeps the edge.">Before fees (90% CI)</th><th class="n" title="Mean round-trip fee a trade paid">Fee</th><th class="n">Win</th><th class="n" title="Share of the window with any position open">Exposure</th><th class="n" title="Mean share of the wallet in positions">Capital</th><th class="n" title="Annual return over holding BTC with the same share of capital. A low end above zero is skill, not the market.">Over hold (90% CI)</th><th class="n">Months up</th><th class="n" title="Trades still needed before the low end of the per-trade interval can clear zero, if the mean and spread hold">More trades</th></tr></thead>
+  <thead><tr><th>Window</th><th>From</th><th class="n">Days</th><th class="n">Trades</th><th class="n">Return</th><th class="n">CAGR</th><th class="n">Sharpe (90% CI)</th><th class="n">Deflated Sharpe</th><th class="n">Sortino</th><th class="n">Calmar</th><th class="n" title="Realized on trade close, so open losses do not count">Max drawdown</th><th class="n" title="Deepest any trade went against its entry before it closed">Worst open</th><th class="n">Profit factor</th><th class="n">Per trade (90% CI)</th><th class="n" title="Mean price move per trade before fees. A venue whose round-trip fee is below the low end keeps the edge.">Before fees (90% CI)</th><th class="n" title="Mean round-trip fee a trade paid">Fee per trade</th><th class="n">Win rate</th><th class="n" title="Share of the window with any position open">Exposure</th><th class="n" title="Mean share of the wallet in positions">Capital used</th><th class="n" title="Annual return over holding BTC with the same share of capital. A low end above zero is skill, not the market.">Over hold (90% CI)</th><th class="n">Months up</th><th class="n" title="Trades still needed before the low end of the per-trade interval can clear zero, if the mean and spread hold">Trades needed</th></tr></thead>
   <tbody>
   {% for w in windows %}
   <tr class="{{ 'muted' if w.trades < min_trades }}">
@@ -57,13 +57,13 @@
   </tbody>
 </table>
 </div>
-{% else %}<p class="muted">No windows yet.</p>{% endif %}
+{% else %}<p class="muted">No results on {{ exchange or "any exchange" }} yet: the nightly analysis adds them after its first backtest here.</p>{% endif %}
 
 <h2>Estimates</h2>
 {% if estimates %}
 <div class="scroll">
 <table>
-  <thead><tr><th>Horizon</th><th class="n">p10</th><th class="n">p50</th><th class="n">p90</th><th class="n">P(loss)</th><th class="n">Expected max DD</th><th class="n">Paths</th><th class="n">Basis days</th></tr></thead>
+  <thead><tr><th>Horizon</th><th class="n">p10</th><th class="n">p50</th><th class="n">p90</th><th class="n">Chance of loss</th><th class="n">Expected max drawdown</th><th class="n">Simulated paths</th><th class="n">Days of history</th></tr></thead>
   <tbody>
   {% for e in estimates %}
   <tr><td>{{ e.horizon_days }} days</td><td class="n {{ e.p10 | tone }}">{{ e.p10 | pct }}</td><td class="n {{ e.p50 | tone }}">{{ e.p50 | pct }}</td><td class="n {{ e.p90 | tone }}">{{ e.p90 | pct }}</td>
@@ -73,12 +73,12 @@
 </table>
 </div>
 <p class="muted">A seeded block bootstrap of the last year's daily returns (10-day blocks), so the same data gives the same bands.</p>
-{% else %}<p class="muted">Needs 180 days of results.</p>{% endif %}
+{% else %}<p class="muted">No estimates yet: they need 180 days of backtest results.</p>{% endif %}
 
 <h2 id="walk-forward">Walk-forward</h2>
 {% if wf %}
 {% for r, folds in wf %}
-<p>On {{ r.exchange }}: tuned beat as is in {{ r.beat }} of {{ r.tuned_folds }} months; per trade {{ r.base_mean | pct(2) }} as is ({{ r.base_lo | pct(2) }} to {{ r.base_hi | pct(2) }}) against {{ r.tuned_mean | pct(2) }} tuned ({{ r.tuned_lo | pct(2) }} to {{ r.tuned_hi | pct(2) }}) over {{ r.tuned_trades }} trades; efficiency {{ r.wfe | num(2) }}.</p>
+<p>Tuned parameters on {{ r.exchange }} beat as is in {{ r.beat }} of {{ r.tuned_folds }} months: {{ r.tuned_mean | pct(2) }} per trade tuned ({{ r.tuned_lo | pct(2) }} to {{ r.tuned_hi | pct(2) }}) against {{ r.base_mean | pct(2) }} as is ({{ r.base_lo | pct(2) }} to {{ r.base_hi | pct(2) }}) over {{ r.tuned_trades }} trades, walk-forward efficiency {{ r.wfe | num(2) }}.</p>
 {% include "_wf_folds.html" %}
 {% endfor %}
 {% else %}<p class="muted">Not a walk-forward candidate yet: the weekly run takes the league's strategies and the promote and watch suggestions.</p>{% endif %}
@@ -102,9 +102,9 @@
 {% if correlations %}
 <ul class="plain">{% for c in correlations %}<li>{{ c.other }}: {{ c.rho | num(2) }} over {{ c.days }} days</li>{% endfor %}</ul>
 <p class="muted">Daily backtest returns on {{ exchange }}. Near 1 means it mostly duplicates a strategy the league already runs.</p>
-{% else %}<p class="muted">Nothing to compare yet.</p>{% endif %}
+{% else %}<p class="muted">Nothing to compare yet: no league strategy on {{ exchange or "this exchange" }} shares backtest days with this one.</p>{% endif %}
 
-<h2>Backtest chunks</h2>
+<h2>Backtests by year</h2>
 {% if chunks %}
 <div class="scroll">
 <table>
@@ -114,18 +114,18 @@
   <tr><td>{{ c.chunk_start.year }}</td><td>{{ c.chunk_start }} to {{ c.chunk_end }}</td><td class="n">{{ c.trades if c.trades is not none else "-" }}</td>
       <td class="n {{ ((c.final_balance / c.start_balance - 1) if c.ok and c.start_balance else none) | tone }}">{{ ((c.final_balance / c.start_balance - 1) if c.ok and c.start_balance else none) | pct }}</td>
       <td class="n">{{ c.max_drawdown | pct }}</td><td class="n">{{ c.duration_s | num(0, "s") }}</td>
-      <td class="{{ 'down' if not c.ok }}" title="{{ c.error or '' }}">{{ "ok" if c.ok else ("failed x" ~ c.attempts ~ ": " ~ (c.error | truncate(60))) }}</td></tr>
+      <td class="{{ 'down' if not c.ok }}" title="{{ c.error or '' }}">{{ "ok" if c.ok else ("failed after " ~ c.attempts ~ " tries: " ~ (c.error | truncate(60))) }}</td></tr>
   {% endfor %}
   </tbody>
 </table>
 </div>
-{% else %}<p class="muted">Not backtested yet.</p>{% endif %}
+{% else %}<p class="muted">Not backtested yet: the nightly analysis backtests every year of history.</p>{% endif %}
 
 <h2>Latest backtest trades</h2>
 {% if trades %}
 <div class="scroll">
 <table>
-  <thead><tr><th>Pair</th><th>Opened</th><th>Closed</th><th class="n">Profit</th><th class="n">USD</th><th>Exit</th><th>Tag</th></tr></thead>
+  <thead><tr><th>Pair</th><th>Opened</th><th>Closed</th><th class="n">Profit</th><th class="n">USD</th><th>Exit reason</th><th>Entry tag</th></tr></thead>
   <tbody>
   {% for t in trades %}
   <tr><td>{{ t.pair }}</td><td>{{ t.open_date | local("%Y-%m-%d %H:%M") }}</td><td>{{ t.close_date | local("%Y-%m-%d %H:%M") }}</td>
@@ -134,5 +134,5 @@
   </tbody>
 </table>
 </div>
-{% else %}<p class="muted">No trades.</p>{% endif %}
+{% else %}<p class="muted">No backtest trades on {{ exchange or "any exchange" }} yet.</p>{% endif %}
 {% endblock %}

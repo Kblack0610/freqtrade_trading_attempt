@@ -1,11 +1,11 @@
 <div class="scroll">
 <table>
-  <thead><tr><th>Strategy</th><th>Exchange</th><th>TF</th><th class="n">Trades</th><th class="n">Return</th><th class="n">CAGR</th>
+  <thead><tr><th>Strategy</th><th>Exchange</th><th>Timeframe</th><th class="n">Trades</th><th class="n">Return</th><th class="n">CAGR</th>
     <th class="n" title="Annualized Sharpe and its 90% bootstrap interval">Sharpe (90% CI)</th>
-    <th class="n" title="Deflated Sharpe: probability the Sharpe beats the best one luck gives among all strategies tested">DSR</th>
-    <th class="n">Max DD</th><th class="n">PF</th><th class="n" title="Mean profit per trade after fees and its 90% interval">Per trade</th>
-    <th class="n" title="Mean price move per trade before fees and its 90% interval. A venue whose round-trip fee is below the low end keeps the edge.">Before fees</th><th class="n">Win</th>
-    <th class="n" title="90-day Monte Carlo, p10 / p50 / p90">90d est.</th><th class="n">P(loss)</th><th class="n" title="Trades still needed before the low end of the per-trade interval can clear zero, if the mean and spread hold">More trades</th><th>Note</th></tr></thead>
+    <th class="n" title="Probability the Sharpe beats the best one luck gives among all strategies tested">Deflated Sharpe</th>
+    <th class="n">Max drawdown</th><th class="n">Profit factor</th><th class="n" title="Mean profit per trade after fees and its 90% interval">Per trade</th>
+    <th class="n" title="Mean price move per trade before fees and its 90% interval. A venue whose round-trip fee is below the low end keeps the edge.">Before fees</th><th class="n">Win rate</th>
+    <th class="n" title="90-day Monte Carlo, p10 / p50 / p90">90-day estimate</th><th class="n" title="Chance the next 90 days lose money">Chance of loss</th><th class="n" title="Trades still needed before the low end of the per-trade interval can clear zero, if the mean and spread hold">Trades needed</th><th>Note</th></tr></thead>
   <tbody>
   {% for w in board %}
   <tr class="{{ 'muted' if w.biased or w.trades < min_trades }}">
@@ -24,7 +24,7 @@
     <td class="n">{% if w.p50 is not none %}{{ w.p10 | pct(0) }} / <span class="{{ w.p50 | tone }}">{{ w.p50 | pct(0) }}</span> / {{ w.p90 | pct(0) }}{% else %}-{% endif %}</td>
     <td class="n">{{ w.prob_loss | pct(0) }}</td>
     <td class="n">{% if w.trades_needed is none %}-{% elif w.trades_needed == 0 %}enough{% else %}{{ w.trades_needed }}{% endif %}</td>
-    <td>{% if w.biased %}<span class="down">biased</span>{% elif w.trades < min_trades %}few trades{% elif w.unchecked %}bias unchecked{% endif %}{% if w.unstable and not w.biased %} <span title="An indicator still moves at the startup candle count, so live values can differ">recursive</span>{% endif %}{% if w.in_league %} in league{% endif %}</td>
+    <td>{% if w.biased %}<span class="down">lookahead bias</span>{% elif w.trades < min_trades %}few trades{% elif w.unchecked %}bias not checked{% endif %}{% if w.unstable and not w.biased %} <span title="An indicator still moves at the startup candle count, so live values can differ">short warmup</span>{% endif %}{% if w.in_league %} in league{% endif %}</td>
   </tr>
   {% endfor %}
   </tbody>

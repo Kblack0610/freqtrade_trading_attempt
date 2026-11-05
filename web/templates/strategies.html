@@ -2,7 +2,7 @@
 {% block title %}Strategies{% endblock %}
 {% block body %}
 <h1>Strategies</h1>
-<p class="muted">Every strategy backtested on each exchange's whole price history, rebuilt nightly. Ranked by the low end of the Sharpe interval, so a strategy has to look good on its unlucky draw too. Greyed rows have a bias finding or fewer than {{ min_trades }} trades in the window. DSR is the chance the Sharpe is more than the best one luck would give among the strategy and exchange pairs tested: {{ board[0].trials_raw or 0 if board else 0 }} of them, worth {{ (board[0].trials | num(1)) if board else 0 }} independent trials once their correlation is counted. More trades is how many the low end of the per-trade interval needs before it can clear zero, if the mean and spread hold. The estimates resample the last year of daily returns: they describe that year, they do not promise the next.</p>
+<p class="muted">Every strategy backtested on each exchange's whole price history, rebuilt nightly. Ranked by the low end of the Sharpe interval, so a strategy has to look good on its unlucky draw too. Greyed rows have a bias finding or fewer than {{ min_trades }} trades in the window. Deflated Sharpe is the chance the Sharpe is more than the best one luck would give among the strategy and exchange pairs tested: {{ board[0].trials_raw or 0 if board else 0 }} of them, worth {{ (board[0].trials | num(1)) if board else 0 }} independent trials once their correlation is counted. Trades needed is how many the low end of the per-trade interval needs before it can clear zero, if the mean and spread hold. The estimates resample the last year of daily returns: they describe that year, they do not promise the next.</p>
 
 <nav class="tabs">{% for w in windows %}<a href="/strategies?win={{ w }}" {% if w == win %}aria-current="page"{% endif %}>{{ "whole history" if w == "all" else w }}</a>{% endfor %}</nav>
 
@@ -19,10 +19,10 @@
   </tbody>
 </table>
 </div>
-<h2>Board</h2>
+<h2>Ranking</h2>
 {% endif %}
 
-{% if board %}{% include "_board.html" %}{% else %}<p class="muted">No results for this window yet.</p>{% endif %}
+{% if board %}{% include "_board.html" %}{% else %}<p class="muted">No results for this window yet: the nightly analysis fills it once a strategy has trades in it.</p>{% endif %}
 
 {% if broken or skipped %}
 <h2>Not analyzed</h2>
@@ -31,5 +31,5 @@
   {% for why, names in skipped | skip_groups %}<li>{{ why }}{% if names | length > 3 %}: <span title="{{ names | join(', ') }}">{{ names | length }} strategies</span>{% elif names %}: {{ names | join(', ') }}{% endif %}</li>{% endfor %}
 </ul>
 {% endif %}
-{% if last_run %}<p class="muted">From analysis run <a href="/runs/{{ last_run.id }}">{{ last_run.name }}</a>.</p>{% endif %}
+{% if last_run %}<p class="muted">Results from analysis run <a href="/runs/{{ last_run.id }}">{{ last_run.name }}</a>.</p>{% endif %}
 {% endblock %}
