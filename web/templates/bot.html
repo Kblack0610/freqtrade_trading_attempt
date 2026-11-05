@@ -14,6 +14,22 @@
 <h2>Profit over time</h2>
 {{ chart | safe }}
 
+<h2>Live against backtest</h2>
+{% if drift and drift.error %}<p class="down">The backtest of this period failed: {{ drift.error }}</p>
+{% elif drift %}
+<p class="muted">{{ bot.strategy }} backtested on {{ bot.exchange }} from {{ drift.since | local }} to {{ drift.bt_end | local }}, the time this bot has run. An entry matches when the backtest entered the same pair within one candle. The gap is live minus backtest profit per trade over trades closed on both sides: the error in the backtest's fill and fee model. It needs dozens of trades to mean anything.</p>
+<div class="scroll">
+<table>
+  <thead><tr><th></th><th class="n">Entries</th><th class="n">Closed</th><th class="n">Per trade</th><th class="n">USD</th></tr></thead>
+  <tbody>
+  <tr><td>Dry run</td><td class="n">{{ drift.live_entries }}</td><td class="n">{{ drift.live_closed }}</td><td class="n">{{ drift.live_expectancy | pct(2) }}</td><td class="n">{{ drift.live_profit | num(2) }}</td></tr>
+  <tr><td>Backtest</td><td class="n">{{ drift.bt_entries }}</td><td class="n">{{ drift.bt_closed }}</td><td class="n">{{ drift.bt_expectancy | pct(2) }}</td><td class="n">{{ drift.bt_profit | num(2) }}</td></tr>
+  </tbody>
+</table>
+</div>
+<p>{{ drift.matched }} of {{ drift.live_entries }} live entries matched; gap {{ drift.gap | pct(2) }} per trade over {{ drift.gap_trades }} trades.</p>
+{% else %}<p class="muted">Not compared yet: the next analysis run backtests this bot's period.</p>{% endif %}
+
 <h2>Trades</h2>
 {% if trades %}
 <div class="scroll">

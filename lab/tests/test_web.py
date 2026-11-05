@@ -28,6 +28,10 @@ def signed_in(site):
 
 def seed(c):
     c.execute("INSERT INTO bots (name, exchange, strategy) VALUES ('kraken-s001', 'kraken', 'Strategy001')")
+    c.execute("INSERT INTO drift (bot, strategy, exchange, since, bt_start, bt_end, live_entries, bt_entries, matched, "
+              "live_closed, bt_closed, live_expectancy, bt_expectancy, live_profit, bt_profit, gap, gap_trades) VALUES "
+              "('kraken-s001', 'Strategy001', 'kraken', %s, %s, %s, 4, 6, 3, 3, 5, 0.012, 0.0185, 4, 9.25, -0.0065, 3)",
+              (NOW - dt.timedelta(days=2), NOW - dt.timedelta(days=2), NOW))
     for h, pct in ((3, 1.0), (2, -0.5), (1, 2.5)):
         c.execute("INSERT INTO bot_snapshots (bot, ts, dry_run, closed_trades, open_trades, profit_all_pct, "
                   "profit_all_abs, winrate_pct, max_drawdown_pct, balance_total) "
@@ -144,9 +148,10 @@ def test_login_for_code_returns_the_forgejo_login():
 def test_every_page_renders_with_data(conn, signed_in):
     seed(conn)
     _, client = signed_in
-    pages = {"/": ["kraken-s001", "2.50%", "binanceus", "Best strategies", "/strategies/Strategy001?exchange=binanceus",
+    pages = {"/": ["kraken-s001", "2.50%", "3 of 4", "binanceus", "Best strategies", "/strategies/Strategy001?exchange=binanceus",
                    "2026-11-04 03:00:00"],
-             "/bots/kraken-s001": ["Strategy001 on kraken", "<svg", "BTC/USD", "1.20%"],
+             "/bots/kraken-s001": ["Strategy001 on kraken", "<svg", "BTC/USD", "1.20%", "Live against backtest", "1.85%",
+                                   "3 of 4 live entries matched; gap -0.65%"],
              "/strategies": ["Strategy001", "0.40", "62%", "-5% / ", "3.2%", "1.20%", "biased", "Broken", "failed to import",
                              "Scalp on binanceus: no 1m candles", "Fees by venue", "0.25%", "1.45%"],
              "/strategies?win=all": ["No results for this window yet"],

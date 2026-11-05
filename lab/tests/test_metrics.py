@@ -89,3 +89,19 @@ def test_regimes_need_200_days_for_a_trend():
     r = metrics.regimes(close)
     assert r["trend"].iloc[:199].isna().all() and (r["trend"].iloc[199:] == "bull").all()
     assert set(r["vol_bucket"].dropna()) <= {"low", "mid", "high"}
+
+
+def test_drift_matches_entries_within_a_candle():
+    t = metrics.utc
+    live = pd.DataFrame({"pair": ["BTC/USD", "BTC/USD", "ETH/USD"],
+                         "open_date": [t("2026-11-01 10:02"), t("2026-11-02 09:00"), t("2026-11-02 12:00")],
+                         "is_open": [False, False, True], "profit_ratio": [0.01, -0.02, 0.0], "profit_abs": [3.0, -6.0, 0.0]})
+    bt = pd.DataFrame({"pair": ["BTC/USD", "ETH/USD", "ETH/USD"],
+                       "open_date": [t("2026-11-01 10:00"), t("2026-11-02 12:00"), t("2026-11-03 00:00")],
+                       "exit_reason": ["roi", "force_exit", "roi"], "profit_ratio": [0.015, 0.01, 0.02],
+                       "profit_abs": [4.5, 3.0, 6.0]})
+    d = metrics.drift(live, bt, pd.Timedelta("5m"))
+    assert (d["live_entries"], d["bt_entries"], d["matched"], d["live_closed"], d["bt_closed"]) == (3, 3, 2, 2, 2)
+    assert d["gap_trades"] == 1 and math.isclose(d["gap"], -0.005)
+    assert math.isclose(d["live_expectancy"], -0.005) and math.isclose(d["bt_profit"], 10.5)
+    assert metrics.drift(live.iloc[0:0], bt, pd.Timedelta("5m"))["matched"] == 0

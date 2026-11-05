@@ -12,7 +12,9 @@
 4. Derived, rebuilt in one transaction from the stored trades: daily returns, metrics over 30d, 90d,
    180d, 365d and all (with bootstrap intervals and the deflated Sharpe across every strategy x
    exchange), Monte Carlo estimates, BTC regimes, and correlation with the strategies the league runs.
-5. Suggestions: lab/suggest.py turns those tables into promote, watch, demote, retire and fix rows,
+5. Drift: each league bot's strategy backtested on its exchange over the time the bot has run, set
+   against the bot's dry-run trades in `drift`.
+6. Suggestions: lab/suggest.py turns those tables into promote, watch, demote, retire and fix rows,
    with the thresholds in lab/suggest.toml.
 
 Returns are realized (on trade close); a trade still open at a chunk's end is closed there.
@@ -329,6 +331,46 @@ def bias_todo(conn, found: list[dict], first: dict) -> list[tuple[str, str, str]
     return out
 
 
+def drift_todo(conn, found: list[dict], today: dt.date) -> list[dict]:
+    """League bots with a live period to compare: from the bot's first sighting or first trade, whichever is earlier."""
+    ok = {s["name"]: s for s in found if not s["load_error"]}
+    out = []
+    for bot, ex, strategy, since in conn.execute(
+            "SELECT b.name, b.exchange, b.strategy, least(b.first_seen, min(t.open_date)) FROM bots b"
+            " LEFT JOIN bot_trades t ON t.bot = b.name GROUP BY b.name ORDER BY b.name"):
+        if strategy in ok and (not ONLY or strategy in ONLY) and since.date() < today:
+            out.append({"bot": bot, "exchange": ex, "strategy": strategy, "since": since,
+                        "timeframe": ok[strategy]["timeframe"], "start": since.date(), "end": today + dt.timedelta(days=1)})
+    return out
+
+
+DRIFT_COLS = ["bot", "strategy", "exchange", "since", "bt_start", "bt_end", "live_entries", "bt_entries", "matched",
+              "live_closed", "bt_closed", "live_expectancy", "bt_expectancy", "live_profit", "bt_profit", "gap",
+              "gap_trades", "error"]
+
+
+def store_drift(conn, task: dict, res: dict) -> None:
+    row = {k: task[k] for k in ("bot", "strategy", "exchange", "since")}
+    if res.get("ok"):
+        lo, hi = max(task["since"], res["bt_start"]), res["bt_end"]
+        live = pd.DataFrame(conn.execute(
+            "SELECT pair, open_date, is_open, profit_ratio, profit_abs FROM bot_trades"
+            " WHERE bot = %s AND open_date >= %s AND open_date < %s", (task["bot"], lo, hi)).fetchall(),
+            columns=["pair", "open_date", "is_open", "profit_ratio", "profit_abs"])
+        bt = res["trades"]
+        if len(bt):
+            opened = pd.to_datetime(bt["open_date"], utc=True)
+            bt = bt[(opened >= lo) & (opened < hi)]
+        row.update(bt_start=res["bt_start"], bt_end=res["bt_end"],
+                   **metrics.drift(live, bt, pd.Timedelta(task["timeframe"] or "5m")))
+    else:
+        row["error"] = res.get("error")
+    cols = ", ".join(DRIFT_COLS)
+    conn.execute(f"INSERT INTO drift ({cols}) VALUES ({', '.join(['%s'] * len(DRIFT_COLS))}) ON CONFLICT (bot) DO UPDATE"
+                 " SET " + ", ".join(f"{c} = EXCLUDED.{c}" for c in DRIFT_COLS[1:]) + ", computed_at = now()",
+                 [clean(row.get(c)) for c in DRIFT_COLS])
+
+
 def load_series(conn) -> dict[tuple[str, str], tuple[pd.DataFrame, pd.DataFrame]]:
     """Daily returns and closed trades of every strategy x exchange, from its successful chunks."""
     chunk_rows = conn.execute(
@@ -471,14 +513,18 @@ def main(runner: Runner | None = None, today: dt.date | None = None) -> int:
             first = coverage(conn)
             todo, cached, skipped = plan(conn, found, first, today, version)
             bias = bias_todo(conn, found, first)
+            drifts = drift_todo(conn, found, today)
             hashes = {s["name"]: s["file_hash"] for s in found}
             summary.update(freqtrade=version, strategies=len(found), load_failed=sum(bool(s["load_error"]) for s in found),
-                           chunks_cached=cached, chunks_run=len(todo), skipped=skipped, bias_run=len(bias))
+                           chunks_cached=cached, chunks_run=len(todo), skipped=skipped, bias_run=len(bias),
+                           drift_run=len(drifts))
             print(f"analyze: {len(found)} strategies, {len(todo)} chunks to run, {cached} cached, "
                   f"{len(bias)} bias checks, {WORKERS} workers", flush=True)
             failed, done, failures = 0, 0, []
             with ThreadPoolExecutor(max_workers=WORKERS) as pool:
                 futs = {pool.submit(runner.bias, kind, s): ("bias", (s, kind, h)) for s, kind, h in bias}
+                futs.update({pool.submit(runner.backtest, t["strategy"], t["exchange"], t["start"], t["end"]): ("drift", t)
+                             for t in drifts})
                 futs.update({pool.submit(runner.backtest, t["strategy"], t["exchange"], t["start"], t["end"]): ("chunk", t)
                              for t in todo})
                 try:
@@ -490,6 +536,9 @@ def main(runner: Runner | None = None, today: dt.date | None = None) -> int:
                             res = {"ok": False, "has_bias": None, "error": f"{type(e).__name__}: {e}"}
                         if what == "bias":
                             store_bias(conn, task[0], task[1], task[2], res)
+                            continue
+                        if what == "drift":
+                            store_drift(conn, task, res)
                             continue
                         store_chunk(conn, task, res, run_id)
                         done += 1
