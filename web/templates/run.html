@@ -1,39 +1,35 @@
 {% extends "base.html" %}
 {% block title %}Run {{ run.name }}{% endblock %}
 {% block body %}
-<h1>{{ run.kind }} {{ run.name }}</h1>
-<p class="muted">{{ run.backtests }} backtests, {{ run.profitable }} profitable, {{ run.biased }} bias findings, {{ run.hyperopts }} hyperopts. A strategy with a bias finding cannot be trusted on its backtest.</p>
+<h1>Analysis run {{ run.name }}</h1>
+<p class="{{ 'up' if run.ok else ('down' if run.finished_at else 'muted') }}">{{ "ok" if run.ok else ("failed" if run.finished_at else "running") }}{% if run.took %}, took {{ (run.took.total_seconds() / 60) | num(0, " min") }}{% endif %}{% if run.raw.error %}: {{ run.raw.error }}{% endif %}</p>
 
-<h2>Backtests</h2>
+<section class="tiles">
+  <div class="tile"><span class="label">Strategies</span><span class="value">{{ run.raw.strategies or 0 }}</span></div>
+  <div class="tile"><span class="label">Chunks run</span><span class="value">{{ run.raw.chunks_run or 0 }}</span></div>
+  <div class="tile"><span class="label">Cached</span><span class="value">{{ run.raw.chunks_cached or 0 }}</span></div>
+  <div class="tile"><span class="label">Failed</span><span class="value {{ 'down' if run.raw.chunks_failed }}">{{ run.raw.chunks_failed or 0 }}</span></div>
+  <div class="tile"><span class="label">Bias checks</span><span class="value">{{ run.raw.bias_run or 0 }}</span></div>
+  <div class="tile"><span class="label">Windows</span><span class="value">{{ run.raw.windows or 0 }}</span></div>
+</section>
+<p class="muted">Freqtrade {{ run.raw.freqtrade or "-" }} on {{ (run.raw.exchanges or []) | join(", ") }}{% if run.raw.only %}, only {{ run.raw.only | join(", ") }}{% endif %}. {{ run.raw.load_failed or 0 }} strategies failed to load; {{ run.raw.bias_failed or 0 }} bias checks could not run.</p>
+
+<h2>Failed chunks</h2>
+{% if failed %}
 <div class="scroll">
 <table>
-  <thead><tr><th>Strategy</th><th>Exchange</th><th>TF</th><th class="n">Trades</th><th class="n">Profit</th><th class="n">Win rate</th><th class="n">Max DD</th><th class="n">PF</th><th class="n">Sharpe</th><th>Note</th></tr></thead>
+  <thead><tr><th>Strategy</th><th>Exchange</th><th>Year</th><th class="n">Attempts</th><th>Error</th></tr></thead>
   <tbody>
-  {% for b in backtests %}
-  <tr>
-    <td>{{ b.strategy }}</td><td>{{ b.exchange }}</td><td>{{ b.timeframe or "" }}</td>
-    <td class="n">{{ b.trades if b.trades is not none else "-" }}</td>
-    <td class="n {{ 'up' if (b.profit_pct or 0) > 0 else ('down' if (b.profit_pct or 0) < 0) }}">{{ b.profit_pct | num(2, "%") }}</td>
-    <td class="n">{{ b.winrate_pct | num(0, "%") }}</td><td class="n">{{ b.max_drawdown_pct | num(2, "%") }}</td>
-    <td class="n">{{ b.profit_factor | num(2) }}</td><td class="n">{{ b.sharpe | num(2) }}</td>
-    <td class="{{ 'down' if b.error or b.lookahead_bias }}" title="{{ b.error or '' }}">{{ (b.error | truncate(48)) if b.error else ("lookahead bias" if b.lookahead_bias else "") }}</td>
-  </tr>
+  {% for f in failed %}
+  <tr><td><a href="/strategies/{{ f.strategy }}?exchange={{ f.exchange }}">{{ f.strategy }}</a></td><td>{{ f.exchange }}</td><td>{{ f.chunk_start.year }}</td><td class="n">{{ f.attempts }}</td><td title="{{ f.error or '' }}">{{ f.error | truncate(90) }}</td></tr>
   {% endfor %}
   </tbody>
 </table>
 </div>
+{% else %}<p class="muted">None.</p>{% endif %}
 
-<h2>Bias checks</h2>
-{% if bias %}
-<div class="scroll">
-<table>
-  <thead><tr><th>Strategy</th><th>Check</th><th>Result</th><th>Indicators</th></tr></thead>
-  <tbody>
-  {% for c in bias %}
-  <tr><td>{{ c.strategy }}</td><td>{{ c.kind }}</td><td class="{{ 'down' if c.has_bias else 'up' }}">{{ "biased" if c.has_bias else "clean" }}</td><td>{{ c.biased_indicators or "" }}</td></tr>
-  {% endfor %}
-  </tbody>
-</table>
-</div>
-{% else %}<p class="muted">No bias checks in this run.</p>{% endif %}
+{% if run.raw.skipped %}
+<h2>Skipped</h2>
+<ul class="plain">{% for s in run.raw.skipped %}<li>{{ s }}</li>{% endfor %}</ul>
+{% endif %}
 {% endblock %}

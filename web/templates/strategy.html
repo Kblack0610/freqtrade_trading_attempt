@@ -1,0 +1,120 @@
+{% extends "base.html" %}
+{% block title %}{{ s.name }}{% endblock %}
+{% block body %}
+<h1>{{ s.name }}</h1>
+<p class="muted">{{ s.file }}, {{ s.timeframe or "no timeframe" }}, {{ s.startup_candle_count or 0 }} startup candles{% if s.load_error %}, <span class="down">fails to load: {{ s.load_error }}</span>{% endif %}</p>
+
+{% if exchanges %}<nav class="tabs">{% for e in exchanges %}<a href="/strategies/{{ s.name }}?exchange={{ e }}" {% if e == exchange %}aria-current="page"{% endif %}>{{ e }}</a>{% endfor %}</nav>{% endif %}
+
+<h2>Bias checks</h2>
+{% if bias %}
+<div class="scroll">
+<table>
+  <thead><tr><th>Check</th><th>Result</th><th>Indicators</th><th>Checked</th><th>Note</th></tr></thead>
+  <tbody>
+  {% for b in bias %}
+  <tr><td>{{ b.kind }}</td>
+      <td class="{{ ('down' if b.kind == 'lookahead' else '') if b.has_bias else ('up' if b.has_bias is not none) }}">{{ "biased" if b.has_bias else ("clean" if b.has_bias is not none else "not checked") }}</td>
+      <td>{{ b.biased_indicators or "" }}</td><td>{{ b.checked_at | local }}</td><td class="muted">{{ b.error or "" }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+<p class="muted">Lookahead: a signal changes when later candles are hidden, so the backtest saw the future. Recursive: an indicator still moves at the strategy's own startup candle count, so live values differ from the backtest.</p>
+{% else %}<p class="muted">Not checked yet.</p>{% endif %}
+
+<h2>Cumulative return on {{ exchange or "-" }}</h2>
+{{ chart | safe }}
+<p class="muted">Realized on trade close. Each calendar year is its own backtest from the same starting wallet, chained by daily return.</p>
+
+<h2>Windows</h2>
+{% if windows %}
+<div class="scroll">
+<table>
+  <thead><tr><th>Window</th><th>From</th><th class="n">Days</th><th class="n">Trades</th><th class="n">Return</th><th class="n">CAGR</th><th class="n">Sharpe (90% CI)</th><th class="n">DSR</th><th class="n">Sortino</th><th class="n">Calmar</th><th class="n">Max DD</th><th class="n">PF</th><th class="n">Per trade (90% CI)</th><th class="n">Win</th><th class="n">Exposure</th><th class="n">Months up</th></tr></thead>
+  <tbody>
+  {% for w in windows %}
+  <tr class="{{ 'muted' if w.trades < min_trades }}">
+    <td>{{ "whole history" if w.win == "all" else w.win }}</td><td>{{ w.start_day }}</td><td class="n">{{ w.days }}</td><td class="n">{{ w.trades }}</td>
+    <td class="n {{ w.total_return | tone }}">{{ w.total_return | pct }}</td><td class="n {{ w.cagr | tone }}">{{ w.cagr | pct }}</td>
+    <td class="n">{{ w.sharpe | num(2) }} <span class="muted">({{ w.sharpe_lo | num(2) }}, {{ w.sharpe_hi | num(2) }})</span></td>
+    <td class="n">{{ w.dsr | pct(0) }}</td><td class="n">{{ w.sortino | num(2) }}</td><td class="n">{{ w.calmar | num(2) }}</td>
+    <td class="n">{{ w.max_drawdown | pct }}</td><td class="n">{{ w.profit_factor | num(2) }}</td>
+    <td class="n">{{ w.expectancy | pct(2) }} <span class="muted">({{ w.expectancy_lo | pct(2) }}, {{ w.expectancy_hi | pct(2) }})</span></td>
+    <td class="n">{{ w.winrate | pct(0) }}</td><td class="n">{{ w.exposure | pct(0) }}</td><td class="n">{{ w.months_profitable | pct(0) }}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}<p class="muted">No windows yet.</p>{% endif %}
+
+<h2>Estimates</h2>
+{% if estimates %}
+<div class="scroll">
+<table>
+  <thead><tr><th>Horizon</th><th class="n">p10</th><th class="n">p50</th><th class="n">p90</th><th class="n">P(loss)</th><th class="n">Expected max DD</th><th class="n">Paths</th><th class="n">Basis days</th></tr></thead>
+  <tbody>
+  {% for e in estimates %}
+  <tr><td>{{ e.horizon_days }} days</td><td class="n {{ e.p10 | tone }}">{{ e.p10 | pct }}</td><td class="n {{ e.p50 | tone }}">{{ e.p50 | pct }}</td><td class="n {{ e.p90 | tone }}">{{ e.p90 | pct }}</td>
+      <td class="n">{{ e.prob_loss | pct(0) }}</td><td class="n">{{ e.exp_max_drawdown | pct }}</td><td class="n">{{ "{:,}".format(e.paths) }}</td><td class="n">{{ e.basis_days }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+<p class="muted">A seeded block bootstrap of the last year's daily returns (10-day blocks), so the same data gives the same bands.</p>
+{% else %}<p class="muted">Needs 180 days of results.</p>{% endif %}
+
+<h2>By market regime</h2>
+{% if regimes %}
+<div class="scroll">
+<table>
+  <thead><tr><th>BTC trend</th><th>BTC volatility</th><th class="n">Days</th><th class="n">Trades</th><th class="n">Annualized</th><th class="n">Sharpe</th></tr></thead>
+  <tbody>
+  {% for r in regimes %}
+  <tr><td>{{ r.trend }}</td><td>{{ r.vol }}</td><td class="n">{{ r.days }}</td><td class="n">{{ r.trades }}</td><td class="n {{ r.annual | tone }}">{{ r.annual | pct }}</td><td class="n">{{ r.sharpe | num(2) }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+<p class="muted">Trend: BTC/USD above or below its 200-day mean. Volatility: 30-day realized volatility in thirds of its own history.</p>
+{% else %}<p class="muted">No regime days overlap this strategy's results yet.</p>{% endif %}
+
+<h2>Correlation with the league</h2>
+{% if correlations %}
+<ul class="plain">{% for c in correlations %}<li>{{ c.other }}: {{ c.rho | num(2) }} over {{ c.days }} days</li>{% endfor %}</ul>
+<p class="muted">Daily backtest returns on {{ exchange }}. Near 1 means it mostly duplicates a strategy the league already runs.</p>
+{% else %}<p class="muted">Nothing to compare yet.</p>{% endif %}
+
+<h2>Backtest chunks</h2>
+{% if chunks %}
+<div class="scroll">
+<table>
+  <thead><tr><th>Year</th><th>Range</th><th class="n">Trades</th><th class="n">Return</th><th class="n">Max DD</th><th class="n">Took</th><th>Result</th></tr></thead>
+  <tbody>
+  {% for c in chunks %}
+  <tr><td>{{ c.chunk_start.year }}</td><td>{{ c.chunk_start }} to {{ c.chunk_end }}</td><td class="n">{{ c.trades if c.trades is not none else "-" }}</td>
+      <td class="n {{ ((c.final_balance / c.start_balance - 1) if c.ok and c.start_balance else none) | tone }}">{{ ((c.final_balance / c.start_balance - 1) if c.ok and c.start_balance else none) | pct }}</td>
+      <td class="n">{{ c.max_drawdown | pct }}</td><td class="n">{{ c.duration_s | num(0, "s") }}</td>
+      <td class="{{ 'down' if not c.ok }}" title="{{ c.error or '' }}">{{ "ok" if c.ok else ("failed x" ~ c.attempts ~ ": " ~ (c.error | truncate(60))) }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}<p class="muted">Not backtested yet.</p>{% endif %}
+
+<h2>Latest backtest trades</h2>
+{% if trades %}
+<div class="scroll">
+<table>
+  <thead><tr><th>Pair</th><th>Opened</th><th>Closed</th><th class="n">Profit</th><th class="n">USD</th><th>Exit</th><th>Tag</th></tr></thead>
+  <tbody>
+  {% for t in trades %}
+  <tr><td>{{ t.pair }}</td><td>{{ t.open_date | local("%Y-%m-%d %H:%M") }}</td><td>{{ t.close_date | local("%Y-%m-%d %H:%M") }}</td>
+      <td class="n {{ t.profit_ratio | tone }}">{{ t.profit_ratio | pct(2) }}</td><td class="n">{{ t.profit_abs | num(2) }}</td><td>{{ t.exit_reason or "" }}</td><td>{{ t.enter_tag or "" }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}<p class="muted">No trades.</p>{% endif %}
+{% endblock %}

@@ -7,9 +7,10 @@ Run: uvicorn web.app:app (env: DATABASE_URL plus the web/auth.py Config variable
 """
 
 import datetime as dt
+import math
 import os
-from contextlib import asynccontextmanager
 import sys
+from contextlib import asynccontextmanager
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -43,12 +44,32 @@ FROM data_coverage GROUP BY exchange ORDER BY exchange
 """
 COVERAGE = "SELECT * FROM data_coverage ORDER BY exchange, array_position(%s, timeframe), pair"
 RUNS = """
-SELECT r.id, r.kind, r.name, r.imported_at,
-       (SELECT count(*) FROM backtests WHERE run_id = r.id) AS backtests,
-       (SELECT count(*) FROM backtests WHERE run_id = r.id AND profit_pct > 0) AS profitable,
-       (SELECT count(*) FROM bias_checks WHERE run_id = r.id AND has_bias) AS biased,
-       (SELECT count(*) FROM hyperopt_runs WHERE run_id = r.id) AS hyperopts
-FROM runs r ORDER BY r.imported_at DESC
+SELECT id, name, started_at, finished_at, ok, raw, finished_at - started_at AS took
+FROM runs WHERE kind = 'analysis' ORDER BY started_at DESC NULLS LAST, id DESC
+"""
+WINDOWS = ["30d", "90d", "180d", "365d", "all"]
+MIN_TRADES = 20  # below this a window's numbers are shown but not ranked
+# Lookahead bias voids the backtest, so it ranks last. Recursive bias only warns: the flagged indicator may not feed a signal.
+BIAS = """SELECT strategy, bool_or(has_bias) FILTER (WHERE kind = 'lookahead') AS biased,
+                 bool_or(has_bias) FILTER (WHERE kind = 'recursive') AS unstable,
+                 count(*) FILTER (WHERE has_bias IS NULL) AS unchecked FROM bias_checks GROUP BY strategy"""
+# Ranked by the low end of the Sharpe interval: a strategy has to be good even on its unlucky draw.
+LEADERBOARD = f"""
+SELECT w.*, s.timeframe, e.p10, e.p50, e.p90, e.prob_loss, b.biased, b.unstable, b.unchecked,
+       EXISTS (SELECT 1 FROM bots WHERE strategy = w.strategy AND exchange = w.exchange) AS in_league
+FROM strategy_windows w
+JOIN strategies s ON s.name = w.strategy
+LEFT JOIN estimates e ON e.strategy = w.strategy AND e.exchange = w.exchange AND e.horizon_days = 90
+LEFT JOIN ({BIAS}) b ON b.strategy = w.strategy
+WHERE w.win = %s
+ORDER BY b.biased IS TRUE, w.trades < {MIN_TRADES}, w.sharpe_lo DESC NULLS LAST, w.sharpe DESC NULLS LAST
+"""
+REGIME_SPLIT = """
+SELECT coalesce(r.trend, 'any') AS trend, coalesce(r.vol_bucket, 'any') AS vol, count(*) AS days, sum(d.trades) AS trades,
+       avg(d.ret) AS mean, stddev_samp(d.ret) AS sd
+FROM strategy_daily d JOIN regimes r USING (day)
+WHERE d.strategy = %s AND d.exchange = %s AND r.trend IS NOT NULL
+GROUP BY GROUPING SETS ((r.trend), (r.vol_bucket)) ORDER BY 1, array_position(ARRAY['low', 'mid', 'high', 'any'], coalesce(r.vol_bucket, 'any'))
 """
 
 cfg = auth.Config()
@@ -87,8 +108,17 @@ def num(v: float | None, digits: int = 2, unit: str = "") -> str:
     return "-" if v is None else f"{v:,.{digits}f}{unit}"
 
 
-templates.env.filters.update(local=local, ago=ago, num=num)
-templates.env.globals.update(stale=stale, tz=str(TZ))
+def pct(v: float | None, digits: int = 1) -> str:
+    """A fraction as a percent."""
+    return "-" if v is None else f"{100 * v:,.{digits}f}%"
+
+
+def tone(v: float | None) -> str:
+    return "" if not v else ("up" if v > 0 else "down")
+
+
+templates.env.filters.update(local=local, ago=ago, num=num, pct=pct, tone=tone)
+templates.env.globals.update(stale=stale, tz=str(TZ), min_trades=MIN_TRADES)
 
 
 class SignIn(Exception):
@@ -164,7 +194,8 @@ def overview(request: Request):
                 total_abs=sum(b["profit_all_abs"] or 0 for b in snaps),
                 total_balance=sum(b["balance_total"] or 0 for b in snaps),
                 live_bots=[b["name"] for b in snaps if b["dry_run"] is False],
-                coverage=rows(COVERAGE_BY_EXCHANGE), runs=rows(RUNS)[:3])
+                coverage=rows(COVERAGE_BY_EXCHANGE), last_run=(rows(RUNS) or [None])[0],
+                top=[r for r in rows(LEADERBOARD, ("365d",)) if not r["biased"] and r["trades"] >= MIN_TRADES][:5])
 
 
 @app.get("/bots/{name}", response_class=HTMLResponse)
@@ -187,6 +218,57 @@ def data(request: Request):
     return page(request, "data.html", by_exchange=rows(COVERAGE_BY_EXCHANGE), series=rows(COVERAGE, (TF_ORDER,)))
 
 
+@app.get("/strategies", response_class=HTMLResponse)
+def strategies(request: Request, win: str = "365d"):
+    user_of(request)
+    if win not in WINDOWS:
+        raise HTTPException(404, f"No window {win}")
+    last = (rows(RUNS) or [None])[0]
+    return page(request, "strategies.html", win=win, windows=WINDOWS, board=rows(LEADERBOARD, (win,)),
+                broken=rows("SELECT name, file, load_error FROM strategies WHERE load_error IS NOT NULL ORDER BY name"),
+                skipped=last["raw"].get("skipped", []) if last else [], last_run=last)
+
+
+def equity_points(daily: list[dict], most: int = 400) -> list[tuple[dt.datetime, float]]:
+    """Cumulative return in percent, thinned to at most `most` points for the SVG."""
+    out, eq = [], 1.0
+    step = max(1, math.ceil(len(daily) / most))
+    for i, d in enumerate(daily):
+        eq *= 1.0 + d["ret"]
+        if i % step == 0 or i == len(daily) - 1:
+            out.append((dt.datetime.combine(d["day"], dt.time(), dt.timezone.utc), 100 * (eq - 1.0)))
+    return out
+
+
+@app.get("/strategies/{name}", response_class=HTMLResponse)
+def strategy(request: Request, name: str, exchange: str = ""):
+    user_of(request)
+    found = rows("SELECT * FROM strategies WHERE name = %s", (name,))
+    if not found:
+        raise HTTPException(404, f"No strategy named {name}")
+    exchanges = [r["exchange"] for r in rows("SELECT DISTINCT exchange FROM backtest_chunks WHERE strategy = %s "
+                                             "ORDER BY exchange", (name,))]
+    exchange = exchange or (exchanges[0] if exchanges else "")
+    key = (name, exchange)
+    daily = rows("SELECT day, ret FROM strategy_daily WHERE strategy = %s AND exchange = %s ORDER BY day", key)
+    regimes = rows(REGIME_SPLIT, key)
+    for r in regimes:
+        r["sharpe"] = r["mean"] / r["sd"] * math.sqrt(365) if r["sd"] else None
+        r["annual"] = (1 + r["mean"]) ** 365 - 1 if r["mean"] is not None and r["mean"] > -1 else None
+    return page(
+        request, "strategy.html", s=found[0], exchange=exchange, exchanges=exchanges,
+        windows=sorted(rows("SELECT * FROM strategy_windows WHERE strategy = %s AND exchange = %s", key),
+                       key=lambda w: WINDOWS.index(w["win"])),
+        chart=charts.line(equity_points(daily), label=f"{name} on {exchange} cumulative return", fmt="%Y-%m-%d"),
+        estimates=rows("SELECT * FROM estimates WHERE strategy = %s AND exchange = %s ORDER BY horizon_days", key),
+        bias=rows("SELECT * FROM bias_checks WHERE strategy = %s ORDER BY kind", (name,)),
+        regimes=regimes,
+        correlations=rows("SELECT * FROM correlations WHERE strategy = %s AND exchange = %s ORDER BY abs(rho) DESC", key),
+        chunks=rows("SELECT * FROM backtest_chunks WHERE strategy = %s AND exchange = %s ORDER BY chunk_start DESC", key),
+        trades=rows("SELECT t.* FROM backtest_trades t JOIN backtest_chunks c ON c.id = t.chunk_id "
+                    "WHERE c.strategy = %s AND c.exchange = %s ORDER BY t.close_date DESC LIMIT 100", key))
+
+
 @app.get("/runs", response_class=HTMLResponse)
 def runs(request: Request):
     user_of(request)
@@ -199,7 +281,6 @@ def run(request: Request, run_id: int):
     found = [r for r in rows(RUNS) if r["id"] == run_id]
     if not found:
         raise HTTPException(404, f"No run {run_id}")
-    backtests = rows("SELECT * FROM backtests WHERE run_id = %s ORDER BY error IS NOT NULL, profit_pct DESC NULLS LAST",
-                     (run_id,))
-    bias = rows("SELECT * FROM bias_checks WHERE run_id = %s ORDER BY has_bias DESC, strategy, kind", (run_id,))
-    return page(request, "run.html", run=found[0], backtests=backtests, bias=bias)
+    failed = rows("SELECT strategy, exchange, chunk_start, attempts, error FROM backtest_chunks "
+                  "WHERE run_id = %s AND NOT ok ORDER BY strategy, exchange, chunk_start", (run_id,))
+    return page(request, "run.html", run=found[0], failed=failed)

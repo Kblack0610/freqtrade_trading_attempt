@@ -1,15 +1,21 @@
 {% extends "base.html" %}
 {% block title %}Runs{% endblock %}
 {% block body %}
-<h1>Research runs</h1>
+<h1>Analysis runs</h1>
+<p class="muted">One row per nightly lab/analyze.py run. A past year's backtest is cached, so most runs only redo the current year.</p>
 {% if runs %}
 <div class="scroll">
 <table>
-  <thead><tr><th>Run</th><th>Kind</th><th>Imported</th><th class="n">Backtests</th><th class="n">Profitable</th><th class="n">Biased</th><th class="n">Hyperopts</th></tr></thead>
+  <thead><tr><th>Run</th><th>Result</th><th>Took</th><th class="n">Strategies</th><th class="n">Chunks run</th><th class="n">Cached</th><th class="n">Failed</th><th class="n">Bias checks</th></tr></thead>
   <tbody>
   {% for r in runs %}
-  <tr><td><a href="/runs/{{ r.id }}">{{ r.name }}</a></td><td>{{ r.kind }}</td><td>{{ r.imported_at | local }}</td>
-      <td class="n">{{ r.backtests }}</td><td class="n">{{ r.profitable }}</td><td class="n">{{ r.biased }}</td><td class="n">{{ r.hyperopts }}</td></tr>
+  <tr><td><a href="/runs/{{ r.id }}">{{ r.name }}</a></td>
+      <td class="{{ 'up' if r.ok else ('down' if r.finished_at) }}">{{ "ok" if r.ok else ("failed" if r.finished_at else "running") }}</td>
+      <td>{{ (r.took.total_seconds() / 60) | num(0, " min") if r.took else "-" }}</td>
+      <td class="n">{{ r.raw.strategies or "-" }}</td><td class="n">{{ r.raw.chunks_run if r.raw.chunks_run is defined else "-" }}</td>
+      <td class="n">{{ r.raw.chunks_cached if r.raw.chunks_cached is defined else "-" }}</td>
+      <td class="n {{ 'down' if r.raw.chunks_failed }}">{{ r.raw.chunks_failed if r.raw.chunks_failed is defined else "-" }}</td>
+      <td class="n">{{ r.raw.bias_run if r.raw.bias_run is defined else "-" }}</td></tr>
   {% endfor %}
   </tbody>
 </table>

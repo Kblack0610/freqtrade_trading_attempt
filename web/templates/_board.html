@@ -1,0 +1,29 @@
+<div class="scroll">
+<table>
+  <thead><tr><th>Strategy</th><th>Exchange</th><th>TF</th><th class="n">Trades</th><th class="n">Return</th><th class="n">CAGR</th>
+    <th class="n" title="Annualized Sharpe and its 90% bootstrap interval">Sharpe (90% CI)</th>
+    <th class="n" title="Deflated Sharpe: probability the Sharpe beats the best one luck gives among all strategies tested">DSR</th>
+    <th class="n">Max DD</th><th class="n">PF</th><th class="n" title="Mean profit per trade and its 90% interval">Per trade</th><th class="n">Win</th>
+    <th class="n" title="90-day Monte Carlo, p10 / p50 / p90">90d est.</th><th class="n">P(loss)</th><th>Note</th></tr></thead>
+  <tbody>
+  {% for w in board %}
+  <tr class="{{ 'muted' if w.biased or w.trades < min_trades }}">
+    <td><a href="/strategies/{{ w.strategy }}?exchange={{ w.exchange }}">{{ w.strategy }}</a></td>
+    <td>{{ w.exchange }}</td><td>{{ w.timeframe or "" }}</td>
+    <td class="n">{{ w.trades }}</td>
+    <td class="n {{ w.total_return | tone }}">{{ w.total_return | pct }}</td>
+    <td class="n {{ w.cagr | tone }}">{{ w.cagr | pct }}</td>
+    <td class="n">{{ w.sharpe | num(2) }} <span class="muted">({{ w.sharpe_lo | num(2) }}, {{ w.sharpe_hi | num(2) }})</span></td>
+    <td class="n">{{ w.dsr | pct(0) }}</td>
+    <td class="n">{{ w.max_drawdown | pct }}</td>
+    <td class="n">{{ w.profit_factor | num(2) }}</td>
+    <td class="n">{{ w.expectancy | pct(2) }} <span class="muted">({{ w.expectancy_lo | pct(2) }}, {{ w.expectancy_hi | pct(2) }})</span></td>
+    <td class="n">{{ w.winrate | pct(0) }}</td>
+    <td class="n">{% if w.p50 is not none %}{{ w.p10 | pct(0) }} / <span class="{{ w.p50 | tone }}">{{ w.p50 | pct(0) }}</span> / {{ w.p90 | pct(0) }}{% else %}-{% endif %}</td>
+    <td class="n">{{ w.prob_loss | pct(0) }}</td>
+    <td>{% if w.biased %}<span class="down">biased</span>{% elif w.trades < min_trades %}few trades{% elif w.unchecked %}bias unchecked{% endif %}{% if w.unstable and not w.biased %} <span title="An indicator still moves at the startup candle count, so live values can differ">recursive</span>{% endif %}{% if w.in_league %} in league{% endif %}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>

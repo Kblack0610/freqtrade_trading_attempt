@@ -6,7 +6,7 @@ from html import escape
 W, H, PAD = 640, 180, 28
 
 
-def line(points: list[tuple[dt.datetime, float]], unit: str = "%", label: str = "") -> str:
+def line(points: list[tuple[dt.datetime, float]], unit: str = "%", label: str = "", fmt: str = "%b %d %H:%M") -> str:
     """One series as an inline SVG with a zero line and min/max labels. Colours come from CSS."""
     if len(points) < 2:
         return '<p class="muted">Not enough points to draw yet.</p>'
@@ -30,7 +30,7 @@ def line(points: list[tuple[dt.datetime, float]], unit: str = "%", label: str = 
         f'<polyline class="series {tone}" points="{path}"/>'
         f'<text class="axis" x="{PAD}" y="{PAD - 10}">{hi:.2f}{unit}</text>'
         f'<text class="axis" x="{PAD}" y="{H - 8}">{lo:.2f}{unit}</text>'
-        f'<text class="axis end" x="{W - PAD}" y="{H - 8}">{escape(points[-1][0].strftime("%b %d %H:%M"))}</text>'
-        f'<text class="axis" x="{PAD + 90}" y="{H - 8}">{escape(points[0][0].strftime("%b %d %H:%M"))}</text>'
+        f'<text class="axis end" x="{W - PAD}" y="{H - 8}">{escape(points[-1][0].strftime(fmt))}</text>'
+        f'<text class="axis" x="{PAD + 90}" y="{H - 8}">{escape(points[0][0].strftime(fmt))}</text>'
         "</svg>"
     )

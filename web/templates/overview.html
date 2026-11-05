@@ -49,10 +49,10 @@
 </div>
 <p><a href="/data">Every series</a></p>
 
-<h2>Recent research runs</h2>
-{% if runs %}
-<ul class="plain">
-  {% for r in runs %}<li><a href="/runs/{{ r.id }}">{{ r.kind }} {{ r.name }}</a>: {{ r.backtests }} backtests, {{ r.profitable }} profitable, {{ r.biased }} biased</li>{% endfor %}
-</ul>
-{% else %}<p class="muted">No runs yet.</p>{% endif %}
+<h2>Best strategies, last 365 days</h2>
+{% if top %}
+{% set board = top %}{% include "_board.html" %}
+<p><a href="/strategies">Every strategy</a></p>
+{% else %}<p class="muted">No strategy has {{ min_trades }} or more backtest trades in the last 365 days without a bias finding yet.</p>{% endif %}
+{% if last_run %}<p class="muted">Last analysis run <a href="/runs/{{ last_run.id }}">{{ last_run.name }}</a>: {{ "ok" if last_run.ok else ("running" if not last_run.finished_at else "failed") }}{% if last_run.finished_at %}, finished {{ last_run.finished_at | ago }}{% endif %}.</p>{% endif %}
 {% endblock %}

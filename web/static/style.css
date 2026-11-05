@@ -60,3 +60,5 @@ ul.plain { padding-left: 1.2rem; }
 .chart .series.down { stroke: var(--down); }
 .chart .axis { fill: var(--muted); font-size: 11px; }
 .chart .axis.end { text-anchor: end; }
+nav.tabs { flex-wrap: wrap; margin: 0.5rem 0 1rem; }
+tr.muted td { color: var(--muted); }

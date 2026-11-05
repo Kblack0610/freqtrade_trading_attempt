@@ -35,12 +35,34 @@ def seed(c):
     c.execute("INSERT INTO bot_trades (bot, trade_id, open_date, pair, is_open, close_date, stake_amount, profit_ratio, "
               "profit_abs, exit_reason, raw) VALUES ('kraken-s001', 1, %s, 'BTC/USD', false, %s, 330, 0.012, 4, 'roi', "
               "'{}')", (NOW - dt.timedelta(hours=5), NOW - dt.timedelta(hours=4)))
-    c.execute("INSERT INTO runs (kind, name, raw) VALUES ('experiments', '2026-11-04', '{}')")
-    c.execute("INSERT INTO backtests (run_id, exchange, strategy, timeframe, trades, profit_pct) "
-              "VALUES (1, 'binanceus', 'Strategy001', '5m', 40, 3.2), (1, 'binanceus', 'Broken', NULL, NULL, NULL)")
-    c.execute("UPDATE backtests SET error = 'failed to load' WHERE strategy = 'Broken'")
-    c.execute("INSERT INTO bias_checks (run_id, strategy, kind, has_bias, biased_indicators) "
-              "VALUES (1, 'Strategy001', 'lookahead', true, 'rsi')")
+    c.execute("INSERT INTO runs (kind, name, raw, started_at, finished_at, ok) VALUES ('analysis', '2026-11-04 03:00:00', "
+              "%s, now() - interval '1 hour', now(), true)",
+              (json.dumps({"strategies": 3, "chunks_run": 4, "chunks_cached": 10, "chunks_failed": 1, "bias_run": 2,
+                           "skipped": ["Scalp on binanceus: no 1m candles"]}),))
+    c.execute("INSERT INTO strategies (name, file, file_hash, timeframe, load_error) VALUES "
+              "('Strategy001', 'user_data/strategies/Strategy001.py', 'h1', '5m', NULL), "
+              "('Planted', 'user_data/strategies/Planted.py', 'h2', '5m', NULL), "
+              "('Broken', 'user_data/strategies/Broken.py', 'h3', NULL, 'failed to import')")
+    c.execute("INSERT INTO backtest_chunks (strategy, exchange, chunk_start, chunk_end, cache_key, ok, trades, "
+              "start_balance, final_balance, max_drawdown, run_id) VALUES "
+              "('Strategy001', 'binanceus', '2026-01-01', '2026-11-04', 'k', true, 1, 1000, 1032, 0.04, 1)")
+    c.execute("INSERT INTO backtest_chunks (strategy, exchange, chunk_start, chunk_end, cache_key, ok, attempts, error, "
+              "run_id) VALUES ('Strategy001', 'binanceus', '2025-01-01', '2026-01-01', 'k', false, 2, 'exit 2: boom', 1)")
+    c.execute("INSERT INTO backtest_trades (chunk_id, pair, open_date, close_date, profit_ratio, profit_abs, exit_reason) "
+              "VALUES (1, 'ETH/USD', '2026-03-01 10:00+00', '2026-03-01 18:00+00', 0.032, 32, 'roi')")
+    for day, ret in (("2026-03-01", 0.032), ("2026-03-02", -0.01), ("2026-03-03", 0.005)):
+        c.execute("INSERT INTO strategy_daily VALUES ('Strategy001', 'binanceus', %s, %s, 0, 1)", (day, ret))
+        c.execute("INSERT INTO regimes VALUES (%s, 80000, 'bull', 0.5, 'mid')", (day,))
+    for name, trades, sharpe_lo in (("Strategy001", 40, 0.4), ("Planted", 90, 3.0)):
+        c.execute("INSERT INTO strategy_windows (strategy, exchange, win, days, start_day, trades, total_return, sharpe, "
+                  "sharpe_lo, sharpe_hi, dsr, trials, max_drawdown, expectancy) VALUES "
+                  "(%s, 'binanceus', '365d', 365, '2025-11-04', %s, 0.032, 1.1, %s, 1.8, 0.62, 2, 0.04, 0.012)",
+                  (name, trades, sharpe_lo))
+    c.execute("INSERT INTO estimates VALUES ('Strategy001', 'binanceus', 90, -0.05, 0.021, 0.09, 0.31, 0.06, 5000, 1, 365)")
+    c.execute("INSERT INTO correlations VALUES ('Strategy001', 'binanceus', 'Strategy002', 0.83, 300)")
+    c.execute("INSERT INTO bias_checks (strategy, kind, file_hash, has_bias, biased_indicators) VALUES "
+              "('Planted', 'lookahead', 'h2', true, 'next_close'), ('Strategy001', 'lookahead', 'h1', false, NULL), "
+              "('Strategy001', 'recursive', 'h1', NULL, NULL)")
     c.execute("INSERT INTO data_coverage (exchange, pair, timeframe, first_ts, last_ts, rows, oldest_reached) "
               "VALUES ('binanceus', 'BTC/USD', '5m', '2019-09-01', %s, 700000, true)", (NOW,))
 
@@ -49,7 +71,7 @@ def test_healthz_needs_no_sign_in(site):
     assert site[1].get("/healthz").text == "ok"
 
 
-@pytest.mark.parametrize("path", ["/", "/bots/x", "/data", "/runs", "/runs/1"])
+@pytest.mark.parametrize("path", ["/", "/bots/x", "/strategies", "/strategies/x", "/data", "/runs", "/runs/1"])
 def test_signed_out_goes_to_login(site, path):
     r = site[1].get(path)
     assert r.status_code == 303 and r.headers["location"] == "/login"
@@ -120,11 +142,17 @@ def test_login_for_code_returns_the_forgejo_login():
 def test_every_page_renders_with_data(conn, signed_in):
     seed(conn)
     _, client = signed_in
-    pages = {"/": ["kraken-s001", "2.50%", "binanceus", "experiments 2026-11-04"],
+    pages = {"/": ["kraken-s001", "2.50%", "binanceus", "Best strategies", "/strategies/Strategy001?exchange=binanceus",
+                   "2026-11-04 03:00:00"],
              "/bots/kraken-s001": ["Strategy001 on kraken", "<svg", "BTC/USD", "1.20%"],
+             "/strategies": ["Strategy001", "0.40", "62%", "-5% / ", "3.2%", "1.20%", "biased", "Broken", "failed to import",
+                             "Scalp on binanceus: no 1m candles"],
+             "/strategies?win=all": ["No results for this window yet"],
+             "/strategies/Strategy001": ["binanceus", "<svg", "3.2%", "Strategy002: 0.83", "bull", "ETH/USD",
+                                         "exit 2: boom", "not checked", "clean", "31%"],
              "/data": ["BTC/USD", "700,000", "2019-09-01"],
-             "/runs": ["2026-11-04", "experiments"],
-             "/runs/1": ["3.20%", "failed to load", "biased", "rsi"]}
+             "/runs": ["2026-11-04 03:00:00", "ok", "60 min"],
+             "/runs/1": ["exit 2: boom", "Scalp on binanceus", "Strategy001"]}
     for path, needles in pages.items():
         r = client.get(path)
         assert r.status_code == 200, path
@@ -133,6 +161,26 @@ def test_every_page_renders_with_data(conn, signed_in):
     assert "Not dry run" not in client.get("/").text
     assert client.get("/bots/nobody").status_code == 404
     assert client.get("/runs/99").status_code == 404
+    assert client.get("/strategies/Nope").status_code == 404
+    assert client.get("/strategies?win=7d").status_code == 404
+
+
+def test_a_biased_strategy_ranks_last_however_good_it_looks(conn, signed_in):
+    seed(conn)
+    text = signed_in[1].get("/strategies").text
+    assert text.index("/strategies/Strategy001?") < text.index("/strategies/Planted?")
+    top = signed_in[1].get("/").text
+    assert "/strategies/Planted?" not in top
+
+
+def test_recursive_bias_warns_but_does_not_sink_a_strategy(conn, signed_in):
+    seed(conn)
+    conn.execute("UPDATE bias_checks SET has_bias = true, biased_indicators = 'htsine' "
+                 "WHERE strategy = 'Strategy001' AND kind = 'recursive'")
+    text = signed_in[1].get("/strategies").text
+    assert text.index("/strategies/Strategy001?") < text.index("/strategies/Planted?")
+    assert ">recursive</span>" in text
+    assert "/strategies/Strategy001?" in signed_in[1].get("/").text
 
 
 def test_overview_warns_when_a_bot_is_not_dry_run(conn, signed_in):
@@ -142,7 +190,7 @@ def test_overview_warns_when_a_bot_is_not_dry_run(conn, signed_in):
 
 
 def test_pages_render_on_an_empty_database(conn, signed_in):
-    for path in ("/", "/data", "/runs"):
+    for path in ("/", "/data", "/runs", "/strategies"):
         assert signed_in[1].get(path).status_code == 200, path
 
 
