@@ -89,7 +89,9 @@ The leaderboard ranks by the low end of the Sharpe interval, so a strategy has t
 
 A backtest of a strategy as it is says nothing about tuning it, and hyperopt's best result on a span is fitted to that span. `lab/walkforward.py` runs weekly to measure how much of hyperopt's gain survives on data it never saw:
 
-- **Candidates.** The league's strategies, then the promote suggestions, then the watch ones by score, loadable and lookahead-clean, up to `WF_LIMIT`, on `WF_EXCHANGE` only (binanceus: coinbase's 2.4% round trip leaves nothing to tune).
+- **Candidates.** The league's strategies, then the promote suggestions, then the watch ones by score, then the best 365-day expectancy low end on each venue in `WF_EXCHANGES`, taking one venue's next best after another, all loadable and lookahead-clean, up to `WF_LIMIT`. coinbase is not a walk-forward venue: its 2.4% round trip leaves nothing to tune.
+- **Venues.** Every candidate runs on every venue in `WF_EXCHANGES`, one fold row per venue, once that venue's candles for its timeframe are fully backfilled (the same coverage guard as the analysis). A fold whose training span starts before the venue's first candle is skipped, and the run's `skipped` list says why.
+- **Memory.** Folds share `WF_MEMORY_GB` by their estimated size (training days plus a month of candles across the venue's pairs, at twice a backtest's load), so a 22-pair venue does not start ten hyperopts at once.
 - **Folds.** For each of the last `WF_FOLDS` whole calendar months, hyperopt tunes the strategy on the `WF_TRAIN_DAYS` before it (`--spaces default`: ROI, stoploss, trailing, max open trades and any declared buy and sell parameters) with a random state seeded by strategy and month, so a rerun gives the same answer. Then the month is backtested as is and with the tuned parameters, and the training span is backtested with them too (in sample). Every per-trade profit ratio is kept.
 - **Isolation.** Hyperopt works on a copy of the strategy's folder in a temporary userdir, because it writes its params file next to the strategy, where every nightly backtest would load it.
 - **Cache.** A fold is keyed by the strategy file, both configs, the freqtrade version, its dates and the hyperopt settings, so a normal week runs only the newest month, and a changed file reruns all of that strategy's months. Failures retry like analysis chunks; a month with no candles is stored once. A fold where no epoch reached `WF_MIN_TRADES` training trades is kept, untuned, with that as its note.
@@ -97,7 +99,7 @@ A backtest of a strategy as it is says nothing about tuning it, and hyperopt's b
 
 | Env | Default | What it is |
 |---|---|---|
-| `WF_EXCHANGE` | `binanceus` | The one exchange folds run on |
+| `WF_EXCHANGES` | `binanceus` | Space-separated venues folds run on |
 | `WF_FOLDS` | `6` | Test months, the newest whole ones |
 | `WF_TRAIN_DAYS` | `180` | Training span before each test month |
 | `WF_EPOCHS` | `150` | Hyperopt epochs per fold |
@@ -106,6 +108,7 @@ A backtest of a strategy as it is says nothing about tuning it, and hyperopt's b
 | `WF_LIMIT` | `16` | Candidates per run |
 | `WF_WORKERS` | `6` | Folds at once; each hyperopt runs on one core (`-j 1`) |
 | `WF_TIMEOUT` | `10800` | Seconds before one hyperopt is killed |
+| `WF_MEMORY_GB` | `10` | Estimated memory the folds running at once may hold |
 | `WF_STRATEGIES` | all | Space-separated names to limit a run to |
 
 ## Suggestions

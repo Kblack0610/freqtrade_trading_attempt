@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 """Weekly walk-forward test: do hyperopt's parameters hold on months it never saw?
 
-Candidates are the league's strategies plus the open promote and watch suggestions, lookahead-clean
-and loadable, on WF_EXCHANGE (binanceus: coinbase's 2.4% round trip leaves nothing to tune). For each
-of the last WF_FOLDS whole calendar months:
+Candidates, lookahead-clean and loadable, up to WF_LIMIT: the league's strategies, then the open promote and
+watch suggestions, then the best 365-day expectancy low end on each venue in turn. Each runs on every venue in
+WF_EXCHANGES whose candles for its timeframe are fully backfilled (coinbase is left out: its 2.4% round trip
+leaves nothing to tune). For each of the last WF_FOLDS whole calendar months:
 - the month is backtested with the strategy as it is (base);
 - hyperopt tunes it on the WF_TRAIN_DAYS before the month, with a seeded random state;
 - the month is backtested again with the tuned parameters, and so is the training span (in sample).
 A fold is cached by strategy file, configs, Freqtrade version, dates and hyperopt settings, so a weekly
-run adds the newest month and whatever a changed file or a new candidate needs.
+run adds the newest month and whatever a changed file or a new candidate needs. Folds share a memory budget
+(WF_MEMORY_GB) by their estimated size, like analyze's chunks, so wide venues do not all hyperopt at once.
 
 Hyperopt runs on a copy of the strategy's folder in a temporary userdir, so its params file never lands
 next to the real strategy, where every nightly backtest would load it.
@@ -36,7 +38,7 @@ import metrics
 import suggest
 from db import connect
 
-EXCHANGE = os.environ.get("WF_EXCHANGE", "binanceus")
+EXCHANGES = os.environ.get("WF_EXCHANGES", "binanceus").split()
 FOLDS = int(os.environ.get("WF_FOLDS", "6"))
 TRAIN_DAYS = int(os.environ.get("WF_TRAIN_DAYS", "180"))
 EPOCHS = int(os.environ.get("WF_EPOCHS", "150"))
@@ -45,6 +47,8 @@ MIN_TRADES = int(os.environ.get("WF_MIN_TRADES", "10"))  # hyperopt ignores an e
 LIMIT = int(os.environ.get("WF_LIMIT", "16"))
 WORKERS = int(os.environ.get("WF_WORKERS", "6"))
 TIMEOUT = int(os.environ.get("WF_TIMEOUT", "10800"))
+MEMORY_GB = float(os.environ.get("WF_MEMORY_GB", "10"))
+HYPEROPT_LOAD = 2  # hyperopt keeps the analysed frame and each epoch's backtest copy
 ONLY = set(os.environ.get("WF_STRATEGIES", "").split())
 MAX_ATTEMPTS = analyze.MAX_ATTEMPTS
 FAIL_SHARE = analyze.FAIL_SHARE
@@ -127,36 +131,57 @@ class Cli:
 
 
 def candidates(conn) -> list[dict]:
-    """League strategies first, then promote and watch suggestions by score; loadable and lookahead-clean."""
+    """League strategies first, then promote and watch suggestions by score, then each venue's best 365-day
+    expectancy low end, one venue after another; loadable and lookahead-clean."""
     rows = conn.execute("""
-        SELECT s.name, s.file, s.file_hash,
-               min(CASE WHEN b.name IS NOT NULL THEN 0 WHEN g.kind = 'promote' THEN 1 ELSE 2 END),
-               max(g.score)
+        WITH best AS (
+            SELECT strategy, min(rn) AS rn, max(expectancy_lo) AS lo FROM (
+                SELECT strategy, expectancy_lo,
+                       row_number() OVER (PARTITION BY exchange ORDER BY expectancy_lo DESC, strategy) AS rn
+                FROM strategy_windows
+                WHERE win = '365d' AND exchange = ANY(%s) AND expectancy_lo IS NOT NULL) w
+            GROUP BY strategy)
+        SELECT s.name, s.file, s.file_hash, s.timeframe,
+               min(CASE WHEN b.name IS NOT NULL THEN 0 WHEN g.kind = 'promote' THEN 1
+                        WHEN g.kind = 'watch' THEN 2 ELSE 3 END) AS tier,
+               max(g.score), min(w.rn), max(w.lo)
         FROM strategies s
         LEFT JOIN bots b ON b.strategy = s.name AND b.last_seen >= now() - interval '1 day'
         LEFT JOIN suggestions g ON g.strategy = s.name AND g.kind IN ('promote', 'watch')
-        WHERE s.load_error IS NULL AND (b.name IS NOT NULL OR g.kind IS NOT NULL)
+        LEFT JOIN best w ON w.strategy = s.name
+        WHERE s.load_error IS NULL AND (b.name IS NOT NULL OR g.kind IS NOT NULL OR w.strategy IS NOT NULL)
           AND NOT EXISTS (SELECT 1 FROM bias_checks c WHERE c.strategy = s.name AND c.kind = 'lookahead' AND c.has_bias)
-        GROUP BY 1, 2, 3 ORDER BY 4, 5 DESC NULLS LAST, 1""").fetchall()
-    out = [{"name": n, "file": f, "file_hash": h} for n, f, h, _, _ in rows if not ONLY or n in ONLY]
+        GROUP BY 1, 2, 3, 4 ORDER BY 5, 6 DESC NULLS LAST, 7 NULLS LAST, 8 DESC NULLS LAST, 1""",
+        (EXCHANGES,)).fetchall()
+    out = [{"name": n, "file": f, "file_hash": h, "timeframe": tf} for n, f, h, tf, *_ in rows if not ONLY or n in ONLY]
     return out[:LIMIT]
 
 
-def plan(conn, found: list[dict], today: dt.date, ft_version: str) -> tuple[list[dict], int]:
+def plan(conn, found: list[dict], first: dict, today: dt.date, ft_version: str) -> tuple[list[dict], int, list[str]]:
+    """The folds to run, how many are cached, and why a strategy x venue or a fold is skipped. A venue runs once
+    its candles are fully backfilled (analyze.coverage), and a fold only when its training span has candles."""
     done = {(s, e, f): (k, ok, n) for s, e, f, k, ok, n in conn.execute(
         "SELECT strategy, exchange, fold_start, cache_key, ok, attempts FROM walkforward")}
-    todo, cached = [], 0
+    todo, cached, skipped = [], 0, []
     for s in found:
-        for fold in folds(today):
-            key = fold_key(s["file_hash"], EXCHANGE, fold, ft_version)
-            prior = done.get((s["name"], EXCHANGE, fold[1]))
-            if prior and prior[0] == key and (prior[1] or prior[2] >= MAX_ATTEMPTS):
-                cached += 1
+        for ex in EXCHANGES:
+            since = first.get((ex, s["timeframe"]))
+            if since is None:
+                skipped.append(f"{s['name']} on {ex}: {s['timeframe']} not fully backfilled")
                 continue
-            todo.append({**s, "fold": fold, "key": key,
-                         "attempts": prior[2] if prior and prior[0] == key and not prior[1] else 0})
-    todo.sort(key=lambda t: (-t["fold"][1].toordinal(), t["name"]))  # the newest month first
-    return todo, cached
+            for fold in folds(today):
+                if fold[0] < since.date():
+                    skipped.append(f"{s['name']} on {ex} {fold[1]:%Y-%m}: training starts before its first candle")
+                    continue
+                key = fold_key(s["file_hash"], ex, fold, ft_version)
+                prior = done.get((s["name"], ex, fold[1]))
+                if prior and prior[0] == key and (prior[1] or prior[2] >= MAX_ATTEMPTS):
+                    cached += 1
+                    continue
+                todo.append({**s, "exchange": ex, "fold": fold, "key": key,
+                             "attempts": prior[2] if prior and prior[0] == key and not prior[1] else 0})
+    todo.sort(key=lambda t: (-t["fold"][1].toordinal(), t["name"], t["exchange"]))  # the newest month first
+    return todo, cached, skipped
 
 
 def store(conn, task: dict, res: dict) -> None:
@@ -176,7 +201,7 @@ def store(conn, task: dict, res: dict) -> None:
             base_returns = EXCLUDED.base_returns, tuned_trades = EXCLUDED.tuned_trades,
             tuned_profit = EXCLUDED.tuned_profit, tuned_expectancy = EXCLUDED.tuned_expectancy,
             tuned_returns = EXCLUDED.tuned_returns, duration_s = EXCLUDED.duration_s, computed_at = now()""",
-        (task["name"], EXCHANGE, fold_start, train_start, test_end, task["key"], res["ok"], attempts, res.get("error"),
+        (task["name"], task["exchange"], fold_start, train_start, test_end, task["key"], res["ok"], attempts, res.get("error"),
          EPOCHS, LOSS, Jsonb(res["params"]) if res.get("params") else None,
          side("is").get("trades"), side("is").get("profit"),
          side("base").get("trades"), side("base").get("profit"), side("base").get("expectancy"), side("base").get("returns"),
@@ -191,18 +216,26 @@ def main(runner: Runner | None = None, today: dt.date | None = None) -> int:
         started = dt.datetime.now(dt.timezone.utc)
         run_id = conn.execute("INSERT INTO runs (kind, name, raw, started_at) VALUES ('walkforward', %s, '{}', %s) "
                               "RETURNING id", (started.strftime("%Y-%m-%d %H:%M:%S"), started)).fetchone()[0]
-        report: dict = {"exchange": EXCHANGE, "folds": FOLDS, "train_days": TRAIN_DAYS, "epochs": EPOCHS, "loss": LOSS}
+        report: dict = {"exchanges": EXCHANGES, "folds": FOLDS, "train_days": TRAIN_DAYS, "epochs": EPOCHS, "loss": LOSS}
         ok = False
         try:
             found = candidates(conn)
-            todo, cached = plan(conn, found, today, runner.version())
-            report.update(candidates=[s["name"] for s in found], folds_run=len(todo), folds_cached=cached)
-            print(f"walkforward: {len(found)} candidates, {len(todo)} folds to run, {cached} cached, "
-                  f"{WORKERS} workers", flush=True)
+            todo, cached, skipped = plan(conn, found, analyze.coverage(conn), today, runner.version())
+            report.update(candidates=[s["name"] for s in found], folds_run=len(todo), folds_cached=cached,
+                          skipped=skipped[:100])
+            print(f"walkforward: {len(found)} candidates on {' '.join(EXCHANGES)}, {len(todo)} folds to run, "
+                  f"{cached} cached, {len(skipped)} skipped, {WORKERS} workers", flush=True)
             failed, done, failures = 0, 0, []
+            budget = analyze.Budget(MEMORY_GB)
+
+            def run(t):
+                gb = analyze.task_gb(t["exchange"], t["timeframe"], TRAIN_DAYS + 31, HYPEROPT_LOAD)
+                with budget.hold(gb):
+                    return runner.fold(t["name"], t["file"], t["exchange"], t["fold"],
+                                       metrics.seed_of(t["name"], t["exchange"], t["fold"][1]))
+
             with ThreadPoolExecutor(max_workers=WORKERS) as pool:
-                futs = {pool.submit(runner.fold, t["name"], t["file"], EXCHANGE, t["fold"],
-                                    metrics.seed_of(t["name"], EXCHANGE, t["fold"][1])): t for t in todo}
+                futs = {pool.submit(run, t): t for t in todo}
                 try:
                     for fut in as_completed(futs):
                         task = futs[fut]
@@ -214,7 +247,7 @@ def main(runner: Runner | None = None, today: dt.date | None = None) -> int:
                         done += 1
                         if not res["ok"] and not res.get("no_data"):
                             failed += 1
-                            failures.append(f"{task['name']} {task['fold'][1]:%Y-%m}: {res['error']}"[:300])
+                            failures.append(f"{task['name']} {task['exchange']} {task['fold'][1]:%Y-%m}: {res['error']}"[:300])
                         print(f"walkforward: {done}/{len(todo)} folds, {failed} failed", flush=True)
                 except BaseException:
                     pool.shutdown(cancel_futures=True)
@@ -222,7 +255,8 @@ def main(runner: Runner | None = None, today: dt.date | None = None) -> int:
             report.update(folds_failed=failed, failures=failures[:100])
             report.update(suggest.run(conn))
             ok = failed <= FAIL_SHARE * max(len(todo), 1)
-            print(f"walkforward: done: {json.dumps({k: v for k, v in report.items() if k != 'failures'})}", flush=True)
+            print(f"walkforward: done: {json.dumps({k: v for k, v in report.items() if k not in ('failures', 'skipped')})}",
+                  flush=True)
         except Exception as e:
             report["error"] = f"{type(e).__name__}: {e}"
             raise
