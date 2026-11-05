@@ -2,19 +2,19 @@
 {% block title %}Strategies{% endblock %}
 {% block body %}
 <h1>Strategies</h1>
-<p class="muted">Every strategy backtested on each exchange's whole price history, rebuilt nightly. Ranked by the low end of the Sharpe interval, so a strategy has to look good on its unlucky draw too. Greyed rows have a bias finding or fewer than {{ min_trades }} trades in the window. DSR is the chance the Sharpe is more than the best one luck would give among the {{ board[0].trials if board else 0 }} strategy and exchange pairs tested. The estimates resample the last year of daily returns: they describe that year, they do not promise the next.</p>
+<p class="muted">Every strategy backtested on each exchange's whole price history, rebuilt nightly. Ranked by the low end of the Sharpe interval, so a strategy has to look good on its unlucky draw too. Greyed rows have a bias finding or fewer than {{ min_trades }} trades in the window. DSR is the chance the Sharpe is more than the best one luck would give among the strategy and exchange pairs tested: {{ board[0].trials_raw or 0 if board else 0 }} of them, worth {{ (board[0].trials | num(1)) if board else 0 }} independent trials once their correlation is counted. More trades is how many the low end of the per-trade interval needs before it can clear zero, if the mean and spread hold. The estimates resample the last year of daily returns: they describe that year, they do not promise the next.</p>
 
 <nav class="tabs">{% for w in windows %}<a href="/strategies?win={{ w }}" {% if w == win %}aria-current="page"{% endif %}>{{ "whole history" if w == "all" else w }}</a>{% endfor %}</nav>
 
 {% if venues %}
 <h2>Fees by venue</h2>
-<p class="muted">Strategies with at least {{ min_trades }} trades in the window and no lookahead bias. An edge counts when the low end of its 90% interval per trade is above zero. Fees are the backtest's taker fee on each side; a venue where edges exist before fees but not after is too expensive for these strategies, and more pairs there will not help.</p>
+<p class="muted">Strategies with at least {{ min_trades }} trades in the window and no lookahead bias. An edge counts when the low end of its 90% interval per trade is above zero. Fees are the backtest's taker fee on each side; a venue where edges exist before fees but not after is too expensive for these strategies, and more pairs there will not help. Overfit is the probability of backtest overfitting: split the window into 16 blocks, take every half as in sample, and count how often the in-sample best strategy lands below the median on the other half. Above 50%, picking the best backtest on that venue does worse than picking at random, and its promotions wait.</p>
 <div class="scroll">
 <table>
-  <thead><tr><th>Exchange</th><th class="n">Strategies</th><th class="n" title="Mean round-trip fee a trade paid">Fee per trade</th><th class="n">Edge before fees</th><th class="n">Edge after fees</th></tr></thead>
+  <thead><tr><th>Exchange</th><th class="n">Strategies</th><th class="n" title="Mean round-trip fee a trade paid">Fee per trade</th><th class="n">Edge before fees</th><th class="n">Edge after fees</th><th class="n" title="Probability of backtest overfitting over every strategy tested on the venue">Overfit</th></tr></thead>
   <tbody>
   {% for v in venues %}
-  <tr><td>{{ v.exchange }}</td><td class="n">{{ v.strategies }}</td><td class="n">{{ v.fee | pct(2) }}</td><td class="n">{{ v.gross_edge }}</td><td class="n">{{ v.net_edge }}</td></tr>
+  <tr><td>{{ v.exchange }}</td><td class="n">{{ v.strategies }}</td><td class="n">{{ v.fee | pct(2) }}</td><td class="n">{{ v.gross_edge }}</td><td class="n">{{ v.net_edge }}</td><td class="n {{ 'down' if v.pbo is not none and v.pbo > 0.5 }}" title="{{ v.pbo_strategies or 0 }} strategies">{{ v.pbo | pct(0) }}</td></tr>
   {% endfor %}
   </tbody>
 </table>

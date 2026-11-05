@@ -3,6 +3,7 @@ import math
 
 import numpy as np
 import pandas as pd
+import pytest
 
 import metrics
 
@@ -160,3 +161,35 @@ def test_seeds_fit_the_hyperopt_samplers():
     seeds = [metrics.seed_of("Strategy001", "binanceus", dt.date(2026, m, 1)) for m in range(1, 13)]
     assert all(0 <= s < 2 ** 32 for s in seeds)
     np.random.RandomState(max(seeds))  # optuna's samplers seed numpy's RandomState, which refuses 2**32 and up
+
+
+def test_effective_trials_counts_independent_series_once_each_and_copies_once():
+    rng = np.random.default_rng(1)
+    x = pd.DataFrame(rng.normal(0, 0.01, size=(2000, 6)))
+    assert 5.5 < metrics.effective_trials(x) <= 6.0
+    same = pd.DataFrame({i: x[0] for i in range(6)})
+    assert metrics.effective_trials(same) == pytest.approx(1.0)
+    # three copies of one plus three independent: eigenvalues 3, 1, 1, 1, so 6^2 / 12
+    mixed = pd.concat([same.iloc[:, :3], x.iloc[:, 3:]], axis=1, ignore_index=True)
+    assert metrics.effective_trials(mixed) == pytest.approx(3.0, abs=0.15)
+    assert metrics.effective_trials(x.iloc[:, :1]) == 1.0
+
+
+def test_pbo_is_low_with_one_truly_better_strategy_and_near_half_on_noise():
+    rng = np.random.default_rng(7)
+    noise = rng.normal(0, 0.01, size=(800, 20))
+    r = metrics.pbo(noise)
+    assert r["splits"] == 12870 and 0.3 < r["pbo"] < 0.7
+    planted = noise.copy()
+    planted[:, 3] += 0.004
+    assert metrics.pbo(planted)["pbo"] < 0.05
+    assert metrics.pbo(noise[:20]) is None and metrics.pbo(noise[:, :1]) is None
+
+
+def test_trades_needed_matches_the_closed_form():
+    x = np.array([0.03, -0.01] * 50)  # mean 0.01, sd about 0.0201
+    expect = math.ceil((1.645 * x.std(ddof=1) / x.mean()) ** 2) - len(x)
+    assert metrics.trades_needed(x) == max(0, expect)
+    small = np.array([0.05, -0.04, 0.03, -0.02])
+    assert metrics.trades_needed(small) == math.ceil((1.645 * small.std(ddof=1) / small.mean()) ** 2) - 4
+    assert metrics.trades_needed(np.array([-0.01, 0.005])) is None

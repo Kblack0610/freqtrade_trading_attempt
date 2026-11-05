@@ -21,6 +21,11 @@ def strat(**kw):
     return {**s, **kw}
 
 
+def elsewhere():
+    """The same strategy on a second venue: an edge there, but short of promotion on two gates."""
+    return {"windows": {"365d": window(dsr=0.5, sharpe_lo=-0.1)}, "years": years(0.3, 0.1, 0.2), "max_rho": None}
+
+
 def facts():
     return {
         "strategies": {
@@ -31,6 +36,7 @@ def facts():
         },
         "series": {
             ("Good", "binanceus"): {"windows": {"365d": window()}, "years": years(0.3, 0.1, 0.2), "max_rho": (0.2, "Running")},
+            ("Good", "okx"): elsewhere(), ("NearMiss", "okx"): elsewhere(), ("Copycat", "okx"): elsewhere(),
             ("NearMiss", "binanceus"): {"windows": {"365d": window(dsr=0.5)}, "years": years(0.3, 0.1, 0.2), "max_rho": None},
             ("Copycat", "binanceus"): {"windows": {"365d": window()}, "years": years(0.3, 0.1, 0.2), "max_rho": (0.93, "Running")},
             ("Leaky", "binanceus"): {"windows": {"365d": window(sharpe_lo=3.0)}, "years": years(0.3, 0.1), "max_rho": None},
@@ -41,6 +47,7 @@ def facts():
             ("Loser", "coinbase"): {"windows": {"365d": window(expectancy_lo=-0.02, expectancy_hi=-0.001, sharpe_lo=-1)},
                                     "years": years(-0.2, -0.1), "max_rho": None},
         },
+        "overfit": {("binanceus", "365d"): 0.3},
         "bots": [
             {"name": "binanceus-running", "exchange": "binanceus", "strategy": "Running", "live_trades": 25, "live_pnl": 4.0},
             {"name": "kraken-loser", "exchange": "kraken", "strategy": "Loser", "live_trades": 3, "live_pnl": -1.0},
@@ -72,7 +79,8 @@ def test_fixture_rows_give_the_expected_suggestions():
 def test_each_suggestion_explains_itself():
     rows = {(r["kind"], r["strategy"], r["bot"]): r for r in suggest.decide(facts(), CFG)}
     good = rows[("promote", "Good", "")]
-    assert all(g["pass"] for g in good["gates"]) and len(good["gates"]) == 8
+    assert all(g["pass"] for g in good["gates"]) and len(good["gates"]) == 10
+    assert {g["gate"]: g["value"] for g in good["gates"]}["venues with an edge"] == "binanceus, okx"
     assert suggest.roster_line("Good", "binanceus") in good["action"] and "replicas" in good["action"]
     assert "to 5." in good["action"]
     near = rows[("watch", "NearMiss", "")]
@@ -82,6 +90,22 @@ def test_each_suggestion_explains_itself():
     assert "in place" in rows[("demote", "Running", "coinbase-running")]["action"]
     assert "every research exchange" in rows[("demote", "Loser", "kraken-loser")]["summary"]
     assert "next_close" in rows[("retire", "Leaky", "")]["summary"]
+
+
+def test_an_edge_on_one_venue_only_watches():
+    f = facts()
+    del f["series"][("Good", "okx")]
+    rows = {(r["kind"], r["strategy"]): r for r in suggest.decide(f, CFG)}
+    assert ("promote", "Good") not in rows
+    assert [g["gate"] for g in rows[("watch", "Good")]["gates"] if not g["pass"]] == ["venues with an edge"]
+
+
+def test_a_venue_likely_overfit_holds_promotion_back():
+    f = facts()
+    f["overfit"][("binanceus", "365d")] = 0.62
+    rows = {(r["kind"], r["strategy"]): r for r in suggest.decide(f, CFG)}
+    assert [g["gate"] for g in rows[("watch", "Good")]["gates"] if not g["pass"]] == [
+        "venue overfit probability, 365d"]
 
 
 def test_a_bot_needs_enough_trades_before_its_dry_run_counts():
@@ -104,20 +128,24 @@ def test_suggestions_persist_their_first_seen_and_drop_when_they_stop_applying(c
     conn.execute("INSERT INTO bias_checks (strategy, kind, file_hash, has_bias) VALUES ('Good', 'lookahead', 'h', false), "
                  "('Good', 'recursive', 'h', false), ('Unwarmed', 'lookahead', 'h', false)")
     conn.execute("INSERT INTO strategy_windows (strategy, exchange, win, days, trades, expectancy_lo, expectancy_hi, "
-                 "sharpe_lo, dsr, max_drawdown) VALUES ('Good', 'binanceus', '365d', 365, 120, 0.002, 0.01, 0.6, 0.97, 0.2)")
+                 "sharpe_lo, dsr, max_drawdown) VALUES ('Good', 'binanceus', '365d', 365, 120, 0.002, 0.01, 0.6, 0.97, 0.2), "
+                 "('Good', 'okx', '365d', 365, 120, 0.002, 0.01, 0.6, 0.97, 0.2)")
+    conn.execute("INSERT INTO overfit (exchange, win, strategies, days, blocks, splits, pbo) "
+                 "VALUES ('binanceus', '365d', 40, 365, 16, 12870, 0.3)")
     for i in range(3 * 365):
         conn.execute("INSERT INTO strategy_daily VALUES ('Good', 'binanceus', %s, 0.001, 1, 0)",
                      (dt.date(2023, 1, 1) + dt.timedelta(days=i),))
     conn.execute("INSERT INTO bots (name, exchange, strategy, last_seen) VALUES ('kraken-s001', 'kraken', 'Strategy001', %s), "
                  "('old-bot', 'kraken', 'Gone', %s)", (now, now - dt.timedelta(days=3)))
     first = suggest.run(conn)
-    assert first["suggestions"] == {"promote": 1, "fix": 1}
-    seen = dict(conn.execute("SELECT kind, first_seen FROM suggestions").fetchall())
+    # okx has no daily returns here, so it misses only the profitable-years gate
+    assert first["suggestions"] == {"promote": 1, "watch": 1, "fix": 1}
+    seen = dict(conn.execute("SELECT kind, first_seen FROM suggestions WHERE kind <> 'watch'").fetchall())
     action = conn.execute("SELECT action FROM suggestions WHERE kind = 'promote'").fetchone()[0]
     assert "set replicas in statefulset.yaml to 2." in action
     conn.execute("UPDATE strategies SET startup_candle_count = 100 WHERE name = 'Unwarmed'")
     second = suggest.run(conn)
-    assert second == {"suggestions": {"promote": 1}, "suggestions_gone": 1}
+    assert second == {"suggestions": {"promote": 1, "watch": 1}, "suggestions_gone": 1}
     assert conn.execute("SELECT first_seen FROM suggestions WHERE kind = 'promote'").fetchone()[0] == seen["promote"]
 
 

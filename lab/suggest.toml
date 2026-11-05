@@ -20,6 +20,12 @@ min_years_profitable = 0.70
 max_drawdown = 0.35
 # A candidate whose daily returns track a strategy already in the league adds little.
 max_rho = 0.70
+# An edge on one thin book can be that book's quirk: the expectancy and trades gates above must hold on this
+# many venues, counting the one promoted.
+min_venues = 2
+# Probability of backtest overfitting on the venue in the window: the share of in-sample halves whose best
+# strategy lands below the median on the other half. Above 0.5, picking the best backtest there is worse than chance.
+max_pbo = 0.5
 
 [watch]
 # Near misses: loadable, lookahead-clean candidates that fail this many promote gates or fewer.

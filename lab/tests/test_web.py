@@ -59,11 +59,13 @@ def seed(c):
         c.execute("INSERT INTO regimes VALUES (%s, 80000, 'bull', 0.5, 'mid')", (day,))
     for name, trades, sharpe_lo in (("Strategy001", 40, 0.4), ("Planted", 90, 3.0)):
         c.execute("INSERT INTO strategy_windows (strategy, exchange, win, days, start_day, trades, total_return, sharpe, "
-                  "sharpe_lo, sharpe_hi, dsr, trials, max_drawdown, expectancy, gross_expectancy, gross_expectancy_lo, "
-                  "fee_per_trade, capital_exposure, hold_excess, hold_excess_lo, hold_excess_hi, worst_open) VALUES "
-                  "(%s, 'binanceus', '365d', 365, '2025-11-04', %s, 0.032, 1.1, %s, 1.8, 0.62, 2, 0.04, 0.012, 0.0145, "
-                  "0.004, 0.0025, 0.2, 0.123, -0.05, 0.3, -0.271)",
+                  "sharpe_lo, sharpe_hi, dsr, trials, trials_raw, trades_needed, max_drawdown, expectancy, gross_expectancy, "
+                  "gross_expectancy_lo, fee_per_trade, capital_exposure, hold_excess, hold_excess_lo, hold_excess_hi, worst_open) "
+                  "VALUES (%s, 'binanceus', '365d', 365, '2025-11-04', %s, 0.032, 1.1, %s, 1.8, 0.62, 1.7, 2, 4321, 0.04, "
+                  "0.012, 0.0145, 0.004, 0.0025, 0.2, 0.123, -0.05, 0.3, -0.271)",
                   (name, trades, sharpe_lo))
+    c.execute("INSERT INTO overfit (exchange, win, strategies, days, blocks, splits, pbo) "
+              "VALUES ('binanceus', '365d', 2, 365, 16, 12870, 0.64)")
     c.execute("INSERT INTO estimates VALUES ('Strategy001', 'binanceus', 90, -0.05, 0.021, 0.09, 0.31, 0.06, 5000, 1, 365)")
     c.execute("INSERT INTO correlations VALUES ('Strategy001', 'binanceus', 'Strategy002', 0.83, 300)")
     c.execute("INSERT INTO bias_checks (strategy, kind, file_hash, has_bias, biased_indicators) VALUES "
@@ -153,11 +155,12 @@ def test_every_page_renders_with_data(conn, signed_in):
              "/bots/kraken-s001": ["Strategy001 on kraken", "<svg", "BTC/USD", "1.20%", "Live against backtest", "1.85%",
                                    "3 of 4 live entries matched; gap -0.65%"],
              "/strategies": ["Strategy001", "0.40", "62%", "-5% / ", "3.2%", "1.20%", "biased", "Broken", "failed to import",
-                             "Scalp on binanceus: no 1m candles", "Fees by venue", "0.25%", "1.45%"],
+                             "Scalp on binanceus: no 1m candles", "Fees by venue", "0.25%", "1.45%", "worth 1.7 independent",
+                             "4321", '<td class="n down" title="2 strategies">64%</td>'],
              "/strategies?win=all": ["No results for this window yet"],
              "/strategies/Strategy001": ["binanceus", "<svg", "3.2%", "Strategy002: 0.83", "bull", "ETH/USD",
                                          "exit 2: boom", "not checked", "clean", "31%", "1.45%", "0.25%", "20%", "12.3%",
-                                         "-5.0%", "-27.1%"],
+                                         "-5.0%", "-27.1%", "4321"],
              "/data": ["BTC/USD", "700,000", "2019-09-01"],
              "/runs": ["2026-11-04 03:00:00", "ok", "60 min"],
              "/runs/1": ["exit 2: boom", "Scalp on binanceus", "Strategy001"]}

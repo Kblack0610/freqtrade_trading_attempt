@@ -67,6 +67,9 @@ REGIME_EXCHANGE = os.environ.get("REGIME_EXCHANGE", "coinbase")
 CHUNK_TIMEOUT = int(os.environ.get("CHUNK_TIMEOUT", "3600"))
 MAX_ATTEMPTS = 3
 WINDOWS = {"30d": 30, "90d": 90, "180d": 180, "365d": 365, "all": None}
+OVERFIT_BLOCKS = 16  # CSCV splits: C(16, 8) = 12,870 in-sample halves
+OVERFIT_MIN_DAYS = 90  # under this a block is a handful of days
+OVERFIT_COVERAGE = 0.9  # share of a window's days a strategy needs to be ranked in it
 HORIZONS = (30, 90)
 ESTIMATE_BASIS, ESTIMATE_MIN_DAYS = 365, 180
 CORR_DAYS, CORR_MIN_DAYS = 365, 60
@@ -474,9 +477,42 @@ def window_rows(series: dict) -> list[dict]:
             rows.append({"strategy": s, "exchange": e, "win": win, **m})
     for win in WINDOWS:
         trial = [r for r in rows if r["win"] == win]
+        rets = pd.DataFrame({(r["strategy"], r["exchange"]): window_returns(series, r) for r in trial
+                             if r["_sr_daily"] is not None})
+        trials = metrics.effective_trials(rets)
         for r in trial:
-            r["dsr"] = metrics.deflated_sharpe(r["_sr_daily"], r["days"], r["_skew"], r["_kurt"], len(trial))
-            r["trials"] = len(trial)
+            r["dsr"] = metrics.deflated_sharpe(r["_sr_daily"], r["days"], r["_skew"], r["_kurt"], trials)
+            r["trials"], r["trials_raw"] = trials, len(trial)
+    return rows
+
+
+def window_returns(series: dict, r: dict) -> pd.Series:
+    daily = series[(r["strategy"], r["exchange"])][0]
+    d = daily[(daily["day"] >= r["start_day"]) & (daily["day"] <= r["end_day"])]
+    return pd.Series(d["ret"].to_numpy(dtype=float), index=d["day"])
+
+
+def overfit_rows(series: dict) -> list[dict]:
+    """PBO per exchange and window over the daily returns of every strategy with that window there.
+    A strategy must cover OVERFIT_COVERAGE of the window's days; the days it lacks count as flat."""
+    rows = []
+    for ex in sorted({e for _, e in series}):
+        mine = {s: d for (s, e), (d, _) in series.items() if e == ex and not d.empty}
+        if len(mine) < 2:
+            continue
+        end = max(d["day"].iloc[-1] for d in mine.values())
+        for win, n in WINDOWS.items():
+            if n is None or n < OVERFIT_MIN_DAYS:
+                continue
+            lo = end - dt.timedelta(days=n - 1)
+            cols = {s: d[d["day"] >= lo].set_index("day")["ret"] for s, d in mine.items()}
+            m = pd.DataFrame({s: c for s, c in cols.items() if len(c) >= OVERFIT_COVERAGE * n})
+            if m.shape[1] < 2 or len(m) < OVERFIT_MIN_DAYS:
+                continue
+            r = metrics.pbo(m.fillna(0.0).to_numpy(dtype=float), OVERFIT_BLOCKS)
+            if r:
+                rows.append({"exchange": ex, "win": win, "strategies": m.shape[1], "days": len(m),
+                             "blocks": OVERFIT_BLOCKS, **r})
     return rows
 
 
@@ -558,7 +594,7 @@ WINDOW_COLS = ["strategy", "exchange", "win", "days", "start_day", "end_day", "t
                "sharpe_lo", "sharpe_hi", "sortino", "calmar", "max_drawdown", "profit_factor", "expectancy",
                "expectancy_lo", "expectancy_hi", "gross_expectancy", "gross_expectancy_lo", "gross_expectancy_hi",
                "fee_per_trade", "winrate", "exposure", "worst_open", "capital_exposure", "hold_excess", "hold_excess_lo", "hold_excess_hi",
-               "months_profitable", "dsr", "trials"]
+               "months_profitable", "dsr", "trials", "trials_raw", "trades_needed"]
 ESTIMATE_COLS = ["strategy", "exchange", "horizon_days", "p10", "p50", "p90", "prob_loss", "exp_max_drawdown", "paths",
                  "seed", "basis_days"]
 
@@ -570,16 +606,18 @@ def derive(conn) -> dict:
     windows, estimates = window_rows(series), estimate_rows(series)
     close = btc_close()
     hold_columns(windows, series, close)
-    corr, reg = correlation_rows(series, league), regime_rows(close)
+    corr, reg, overfit = correlation_rows(series, league), regime_rows(close), overfit_rows(series)
     with conn.transaction():
-        conn.execute("TRUNCATE strategy_daily, strategy_windows, estimates, correlations, regimes")
+        conn.execute("TRUNCATE strategy_daily, strategy_windows, estimates, correlations, regimes, overfit")
         insert_many(conn, "strategy_daily", daily, ["strategy", "exchange", "day", "ret", "pnl", "trades"])
         insert_many(conn, "strategy_windows", windows, WINDOW_COLS)
         insert_many(conn, "estimates", estimates, ESTIMATE_COLS)
         insert_many(conn, "correlations", corr, ["strategy", "exchange", "other", "rho", "days"])
         insert_many(conn, "regimes", reg, ["day", "btc_close", "trend", "vol_30d", "vol_bucket"])
+        insert_many(conn, "overfit", overfit, ["exchange", "win", "strategies", "days", "blocks", "splits", "pbo",
+                                               "logit_median"])
     return {"series": len(series), "daily_rows": len(daily), "windows": len(windows), "estimates": len(estimates),
-            "correlations": len(corr), "regime_days": len(reg)}
+            "correlations": len(corr), "regime_days": len(reg), "overfit": len(overfit)}
 
 
 def main(runner: Runner | None = None, today: dt.date | None = None) -> int:

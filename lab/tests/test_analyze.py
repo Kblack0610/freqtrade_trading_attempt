@@ -115,7 +115,9 @@ def test_full_history_in_yearly_chunks_then_cached(lab):
     # 2024-03-01 to today is more than 365 days on binanceus; coinbase starts 2025-01-01, so also yes
     assert one(lab, "SELECT count(*) FROM strategy_windows WHERE win = '365d'") == 6
     assert one(lab, "SELECT count(*) FROM strategy_windows WHERE win = 'all' AND strategy = 'Good'") == 2
-    assert one(lab, "SELECT min(trials) = max(trials) AND min(trials) = 6 FROM strategy_windows WHERE win = '365d'")
+    assert one(lab, "SELECT min(trials_raw) = max(trials_raw) AND min(trials_raw) = 6 FROM strategy_windows WHERE win = '365d'")
+    assert one(lab, "SELECT min(trials) = max(trials) AND min(trials) BETWEEN 1 AND 6 FROM strategy_windows WHERE win = '365d'")
+    assert one(lab, "SELECT count(*) FROM overfit WHERE exchange = 'binanceus' AND win = '365d' AND pbo BETWEEN 0 AND 1") == 1
     assert one(lab, "SELECT bool_and(dsr BETWEEN 0 AND 1) FROM strategy_windows WHERE dsr IS NOT NULL")
     # every trade stakes 300 of a 1000 wallet for 8 hours in 48, so 5% of capital is in the market
     assert one(lab, "SELECT bool_and(abs(capital_exposure - 0.05) < 0.002) FROM strategy_windows WHERE win = '365d'")
