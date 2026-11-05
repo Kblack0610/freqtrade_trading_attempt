@@ -271,3 +271,34 @@ def test_errors_keep_an_exception_message_whole():
            "Traceback (most recent call last):\n"
            "ValueError: Seed must be between 0 and 2**32 - 1\n")
     assert analyze._errors(out) == "Fatal exception! | ValueError: Seed must be between 0 and 2**32 - 1"
+
+
+def test_task_memory_matches_the_measured_peaks(monkeypatch):
+    monkeypatch.setattr(analyze, "pair_count", lambda ex: 10)
+    assert analyze.task_gb("binanceus", "5m", 365) == pytest.approx(1.1, abs=0.1)
+    assert analyze.task_gb("binanceus", "1m", 365) == pytest.approx(4.0, abs=0.1)
+
+
+def test_the_budget_holds_a_task_back_until_memory_frees():
+    b = analyze.Budget(10)
+    entered = threading.Event()
+
+    def second():
+        with b.hold(6):
+            entered.set()
+
+    with b.hold(6):
+        t = threading.Thread(target=second)
+        t.start()
+        with b.cv:
+            assert b.cv.wait_for(lambda: b.waiting == 1, timeout=10)  # guard only; the notify ends the wait
+        assert not entered.is_set() and b.used == 6
+    t.join(timeout=10)
+    assert entered.is_set() and b.used == 0
+
+
+def test_a_task_above_the_budget_runs_alone():
+    b = analyze.Budget(10)
+    with b.hold(25):
+        assert b.used == 10
+    assert b.used == 0

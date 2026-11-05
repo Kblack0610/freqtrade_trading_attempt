@@ -14,6 +14,7 @@ Results go to the `trader` database in the cluster's shared Postgres, which the 
 | `user_data/config.base.json` | Shared config: dry run, 1000 USD wallet, spot, static pair list |
 | `user_data/exchanges/<name>.json` | Per-exchange overlay: name, pair whitelist, pricing quirks; no keys |
 | `lab/league.py` | Bot entrypoint: picks its roster row from the pod ordinal, refuses anything but key-less spot dry run, writes the API config, execs `freqtrade trade` |
+| `lab/pairs.py` | By hand: a research venue's whitelist, its most traded pairs with history since 2022 |
 | `lab/backfill.py` | Hourly job: price history for every exchange x pair x timeframe into `data/<exchange>/` on the lab PVC, and what it holds into `data_coverage` (see Price data) |
 | `lab/analyze.py` | Nightly job: every strategy x exchange backtested in calendar-year chunks over the whole history, lookahead and recursive bias checks, then the derived tables (see The analysis) |
 | `lab/walkforward.py` | Weekly job: hyperopt on the months before each of the last whole months, then that unseen month backtested as is and tuned (see Walk-forward) |
@@ -58,7 +59,7 @@ docker rm -f trader-pg && docker network rm trader-test
 
 A quick analysis of two strategies: run a backfill into the mounted `/lab` first (below), then `python lab/migrate.py && python lab/analyze.py` in the test container with `-e LAB_RESULTS=/lab -e ANALYZE_EXCHANGES=binanceus -e REGIME_EXCHANGE=binanceus -e "ANALYZE_STRATEGIES=Strategy001 SampleStrategy"`. It reads which candles exist from `data_coverage`, so the backfill has to write there too. Two strategies over about a year of binanceus data took under a minute.
 
-Analysis knobs (env): `ANALYZE_EXCHANGES` (`binanceus coinbase`), `ANALYZE_STRATEGIES` (empty means all), `ANALYZE_WORKERS` (6 backtests at once), `BIAS_EXCHANGE` (`binanceus`), `LOOKAHEAD_DAYS` (120), `RECURSIVE_DAYS` (30), `REGIME_EXCHANGE` (`coinbase`, the longest BTC history), `CHUNK_TIMEOUT` (3600 s).
+Analysis knobs (env): `ANALYZE_EXCHANGES` (`binanceus coinbase`), `ANALYZE_STRATEGIES` (empty means all), `ANALYZE_WORKERS` (at most 6 backtests at once), `ANALYZE_MEMORY_GB` (10: the estimated memory of the tasks in flight together; keep it 2 GB under the pod limit), `BIAS_EXCHANGE` (`binanceus`), `LOOKAHEAD_DAYS` (120), `RECURSIVE_DAYS` (30), `REGIME_EXCHANGE` (`coinbase`, the longest BTC history), `CHUNK_TIMEOUT` (3600 s).
 
 Backfill knobs (env): `BACKFILL_EXCHANGES` (`binanceus coinbase kraken`), `TIMEFRAMES` (`1m 5m 15m 30m 1h 4h 1d`, each capped at what the exchange offers), `FORWARD_EXCHANGES` (`kraken`), `PREPEND_FROM` (`20150101`), `PREPEND_FLOORS` (`1m=20240101`: space-separated `<timeframe>=<date>` pairs, the oldest candle a timeframe is prepended to), `LAB_RESULTS` (`/lab`). For a quick local run, add `-e TIMEFRAMES='4h 1d' -v "$HOME/.cache/trader-lab:/lab"` to the test container and run `python lab/backfill.py`.
 
@@ -129,6 +130,22 @@ Drop the `.py` in `user_data/strategies/` (any subfolder). It must import on the
 - Then every series gets an append pass up to now. A prepend drops a series' newest candle, so the append always runs after it.
 - When a prepend leaves the first candle where it was, the series is marked `oldest_reached` and only appended from then on.
 - Kraken serves no OHLCV history, only its newest 720 candles per timeframe. It is collected forward through ccxt and merged into the same Freqtrade files. A run at least every 60 hours keeps 5m gap-free; a longer outage leaves a gap that `data_coverage` counts. These candles exist nowhere else once they age out.
+
+### Venues
+
+| Venue | Pairs | Fee per side in backtests | Used by |
+|---|---|---|---|
+| binanceus | 10 USD | ccxt's default | league bots, research |
+| coinbase | 10 USD | ccxt's default | league bots, research |
+| kraken | 10 USD | ccxt's default | league bots (forward candles only) |
+| okx | 22 USDT | 0.20%: 0.15% taker plus 0.05% slippage | research only, no bot |
+| kucoin | 18 USDT | 0.15%: 0.10% taker plus 0.05% slippage | research only, no bot |
+
+binanceus has no USD pair trading $5M a day, so its backtests assume fills its books may not give; okx and kucoin add pairs that trade millions a day, where a backtest's fills are believable. Their whitelists come from `python lab/pairs.py <exchange>`: pairs over $2M a day for the last 30 days, with a daily candle by 2022-01-01, at most 40. Their `fee` key is the stressed cost, set by hand in the exchange file; Freqtrade applies a `fee` key to dry-run fills too, which is why the bot venues do not get one here.
+
+**Survivorship.** Those whitelists are today's liquid survivors. A coin that was liquid in 2022 and died since is not in them, so the research venues' early years flatter every strategy a little. Freqtrade cannot backtest a point-in-time volume list; read okx and kucoin results as an upper bound and look for agreement with binanceus.
+
+The research venues are backfilled by their own job (`5m` and up, no 1m), so their slow first pass never holds back the hourly candles of the bot venues. OKX serves 100 candles per request, so its first pass takes several runs; each run keeps the pairs it finished.
 
 The first run fetches full history (5m since 2019 on binanceus is the long pole) and can take hours; later runs take under a minute. Exchanges run in parallel, each with its own rate limit.
 
@@ -213,5 +230,7 @@ Sign-in cannot complete against a fake Forgejo; mint a cookie with `auth.make_se
 | `'' is too short` or a JWT length error | `api_server` secrets are validated at load | `league.py` writes them from env at start; use `openssl rand -hex 32` for the JWT secret |
 | `ModuleNotFoundError: ta` | The image has no `ta` package | GodStra, Heracles and Zeus were deleted for this |
 | Futures strategies missing | US exchanges are spot only | `user_data/strategies/futures/` was deleted |
-| binance.com, bybit or okx refuse to connect | They geo-block US IPs | Use binanceus, coinbase, kraken |
+| binance.com or bybit refuse to connect (451, 403) | They geo-block US IPs, market data included | okx and kucoin serve public market data to US IPs; they are research venues, with no account |
+| The analysis pod is `OOMKilled` within a minute | Too many 1m tasks at once: a year of 1m on 10 pairs peaks at 4 GB, a 5m year at 1.1 GB | The pool admits tasks by estimated memory (`ANALYZE_MEMORY_GB`); if a new venue or timeframe still overflows, re-measure and update `TASK_BASE_GB` and `GB_PER_MCANDLE` in `analyze.py` |
+| Every walk-forward fold fails with `Fatal exception! \| 1` | Hyperopt's `--random-state` must fit in 32 bits for numpy and optuna | Fixed in `metrics.seed_of`; the fold error now keeps the whole message |
 | `pod ordinal N has no roster row` | StatefulSet replicas exceed roster rows | Set replicas to the roster row count in home-config |
