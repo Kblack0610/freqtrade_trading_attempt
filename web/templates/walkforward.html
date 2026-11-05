@@ -6,7 +6,7 @@
 {% if board %}
 <div class="scroll">
 <table>
-  <thead><tr><th>Strategy</th><th>Exchange</th><th class="n">Months</th><th class="n">Tuned beat as is</th><th class="n">Per trade as is (90%)</th><th class="n">Per trade tuned (90%)</th><th class="n">Trades tuned</th><th class="n" title="Tuned return per day out of sample over in sample">Efficiency</th></tr></thead>
+  <thead><tr><th>Strategy</th><th>Exchange</th><th class="n">Months</th><th class="n">Tuned beat as is</th><th class="n">Per trade as is (90%)</th><th class="n">Per trade tuned (90%)</th><th class="n">Trades tuned</th><th class="n" title="Tuned return per day out of sample over in sample">Walk-forward efficiency</th></tr></thead>
   <tbody>
   {% for r in board %}
   <tr><td><a href="/strategies/{{ r.strategy }}?exchange={{ r.exchange }}#walk-forward">{{ r.strategy }}</a></td><td>{{ r.exchange }}</td>
@@ -18,5 +18,5 @@
   </tbody>
 </table>
 </div>
-{% else %}<p class="muted">No walk-forward results yet; the weekly run fills this.</p>{% endif %}
+{% else %}<p class="muted">No walk-forward results yet: the weekly run adds a row per strategy and exchange it tunes.</p>{% endif %}
 {% endblock %}

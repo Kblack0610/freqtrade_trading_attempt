@@ -2,7 +2,7 @@
 {% block title %}{{ bot.name }}{% endblock %}
 {% block body %}
 <h1>{{ bot.name }}</h1>
-<p class="muted">{{ bot.strategy }} on {{ bot.exchange }}, {{ "dry run" if bot.dry_run else "NOT DRY RUN" }}{% if bot.error %}, unreachable at the last ingest: {{ bot.error }}{% endif %}</p>
+<p class="muted">{{ bot.strategy }} on {{ bot.exchange }}, {{ "dry run" if bot.dry_run else "NOT DRY RUN" }}{% if bot.error %}, unreachable at the last hourly update: {{ bot.error }}{% endif %}</p>
 
 <section class="tiles">
   <div class="tile"><span class="label">Profit</span><span class="value {{ 'up' if (bot.profit_all_pct or 0) >= 0 else 'down' }}">{{ bot.profit_all_pct | num(2, "%") }}</span></div>
@@ -14,7 +14,7 @@
 <h2>Profit over time</h2>
 {{ chart | safe }}
 
-<h2>Live against backtest</h2>
+<h2>Dry run against backtest</h2>
 {% if drift and drift.error %}<p class="down">The backtest of this period failed: {{ drift.error }}</p>
 {% elif drift %}
 <p class="muted">{{ bot.strategy }} backtested on {{ bot.exchange }} from {{ drift.since | local }} to {{ drift.bt_end | local }}, the time this bot has run. An entry matches when the backtest entered the same pair within one candle. The gap is live minus backtest profit per trade over trades closed on both sides: the error in the backtest's fill and fee model. It needs dozens of trades to mean anything.</p>
@@ -27,14 +27,14 @@
   </tbody>
 </table>
 </div>
-<p>{{ drift.matched }} of {{ drift.live_entries }} live entries matched; gap {{ drift.gap | pct(2) }} per trade over {{ drift.gap_trades }} trades.</p>
+<p>{{ drift.matched }} of {{ drift.live_entries }} dry-run entries matched the backtest; the gap is {{ drift.gap | pct(2) }} per trade over {{ drift.gap_trades }} trades closed on both sides.</p>
 {% else %}<p class="muted">Not compared yet: the next analysis run backtests this bot's period.</p>{% endif %}
 
 <h2>Trades</h2>
 {% if trades %}
 <div class="scroll">
 <table>
-  <thead><tr><th>#</th><th>Pair</th><th>Opened</th><th>Closed</th><th class="n">Stake</th><th class="n">Profit</th><th class="n">USD</th><th>Exit</th></tr></thead>
+  <thead><tr><th>Trade</th><th>Pair</th><th>Opened</th><th>Closed</th><th class="n">Stake</th><th class="n">Profit</th><th class="n">USD</th><th>Exit reason</th></tr></thead>
   <tbody>
   {% for t in trades %}
   <tr>
@@ -49,5 +49,5 @@
   </tbody>
 </table>
 </div>
-{% else %}<p class="muted">No trades yet.</p>{% endif %}
+{% else %}<p class="muted">No trades yet: the hourly update adds them once this bot opens one.</p>{% endif %}
 {% endblock %}

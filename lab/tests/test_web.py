@@ -153,9 +153,9 @@ def test_every_page_renders_with_data(conn, signed_in):
     _, client = signed_in
     pages = {"/": ["kraken-s001", "2.50%", "3 of 4", "binanceus", "Best strategies", "/strategies/Strategy001?exchange=binanceus",
                    "2026-11-04 03:00:00"],
-             "/bots/kraken-s001": ["Strategy001 on kraken", "<svg", "BTC/USD", "1.20%", "Live against backtest", "1.85%",
-                                   "3 of 4 live entries matched; gap -0.65%"],
-             "/strategies": ["Strategy001", "0.40", "62%", "-5% / ", "3.2%", "1.20%", "biased", "Broken", "failed to import",
+             "/bots/kraken-s001": ["Strategy001 on kraken", "<svg", "BTC/USD", "1.20%", "Dry run against backtest", "1.85%",
+                                   "3 of 4 dry-run entries matched the backtest; the gap is -0.65%"],
+             "/strategies": ["Strategy001", "0.40", "62%", "-5% / ", "3.2%", "1.20%", "lookahead bias", "Broken", "failed to import",
                              "binanceus: no 1m candles: Scalp", 'okx: 5m not fully backfilled: <span title="S0, S1, S2, S3">4 strategies</span>', "Fees by venue", "0.25%", "1.45%", "worth 1.7 independent",
                              "4321", '<td class="n down" title="2 strategies">64%</td>'],
              "/strategies?win=all": ["No results for this window yet"],
@@ -191,7 +191,7 @@ def test_recursive_bias_warns_but_does_not_sink_a_strategy(conn, signed_in):
                  "WHERE strategy = 'Strategy001' AND kind = 'recursive'")
     text = signed_in[1].get("/strategies").text
     assert text.index("/strategies/Strategy001?") < text.index("/strategies/Planted?")
-    assert ">recursive</span>" in text
+    assert ">short warmup</span>" in text
     assert "/strategies/Strategy001?" in signed_in[1].get("/").text
 
 
@@ -213,7 +213,7 @@ def test_suggestions_show_each_kind_with_its_gates(conn, signed_in):
     assert suggest.run(conn)["suggestions"] == {"retire": 2, "fix": 1}
     text = signed_in[1].get("/suggestions").text
     for needle in ("Retire <span", "next_close", "Broken", "failed to import", "Fix <span", "startup_candle_count",
-                   "Gates (0 of 1 pass)", "Promote <span"):
+                   "Gates: 0 of 1 pass", "Promote <span"):
         assert needle in text, needle
     assert "1 fix, 2 retire" in signed_in[1].get("/").text
     assert "startup_candle_count" in signed_in[1].get("/strategies/Strategy001").text

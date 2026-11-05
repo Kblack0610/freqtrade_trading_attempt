@@ -2,5 +2,5 @@
 {% block title %}Not allowed{% endblock %}
 {% block body %}
 <h1>Not allowed</h1>
-<p>The Forgejo account <strong>{{ login }}</strong> is not on this site's allowlist.</p>
+<p>Sign-in refused: the Forgejo account <strong>{{ login }}</strong> is not on this site's allowlist. Sign in with an allowed account, or add this login to <code>ALLOWED_USERS</code> and restart the site.</p>
 {% endblock %}

@@ -10,13 +10,13 @@
   <div class="tile"><span class="label">Combined balance</span><span class="value">{{ total_balance | num(0, " USD") }}</span></div>
   <div class="tile"><span class="label">Bots</span><span class="value">{{ bots | length }}</span></div>
   <a class="tile" href="/suggestions"><span class="label">Suggestions</span><span class="value">{% for k in suggested | sort(attribute="kind") %}{{ k.n }} {{ k.kind }}{% if not loop.last %}, {% endif %}{% else %}none{% endfor %}</span></a>
-  <div class="tile"><span class="label">Last ingest</span><span class="value {{ 'down' if stale(last_ingest) }}">{{ last_ingest | ago }}</span></div>
+  <div class="tile"><span class="label">Bots last updated</span><span class="value {{ 'down' if stale(last_ingest) }}">{{ last_ingest | ago }}</span></div>
 </section>
 
 <h2>League</h2>
 <div class="scroll">
 <table>
-  <thead><tr><th>Bot</th><th>Exchange</th><th>Strategy</th><th class="n">Profit</th><th class="n">USD</th><th class="n">Closed</th><th class="n">Open</th><th class="n">Win rate</th><th class="n">Max DD</th><th class="n" title="Live entries the backtest of the same period also took, within one candle">Backtest match</th><th>Snapshot</th></tr></thead>
+  <thead><tr><th>Bot</th><th>Exchange</th><th>Strategy</th><th class="n">Profit</th><th class="n">USD</th><th class="n">Closed trades</th><th class="n">Open trades</th><th class="n">Win rate</th><th class="n">Max drawdown</th><th class="n" title="Live entries the backtest of the same period also took, within one candle">Backtest match</th><th>Updated</th></tr></thead>
   <tbody>
   {% for b in bots %}
   <tr>
@@ -40,7 +40,7 @@
 <h2>Price data</h2>
 <div class="scroll">
 <table>
-  <thead><tr><th>Exchange</th><th class="n">Series</th><th class="n">At oldest candle</th><th>History from</th><th>Newest candle</th></tr></thead>
+  <thead><tr><th>Exchange</th><th class="n">Series</th><th class="n" title="Series the backfill has taken back to the oldest candle the exchange serves">Full history</th><th>History from</th><th>Newest candle</th></tr></thead>
   <tbody>
   {% for c in coverage %}
   <tr><td>{{ c.exchange }}</td><td class="n">{{ c.series }}</td><td class="n">{{ c.at_oldest }}</td><td>{{ c.first_ts | local("%Y-%m-%d") }}</td>
@@ -49,12 +49,12 @@
   </tbody>
 </table>
 </div>
-<p><a href="/data">Every series</a></p>
+<p><a href="/data">All price data</a></p>
 
 <h2>Best strategies, last 365 days</h2>
 {% if top %}
 {% set board = top %}{% include "_board.html" %}
 <p><a href="/strategies">Every strategy</a></p>
 {% else %}<p class="muted">No strategy has {{ min_trades }} or more backtest trades in the last 365 days without a bias finding yet.</p>{% endif %}
-{% if last_run %}<p class="muted">Last analysis run <a href="/runs/{{ last_run.id }}">{{ last_run.name }}</a>: {{ "ok" if last_run.ok else ("running" if not last_run.finished_at else "failed") }}{% if last_run.finished_at %}, finished {{ last_run.finished_at | ago }}{% endif %}.</p>{% endif %}
+{% if last_run %}<p class="muted">The last analysis {% if not last_run.finished_at %}is still running{% else %}{{ "succeeded" if last_run.ok else "failed" }} {{ last_run.finished_at | ago }}{% endif %} (run <a href="/runs/{{ last_run.id }}">{{ last_run.name }}</a>).</p>{% endif %}
 {% endblock %}

@@ -3,11 +3,11 @@
 {% block body %}
 <h1>Confidence</h1>
 <p class="muted">Whether a strategy has earned real money, rebuilt after every analysis and walk-forward from <code>lab/suggest.toml</code> [confidence]. The score is the chance its true net expectancy per trade is above zero, from its walk-forward months shrunk toward everything tried. Ready needs every gate and means worth a small capped experiment, not safe. Nothing here changes a bot.</p>
-<p>{{ board | selectattr("ready") | list | length }} of {{ board | length }} ready.</p>
+<p>{{ board | selectattr("ready") | list | length }} of {{ board | length }} strategy and exchange pairs are ready for a small real-money test.</p>
 {% for c in board %}
 <details class="card">
-  <summary><strong>{{ c.strategy }}</strong> on {{ c.exchange }}: {% if c.score is none %}no score{% else %}{{ "%.0f" | format(c.score) }}{% endif %}, {% if c.ready %}<span class="up">ready</span>{% else %}<span class="down">not ready: {{ (c.gates | rejectattr("pass") | first).gate }}</span>{% endif %} <span class="muted">{{ c.passed }} of {{ c.gates | length }} gates, {{ c.oos_trades }} out-of-sample trades</span></summary>
+  <summary><strong>{{ c.strategy }}</strong> on {{ c.exchange }}: {% if c.score is none %}no score{% else %}score {{ "%.0f" | format(c.score) }}{% endif %}, {% if c.ready %}<span class="up">ready</span>{% else %}<span class="down">not ready: {{ (c.gates | rejectattr("pass") | first).gate }}</span>{% endif %} <span class="muted">{{ c.passed }} of {{ c.gates | length }} gates, {{ c.oos_trades }} out-of-sample trades</span></summary>
   {% set gates = c.gates %}{% include "_gates.html" %}
 </details>
-{% else %}<p class="muted">Nothing scored yet.</p>{% endfor %}
+{% else %}<p class="muted">Nothing scored yet: a score needs 20 strategies with 30 walk-forward trades each.</p>{% endfor %}
 {% endblock %}

@@ -1,6 +1,6 @@
 <div class="scroll">
 <table>
-  <thead><tr><th>Test month</th><th>Trained on</th><th class="n">In sample</th><th class="n">As is</th><th class="n">Tuned</th><th class="n">Trades as is</th><th class="n">Trades tuned</th><th>Note</th></tr></thead>
+  <thead><tr><th>Test month</th><th>Trained on</th><th class="n">Profit in training</th><th class="n">Profit as is</th><th class="n">Profit tuned</th><th class="n">Trades as is</th><th class="n">Trades tuned</th><th>Error</th></tr></thead>
   <tbody>
   {% for f in folds %}
   <tr><td>{{ f.fold_start.strftime("%Y-%m") }}</td><td>{{ f.train_start }} to {{ f.fold_start }}</td>

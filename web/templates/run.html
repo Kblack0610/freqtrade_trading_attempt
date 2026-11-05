@@ -6,15 +6,15 @@
 
 <section class="tiles">
   <div class="tile"><span class="label">Strategies</span><span class="value">{{ run.raw.strategies or 0 }}</span></div>
-  <div class="tile"><span class="label">Chunks run</span><span class="value">{{ run.raw.chunks_run or 0 }}</span></div>
-  <div class="tile"><span class="label">Cached</span><span class="value">{{ run.raw.chunks_cached or 0 }}</span></div>
-  <div class="tile"><span class="label">Failed</span><span class="value {{ 'down' if run.raw.chunks_failed }}">{{ run.raw.chunks_failed or 0 }}</span></div>
+  <div class="tile"><span class="label">Years backtested</span><span class="value">{{ run.raw.chunks_run or 0 }}</span></div>
+  <div class="tile"><span class="label">Years cached</span><span class="value">{{ run.raw.chunks_cached or 0 }}</span></div>
+  <div class="tile"><span class="label">Years failed</span><span class="value {{ 'down' if run.raw.chunks_failed }}">{{ run.raw.chunks_failed or 0 }}</span></div>
   <div class="tile"><span class="label">Bias checks</span><span class="value">{{ run.raw.bias_run or 0 }}</span></div>
-  <div class="tile"><span class="label">Windows</span><span class="value">{{ run.raw.windows or 0 }}</span></div>
+  <div class="tile"><span class="label">Windows measured</span><span class="value">{{ run.raw.windows or 0 }}</span></div>
 </section>
 <p class="muted">Freqtrade {{ run.raw.freqtrade or "-" }} on {{ (run.raw.exchanges or []) | join(", ") }}{% if run.raw.only %}, only {{ run.raw.only | join(", ") }}{% endif %}. {{ run.raw.load_failed or 0 }} strategies failed to load; {{ run.raw.bias_failed or 0 }} bias checks could not run.</p>
 
-<h2>Failed chunks</h2>
+<h2>Failed backtest years</h2>
 {% if failed %}
 <div class="scroll">
 <table>
@@ -26,7 +26,7 @@
   </tbody>
 </table>
 </div>
-{% else %}<p class="muted">None.</p>{% endif %}
+{% else %}<p class="muted">No backtest year failed in this run.</p>{% endif %}
 
 {% if run.raw.skipped %}
 <h2>Skipped</h2>
