@@ -20,7 +20,9 @@ Results go to the `trader` database in the cluster's shared Postgres, which the 
 | `lab/walkforward.py` | Weekly job: hyperopt on the months before each of the last whole months, then that unseen month backtested as is and tuned (see Walk-forward) |
 | `lab/metrics.py` | Pure functions behind the derived tables: daily returns, Sharpe, Sortino, drawdown, block-bootstrap intervals, deflated Sharpe with effective trials, overfit probability (CSCV), trades still needed, Monte Carlo, BTC regimes |
 | `lab/suggest.py`, `lab/suggest.toml` | After each analysis and walk-forward: promote, watch, demote, retire, fix and retune suggestions from the derived tables, with the thresholds as data (see Suggestions) |
+| `lab/confidence.py` | After each analysis and walk-forward: the score and gates that say whether a strategy has earned real money, and the trial register (see Confidence) |
 | `lab/ingest.py` | Hourly job: every bot's trades (closed and open) and a snapshot (profit, balance, dry-run flag) into Postgres |
+| `lab/watcher.py` | Daily loss watch: each bot's marked-to-market equity every 60 s into `watch`, and the kill drill. See Watcher |
 | `lab/migrate.py`, `lab/migrations/` | Schema: numbered SQL files applied once each, in order, under an advisory lock; runs as the init container of every job |
 | `lab/db.py` | The one Postgres connection: `DATABASE_URL` |
 | `web/` | The site: FastAPI and Jinja, read-only, Forgejo sign-in (`web/auth.py`), server-drawn SVG charts (`web/charts.py`); pages Overview, bot detail, Strategies, strategy detail, Walk-forward, Suggestions, Data, Runs (see The site) |
@@ -124,6 +126,16 @@ A backtest of a strategy as it is says nothing about tuning it, and hyperopt's b
 
 A suggestion keeps its `first_seen` while it holds, so "since Nov 05" on the site is how long the evidence has pointed the same way; one that stops applying is deleted.
 
+## Confidence
+
+`lab/confidence.py` runs after suggestions (alone: `python lab/confidence.py`) and rebuilds `confidence`, one row per strategy and exchange, shown on `/confidence`. Promote decides who enters the dry-run league; this decides who could touch money, so its gates are stricter. It is advice: nothing here touches a bot, and `lab/league.py` still refuses real money.
+
+- **Score**: 100 x P(true net expectancy per trade > 0). Each strategy's pooled tuned walk-forward trades, shrunk toward every strategy walk-forward has tried. The population mean is capped at zero, so a rising market does not lift everyone. No score below 20 strategies with 30 trades each.
+- **Ready**: every gate passes and the score is at least 90. A failed gate shows as "not ready: <gate>" whatever the score. Ready means worth a small capped experiment, not safe.
+- **Gates**, thresholds in `lab/suggest.toml` [confidence]: bias, costs at the venue's configured fee, 250 out-of-sample trades, expectancy interval low above zero, deflated Sharpe, overfit probability, months positive, BTC regime spread, excess over hold, worst open loss, cost stress, drift, dry run length, score.
+- **Out of sample** means the tuned returns, months hyperopt never saw. So the score speaks for tuning monthly and trading the next month, not for the file as it stands, and candidates were chosen on a trailing year that overlaps those months.
+- **Trial register**: `trials` counts every strategy, exchange and tuned parameter set ever tried, and keeps a row when its strategy goes, so the bar never falls. The deflated Sharpe uses that count at the window's effective share.
+
 ## Adding a strategy
 
 Drop the `.py` in `user_data/strategies/` (any subfolder). It must import on the pinned image: Python 3.14, NumPy 2 (`np.nan`, not `np.NaN`), no `ta` package. Check with `freqtrade list-strategies --recursive-strategy-search --userdir user_data -c user_data/config.base.json -c user_data/exchanges/binanceus.json`. The next nightly analysis backtests its whole history and checks it for bias.
@@ -164,6 +176,8 @@ The first run fetches full history (5m since 2019 on binanceus is the long pole)
 - `003`: the analysis. `strategies` (every file found, its hash and load error), `backtest_chunks` and `backtest_trades` (the cache and its trades), `bias_checks`; derived, rebuilt in one transaction at the end of each run: `strategy_daily`, `strategy_windows`, `estimates`, `regimes`, `correlations`. `runs` rows of kind `analysis` carry the run summary in `raw`.
 - `004`: clears bias checks that errored before subfolder strategies could load, so they rerun.
 - `005`: `suggestions`, one row per kind, strategy, exchange and bot, with its gates as JSON and when it was first and last seen.
+- `012`: `trials`, the register of everything tried, and `confidence`, the score and gates per strategy and exchange.
+- `013`: `watch`, one row per bot rewritten by `lab/watcher.py`: equity, the day's opening equity, breach, drill
 
  A schema change is a new numbered file; never edit an applied one.
 
@@ -192,6 +206,21 @@ docker run --rm -p 127.0.0.1:18765:8000 --entrypoint uvicorn -e DATABASE_URL=...
 
 Sign-in cannot complete against a fake Forgejo; mint a cookie with `auth.make_session(auth.Config(), "kblack0610")` under the same `SESSION_KEY` and send it as `trader_session`.
 
+### Watcher
+
+`lab/watcher.py` is a Deployment, not a job. Every 60 seconds it reads `/show_config`, `/profit` and `/balance` from each bot and writes one `watch` row per bot. Equity is `starting_capital` plus `profit_all_coin`, which values open trades at the current rate. The bot's `/balance` total is not used, since its wallet refreshes at most hourly.
+
+A bot is breached when equity falls `[watcher] day_loss` of capital below the first reading of the UTC day, and stays breached until the next one. This is Stage 0, so a breach only raises an alert. The day opens at the first reading, so a bot unseen at 00:00 UTC opens late, and a watcher started mid-day counts from then.
+
+The drill proves the stopping path on one dry-run bot. Run these in the watcher pod:
+
+```
+python lab/watcher.py --drill <bot>
+python lab/watcher.py --drill-end <bot>
+```
+
+The first flags the bot; the next pass marks it breached and POSTs `/stopentry`, which keeps managing open trades. `stopped_at` minus `drill_at` in `watch` is the time taken, and the plan's gate is two cadences. The pass repeats the stop while the drill lasts, because a restarted bot comes back running. The second clears the breach and POSTs `/start`.
+
 ### Metrics
 
 `web/exporter.py` reads the database on each scrape, so the numbers are as fresh as the tables: bot state is as old as the newest hourly ingest. home-config alerts on these:
@@ -203,6 +232,8 @@ Sign-in cannot complete against a fake Forgejo; mint a cookie with `auth.make_se
 | `trader_bot_snapshot_age_seconds`, `trader_bot_snapshot_error` | `bot` | Age of the newest snapshot, and 1 when ingest got an API error instead of numbers |
 | `trader_bot_open_trades`, `trader_bot_closed_trades`, `trader_bot_profit_pct` | `bot` | The newest snapshot's numbers |
 | `trader_ingest_age_seconds` | | Since any snapshot was written |
+| `trader_watch_age_seconds` | | Since the watcher last finished a pass |
+| `trader_watch_unseen_seconds`, `trader_watch_running`, `trader_watch_breached`, `trader_watch_day_loss_ratio` | `bot` | Since the last good read, 1 when taking entries, 1 after a daily loss breach, and the loss so far today as a share of capital |
 | `trader_run_started_timestamp_seconds`, `trader_run_finished_timestamp_seconds`, `trader_run_ok`, `trader_run_last_ok_timestamp_seconds` | `kind` (`analysis`, `walkforward`) | Newest run started, newest run finished and whether it succeeded, newest success |
 | `trader_candle_age_seconds`, `trader_coverage_age_seconds`, `trader_coverage_series` | `exchange` | Newest stored candle, newest backfill write, series stored |
 | `trader_suggestions` | `kind` | Open suggestions |
@@ -211,6 +242,7 @@ Sign-in cannot complete against a fake Forgejo; mint a cookie with `auth.make_se
 
 | Symptom | Cause | Fix |
 |---|---|---|
+| A `watch` row has `error` set and `seen_at` falling behind | That bot's API did not answer, or an open trade has no price so `profit_all_coin` is NaN | The row clears on the next good read; TraderWatchBotBlind fires after 5 minutes |
 | `migrate: 00N_x.sql changed after it was applied` | An applied migration file was edited | Revert the edit and put the change in the next numbered file |
 | `DATABASE_URL is not set` (exit 2) | The job has no `trader-db` secret mounted | home-config `apps/freqtrade/trader-db-secret.sops.yaml` holds it |
 | An ingest snapshot has `error` set and no trades moved | That bot's API was unreachable that hour | The next run catches up: trades are upserted from the bot's own history |

@@ -19,6 +19,7 @@ BOTS = """
 SELECT DISTINCT ON (bot) bot, ts, dry_run, error, open_trades, closed_trades, profit_all_pct, balance_total
 FROM bot_snapshots ORDER BY bot, ts DESC
 """
+WATCH = "SELECT bot, checked_at, seen_at, state, capital, equity, day_open, breached_at FROM watch"
 RUNS = """
 SELECT k AS kind,
        (SELECT max(started_at) FROM runs WHERE kind = k) AS started_at,
@@ -57,6 +58,7 @@ class TraderCollector:
             with self.conn_factory() as c, c.cursor(row_factory=dict_row) as cur:
                 now = cur.execute("SELECT now() AS now").fetchone()["now"]
                 bots = cur.execute(BOTS).fetchall()
+                watch = cur.execute(WATCH).fetchall()
                 runs = cur.execute(RUNS, (list(RUN_KINDS),)).fetchall()
                 candles = cur.execute(CANDLES).fetchall()
                 suggestions = cur.execute(SUGGESTIONS).fetchall()
@@ -67,6 +69,7 @@ class TraderCollector:
         up.add_metric([], 1)
         yield up
         yield from bot_metrics(now, bots)
+        yield from watch_metrics(now, watch)
         yield from run_metrics(runs)
         yield from candle_metrics(now, candles)
         yield from suggestion_metrics(suggestions)
@@ -96,6 +99,20 @@ def bot_metrics(now, bots):
     newest = max((b["ts"] for b in bots), default=None)
     yield family("trader_ingest_age_seconds", "Seconds since any bot snapshot was written", [],
                  [([], age(now, newest))])
+
+
+def watch_metrics(now, watch):
+    yield family("trader_watch_age_seconds", "Seconds since the watcher last finished a pass", [],
+                 [([], age(now, max((w["checked_at"] for w in watch), default=None)))])
+    yield family("trader_watch_unseen_seconds", "Seconds since the watcher last read the bot", ["bot"],
+                 (([w["bot"]], age(now, w["seen_at"])) for w in watch))
+    yield family("trader_watch_running", "1 when the bot takes entries, 0 when it is paused or stopped", ["bot"],
+                 (([w["bot"]], None if w["state"] is None else int(w["state"] == "running")) for w in watch))
+    yield family("trader_watch_breached", "1 when the bot broke the daily loss limit this UTC day", ["bot"],
+                 (([w["bot"]], int(w["breached_at"] is not None)) for w in watch))
+    yield family("trader_watch_day_loss_ratio", "Equity lost since the UTC day's first reading, share of capital",
+                 ["bot"], (([w["bot"]], None if w["equity"] is None else (w["day_open"] - w["equity"]) / w["capital"])
+                           for w in watch))
 
 
 def run_metrics(runs):

@@ -4,13 +4,6 @@
   <pre>{{ sg.action }}</pre>
   <details>
     <summary>Gates ({{ sg.gates | selectattr("pass") | list | length }} of {{ sg.gates | length }} pass) <span class="muted">since {{ sg.first_seen | local("%b %d") }}</span></summary>
-    <div class="scroll">
-    <table>
-      <thead><tr><th>Gate</th><th class="n">Seen</th><th>Needs</th><th>Result</th></tr></thead>
-      <tbody>
-      {% for g in sg.gates %}<tr><td>{{ g.gate }}</td><td class="n">{{ g.value | gv }}</td><td>{{ g.need }}</td><td class="{{ 'up' if g.pass else 'down' }}">{{ "pass" if g.pass else "fail" }}</td></tr>{% endfor %}
-      </tbody>
-    </table>
-    </div>
+    {% set gates = sg.gates %}{% include "_gates.html" %}
   </details>
 </article>

@@ -127,6 +127,15 @@ def mean_ci(x: np.ndarray, seed: int, samples: int = 1000, level: float = 0.90):
     return float(lo), float(hi)
 
 
+def block_mean_ci(x: np.ndarray, seed: int, samples: int = 1000, block: int = 10, level: float = 0.95):
+    """mean_ci in blocks of consecutive trades, since trades that overlap or follow each other share a market."""
+    x = np.asarray(x, dtype=float)
+    if len(x) < 2 * block:
+        return None, None
+    means = x[block_indices(len(x), block, samples, np.random.default_rng(seed))].mean(axis=1)
+    lo, hi = np.quantile(means, [(1 - level) / 2, (1 + level) / 2])
+    return float(lo), float(hi)
+
 
 def diff_ci(a: np.ndarray, b: np.ndarray, seed: int, samples: int = 1000, level: float = 0.90):
     """Bootstrap interval of mean(a) - mean(b) for two independent samples of trades."""
@@ -139,6 +148,7 @@ def diff_ci(a: np.ndarray, b: np.ndarray, seed: int, samples: int = 1000, level:
                             for n in (min(100, samples - i) for i in range(0, samples, 100))])
     lo, hi = np.quantile(diffs, [(1 - level) / 2, (1 + level) / 2])
     return float(lo), float(hi)
+
 
 def exposure(trades: pd.DataFrame, start: pd.Timestamp, end: pd.Timestamp) -> float:
     """Share of the window with at least one position open."""
@@ -305,6 +315,21 @@ def pbo(returns: np.ndarray, blocks: int = 16) -> dict | None:
     return {"pbo": float((logit <= 0).mean()), "logit_median": float(np.median(logit)), "splits": len(combos)}
 
 
+def shrink(x: np.ndarray, se: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Empirical-Bayes posterior mean and sd of each true mean, from estimates x with standard errors se. The
+    spread of true means is DerSimonian and Laird's moment estimate, and the posterior sd carries the uncertainty
+    in the population mean. That mean is capped at zero: a market rising under every long-only strategy lifts
+    the whole population, and it is no reason to believe any one of them.
+    """
+    w = 1 / se ** 2
+    q = (w * (x - (w * x).sum() / w.sum()) ** 2).sum()
+    tau2 = max(0.0, (q - (len(x) - 1)) / (w.sum() - (w ** 2).sum() / w.sum()))
+    w = 1 / (se ** 2 + tau2)
+    mu, mu_var = min((w * x).sum() / w.sum(), 0.0), 1 / w.sum()
+    b = se ** 2 / (se ** 2 + tau2)
+    return (1 - b) * x + b * mu, np.sqrt((1 - b) * se ** 2 + b ** 2 * mu_var)
+
+
 def trades_needed(x: np.ndarray, z: float = 1.645) -> int | None:
     """More trades needed before the low end of a 90% interval on the mean per-trade return clears
     zero, if the mean and spread hold: (z sd / mean)^2 less the trades so far. None when the mean is
@@ -341,6 +366,12 @@ def regimes(close: pd.Series) -> pd.DataFrame:
     bucket = pd.Series(np.select([vol <= lo, vol <= hi], ["low", "mid"], "high"), index=close.index).where(vol.notna())
     return pd.DataFrame({"day": close.index, "btc_close": close.to_numpy(), "trend": trend.to_numpy(),
                          "vol_30d": vol.to_numpy(), "vol_bucket": bucket.to_numpy()})
+
+
+def trend_buckets(close: pd.Series, band: float) -> pd.Series:
+    """up, down or flat per day: the BTC close against its 200-day mean, flat within `band` of it."""
+    gap = close.sort_index().astype(float) / close.sort_index().astype(float).rolling(200).mean() - 1.0
+    return pd.Series(np.select([gap > band, gap < -band], ["up", "down"], "flat"), index=gap.index).where(gap.notna())
 
 
 def drift(live: pd.DataFrame, bt: pd.DataFrame, tolerance: pd.Timedelta) -> dict:

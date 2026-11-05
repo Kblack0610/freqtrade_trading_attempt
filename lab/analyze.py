@@ -48,6 +48,7 @@ import pandas as pd
 from psycopg.types.json import Jsonb
 
 import metrics
+import confidence
 import suggest
 from db import connect
 
@@ -691,6 +692,7 @@ def main(runner: Runner | None = None, today: dt.date | None = None) -> int:
                 "SELECT count(*) FROM bias_checks WHERE has_bias IS NULL").fetchone()[0])
             summary.update(derive(conn))
             summary.update(suggest.run(conn))
+            summary.update(confidence.run(conn))
             ok = failed <= FAIL_SHARE * max(len(todo), 1)
             print(f"analyze: done: {json.dumps({k: v for k, v in summary.items() if k not in ('failures', 'skipped')})}",
                   flush=True)

@@ -59,6 +59,7 @@ SECTIONS = [
     ("retune", "Retune", "Walk-forward: hyperopt's parameters beat the strategy as it is on months hyperopt never saw."),
     ("watch", "Watch", "Lookahead-clean candidates one gate short of promotion, best Sharpe interval first."),
 ]
+CONFIDENCE = "SELECT * FROM confidence ORDER BY ready DESC, score DESC NULLS LAST, passed DESC, strategy, exchange"
 SUGGESTIONS = "SELECT * FROM suggestions ORDER BY score DESC NULLS LAST, strategy, exchange, bot"
 MIN_TRADES = 20  # below this a window's numbers are shown but not ranked
 # Lookahead bias voids the backtest, so it ranks last. Recursive bias only warns: the flagged indicator may not feed a signal.
@@ -354,6 +355,12 @@ def suggestions(request: Request):
     for r in rows(SUGGESTIONS):
         by_kind.setdefault(r["kind"], []).append(r)
     return page(request, "suggestions.html", sections=SECTIONS, by_kind=by_kind)
+
+
+@app.get("/confidence", response_class=HTMLResponse)
+def confidence(request: Request):
+    user_of(request)
+    return page(request, "confidence.html", board=rows(CONFIDENCE))
 
 
 @app.get("/runs", response_class=HTMLResponse)

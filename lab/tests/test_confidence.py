@@ -1,0 +1,159 @@
+import datetime as dt
+
+import numpy as np
+import pandas as pd
+
+import confidence
+import metrics
+import suggest
+
+CFG = suggest.load_config()
+C = CFG["confidence"]
+NOW = dt.datetime(2026, 11, 5, tzinfo=dt.timezone.utc)
+PAIR = ("Good", "binanceus")
+
+
+def folds(returns, months=6):
+    return [{"tuned_returns": list(part), "tuned_trades": len(part), "tuned_expectancy": float(np.mean(part))}
+            for part in np.array_split(returns, months)]
+
+
+def population(rng, noise, planted=0, edge=0.2, trades=400):
+    wf = {(f"noise{i}", "x"): folds(rng.normal(0, 1, trades)) for i in range(noise)}
+    wf.update({(f"edge{i}", "x"): folds(rng.normal(edge, 1, trades)) for i in range(planted)})
+    return wf
+
+
+def days(n=1500):
+    return [dt.date(2022, 1, 1) + dt.timedelta(days=i) for i in range(n)]
+
+
+def good_facts():
+    """A pair that clears every gate: an edge in every BTC trend, a population of others around it."""
+    rng = np.random.default_rng(1)
+    d = days()
+    close = pd.Series(100 * np.exp(0.12 * np.sin(np.arange(len(d)) / 60)) + 100, index=d)
+    daily = pd.Series(rng.normal(0.004, 0.01, len(d)), index=d)
+    wf = {PAIR: folds(rng.normal(0.02, 0.03, 300))}
+    wf.update({(f"o{i}", "binanceus"): folds(rng.normal(0.001, 0.03, 300)) for i in range(24)})
+    w = {"trials": 10.0, "trials_raw": 20, "start_day": d[0], "end_day": d[-1], "hold_excess_lo": 0.05,
+         "worst_open": -0.12, "fee_per_trade": 0.0014}
+    return {"strategies": {"Good": {"lookahead": False, "recursive": False}},
+            "series": {PAIR: {"windows": {"all": w}}}, "walkforward": wf, "daily": {PAIR: daily}, "close": close,
+            "overfit": {("binanceus", "all"): 0.1}, "drift": {PAIR: {"gap": 0.0005, "trades": 40}},
+            "live": {PAIR: {"since": dt.datetime(2025, 1, 1, tzinfo=dt.timezone.utc), "closed": 80, "stopouts": 3}}, "now": NOW}
+
+
+def result(facts, trials=30):
+    return next(r for r in confidence.rows(facts, trials, CFG) if (r["strategy"], r["exchange"]) == PAIR)
+
+
+def failed(row):
+    return [g["gate"] for g in row["gates"].obj if not g["pass"]]
+
+
+def test_pure_noise_clears_the_score_and_interval_under_five_percent_of_the_time():
+    rng = np.random.default_rng(7)
+    passed = total = 0
+    for _ in range(4):
+        ev = confidence.evidence(population(rng, 100), C)
+        score = confidence.scores(ev, C)
+        passed += sum(score[p] >= C["ready_score"] and ev[p]["lo"] > 0 for p in ev)
+        total += len(ev)
+    assert passed / total < 0.05
+
+
+def test_a_market_lifting_every_strategy_does_not_lift_the_score():
+    wf = population(np.random.default_rng(3), 60, edge=0.0)
+    lifted = {p: [{**f, "tuned_returns": [r + 0.05 for r in f["tuned_returns"]]} for f in v] for p, v in wf.items()}
+    score = confidence.scores(confidence.evidence(lifted, C), C)
+    assert sum(s >= C["ready_score"] for s in score.values()) / len(score) < 0.05
+
+
+def test_a_planted_edge_scores_ready_among_noise():
+    ev = confidence.evidence(population(np.random.default_rng(11), 95, planted=5, edge=0.3), C)
+    score = confidence.scores(ev, C)
+    assert all(score[f"edge{i}", "x"] >= C["ready_score"] and ev[f"edge{i}", "x"]["lo"] > 0 for i in range(5))
+    assert np.median([s for p, s in score.items() if p[0].startswith("noise")]) < C["ready_score"]
+
+
+def test_no_score_without_a_population():
+    ev = confidence.evidence(population(np.random.default_rng(5), C["min_population"] - 1), C)
+    assert confidence.scores(ev, C) == {}
+
+
+def test_every_gate_passing_is_ready():
+    row = result(good_facts())
+    assert failed(row) == [] and row["ready"] and row["passed"] == len(row["gates"].obj) == 14
+    assert row["oos_trades"] == 300
+
+
+def spoil(facts, name):
+    w = facts["series"][PAIR]["windows"]["all"]
+    if name == "bias":
+        facts["strategies"]["Good"]["recursive"] = None
+    elif name == "costs":
+        w["fee_per_trade"] = 0.004
+    elif name == "overfit probability":
+        facts["overfit"][("binanceus", "all")] = 0.3
+    elif name == "excess over hold, low":
+        w["hold_excess_lo"] = -0.01
+    elif name == "worst open loss":
+        w["worst_open"] = -0.75
+    elif name == "drift":
+        facts["drift"][PAIR]["gap"] = -0.05
+    elif name == "dry run":
+        facts["live"][PAIR]["closed"] = 59
+    return facts
+
+
+def test_one_bad_gate_is_named_and_blocks_ready_whatever_the_score():
+    for name in ("bias", "costs", "overfit probability", "excess over hold, low", "worst open loss", "drift", "dry run"):
+        row = result(spoil(good_facts(), name))
+        assert failed(row) == [name] and not row["ready"] and row["score"] >= C["ready_score"]
+
+
+def test_a_bull_only_strategy_fails_the_regime_spread():
+    facts = good_facts()
+    up = metrics.trend_buckets(facts["close"], C["trend_band"]) == "up"
+    facts["daily"][PAIR] = facts["daily"][PAIR].where(up.reindex(facts["daily"][PAIR].index, fill_value=False), 0.0)
+    assert "regime spread" in failed(result(facts))
+
+
+def test_more_trials_raise_the_bar():
+    low = next(g for g in result(good_facts(), trials=30)["gates"].obj if g["gate"].startswith("deflated"))
+    facts = good_facts()
+    facts["daily"][PAIR] = facts["daily"][PAIR] * 0.0 + np.random.default_rng(2).normal(0.0006, 0.01, 1500)
+    thin = [next(g for g in result(facts, trials=n)["gates"].obj if g["gate"].startswith("deflated")) for n in (30, 3000)]
+    assert low["pass"] and thin[0]["value"] > thin[1]["value"]
+
+
+def test_a_dry_run_needs_a_real_btc_fall():
+    facts = good_facts()
+    facts["close"] = pd.Series(np.linspace(100, 200, 1500), index=days())
+    facts["live"][PAIR]["since"] = dt.datetime(2025, 6, 1, tzinfo=dt.timezone.utc)
+    assert "dry run" in failed(result(facts))
+
+
+def test_no_walkforward_is_not_ready_and_says_so():
+    facts = good_facts()
+    facts["walkforward"] = {}
+    row = result(facts)
+    assert row["score"] is None and not row["ready"] and row["oos_trades"] == 0
+    assert {"out-of-sample trades", "expectancy interval low", "months positive", "score"} <= set(failed(row))
+
+
+def test_the_register_keeps_a_strategy_that_is_gone(conn):
+    conn.execute("TRUNCATE trials")
+    conn.execute("INSERT INTO strategies (name, file, file_hash, load_error) VALUES ('Gone', 'g.py', 'h', 'no import')")
+    assert confidence.register(conn) == 1
+    conn.execute("DELETE FROM strategies")
+    assert confidence.register(conn) == 1
+
+
+def test_run_stores_a_row_and_replaces_the_last(conn):
+    conn.execute("INSERT INTO strategy_windows (strategy, exchange, win, days, trades) VALUES ('S', 'binanceus', 'all', 10, 3)")
+    assert confidence.run(conn)["confidence"] == 1
+    conn.execute("DELETE FROM strategy_windows")
+    assert confidence.run(conn)["confidence"] == 0
+    assert conn.execute("SELECT count(*) FROM confidence").fetchone()[0] == 0
