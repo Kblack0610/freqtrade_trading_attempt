@@ -35,12 +35,13 @@ def good_facts():
     close = pd.Series(100 * np.exp(0.12 * np.sin(np.arange(len(d)) / 60)) + 100, index=d)
     daily = pd.Series(rng.normal(0.004, 0.01, len(d)), index=d)
     wf = {PAIR: folds(rng.normal(0.02, 0.03, 300))}
+    wf[("Good", "okx")] = folds(rng.normal(0.02, 0.03, 300))
     wf.update({(f"o{i}", "binanceus"): folds(rng.normal(0.001, 0.03, 300)) for i in range(24)})
     w = {"trials": 10.0, "trials_raw": 20, "start_day": d[0], "end_day": d[-1], "hold_excess_lo": 0.05,
          "worst_open": -0.12, "fee_per_trade": 0.0014}
     return {"strategies": {"Good": {"lookahead": False, "recursive": False}},
             "series": {PAIR: {"windows": {"all": w}}}, "walkforward": wf, "daily": {PAIR: daily}, "close": close,
-            "overfit": {("binanceus", "all"): 0.1}, "drift": {PAIR: {"gap": 0.0005, "trades": 40}},
+            "overfit": {("binanceus", "all"): 0.1}, "pairs": {PAIR: [(100, 2.0), (100, 1.5), (100, 1.0)]}, "drift": {PAIR: {"gap": 0.0005, "trades": 40}},
             "live": {PAIR: {"since": dt.datetime(2025, 1, 1, tzinfo=dt.timezone.utc), "closed": 80, "stopouts": 3}}, "now": NOW}
 
 
@@ -84,7 +85,7 @@ def test_no_score_without_a_population():
 
 def test_every_gate_passing_is_ready():
     row = result(good_facts())
-    assert failed(row) == [] and row["ready"] and row["passed"] == len(row["gates"].obj) == 14
+    assert failed(row) == [] and row["ready"] and row["passed"] == len(row["gates"].obj) == 18
     assert row["oos_trades"] == 300
 
 
@@ -118,6 +119,34 @@ def test_a_bull_only_strategy_fails_the_regime_spread():
     up = metrics.trend_buckets(facts["close"], C["trend_band"]) == "up"
     facts["daily"][PAIR] = facts["daily"][PAIR].where(up.reindex(facts["daily"][PAIR].index, fill_value=False), 0.0)
     assert "regime spread" in failed(result(facts))
+
+
+def test_an_edge_smaller_than_slippage_fails_only_that_room():
+    facts = good_facts()
+    facts["walkforward"][PAIR] = folds(np.tile([0.0005, 0.0025], 150))
+    assert "slippage room" in failed(result(facts))
+
+
+def test_one_pair_carrying_the_profit_fails_the_holdout():
+    facts = good_facts()
+    facts["pairs"][PAIR] = [(50, 9.0), (100, -1.0), (100, -0.5)]
+    assert "without its best pair" in failed(result(facts))
+    assert confidence.without_best_pair([(10, 1.0)]) is None
+
+
+def test_one_venue_alone_fails_agreement():
+    facts = good_facts()
+    del facts["walkforward"][("Good", "okx")]
+    assert "venues agreeing" in failed(result(facts))
+    facts["walkforward"][("Good", "okx")] = folds(np.random.default_rng(2).normal(-0.02, 0.03, 300))
+    assert "venues agreeing" in failed(result(facts))
+
+
+def test_a_large_loss_run_fails_the_reorder_at_stage_one_stake():
+    facts = good_facts()
+    facts["walkforward"][PAIR] = folds(np.tile([0.6, -0.5], 150))
+    assert "trades reordered, worst fall" in failed(result(facts))
+    assert metrics.reorder_drawdown(np.full(50, 0.01), 1) == 0
 
 
 def test_more_trials_raise_the_bar():
