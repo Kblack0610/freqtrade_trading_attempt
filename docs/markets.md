@@ -15,11 +15,11 @@ Confidence: **doc** means read on the venue's own page, **secondary** means a la
 | Manifold | data, play money | REST and websocket without a key | bets API plus dumps to 2024-07 | play money | play money |
 | The Odds API | sportsbook implied odds | API key (free tier 500 credits/month) | paid plans, from 2020-06 | n/a | we never bet at a sportsbook |
 
-Open markets counted 2026-11-05: Kalshi 178,883 open with combos excluded (`/markets?status=open&mve_filter=exclude`, 179 pages of 1000); Polymarket global more than 2,100 (Gamma refuses an offset past 2,100; third parties put it at 12k to 20k); PredictIt 148 markets with 542 contracts. Manifold and Polymarket US were not counted.
+Open markets counted 2026-11-05: Kalshi 178,883 open with combos excluded (`/markets?status=open&mve_filter=exclude`, 179 pages of 1000); Polymarket global more than 2,100 (Gamma refuses an offset past 2,100; third parties put it at 12k to 20k); PredictIt 148 markets with 542 contracts. Counted 2026-11-06: Polymarket global 234,259 through `/markets/keyset` (127,582 with a best bid), Polymarket US about 74,800, Manifold 26,299 open binary markets.
 
 ## Recorder
 
-`python -m markets.recorder [venue ...]` (cwd `/repo`, `PYTHONPATH=/repo/lab`) runs one sweep per venue in `lab/markets.toml`. Each sweep reads every open market a page at a time and diffs each outcome's top of book against `outcomes`. Changed quotes go to one parquet object, `s3://trader-markets/quotes/venue=<v>/date=<YYYY-MM-DD>/<HHMMSS>Z.parquet`; only after it lands are `markets`, `outcomes`, `resolutions` and a `market_sweeps` row committed together. Endpoint and keys come from `S3_ENDPOINT`, `S3_ACCESS_KEY` and `S3_SECRET_KEY`, and the database from `DATABASE_URL`.
+`python -m markets.recorder [venue ...]` (cwd `/repo`, `PYTHONPATH=/repo/lab`) runs one sweep per named venue; with no names it runs `[recorder] default_venues` in `lab/markets.toml`, which is Kalshi only, because the 5-min CronJob runs it bare and a Polymarket global sweep alone takes about 10 minutes. The other venues (`polymarket_us`, `polymarket`, `predictit`, `manifold`) run by name, each on its own schedule; their CronJobs are not deployed yet. Each sweep reads every open market a page at a time and diffs each outcome's top of book against `outcomes`. Changed quotes go to one parquet object, `s3://trader-markets/quotes/venue=<v>/date=<YYYY-MM-DD>/<HHMMSS>Z.parquet`; only after it lands are `markets`, `outcomes`, `resolutions` and a `market_sweeps` row committed together. Endpoint and keys come from `S3_ENDPOINT`, `S3_ACCESS_KEY` and `S3_SECRET_KEY`, and the database from `DATABASE_URL`.
 
 Kalshi's `min_updated_ts` filter cannot be combined with `status=open`, so the venue cannot hand over only what changed. The recorder sweeps every open market and diffs on its side. Measured 2026-11-06 against the live API: 179k open markets in about 180 pages, 3 to 4.5 minutes a sweep with a few 429s absorbed by the backoff, 470 MB peak memory, and 12k to 16k changed quotes per 5 minutes after the first sweep, which writes everything. Resolutions are read from the last good sweep's start minus `resolutions_lookback_h`, so about 4k settled markets are re-read each run and stored once.
 
@@ -67,6 +67,7 @@ The CFTC-designated exchange (QCX LLC, amended order 2025-11-25; snippet), separ
 - Retention (doc, changelog 2026-07-13): market data 45 days, orders 90 days, executions 7 days. The venue cannot be the history source, so the recorder is.
 - Sandbox: Preprod exists for the institutional API only, by contact (doc, environments.md). No retail demo, so Polymarket US is never in P7.
 - States: Nevada blocked by court order; Massachusetts, Maryland and others contested (snippet, aggregator sites). No official state list found.
+- Adapter (`lab/markets/polymarket.py`, `polymarket_us`; measured 2026-11-06): `/v1/markets?active=true&closed=false` pages by offset, 500 a page, about 150 requests a sweep. The list carries `bestBidQuote` and `bestAskQuote`, which match `/bbo`, so no per-market call. A market is one yes outcome, the long side; `market_id` is the slug, the key the book, BBO and settlement routes take. Resolutions read `closed=true&orderBy=updated_at&orderDirection=desc` (snake_case; the camelCase field is ignored), stop at the lookback, and take the long side's price as the payout and `updatedAt` as the settled time, since `endDate` is the scheduled end.
 
 ## Polymarket global
 
@@ -75,7 +76,8 @@ Read-only prices. A US resident must not trade it: the US is close-only on both 
 - Hosts (doc): Gamma `https://gamma-api.polymarket.com`, CLOB `https://clob.polymarket.com`, data `https://data-api.polymarket.com`, websocket `wss://ws-subscriptions-clob.polymarket.com/ws/market`.
 - Price history: `GET /v2/prices-history` on the data host since 2026-09-04. The CLOB v1 route retired 2026-11-02, so older tutorials are broken (doc, changelog). CLOB V2 went live 2026-04-28 with pUSD collateral.
 - Limits (doc, per 10 s, Cloudflare queues rather than rejects): Gamma `/markets` 300, `/events` 500; CLOB `/book` 1,500; data `/v2/prices-history` 200, `/v2/trades` 300.
-- Gamma `/markets` pages by `offset` and refused offset 2,100 with a 422 on 2026-11-05, so a full sweep needs another path (events, or a keyset route); P2 finds it.
+- Gamma `/markets` pages by `offset` and refuses an offset past 2,100 with a 422. `/markets/keyset` pages by `after_cursor` (100 a page) and reaches every market: 2,343 pages and 234,259 markets in 575 s on 2026-11-06, too slow for a 5-min job. The events keyset is slower.
+- Adapter (`lab/markets/polymarket.py`, `polymarket`): one yes outcome per market, the first outcome token, keyed by `conditionId`, with the event as `event_id`, the series slug as `series_id` and `groupItemTitle` as the subtitle. Resolutions read `closed=true&order=closedTime&ascending=false` and keep markets with `umaResolutionStatus` resolved; the first entry of `outcomePrices` is the payout.
 - Fees (doc, https://docs.polymarket.com/trading/fees): taker `C * feeRate * p * (1 - p)`, makers 0. The rate depends on category: crypto 0.07, sports and economics 0.05, politics and finance 0.04, geopolitics 0. Each market's `feeSchedule` object is the authority.
 - Terms: market-data distributors may not use site data without a written agreement. Our use is private research, and the adapter reads only the documented API.
 
@@ -86,6 +88,7 @@ Read-only prices. A US resident must not trade it: the US is close-only on both 
 - Fees: 10% of profit on winning trades; the 5% withdrawal fee was dropped 2026-09-23 (secondary, nextpredict.io).
 - Status (doc, CFTC Letter 25-20, 2025-07-14): runs under no-action relief through a non-profit. The trader cap per contract is gone and the position limit, formerly $850, is now the FECA contribution limit (about $3,500). Political contracts only.
 - History: none from the venue. The recorder's snapshots are the history.
+- Adapter (`lab/markets/predictit.py`): one GET of the snapshot, open markets only. Each contract is a market, keyed by contract id, with its PredictIt market as `event_id`; `bestBuyYesCost` is our ask and `bestSellYesCost` our bid. Dates are Eastern without an offset. No resolutions: a closed market leaves the snapshot and its own page shows only last prices, with no result or settled time, so the adapter yields none rather than guess.
 
 ## Manifold
 
@@ -95,6 +98,7 @@ Play money (mana); the sweepcash real-money model ended 2025-03-28 (snippet).
 - Websocket `wss://api.manifold.markets/ws`.
 - Dumps (doc, https://docs.manifold.markets/data): bets, markets and comments from 2021-12 to 2024-07, non-commercial use. Our use is private research.
 - Use: calibration and base-rate studies, and a free paper venue. Its prices are not money prices, so a gap against Kalshi is not an arbitrage.
+- Adapter (`lab/markets/manifold.py`, measured 2026-11-06): binary markets only, from `/v0/search-markets?contractType=BINARY`; multiple-choice is not read yet. Open markets page newest first by the `beforeTime` cursor, 26,299 in 27 pages and 14.5 s. Manifold is an AMM with no book, so the probability is stored as `last` and bid and ask stay empty. Resolutions sort by resolve-date, which pages by offset only, up to 1,000; YES pays 1, NO 0, MKT its resolution probability, and CANCEL is void.
 
 ## Sportsbook odds: The Odds API
 

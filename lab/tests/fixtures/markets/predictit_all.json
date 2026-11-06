@@ -1,0 +1,66 @@
+{
+  "markets": [
+    {
+      "contracts": [
+        {
+          "bestBuyNoCost": 0.09,
+          "bestBuyYesCost": 0.98,
+          "bestSellNoCost": 0.02,
+          "bestSellYesCost": 0.91,
+          "dateEnd": "NA",
+          "displayOrder": 0,
+          "id": 32831,
+          "lastClosePrice": 0.98,
+          "lastTradePrice": 0.98,
+          "name": "Will Mike Johnson remain Speaker of the House through the 119th Congress?",
+          "shortName": "Johnson remains Speaker through 119th?",
+          "status": "Open"
+        }
+      ],
+      "id": 8345,
+      "name": "Will Mike Johnson remain Speaker of the House through the 119th Congress?",
+      "shortName": "Johnson remains Speaker through 119th?",
+      "status": "Open",
+      "timeStamp": "2026-11-06T01:50:11.4657164",
+      "url": "https://www.predictit.org/markets/detail/8345/Will-Mike-Johnson-remain-Speaker-of-the-House-through-the-119th-Congress"
+    },
+    {
+      "contracts": [
+        {
+          "bestBuyNoCost": 0.03,
+          "bestBuyYesCost": null,
+          "bestSellNoCost": null,
+          "bestSellYesCost": 0.97,
+          "dateEnd": "NA",
+          "displayOrder": 0,
+          "id": 32045,
+          "lastClosePrice": 0.98,
+          "lastTradePrice": 0.98,
+          "name": "Republican",
+          "shortName": "Republican",
+          "status": "Open"
+        },
+        {
+          "bestBuyNoCost": null,
+          "bestBuyYesCost": 0.01,
+          "bestSellNoCost": 0.99,
+          "bestSellYesCost": null,
+          "dateEnd": "NA",
+          "displayOrder": 0,
+          "id": 32046,
+          "lastClosePrice": 0.01,
+          "lastTradePrice": 0.01,
+          "name": "Democratic",
+          "shortName": "Democratic",
+          "status": "Open"
+        }
+      ],
+      "id": 8177,
+      "name": "Which party will win the 2026 US House election in Maine's 2nd District?",
+      "shortName": "ME-02 House race winner?",
+      "status": "Open",
+      "timeStamp": "2026-11-06T01:50:11.4657164",
+      "url": "https://www.predictit.org/markets/detail/8177/Which-party-will-win-the-2026-US-House-election-in-Maine's-2nd-District"
+    }
+  ]
+}

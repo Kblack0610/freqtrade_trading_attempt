@@ -1,0 +1,57 @@
+[
+  {
+    "closeTime": 1795237140000,
+    "createdTime": 1793947701016,
+    "creatorId": "TmnWR9E6lAYtlJa9lvXdwP47rPR2",
+    "creatorName": "Terminator2",
+    "creatorUsername": "Terminator2",
+    "id": "ICLn0OE9Pn",
+    "isResolved": false,
+    "lastBetTime": 1793947713115,
+    "lastCommentTime": 1793947724655,
+    "lastUpdatedTime": 1793947724756,
+    "mechanism": "cpmm-1",
+    "outcomeType": "BINARY",
+    "p": 0.6,
+    "pool": {
+      "NO": 99.99999981049442,
+      "YES": 100.00000012633706
+    },
+    "probability": 0.5999999992419777,
+    "question": "Will the AP call the 2026 Mississippi Senate race (Colom vs. Hyde-Smith) by November 20, 2026?",
+    "slug": "will-the-ap-call-the-2026-mississip",
+    "token": "MANA",
+    "totalLiquidity": 100,
+    "uniqueBettorCount": 1,
+    "url": "https://manifold.markets/Terminator2/will-the-ap-call-the-2026-mississip",
+    "volume": 1.9999998736629503,
+    "volume24Hours": 0
+  },
+  {
+    "closeTime": 1793978940000,
+    "createdTime": 1793942769915,
+    "creatorId": "j2RUx1JjFlb76S7CYhYnJCG0djy1",
+    "creatorName": "arjun hariram",
+    "creatorUsername": "arjunhariram",
+    "id": "AQ0LyQugud",
+    "isResolved": false,
+    "lastBetTime": 1793942878342,
+    "lastUpdatedTime": 1793942878342,
+    "mechanism": "cpmm-1",
+    "outcomeType": "BINARY",
+    "p": 0.5,
+    "pool": {
+      "NO": 150,
+      "YES": 66.66666666666667
+    },
+    "probability": 0.6923076923076923,
+    "question": "Will VRLLOG drop below 320 INR by End of trading day November 6, 2026",
+    "slug": "will-vrllog-drop-below-320-inr-by-e",
+    "token": "MANA",
+    "totalLiquidity": 100,
+    "uniqueBettorCount": 1,
+    "url": "https://manifold.markets/arjunhariram/will-vrllog-drop-below-320-inr-by-e",
+    "volume": 50,
+    "volume24Hours": 50
+  }
+]

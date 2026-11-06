@@ -1,0 +1,84 @@
+{
+  "markets": [
+    {
+      "active": true,
+      "archived": false,
+      "assetPriceTerms": null,
+      "bestAskQuote": {
+        "currency": "USD",
+        "value": "0.0360"
+      },
+      "bestBidQuote": {
+        "currency": "USD",
+        "value": "0.0090"
+      },
+      "category": "sports",
+      "closed": false,
+      "color": "#633492",
+      "comboEnabled": false,
+      "createdAt": "2026-03-19T21:31:54Z",
+      "endDate": "2027-01-01T21:20:09Z",
+      "ep3Status": "OPEN",
+      "ep3SyncedAt": "2026-10-29T12:04:57Z",
+      "eventSubcategory": "SOCCER",
+      "feeCoefficient": 0.0695,
+      "gameStartTime": "2026-02-21T00:00:00Z",
+      "hidden": false,
+      "id": "7978",
+      "manualActivation": false,
+      "marketSides": [
+        {
+          "createdAt": "2026-03-19T21:31:54Z",
+          "description": "Yes",
+          "id": "15955",
+          "identifier": "tec-mls-winner-2026-11-07-orl",
+          "long": true,
+          "marketId": 7978,
+          "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+          "price": "0.0360",
+          "quote": {
+            "currency": "USD",
+            "value": "0.0360"
+          },
+          "teamId": 2274,
+          "tradable": true,
+          "updatedAt": "2026-03-19T21:31:54Z"
+        },
+        {
+          "createdAt": "2026-03-19T21:31:54Z",
+          "description": "No",
+          "id": "15956",
+          "identifier": "tec-mls-winner-2026-11-07-orl",
+          "long": false,
+          "marketId": 7978,
+          "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+          "price": "0.991",
+          "quote": {
+            "currency": "USD",
+            "value": "0.991"
+          },
+          "teamId": 2274,
+          "tradable": true,
+          "updatedAt": "2026-03-19T21:31:54Z"
+        }
+      ],
+      "marketType": "futures",
+      "minimumTradeQty": 1,
+      "orderPriceMinTickSize": 0.001,
+      "outcomePrices": "[\"0.0360\",\"0.991\"]",
+      "outcomes": "[\"Yes\",\"No\"]",
+      "politics": null,
+      "question": "Major League Soccer Champion",
+      "slug": "tec-mls-winner-2026-11-07-orl",
+      "sportsMarketType": "futures",
+      "sportsMarketTypeV2": "SPORTS_MARKET_TYPE_FUTURE",
+      "startDate": "2026-03-19T21:25:04Z",
+      "status": "MARKET_STATUS_OPEN",
+      "subtitle": "4-2-9",
+      "tags": [],
+      "title": "Orlando City SC",
+      "titleShort": "Orlando City SC",
+      "updatedAt": "2026-11-05T22:17:01Z"
+    }
+  ]
+}
