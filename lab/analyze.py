@@ -446,28 +446,47 @@ def store_drift(conn, task: dict, res: dict) -> None:
                  [finite(row.get(c)) for c in DRIFT_COLS])
 
 
+SERIES_COLS = ["open_date", "close_date", "open_rate", "close_rate", "min_rate", "stake_amount", "profit_ratio", "profit_abs"]
+SERIES_BATCH = 50_000  # rows per round trip of the server-side cursor
+
+
+def series_trades(conn, chunk_ids: list[int]) -> pd.DataFrame:
+    """Closed trades of the given chunks, streamed in batches into typed frames, dates already UTC."""
+    frames = []
+    with conn.cursor(name="series_trades") as cur:
+        cur.execute(f"SELECT chunk_id, {', '.join(SERIES_COLS)} FROM backtest_trades WHERE chunk_id = ANY(%s)"
+                    " ORDER BY chunk_id, close_date", (chunk_ids,))
+        while batch := cur.fetchmany(SERIES_BATCH):
+            frames.append(pd.DataFrame(batch, columns=["chunk_id", *SERIES_COLS]))
+    t = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(columns=["chunk_id", *SERIES_COLS])
+    for c in ("open_date", "close_date"):
+        t[c] = pd.to_datetime(t[c], utc=True)
+    return t.astype({c: float for c in SERIES_COLS[2:]})
+
+
 def load_series(conn) -> dict[tuple[str, str], tuple[pd.DataFrame, pd.DataFrame]]:
-    """Daily returns and closed trades of every strategy x exchange, from its successful chunks."""
+    """Daily returns and closed trades of every strategy x exchange, from its successful chunks.
+    Trades load one strategy x exchange at a time, so memory peaks at one series' rows, not the whole table."""
     chunk_rows = conn.execute(
         "SELECT c.id, c.strategy, c.exchange, c.bt_start, c.bt_end, c.start_balance FROM backtest_chunks c"
         " JOIN strategies s ON s.name = c.strategy AND s.load_error IS NULL"
         " WHERE c.ok AND c.exchange = ANY(%s) ORDER BY c.strategy, c.exchange, c.chunk_start", (EXCHANGES,)).fetchall()
-    trades = pd.DataFrame(conn.execute(
-        "SELECT chunk_id, open_date, close_date, open_rate, close_rate, min_rate, stake_amount, profit_ratio, profit_abs"
-        " FROM backtest_trades"
-    ).fetchall(), columns=["chunk_id", "open_date", "close_date", "open_rate", "close_rate", "min_rate", "stake_amount",
-                           "profit_ratio", "profit_abs"])
-    by_chunk = dict(tuple(trades.groupby("chunk_id"))) if len(trades) else {}
-    empty = trades.iloc[0:0]
-    parts: dict[tuple[str, str], list] = {}
+    keys: dict[tuple[str, str], list] = {}
     for cid, s, e, t0, t1, bal in chunk_rows:
-        t = by_chunk.get(cid, empty)
-        t = t.assign(share=t["stake_amount"].astype(float) / (bal or wallet()))
-        parts.setdefault((s, e), []).append((metrics.daily_returns(t, t0, t1, bal or wallet()), t))
+        keys.setdefault((s, e), []).append((cid, t0, t1, bal or wallet()))
     out = {}
-    for k, ps in parts.items():
-        daily = pd.concat([d for d, _ in ps], ignore_index=True).drop_duplicates("day", keep="last")
-        out[k] = (daily.sort_values("day").reset_index(drop=True), pd.concat([t for _, t in ps], ignore_index=True))
+    with conn.transaction():  # a server-side cursor lives inside one transaction
+        for k, chunks in keys.items():
+            trades = series_trades(conn, [c[0] for c in chunks])
+            by_chunk = dict(tuple(trades.groupby("chunk_id", sort=False)))
+            empty = trades.iloc[0:0]
+            ps = []
+            for cid, t0, t1, bal in chunks:
+                t = by_chunk.get(cid, empty).drop(columns="chunk_id")
+                t = t.assign(share=t["stake_amount"] / bal)
+                ps.append((metrics.daily_returns(t, t0, t1, bal), t))
+            daily = pd.concat([d for d, _ in ps], ignore_index=True).drop_duplicates("day", keep="last")
+            out[k] = (daily.sort_values("day").reset_index(drop=True), pd.concat([t for _, t in ps], ignore_index=True))
     return out
 
 
@@ -482,7 +501,7 @@ def window_rows(series: dict) -> list[dict]:
                 continue  # not that much history
             d = daily if n is None else daily[daily["day"] > end - dt.timedelta(days=n)]
             lo = pd.Timestamp(d["day"].iloc[0], tz="UTC")
-            t = trades[pd.to_datetime(trades["close_date"], utc=True) >= lo]
+            t = trades[trades["close_date"] >= lo]
             m = metrics.window_metrics(d.reset_index(drop=True), t, metrics.seed_of(s, e, win))
             rows.append({"strategy": s, "exchange": e, "win": win, **m})
     for win in WINDOWS:
@@ -532,7 +551,7 @@ def hold_columns(rows: list[dict], series: dict, close: pd.Series) -> None:
         daily, trades = series[(r["strategy"], r["exchange"])]
         start = pd.Timestamp(r["start_day"], tz="UTC")
         end = pd.Timestamp(r["end_day"], tz="UTC") + pd.Timedelta(days=1)
-        t = trades[pd.to_datetime(trades["close_date"], utc=True) >= start]
+        t = trades[trades["close_date"] >= start]
         capital = metrics.capital_exposure(t, start, end)
         excess = metrics.hold_excess(daily[daily["day"] >= r["start_day"]], close, capital,
                                      metrics.seed_of(r["strategy"], r["exchange"], r["win"], "hold"))
