@@ -9,12 +9,15 @@ Nothing here trades money. `lab/live.py` always refuses, and no manifest starts 
 - Real orders, spot, no margin.
 - Stake and open trades are numbers within the stage. `unlimited`, -1 and infinity are refused.
 - `position_adjustment_enable` and `force_entry_enable` are false, so a position cannot grow past its stake.
+- Telegram is off, since it carries `/forceexit`.
 - `initial_state` is `stopped`.
 - `stoploss_on_exchange` is true.
 - The bot API is on, so the watcher can stop the bot.
 - The venue is in `[live] venues`, the pair list is one `StaticPairList`, and every pair is in `[live] pairs`.
 - Key and secret are set, and no `FREQTRADE__` env var is.
 - `confidence.ready` is true for this strategy on this venue.
+
+A bot with open trades also refuses to start when its strategy, params, venue, pairs or caps differ from its last start. The rules behind these checks are in `docs/operating-rules.md`.
 
 Stake and open trades have one home, `[[book.stages]]`, which `/book` reads too. The keys file loads last, and the checks run after it, so it cannot raise a cap.
 
