@@ -6,11 +6,15 @@ database role has SELECT grants and nothing else, and there are no trade control
 Run: uvicorn web.app:app (env: DATABASE_URL plus the web/auth.py Config variables).
 """
 
+import atexit
 import datetime as dt
 import math
 import os
 import re
+import threading
+import time
 from contextlib import asynccontextmanager
+from contextvars import ContextVar
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -19,15 +23,21 @@ from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from psycopg.rows import dict_row
+from psycopg_pool import ConnectionPool
+from starlette.concurrency import run_in_threadpool
 
 from lab import book as book_lab
-from lab import metrics, suggest
-from lab.db import connect
+from lab import db, metrics, suggest
 from web import auth, charts, exporter
 
 HERE = Path(__file__).resolve().parent
 TZ = ZoneInfo(os.environ.get("TRADER_WEB_TZ", "UTC"))
 STALE = dt.timedelta(hours=2)
+POOL_MAX = 4  # connections per pod; a request holds one for its whole life, the rest wait for it
+# Query results are keyed on the newest runs.finished_at, so a finished analysis or walk-forward shows at once.
+# Ingest and the markets recorder write no runs row, so their data shows within CACHE_TTL.
+CACHE_TTL = 60.0
+CACHE_MAX = 512  # entries; the oldest goes first
 TF_ORDER = ["1m", "5m", "15m", "30m", "1h", "4h", "1d"]
 FAMILIES = HERE.parent / "lab" / "families.toml"
 MARKETS = HERE.parent / "lab" / "markets.toml"
@@ -177,6 +187,23 @@ WHERE o.contracts > 0 ORDER BY o.sent_at DESC, o.id DESC LIMIT 50
 DEMO_ORDERS = "SELECT * FROM demo_orders ORDER BY placed_at DESC, id DESC LIMIT 20"
 
 cfg = auth.Config()
+_pool: ConnectionPool | None = None
+_pool_lock = threading.Lock()
+# The request's connection and cache stamp, filled on its first rows() call. Middleware sets it; the
+# handler's thread sees the same dict because Starlette copies the context into it.
+_request: ContextVar[dict | None] = ContextVar("request_db", default=None)
+_cache: dict[tuple, tuple[float, list[dict]]] = {}
+_cache_lock = threading.Lock()
+
+
+def pool() -> ConnectionPool:
+    global _pool
+    with _pool_lock:
+        if _pool is None:
+            _pool = ConnectionPool(db.url(), min_size=1, max_size=POOL_MAX, kwargs={"autocommit": True},
+                                  check=ConnectionPool.check_connection, open=True)
+            atexit.register(_pool.close)
+        return _pool
 
 
 @asynccontextmanager
@@ -190,6 +217,19 @@ async def lifespan(_app: FastAPI):
 app = FastAPI(title="trader", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
 templates = Jinja2Templates(directory=HERE / "templates")
+
+
+@app.middleware("http")
+async def one_connection(request: Request, call_next):
+    """Every rows() call in a request shares one pooled connection, given back when the handler returns."""
+    slot: dict = {}
+    token = _request.set(slot)
+    try:
+        return await call_next(request)
+    finally:
+        _request.reset(token)
+        if "conn" in slot:
+            await run_in_threadpool(pool().putconn, slot["conn"])
 
 
 def local(t: dt.datetime | None, fmt: str = "%b %d %H:%M") -> str:
@@ -263,9 +303,34 @@ def user_of(request: Request) -> str:
 
 
 def rows(sql: str, params: tuple = ()) -> list[dict]:
-    with connect() as c, c.cursor(row_factory=dict_row) as cur:
+    """A query's rows, from the cache while no run has finished since and CACHE_TTL has not passed."""
+    slot = _request.get()
+    if slot is None:
+        raise RuntimeError("rows() runs only inside a request")
+    if "conn" not in slot:
+        slot["conn"] = pool().getconn()
+        slot["stamp"] = slot["conn"].execute("SELECT max(finished_at) FROM runs").fetchone()[0]
+    key, now = (sql, repr(params), slot["stamp"]), time.monotonic()
+    with _cache_lock:
+        hit = _cache.get(key)
+    if hit and now - hit[0] < CACHE_TTL:
+        return [dict(r) for r in hit[1]]  # copies: handlers add fields to the rows they get
+    with slot["conn"].cursor(row_factory=dict_row) as cur:
         cur.execute(sql, params)
-        return cur.fetchall()
+        found = cur.fetchall()
+    if CACHE_TTL > 0:
+        with _cache_lock:
+            _keep(key, now, slot["stamp"], found)
+    return [dict(r) for r in found]
+
+
+def _keep(key: tuple, now: float, stamp, found: list[dict]) -> None:
+    """Stores one result after dropping expired ones, those from before the newest run, and past CACHE_MAX the oldest."""
+    for k in [k for k, (t, _) in _cache.items() if now - t >= CACHE_TTL or k[2] != stamp]:
+        del _cache[k]
+    while len(_cache) >= CACHE_MAX:
+        del _cache[next(iter(_cache))]
+    _cache[key] = (now, found)
 
 
 def page(request: Request, name: str, **ctx) -> HTMLResponse:

@@ -18,6 +18,8 @@ def site(monkeypatch):
     from web import app as app_mod, auth
 
     monkeypatch.setattr(app_mod, "cfg", auth.Config(ENV))
+    monkeypatch.setattr(app_mod, "CACHE_TTL", 0.0)  # tests write between requests; test_cache turns it back on
+    app_mod._cache.clear()
     return app_mod, TestClient(app_mod.app, follow_redirects=False)
 
 
@@ -229,6 +231,28 @@ def test_confidence_shows_every_gate_and_the_first_it_fails(conn, signed_in):
                  "VALUES ('Alpha', 'binanceus', 71.4, false, 1, 42, %s)", (Jsonb(gates),))
     body = signed_in[1].get("/confidence").text
     assert "not ready: drift" in body and "1 of 2 gates" in body and "inside the interval" in body
+
+
+def test_a_page_holds_one_pooled_connection_and_gives_it_back(conn, signed_in, monkeypatch):
+    seed(conn)
+    app_mod, client = signed_in
+    pool, taken, given = app_mod.pool(), [], []
+    monkeypatch.setattr(pool, "getconn", lambda real=pool.getconn: taken.append(1) or real())
+    monkeypatch.setattr(pool, "putconn", lambda c, real=pool.putconn: given.append(1) or real(c))
+    assert client.get("/strategies/Strategy001").status_code == 200
+    assert len(taken) == len(given) == 1
+
+
+def test_cache_serves_until_a_run_finishes(conn, signed_in, monkeypatch):
+    app_mod, client = signed_in
+    monkeypatch.setattr(app_mod, "CACHE_TTL", 60.0)
+    assert "Nothing scored yet" in client.get("/confidence").text
+    gates = [{"gate": "bias", "value": "clean", "need": "clean", "pass": True}]
+    conn.execute("INSERT INTO confidence (strategy, exchange, score, ready, passed, oos_trades, gates) "
+                 "VALUES ('Alpha', 'binanceus', 71.4, true, 1, 42, %s)", (Jsonb(gates),))
+    assert "Nothing scored yet" in client.get("/confidence").text
+    conn.execute("INSERT INTO runs (kind, name, raw, started_at, finished_at, ok) VALUES ('analysis', 'a', '{}', now(), now(), true)")
+    assert "Nothing scored yet" not in client.get("/confidence").text
 
 
 def test_book_shows_no_number_until_a_strategy_is_scored(conn, signed_in):
