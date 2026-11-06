@@ -6,9 +6,13 @@ import sys
 import psycopg
 
 
-def connect(autocommit: bool = False) -> psycopg.Connection:
-    url = os.environ.get("DATABASE_URL")
-    if not url:
+def url() -> str:
+    found = os.environ.get("DATABASE_URL")
+    if not found:
         print("DATABASE_URL is not set", file=sys.stderr)
         sys.exit(2)
-    return psycopg.connect(url, autocommit=autocommit)
+    return found
+
+
+def connect(autocommit: bool = False) -> psycopg.Connection:
+    return psycopg.connect(url(), autocommit=autocommit)
