@@ -34,6 +34,7 @@ TZ = ZoneInfo(os.environ.get("TRADER_WEB_TZ", "UTC"))
 STALE = dt.timedelta(hours=2)
 TF_ORDER = ["1m", "5m", "15m", "30m", "1h", "4h", "1d"]
 FAMILIES = HERE.parent / "lab" / "families.toml"
+MARKETS = HERE.parent / "lab" / "markets.toml"
 STRATEGY_DIR = HERE.parent / "user_data" / "strategies"
 # Direct IStrategy subclasses, read from source so the toml check needs neither freqtrade nor a database.
 STRATEGY_CLASS = re.compile(r"^class (\w+)\(IStrategy\)", re.M)
@@ -129,6 +130,55 @@ FROM strategy_daily d JOIN regimes r USING (day)
 WHERE d.strategy = %s AND d.exchange = %s AND r.trend IS NOT NULL
 GROUP BY GROUPING SETS ((r.trend), (r.vol_bucket)) ORDER BY 1, array_position(ARRAY['low', 'mid', 'high', 'any'], coalesce(r.vol_bucket, 'any'))
 """
+
+# Event-contract markets (lab/markets): the recorder's health per venue, the history backfill, cross-venue links,
+# backtests and the paper league. Counts come from the sweeps, never count(*) over markets: the archive is millions.
+MARKET_VENUES = """
+SELECT v.venue, v.title, v.kind, s.started_at, s.ok, s.error, ok.finished_at AS last_ok, ok.seen, ok.changes,
+       ok.new_markets, ok.resolved, ok.finished_at - ok.started_at AS took,
+       (SELECT count(*) FROM market_sweeps f WHERE f.venue = v.venue AND NOT f.ok
+        AND f.started_at > now() - interval '1 day') AS failed_1d
+FROM venues v
+LEFT JOIN LATERAL (SELECT * FROM market_sweeps WHERE venue = v.venue ORDER BY started_at DESC LIMIT 1) s ON true
+LEFT JOIN LATERAL (SELECT * FROM market_sweeps WHERE venue = v.venue AND ok ORDER BY started_at DESC LIMIT 1) ok ON true
+ORDER BY s.started_at IS NULL, v.venue
+"""
+SWEEP_ERRORS = """SELECT venue, started_at, error FROM market_sweeps WHERE NOT ok AND started_at > now() - interval '7 days'
+ORDER BY started_at DESC LIMIT 20"""
+BACKFILL = """
+SELECT venue, job, count(*) AS units, count(*) FILTER (WHERE done) AS done, sum(rows) AS rows, max(updated_at) AS updated,
+       min(unit) FILTER (WHERE unit <> '') AS first_unit, max(unit) FILTER (WHERE unit <> '') AS last_unit
+FROM market_backfill GROUP BY venue, job ORDER BY venue, job
+"""
+LINK_STATUSES = ("proposed", "confirmed", "rejected")
+LINK_SUMMARY = """
+SELECT source, status, count(*) AS n, count(*) FILTER (WHERE resolved_agrees IS false) AS disagreed
+FROM market_links GROUP BY source, status ORDER BY source, array_position(%s, status)
+"""
+LINKS = """
+SELECT l.*, a.title AS title_a, a.subtitle AS subtitle_a, a.close_time AS close_a, b.title AS title_b, b.subtitle AS subtitle_b
+FROM market_links l
+JOIN markets a ON a.venue = l.venue_a AND a.market_id = l.market_id_a
+JOIN markets b ON b.venue = l.venue_b AND b.market_id = l.market_id_b
+WHERE %s = '' OR l.status = %s
+ORDER BY l.proposed_at DESC, l.id DESC LIMIT 200
+"""
+LINK_ASKS = "SELECT model, venue_b, count(*) AS asked, sum(proposed) AS proposed, max(asked_at) AS last FROM market_link_asks GROUP BY model, venue_b ORDER BY model, venue_b"
+MARKET_BACKTESTS = "SELECT * FROM market_backtests ORDER BY score DESC NULLS LAST, expectancy_lo DESC NULLS LAST, family, venue, variant"
+PAPER_ACCOUNTS = """
+SELECT a.*, w.state, w.breached_at, w.stopped_at,
+       (SELECT count(*) FROM paper_orders o WHERE o.account = a.account AND o.contracts > 0) AS fills,
+       (SELECT count(*) FROM paper_orders o WHERE o.account = a.account AND o.contracts > 0 AND o.settled_at IS NOT NULL) AS settled
+FROM paper_accounts a LEFT JOIN watch w ON w.bot = a.account
+ORDER BY a.equity DESC NULLS LAST, a.account
+"""
+PAPER_FILLS = """
+SELECT o.*, m.title, m.subtitle FROM paper_orders o
+JOIN paper_accounts a ON a.account = o.account
+LEFT JOIN markets m ON m.venue = a.venue AND m.market_id = o.market_id
+WHERE o.contracts > 0 ORDER BY o.sent_at DESC, o.id DESC LIMIT 50
+"""
+DEMO_ORDERS = "SELECT * FROM demo_orders ORDER BY placed_at DESC, id DESC LIMIT 20"
 
 cfg = auth.Config()
 
@@ -501,3 +551,32 @@ def run(request: Request, run_id: int):
     failed = rows("SELECT strategy, exchange, chunk_start, attempts, error FROM backtest_chunks "
                   "WHERE run_id = %s AND NOT ok ORDER BY strategy, exchange, chunk_start", (run_id,))
     return page(request, "run.html", run=found[0], failed=failed)
+
+
+@app.get("/markets", response_class=HTMLResponse)
+def markets(request: Request):
+    user_of(request)
+    max_age = suggest.load_config(MARKETS)["paper"]["max_book_age_min"]
+    return page(request, "markets.html", venues=rows(MARKET_VENUES), errors=rows(SWEEP_ERRORS), backfill=rows(BACKFILL),
+                max_age=max_age)
+
+
+@app.get("/links", response_class=HTMLResponse)
+def links(request: Request, status: str = ""):
+    user_of(request)
+    if status and status not in LINK_STATUSES:
+        raise HTTPException(404, f"No link status {status}")
+    return page(request, "links.html", status=status, statuses=LINK_STATUSES,
+                summary=rows(LINK_SUMMARY, (list(LINK_STATUSES),)), links=rows(LINKS, (status, status)),
+                asks=rows(LINK_ASKS))
+
+
+@app.get("/markets/book", response_class=HTMLResponse)
+def markets_book(request: Request):
+    user_of(request)
+    hard_stop = suggest.load_config()["book"]["hard_stop"]
+    accounts = rows(PAPER_ACCOUNTS)
+    for a in accounts:
+        a["ret"] = None if a["equity"] is None else a["equity"] / a["capital"] - 1
+    return page(request, "markets_book.html", backtests=rows(MARKET_BACKTESTS), accounts=accounts,
+                fills=rows(PAPER_FILLS), demo=rows(DEMO_ORDERS), hard_stop=hard_stop)

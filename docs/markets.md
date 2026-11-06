@@ -92,6 +92,12 @@ The league runs `longshot` only (8 accounts). `calibration` needs a bars fit eac
 - The drill picks an open demo market with an ask above `drill_price` (1c), or takes `--ticker`. It rests one yes contract at 1c, post only, reads it back, cancels it and reads it back again, writing each step to `demo_orders`. It exits 1 unless the order was seen resting and then canceled. A POST is never retried, because a timeout may already have placed it.
 - Not yet run against the demo exchange: there is no demo account key in SOPS.
 
+## Site and telemetry
+
+The site's Markets pages read the same tables, behind the same sign-in. `/markets` is each venue's newest recorder sweep (red once the last good one is over `[paper] max_book_age_min` old, the moment the paper league stops entries), the failed sweeps of the last week with their errors, and the history backfill per venue and job. `/links` counts links by source and status, lists the newest 200 (filter with `?status=`) and the LLM asks. `/markets/book` is every `market_backtests` row, the paper accounts with their watch state, the newest paper fills and the demo orders. Counts come from `market_sweeps`, never `count(*)` over `markets`, which holds the settled archive too.
+
+The exporter adds `trader_markets_*` and `trader_paper_*` (README, Metrics). home-config alerts on them in `apps/monitoring/prometheus-rules-freqtrade.yaml`: a venue's last good sweep over 15 minutes old, three or more failed sweeps of one venue in an hour, and a paper account down `[book] hard_stop` (15%) of its capital from its 30-day peak. The Grafana dashboard "Freqtrade league and lab" has a Markets row over the same series.
+
 ## Kalshi
 
 API (doc, https://docs.kalshi.com/getting_started/api_environments.md):

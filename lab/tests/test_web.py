@@ -82,7 +82,7 @@ def test_healthz_needs_no_sign_in(site):
     assert site[1].get("/healthz").text == "ok"
 
 
-@pytest.mark.parametrize("path", ["/", "/bots/x", "/strategies", "/strategies/x", "/suggestions", "/confidence", "/book", "/coverage", "/guide", "/data", "/runs", "/runs/1"])
+@pytest.mark.parametrize("path", ["/", "/bots/x", "/strategies", "/strategies/x", "/suggestions", "/confidence", "/book", "/coverage", "/guide", "/data", "/runs", "/runs/1", "/markets", "/links", "/markets/book"])
 def test_signed_out_goes_to_login(site, path):
     r = site[1].get(path)
     assert r.status_code == 303 and r.headers["location"] == "/login"
@@ -204,7 +204,7 @@ def test_overview_warns_when_a_bot_is_not_dry_run(conn, signed_in):
 
 
 def test_pages_render_on_an_empty_database(conn, signed_in):
-    for path in ("/", "/data", "/runs", "/strategies", "/suggestions", "/walkforward", "/coverage"):
+    for path in ("/", "/data", "/runs", "/strategies", "/suggestions", "/walkforward", "/coverage", "/markets", "/links", "/markets/book"):
         assert signed_in[1].get(path).status_code == 200, path
 
 
@@ -258,7 +258,7 @@ def test_until_scored_both_pages_show_how_far_the_population_is(conn, signed_in)
 def test_guide_lists_every_page_in_reading_order(conn, signed_in):
     body = signed_in[1].get("/guide").text
     order = [body.index(f'<li><a href="{p}">') for p in ("/", "/data", "/strategies", "/walkforward", "/suggestions",
-                                                          "/confidence", "/book", "/coverage", "/runs")]
+                                                          "/confidence", "/book", "/coverage", "/markets", "/runs")]
     assert order == sorted(order) and "needs 20 strategies with at least 30" in body and "trial register" in body
 
 
@@ -371,3 +371,52 @@ def test_a_strategy_class_missing_from_the_toml_shows_untagged(conn, signed_in, 
     assert app_mod.strategy_classes() == {"Strategy001", "Ghost"}
     body = client.get("/coverage").text
     assert '<td class="down">untagged</td>' in body and ">Ghost</a>" in body and ">Helper<" not in body
+
+
+def seed_markets(c):
+    c.execute("INSERT INTO venues (venue, title, kind) VALUES ('kalshi', 'Kalshi', 'exchange'), "
+              "('odds_api', 'The Odds API', 'sportsbook'), ('manifold', 'Manifold', 'play-money')")
+    c.execute("INSERT INTO market_sweeps (venue, started_at, finished_at, seen, new_markets, changes, resolved, ok, error) VALUES "
+              "('kalshi', now() - interval '40 minutes', now() - interval '37 minutes', 179162, 12, 10099, 41, true, NULL), "
+              "('kalshi', now() - interval '5 minutes', now() - interval '5 minutes', 0, 0, 0, 0, false, 'HTTPError: 503 upstream'), "
+              "('odds_api', now() - interval '4 minutes', now() - interval '3 minutes', 220, 0, 31, 2, true, NULL)")
+    c.execute("INSERT INTO markets (venue, market_id, title, subtitle, market_type, status, close_time, first_seen, updated_at) VALUES "
+              "('kalshi', 'KXNBAGAME-26NOV09SASPHX-SAS', 'San Antonio at Phoenix', 'San Antonio', 'binary', 'open', now() + interval '3 days', now(), now()), "
+              "('odds_api', 'g1', 'Spurs at Suns', NULL, 'binary', 'open', now() + interval '3 days', now(), now())")
+    c.execute("INSERT INTO market_links (venue_a, market_id_a, outcome_a, venue_b, market_id_b, outcome_b, source, status, confirmed_by) "
+              "VALUES ('odds_api', 'g1', 'San Antonio Spurs', 'kalshi', 'KXNBAGAME-26NOV09SASPHX-SAS', 'yes', 'rule:kalshi_game', 'confirmed', 'rule')")
+    c.execute("INSERT INTO market_link_asks (venue_a, market_id_a, venue_b, model, proposed) VALUES ('kalshi', 'KXNBAGAME-26NOV09SASPHX-SAS', 'odds_api', 'claude-haiku', 0)")
+    c.execute("INSERT INTO market_backfill (venue, job, unit, rows, done) VALUES ('kalshi', 'bars', '2026-01-02', 4321, true), "
+              "('kalshi', 'bars', '2026-01-03', 0, false)")
+    c.execute("INSERT INTO market_backtests (family, venue, variant, params, start_at, end_at, orders, fills, trades, open_fills, metrics, "
+              "returns, expectancy, expectancy_lo, expectancy_hi, dsr, trials) VALUES ('longshot', 'kalshi', 'abcdef0123456789', %s, "
+              "'2025-01-01', '2026-01-01', 900, 812, 800, 12, %s, '{0.1,-0.05}', 0.0123, -0.004, 0.031, 0.42, 16)",
+              (Jsonb({"edge": 0.06}), Jsonb({"winrate": 0.61})))
+    c.execute("INSERT INTO paper_accounts (account, family, venue, variant, params, capital, started_at, equity, realized, open_positions, marked_at) "
+              "VALUES ('paper-longshot-abcdef01', 'longshot', 'kalshi', 'abcdef0123456789', %s, 1000, now(), 987.5, -4.25, 3, now())",
+              (Jsonb({"edge": 0.06}),))
+    c.execute("INSERT INTO paper_orders (account, market_id, side, stake, sent_at, quoted_at, contracts, price, fee) VALUES "
+              "('paper-longshot-abcdef01', 'KXNBAGAME-26NOV09SASPHX-SAS', 'no', 10, now(), now(), 11, 0.91, 0.07)")
+    c.execute("INSERT INTO watch (bot, checked_at, seen_at, state, stopped_at) VALUES ('paper-longshot-abcdef01', now(), now(), 'stopped', now())")
+    c.execute("INSERT INTO demo_orders (venue, ticker, client_id, price, count, placed_at, status, canceled_at) VALUES "
+              "('kalshi', 'KXDEMO-1', 'c1', 0.01, 1, now(), 'canceled', now())")
+
+
+def test_markets_pages_render_with_data(conn, signed_in):
+    seed_markets(conn)
+    client = signed_in[1]
+    pages = {"/markets": ["Kalshi", "179,162", "10,099", "HTTPError: 503 upstream", '<td class="down">37m ago</td>',
+                          "The Odds API", "1 of 2", "2026-01-02 to 2026-01-03", "4,321", "never swept"],
+             "/links": ["rule:kalshi_game", "San Antonio at Phoenix", "Spurs at Suns", "by rule", "claude-haiku"],
+             "/links?status=rejected": ["No rejected links."],
+             "/markets/book": ["longshot", "abcdef01", "1.23%", "-0.40% to 3.10%", "61%", "0.42", "paper-longshot-abcdef01",
+                               "987.50", "-1.25%", "stopped", "San Antonio at Phoenix", "0.91", "KXDEMO-1", "canceled", "15%"]}
+    for path, needles in pages.items():
+        r = client.get(path)
+        assert r.status_code == 200, path
+        for n in needles:
+            assert n in r.text, (path, n)
+    # the healthy venue is not marked stale, and a link filter outside the statuses is a 404
+    assert '<td class="">3m ago</td>' in client.get("/markets").text
+    assert "Spurs at Suns" not in client.get("/links?status=rejected").text
+    assert client.get("/links?status=bogus").status_code == 404
