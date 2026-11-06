@@ -1,0 +1,34 @@
+# The chart-pattern family: one strategy per long signal in lab/patterns.py, entering on the close
+# that completes the pattern, all with the same fixed exit. The short signals there (support break,
+# double top, triangle break down, bear flag) have no strategy: research is spot and long only.
+# lab/families/generate.py writes the strategy files from this file: edit here, then rerun it.
+kind = "chart"
+prefix = "Chart"
+timeframe = "1h"
+# Covers the longest lookback below: a 120-bar window plus the pivot width.
+startup_candle_count = 150
+
+[exit]
+minimal_roi = { "0" = 0.06, "1440" = 0.03 }
+stoploss = -0.04
+time_stop_hours = 72
+
+[strategies.ResistanceBreak]
+call = "resistance_break"
+args = { k = 5, max_age = 120 }
+
+[strategies.DoubleBottom]
+call = "double_bottom"
+args = { k = 5, window = 120, tol = 0.01, min_depth = 0.02 }
+
+[strategies.AscendingTriangle]
+call = "triangle_break"
+args = { kind = "ascending", direction = "up", k = 5, n = 3, window = 120, flat = 0.01 }
+
+[strategies.SymmetricTriangle]
+call = "triangle_break"
+args = { kind = "symmetric", direction = "up", k = 5, n = 3, window = 120, flat = 0.01 }
+
+[strategies.BullFlag]
+call = "bull_flag"
+args = { pole = 10, flag = 8, impulse = 0.05, retrace = 0.5 }
