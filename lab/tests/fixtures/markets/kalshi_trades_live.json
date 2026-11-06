@@ -1,0 +1,29 @@
+{
+ "cursor": "",
+ "trades": [
+  {
+   "count_fp": "187.03",
+   "created_time": "2026-11-06T04:30:04.603826Z",
+   "is_block_trade": false,
+   "no_price_dollars": "0.9900",
+   "taker_book_side": "bid",
+   "taker_outcome_side": "yes",
+   "taker_side": "yes",
+   "ticker": "KXNCAAFSPREAD-26NOV05UTSAFAU-FAU33",
+   "trade_id": "07271366-46d1-bc1d-8fb0-190f623e419c",
+   "yes_price_dollars": "0.0100"
+  },
+  {
+   "count_fp": "11.22",
+   "created_time": "2026-11-06T04:30:03.252732Z",
+   "is_block_trade": false,
+   "no_price_dollars": "0.9900",
+   "taker_book_side": "bid",
+   "taker_outcome_side": "yes",
+   "taker_side": "yes",
+   "ticker": "KXNCAAFSPREAD-26NOV05UTSAFAU-FAU33",
+   "trade_id": "07271366-56b1-a199-a029-e81975b87e28",
+   "yes_price_dollars": "0.0100"
+  }
+ ]
+}

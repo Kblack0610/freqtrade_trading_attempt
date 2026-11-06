@@ -6,7 +6,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-TABLES = ("market_link_asks, market_links, market_sweeps, resolutions, outcomes, markets, venues, benchmarks, book, watch, confidence, walkforward, overfit, strategies, backtest_trades, backtest_chunks, strategy_daily, strategy_windows, estimates, regimes, "
+TABLES = ("market_backfill, market_link_asks, market_links, market_sweeps, resolutions, outcomes, markets, venues, benchmarks, book, watch, confidence, walkforward, overfit, strategies, backtest_trades, backtest_chunks, strategy_daily, strategy_windows, estimates, regimes, "
           "correlations, bias_checks, suggestions, data_coverage, funding_rates, open_interest, runs, bot_snapshots, bot_trades, bots, portfolio")
 
 

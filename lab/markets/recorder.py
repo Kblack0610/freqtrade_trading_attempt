@@ -108,9 +108,9 @@ def sweep(v: Venue, vcfg: dict, conn, fs: pafs.FileSystem, root: str, lookback: 
                 {', '.join(f'{f} = EXCLUDED.{f}' for f in BOOK)}, quoted_at = EXCLUDED.quoted_at""",
             [(v.name, q.market_id, q.outcome, *(getattr(q, f) for f in BOOK), q.ts) for q in changed])
         cur.executemany(
-            "INSERT INTO resolutions (venue, market_id, result, value, settled_at) VALUES (%s, %s, %s, %s, %s) "
+            "INSERT INTO resolutions (venue, market_id, result, value, settled_at, volume) VALUES (%s, %s, %s, %s, %s, %s) "
             "ON CONFLICT (venue, market_id) DO NOTHING",
-            [(v.name, r.market_id, r.result, r.value, r.settled_at) for r in resolved])
+            [(v.name, r.market_id, r.result, r.value, r.settled_at, r.volume) for r in resolved])
         cur.executemany("UPDATE markets SET status = 'settled', updated_at = %s WHERE venue = %s AND market_id = %s "
                         "AND status <> 'settled'", [(r.settled_at, v.name, r.market_id) for r in resolved])
         stats = {"seen": seen, "new_markets": sum(1 for k in new_meta if k not in meta), "changes": len(changed),

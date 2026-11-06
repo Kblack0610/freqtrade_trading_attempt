@@ -11,6 +11,43 @@ resolutions_lookback_h = 1
 # fits that cadence alongside Kalshi's 3 to 4.5 min; the others run by name (python -m markets.recorder manifold).
 default_venues = ["kalshi"]
 
+[history]
+# python -m markets.history (lab/markets/history.py). Objects: <recorder bucket>/<prefix>/<job>/venue=<v>/date=<d>.parquet
+prefix = "history"
+# A run stops between pages (settled) or settle dates (bars, trades) once it has taken this long; the next resumes.
+budget_min = 50
+# What a job with no venue named runs. PredictIt states no results and the Odds API sells history only on paid
+# plans, so neither is here (docs/markets.md).
+settled_venues = ["kalshi", "polymarket_us", "polymarket", "manifold"]
+bars_venues = ["kalshi", "polymarket_us", "polymarket"]
+trades_venues = ["kalshi"]
+
+[history.kalshi]
+# 0.5 s paces the recorder's list sweep; history makes one call a market, and 0.15 s keeps it with the recorder
+# under the Basic tier's 20 requests/s.
+page_gap_s = 0.15
+# Kalshi settles about 70k markets a day and 80% trade under 100 contracts: those never reach bars or trades.
+settled_min_volume = 100
+bars_period_min = 60
+# Contracts traded over the market's life. Below 100 there is no real quote to backtest against.
+bars_min_volume = 100
+bars_since_days = 1095
+# Trades are what the fill model is fitted on, and Kalshi prints millions a day: the liquid markets of the last 90 days.
+trades_min_volume = 10000
+trades_since_days = 90
+
+[history.polymarket_us]
+# The venue keeps 45 days, and its list carries no volume, so every settled market in that window.
+bars_period_min = 60
+bars_min_volume = 0
+bars_since_days = 45
+
+[history.polymarket]
+# volumeNum is dollars traded.
+bars_period_min = 60
+bars_min_volume = 1000
+bars_since_days = 1095
+
 [venues.kalshi]
 title = "Kalshi"
 kind = "exchange"

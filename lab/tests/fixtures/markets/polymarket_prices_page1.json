@@ -1,0 +1,25 @@
+{
+ "data": [
+  {
+   "timestamp": 1792166400,
+   "price": 0.505,
+   "resolution_seconds": 3600
+  },
+  {
+   "timestamp": 1792170000,
+   "price": 0.545,
+   "resolution_seconds": 3600
+  },
+  {
+   "timestamp": 1792173600,
+   "price": 0.655,
+   "resolution_seconds": 3600
+  }
+ ],
+ "pagination": {
+  "limit": 3,
+  "offset": 0,
+  "has_more": true,
+  "next_cursor": "eyJkYXRhIjp7InR5cGUiOiJwcmljZXNfaGlzdG9yeSIsInBhcmFtcyI6eyJsIjozLCJ0cyI6MTc5MjE3MzYwMCwic3EiOiIzNjAwIiwiZCI6M319LCJzaWciOiIyYjcyMGQwODNhNDM2NmJlYzFlMzQ1OTYyMWY0NTRjOCJ9"
+ }
+}

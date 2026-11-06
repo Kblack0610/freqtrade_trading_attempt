@@ -1,0 +1,29 @@
+{
+ "cursor": "",
+ "trades": [
+  {
+   "count_fp": "561.11",
+   "created_time": "2026-09-06T07:45:40.582515Z",
+   "is_block_trade": false,
+   "no_price_dollars": "0.9900",
+   "taker_book_side": "bid",
+   "taker_outcome_side": "yes",
+   "taker_side": "yes",
+   "ticker": "KXITFMATCH-26SEP06VANKAM-VAN",
+   "trade_id": "0721a315-0ef9-98b5-af71-973b6cdd0b2c",
+   "yes_price_dollars": "0.0100"
+  },
+  {
+   "count_fp": "2337.97",
+   "created_time": "2026-09-06T07:45:02.788813Z",
+   "is_block_trade": false,
+   "no_price_dollars": "0.9900",
+   "taker_book_side": "bid",
+   "taker_outcome_side": "yes",
+   "taker_side": "yes",
+   "ticker": "KXITFMATCH-26SEP06VANKAM-VAN",
+   "trade_id": "0721a31b-5cb9-ad71-6766-426fb67d6f6c",
+   "yes_price_dollars": "0.0100"
+  }
+ ]
+}

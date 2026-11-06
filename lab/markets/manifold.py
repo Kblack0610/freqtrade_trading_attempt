@@ -4,14 +4,15 @@ Binary markets only for now: a multiple-choice market prices each answer, and th
 Manifold is an AMM with no order book, so its probability is stored as `last` and bid and ask stay empty; its
 prices are not money prices, so a gap against a money venue is not an arbitrage (docs/markets.md, Manifold).
 Open markets page newest first by the beforeTime cursor. Resolved ones come newest first by resolve-date, which
-pages by offset only, and the offset stops at 1,000.
+pages by offset only, and the offset stops at 1,000, so the history walk reads `/v0/markets` instead: every market
+newest first, 1000 a page by the `before` id, keeping the resolved binary ones.
 """
 
 import datetime as dt
 from typing import Iterator
 
 from markets.api import Api, num, result_of, when
-from markets.venue import Quote, Resolution
+from markets.venue import Quote, Resolution, Settled
 
 MAX_OFFSET = 1000
 
@@ -32,7 +33,8 @@ def resolution(m: dict) -> Resolution | None:
     if not word or not settled:
         return None
     value = {"YES": 1.0, "NO": 0.0, "MKT": num(m.get("resolutionProbability"))}.get(word)  # CANCEL pays back
-    return Resolution(market_id=m["id"], result=result_of(value), value=value, settled_at=settled)
+    return Resolution(market_id=m["id"], result=result_of(value), value=value, settled_at=settled,
+                      volume=num(m.get("volume")))
 
 
 class Manifold:
@@ -67,4 +69,15 @@ class Manifold:
             if len(markets) < self.api.limit:
                 return
             offset += self.api.limit
+            self.api.sleep(self.api.gap)
+
+    def settled(self, cursor: str | None) -> Iterator[tuple[list[Settled], str | None]]:
+        before = cursor
+        while True:
+            markets = self.api.get("/v0/markets", {"limit": self.api.limit, **({"before": before} if before else {})})
+            before = markets[-1]["id"] if len(markets) == self.api.limit else None
+            yield [Settled(quote(m, r.settled_at), r) for m in markets if m.get("outcomeType") == "BINARY"
+                   and m.get("isResolved") and (r := resolution(m)) is not None], before
+            if not before:
+                return
             self.api.sleep(self.api.gap)

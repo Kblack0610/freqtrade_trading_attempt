@@ -1,0 +1,45 @@
+{
+ "cursor": "live-c2",
+ "markets": [
+  {
+   "ticker": "KXLIGAPROMATCH-26NOV061230GLACHU-GLA",
+   "event_ticker": "KXLIGAPROMATCH-26NOV061230GLACHU",
+   "title": "Glazun Evgeniy wins",
+   "yes_sub_title": "Glazun Evgeniy",
+   "market_type": "binary",
+   "status": "finalized",
+   "open_time": "2026-11-06T05:33:00Z",
+   "close_time": "2026-11-06T05:50:12Z",
+   "yes_bid_dollars": "0.0000",
+   "yes_ask_dollars": "1.0000",
+   "last_price_dollars": "0.0000",
+   "yes_bid_size_fp": "0.00",
+   "yes_ask_size_fp": "0.00",
+   "volume_fp": "0.00",
+   "open_interest_fp": "0.00",
+   "result": "scalar",
+   "settlement_value_dollars": "0.5000",
+   "settlement_ts": "2026-11-06T05:54:12.052151Z"
+  },
+  {
+   "ticker": "KXLIGAPROMATCH-26NOV061230GLACHU-CHU",
+   "event_ticker": "KXLIGAPROMATCH-26NOV061230GLACHU",
+   "title": "CHulkov Vitalii wins",
+   "yes_sub_title": "CHulkov Vitalii",
+   "market_type": "binary",
+   "status": "finalized",
+   "open_time": "2026-11-06T05:33:00Z",
+   "close_time": "2026-11-06T05:50:12Z",
+   "yes_bid_dollars": "0.0000",
+   "yes_ask_dollars": "1.0000",
+   "last_price_dollars": "0.0000",
+   "yes_bid_size_fp": "0.00",
+   "yes_ask_size_fp": "0.00",
+   "volume_fp": "0.00",
+   "open_interest_fp": "0.00",
+   "result": "scalar",
+   "settlement_value_dollars": "0.5000",
+   "settlement_ts": "2026-11-06T05:54:12.052151Z"
+  }
+ ]
+}

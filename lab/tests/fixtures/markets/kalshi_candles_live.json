@@ -1,0 +1,23 @@
+{
+ "candlesticks": [
+  {
+   "end_period_ts": 1793937600,
+   "open_interest_fp": "0.00",
+   "price": {},
+   "volume_fp": "0.00",
+   "yes_ask": {
+    "close_dollars": "0.1600",
+    "high_dollars": "0.9900",
+    "low_dollars": "0.1600",
+    "open_dollars": "0.9900"
+   },
+   "yes_bid": {
+    "close_dollars": "0.0200",
+    "high_dollars": "0.0200",
+    "low_dollars": "0.0000",
+    "open_dollars": "0.0000"
+   }
+  }
+ ],
+ "ticker": "KXNCAAFSPREAD-26NOV05UTSAFAU-FAU33"
+}
