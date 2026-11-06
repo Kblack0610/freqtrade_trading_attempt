@@ -88,6 +88,7 @@ def test_every_live_venue_keeps_its_stop_on_the_exchange(cfg):
     ({"max_open_trades": 4}, "max_open_trades"),
     ({"position_adjustment_enable": True}, "position_adjustment"),
     ({"force_entry_enable": True}, "force_entry"),
+    ({"telegram": {"enabled": True}}, "telegram"),
     ({"initial_state": "running"}, "initial_state"),
     ({"order_types": {"stoploss_on_exchange": False}}, "stop on the exchange"),
     ({"order_types": {}}, "stop on the exchange"),
@@ -207,3 +208,72 @@ def test_no_deploy_file_in_this_repo_starts_it():
     root = Path(__file__).resolve().parents[2]
     for f in [root / "Dockerfile", *(root / ".github").rglob("*.yml")]:
         assert not re.search(r"live\.py", f.read_text()), f
+
+
+def test_the_shipped_overlay_and_base_carry_no_manual_entry(tmp_path, cfg, stage):
+    conf, _ = merged(tmp_path, cfg, stage)
+    assert conf["force_entry_enable"] is False and not conf.get("telegram", {}).get("enabled")
+
+
+def make_strategy(tmp_path, source="x = 1\n", params="{}"):
+    d = tmp_path / "ud" / "strategies"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "Strat.py").write_text(source)
+    (d / "Strat.json").write_text(params)
+    return tmp_path / "ud"
+
+
+def make_db(path, open_count):
+    import sqlite3
+
+    with sqlite3.connect(path) as c:
+        c.execute("CREATE TABLE trades (id INTEGER, is_open INTEGER)")
+        c.executemany("INSERT INTO trades VALUES (?, ?)", [(i, 1) for i in range(open_count)] + [(99, 0)])
+
+
+def test_open_trades_counts_only_open_and_reads_no_file_as_none(tmp_path):
+    assert live.open_trades(tmp_path / "none.sqlite") == 0
+    make_db(tmp_path / "t.sqlite", 2)
+    assert live.open_trades(tmp_path / "t.sqlite") == 2
+
+
+def test_the_fingerprint_moves_with_source_and_params_but_not_keys(tmp_path):
+    base = {"stake_amount": 50, "exchange": {"name": "kraken", "pair_whitelist": ["BTC/USD"], "key": "a"}}
+    ud = make_strategy(tmp_path)
+    fp = live.fingerprint(base, "Strat", ud)
+    assert live.fingerprint({**base, "exchange": {**base["exchange"], "key": "b"}}, "Strat", ud) == fp
+    assert live.fingerprint({**base, "stake_amount": 60}, "Strat", ud) != fp
+    make_strategy(tmp_path, params='{"buy": 1}')
+    assert live.fingerprint(base, "Strat", ud) != fp
+    ud = make_strategy(tmp_path, source="x = 2\n")
+    assert live.fingerprint(base, "Strat", ud) != fp
+
+
+def test_an_edit_over_open_trades_is_refused_and_keeps_the_old_record(tmp_path):
+    assert live.edited_while_open(tmp_path, "a", trades=3) is False
+    assert live.edited_while_open(tmp_path, "a", trades=3) is False
+    assert live.edited_while_open(tmp_path, "b", trades=3) is True
+    assert json.loads((tmp_path / "started.json").read_text())["fingerprint"] == "a"
+
+
+def test_an_edit_with_no_open_trades_is_allowed_and_recorded(tmp_path):
+    live.edited_while_open(tmp_path, "a", trades=0)
+    assert live.edited_while_open(tmp_path, "b", trades=0) is False
+    assert json.loads((tmp_path / "started.json").read_text())["fingerprint"] == "b"
+
+
+def test_lifted_refuses_an_edited_strategy_over_open_trades(monkeypatch, tmp_path, capsys):
+    state = tmp_path / "state"
+    state.mkdir()
+    make_db(state / "tradesv3.sqlite", 1)
+    (state / "started.json").write_text(json.dumps({"fingerprint": "from-an-earlier-start"}))
+    with pytest.raises(SystemExit):
+        run_lifted(monkeypatch, tmp_path, ready=True)
+    assert "open trades" in capsys.readouterr().err
+    assert (state / "started.json").read_text() == json.dumps({"fingerprint": "from-an-earlier-start"})
+
+
+def test_lifted_starts_an_unchanged_bot_with_open_trades(monkeypatch, tmp_path):
+    run_lifted(monkeypatch, tmp_path, ready=True)
+    make_db(tmp_path / "state" / "tradesv3.sqlite", 2)
+    assert len(run_lifted(monkeypatch, tmp_path, ready=True)) == 1

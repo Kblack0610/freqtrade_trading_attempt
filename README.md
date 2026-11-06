@@ -30,7 +30,7 @@ Results go to the `trader` database in the cluster's shared Postgres, which the 
 | `lab/confidence.py` | After each analysis and walk-forward: the score and gates that say whether a strategy has earned real money, and the trial register (see Confidence) |
 | `lab/families.toml` | By hand: each strategy class's method family (trend, mean-reversion, momentum and the rest) and data inputs, for `/coverage` |
 | `lab/book.py` | After the score: what each scored strategy might return beside holding BTC, and what each stage costs and can lose. |
-| `lab/live.py` | Live bot entry point: always refuses, nothing deploys it. See `docs/live.md` |
+| `lab/live.py` | Live bot entry point: always refuses, nothing deploys it. See `docs/live.md` and the operator rules in `docs/operating-rules.md` |
 | `lab/ingest.py` | Hourly job: every bot's trades (closed and open) and a snapshot (profit, balance, dry-run flag, each open pair's newest candle time) into Postgres |
 | `lab/watcher.py` | Daily loss watch: each bot's marked-to-market equity every 60 s into `watch`, and the kill drill. See Watcher |
 | `lab/migrate.py`, `lab/migrations/` | Schema: numbered SQL files applied once each, in order, under an advisory lock; runs as the init container of every job |

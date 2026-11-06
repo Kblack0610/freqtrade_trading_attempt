@@ -4,11 +4,14 @@
 GUARD_LIFTED is False, so main() exits 2 before it reads anything. Lifting it is a human's PR, with
 the docs that state the rule in the same PR. After that the merged config must still pass check():
 the caps of the [live] stage, a stop on the exchange, keys present, and a strategy at ready.
+It also holds the operator rules of docs/operating-rules.md: no force entry, no Telegram, and no start over open trades after an edit.
 lab/league.py stays the entry point of every paper bot. See docs/live.md.
 """
 
+import hashlib
 import json
 import os
+import sqlite3
 import sys
 from pathlib import Path
 
@@ -74,6 +77,8 @@ def check(cfg: dict, live: dict, stage: dict, ready: bool) -> list[str]:
         problems.append("position_adjustment_enable is not false")
     if cfg.get("force_entry_enable") is not False:
         problems.append("force_entry_enable is not false")
+    if cfg.get("telegram", {}).get("enabled"):
+        problems.append("telegram is on, and it carries /forceexit")
     if cfg.get("initial_state") != "stopped":
         problems.append("initial_state is not stopped")
     if cfg.get("order_types", {}).get("stoploss_on_exchange") is not True:
@@ -93,6 +98,34 @@ def check(cfg: dict, live: dict, stage: dict, ready: bool) -> list[str]:
     if not ready:
         problems.append("the strategy is not at ready on this venue")
     return problems
+
+
+def open_trades(db: Path) -> int:
+    """Open trades in the bot's sqlite, read-only. A bot that never ran has no file and no trades."""
+    if not db.exists():
+        return 0
+    with sqlite3.connect(f"file:{db}?mode=ro", uri=True) as c:
+        return c.execute("SELECT count(*) FROM trades WHERE is_open = 1").fetchone()[0]
+
+
+def fingerprint(cfg: dict, strategy: str, user_data: Path) -> str:
+    """What the bot trades with: the strategy source and its params file, the venue, pairs and caps. Never a key or a secret."""
+    parts = {k: cfg.get(k) for k in ("stake_amount", "max_open_trades", "timeframe", "stoploss", "minimal_roi", "order_types")}
+    parts |= {"strategy": strategy, "exchange": cfg.get("exchange", {}).get("name"),
+              "pairs": sorted(cfg.get("exchange", {}).get("pair_whitelist", []))}
+    files = sorted(f for f in (user_data / "strategies").rglob("*") if f.is_file() and f.stem == strategy and f.suffix in (".py", ".json"))
+    parts["files"] = [hashlib.sha256(f.read_bytes()).hexdigest() for f in files]
+    return hashlib.sha256(json.dumps(parts, sort_keys=True, default=str).encode()).hexdigest()
+
+
+def edited_while_open(state: Path, fp: str, trades: int) -> bool:
+    """True when a bot holds open trades and what it trades with differs from its last start. The record is rewritten only when it may be."""
+    record = state / "started.json"
+    before = json.loads(record.read_text())["fingerprint"] if record.exists() else None
+    if trades and before not in (None, fp):
+        return True
+    record.write_text(json.dumps({"fingerprint": fp}))
+    return False
 
 
 def at_ready(conn, strategy: str, exchange: str) -> bool:
@@ -127,9 +160,13 @@ def main() -> None:
 
     with connect() as conn:
         ready = at_ready(conn, strategy, exchange)
-    problems = check(Configuration.from_files([str(p) for p in configs]), live, stage, ready)
+    merged = Configuration.from_files([str(p) for p in configs])
+    problems = check(merged, live, stage, ready)
     if problems:
         die("refusing to start: " + "; ".join(problems))
+
+    if edited_while_open(STATE, fingerprint(merged, strategy, USER_DATA), open_trades(STATE / "tradesv3.sqlite")):
+        die("refusing to start: the strategy, its params or the config changed while the bot holds open trades (docs/operating-rules.md)")
 
     print(f"live: {name}: {strategy} on {exchange}, REAL MONEY, {live['stage']}", flush=True)
     args = ["freqtrade", "trade", "--userdir", str(USER_DATA), "--recursive-strategy-search",
