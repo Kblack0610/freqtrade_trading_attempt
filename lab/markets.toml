@@ -1,0 +1,20 @@
+# Tuning for lab/markets/. Facts behind each number: docs/markets.md.
+
+[recorder]
+# Bucket and prefix of the change-only quote parquet; the endpoint and keys come from the environment
+# (S3_ENDPOINT, S3_ACCESS_KEY, S3_SECRET_KEY). Objects: <prefix>/venue=<v>/date=<YYYY-MM-DD>/<HHMMSSZ>.parquet
+bucket = "trader-markets"
+prefix = "quotes"
+# The first run with no earlier sweep reads resolutions this far back; later runs overlap the last one by this.
+resolutions_lookback_h = 1
+
+[venues.kalshi]
+title = "Kalshi"
+kind = "exchange"
+url = "https://kalshi.com"
+base_url = "https://api.elections.kalshi.com/trade-api/v2"
+page_limit = 1000
+# An unpaced count of /markets drew 429s; 0.5 s between pages was clean (docs/markets.md, Rate limits).
+page_gap_s = 0.5
+retries = 6
+timeout_s = 30

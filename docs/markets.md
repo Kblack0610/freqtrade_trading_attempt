@@ -17,6 +17,14 @@ Confidence: **doc** means read on the venue's own page, **secondary** means a la
 
 Open markets counted 2026-11-05: Kalshi 178,883 open with combos excluded (`/markets?status=open&mve_filter=exclude`, 179 pages of 1000); Polymarket global more than 2,100 (Gamma refuses an offset past 2,100; third parties put it at 12k to 20k); PredictIt 148 markets with 542 contracts. Manifold and Polymarket US were not counted.
 
+## Recorder
+
+`python -m markets.recorder [venue ...]` (cwd `/repo`, `PYTHONPATH=/repo/lab`) runs one sweep per venue in `lab/markets.toml`. Each sweep reads every open market a page at a time and diffs each outcome's top of book against `outcomes`. Changed quotes go to one parquet object, `s3://trader-markets/quotes/venue=<v>/date=<YYYY-MM-DD>/<HHMMSS>Z.parquet`; only after it lands are `markets`, `outcomes`, `resolutions` and a `market_sweeps` row committed together. Endpoint and keys come from `S3_ENDPOINT`, `S3_ACCESS_KEY` and `S3_SECRET_KEY`, and the database from `DATABASE_URL`.
+
+Kalshi's `min_updated_ts` filter cannot be combined with `status=open`, so the venue cannot hand over only what changed. The recorder sweeps every open market and diffs on its side. Measured 2026-11-06 against the live API: 179k open markets in about 180 pages, 3 to 4.5 minutes a sweep with a few 429s absorbed by the backoff, 470 MB peak memory, and 12k to 16k changed quotes per 5 minutes after the first sweep, which writes everything. Resolutions are read from the last good sweep's start minus `resolutions_lookback_h`, so about 4k settled markets are re-read each run and stored once.
+
+Reading the parquet: a row is a quote as first seen at `ts`. If the database commit fails after the object is written, the next run writes the same changes again with a later `ts`, so keep the first row of a run of equal quotes.
+
 ## Kalshi
 
 API (doc, https://docs.kalshi.com/getting_started/api_environments.md):
