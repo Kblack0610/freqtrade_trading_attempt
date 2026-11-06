@@ -2,7 +2,7 @@ import http.server
 import socket
 import threading
 
-from healthcheck import healthy
+from lab.healthcheck import healthy
 
 
 def _free_port() -> int:
