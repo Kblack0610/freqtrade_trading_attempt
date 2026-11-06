@@ -11,7 +11,7 @@ Results go to the `trader` database in the cluster's shared Postgres, which the 
 | Path | What it is |
 |---|---|
 | `user_data/strategies/` | Strategies, found with `--recursive-strategy-search` |
-| `lab/families/` | Staged strategy families, not yet scanned (see Staged families) |
+| `lab/families/` | Staged strategy families, not yet scanned: candles, chart and the FreqAI `ml/` (see Staged families) |
 | `lab/patterns.py` | Causal chart-pattern signals: swing pivots, support and resistance breaks, double tops and bottoms, triangles, flags |
 | `user_data/config.base.json` | Shared config: dry run, 1000 USD wallet, spot, static pair list |
 | `user_data/exchanges/<name>.json` | Per-exchange overlay: name, pair whitelist, pricing quirks; no keys |
@@ -162,6 +162,8 @@ Drop the `.py` in `user_data/strategies/` (any subfolder). It must import on the
 ## Staged families
 
 `lab/families/` holds whole method families waiting to be switched on: `candles/`, one strategy per TA-Lib candlestick pattern that can signal bullish, and `chart/`, one per long signal in `lab/patterns.py`. Each family shares one fixed exit (ROI table, stoploss, time stop), and its `family.toml` holds that exit and every parameter. The strategy files are generated from it: edit the toml or `lab/patterns.py`, then run `python lab/families/generate.py`; `lab/tests/test_families.py` fails while a file is stale. The nightly analysis searches only `user_data/strategies/`, so these add no trials yet; the pre-registered stop rule reads the trial count on 2026-11-07. CI still checks that each one loads and that one of each passes the lookahead check on synthetic prices. Switching a family on is a PR that moves its folder to `user_data/strategies/<family>/` and drops the test that says it is not scanned.
+
+`ml/` is the machine-learning family, hand-written rather than generated: `MLLightGBMBaseline`, a FreqAI LightGBM regressor that predicts the mean close over the next 24 hourly candles and goes long when the prediction clears 1%, with its FreqAI settings in `ml/freqai.json` (30 training days, 7-day windows, `n_jobs` 2: LightGBM's default of one thread per core thrashed for 90 seconds per fit on a loaded hp-victus, against under 5 seconds pinned). It needs lightgbm, which only the ML image has: `ghcr.io/kblack0610/trader-ml`, this same Dockerfile built with `--build-arg FREQTRADE_TAG=2026.9_freqai` (2.7 GB against 1.3 GB), so the bots never run on it. CI builds it and runs `lab/tests/test_ml.py` there, which checks that each 7-day window is predicted only by a model fit before it; the plain image skips that test. It stays off until walk-forward purges trades across fold boundaries, since a 24-candle label spills into the next fold.
 
 ## Price data
 
