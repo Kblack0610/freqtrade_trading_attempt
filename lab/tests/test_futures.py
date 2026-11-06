@@ -81,3 +81,41 @@ def test_one_failing_swap_is_reported_and_the_rest_are_kept(conn, monkeypatch):
     v = FakeVenue(listed=now - 5 * DAY, now=now, broken={"BAD/USDT:USDT"})
     assert not futures.collect(v, conn, "okx", ["BAD/USDT", "BTC/USDT"], now)
     assert [r[0] for r in stored(conn, "funding_rates")] == ["BTC/USDT:USDT"]
+
+
+class Throttled(Exception):
+    pass
+
+
+class FlakyExchange:
+    def __init__(self, fails: int):
+        self.fails = fails
+
+    def fetch_open_interest_history(self, symbol, timeframe, since=None, params=None):
+        if self.fails:
+            self.fails -= 1
+            raise Throttled("50011 Too Many Requests")
+        return [{"timestamp": 1, "openInterestAmount": 2.0, "openInterestValue": 3.0}]
+
+
+def ccxt_venue(fails: int):
+    v, waits = object.__new__(futures.Ccxt), []
+    v.ex, v.throttled, v.sleep = FlakyExchange(fails), Throttled, waits.append
+    return v, waits
+
+
+def test_a_rate_limited_call_waits_and_retries():
+    v, waits = ccxt_venue(fails=2)
+    assert v.open_interest("SOL/USDT:USDT", None) == [(1, 2.0, 3.0)]
+    assert waits == list(futures.RETRY_WAITS[:2])
+
+
+def test_a_call_still_throttled_after_every_retry_raises():
+    v, waits = ccxt_venue(fails=len(futures.RETRY_WAITS) + 1)
+    try:
+        v.open_interest("SOL/USDT:USDT", None)
+    except Throttled:
+        pass
+    else:
+        raise AssertionError("expected the last throttle to surface")
+    assert waits == list(futures.RETRY_WAITS)
