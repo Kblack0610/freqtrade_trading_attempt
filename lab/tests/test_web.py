@@ -74,6 +74,7 @@ def seed(c):
               "('Strategy001', 'recursive', 'h1', NULL, NULL)")
     c.execute("INSERT INTO data_coverage (exchange, pair, timeframe, first_ts, last_ts, rows, oldest_reached) "
               "VALUES ('binanceus', 'BTC/USD', '5m', '2019-09-01', %s, 700000, true)", (NOW,))
+    c.execute("INSERT INTO open_interest (exchange, pair, ts, value_usd) VALUES ('okx', 'BTC/USDT:USDT', '2026-08-03', 3.6e9)")
 
 
 def test_healthz_needs_no_sign_in(site):
@@ -162,7 +163,7 @@ def test_every_page_renders_with_data(conn, signed_in):
              "/strategies/Strategy001": ["binanceus", "<svg", "3.2%", "Strategy002: 0.83", "bull", "ETH/USD",
                                          "exit 2: boom", "not checked", "clean", "31%", "1.45%", "0.25%", "20%", "12.3%",
                                          "-5.0%", "-27.1%", "4321"],
-             "/data": ["BTC/USD", "700,000", "2019-09-01"],
+             "/data": ["BTC/USD", "700,000", "2019-09-01", "Open interest", "<td>okx</td>", "2026-08-03"],
              "/runs": ["2026-11-04 03:00:00", "ok", "60 min"],
              "/runs/1": ["exit 2: boom", "binanceus: no 1m candles: Scalp", "4 strategies", "Strategy001"]}
     for path, needles in pages.items():

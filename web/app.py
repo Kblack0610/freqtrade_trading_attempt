@@ -47,6 +47,13 @@ SELECT exchange, count(*) AS series, count(*) FILTER (WHERE oldest_reached) AS a
        min(first_ts) AS first_ts, max(last_ts) AS last_ts
 FROM data_coverage GROUP BY exchange ORDER BY exchange
 """
+FUTURES = """
+SELECT 'Funding rate' AS kind, exchange, count(DISTINCT pair) AS pairs, count(*) AS n, min(ts) AS first_ts, max(ts) AS last_ts
+FROM funding_rates GROUP BY exchange
+UNION ALL
+SELECT 'Open interest', exchange, count(DISTINCT pair), count(*), min(ts), max(ts) FROM open_interest GROUP BY exchange
+ORDER BY 1, 2
+"""
 COVERAGE = "SELECT * FROM data_coverage ORDER BY exchange, array_position(%s, timeframe), pair"
 RUNS = """
 SELECT id, name, started_at, finished_at, ok, raw, finished_at - started_at AS took
@@ -138,8 +145,9 @@ def ago(t: dt.datetime | None) -> str:
     return "just now"
 
 
-def stale(t: dt.datetime | None) -> bool:
-    return t is None or dt.datetime.now(dt.timezone.utc) - t > STALE
+def stale(t: dt.datetime | None, seconds: float | None = None) -> bool:
+    limit = STALE if seconds is None else dt.timedelta(seconds=seconds)
+    return t is None or dt.datetime.now(dt.timezone.utc) - t > limit
 
 
 def num(v: float | None, digits: int = 2, unit: str = "") -> str:
@@ -273,7 +281,8 @@ def bot(request: Request, name: str):
 @app.get("/data", response_class=HTMLResponse)
 def data(request: Request):
     user_of(request)
-    return page(request, "data.html", by_exchange=rows(COVERAGE_BY_EXCHANGE), series=rows(COVERAGE, (TF_ORDER,)))
+    return page(request, "data.html", by_exchange=rows(COVERAGE_BY_EXCHANGE), series=rows(COVERAGE, (TF_ORDER,)),
+                futures=rows(FUTURES))
 
 
 @app.get("/strategies", response_class=HTMLResponse)

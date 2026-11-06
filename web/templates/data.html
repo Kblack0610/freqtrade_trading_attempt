@@ -4,6 +4,23 @@
 <h1>Data coverage</h1>
 <p class="muted">The price history the hourly backfill job holds. A series is filled backwards until the exchange has nothing older, then kept current. Kraken serves no deep history, so its archive starts when collection began and grows from there.</p>
 
+<h2>Perpetual swaps</h2>
+<p class="muted">Funding rates and daily open interest from the okx and kucoin swap of each spot pair, collected daily. The exchanges serve only a few months of either, so this history starts when collection began and grows from there.</p>
+{% if futures %}
+<table>
+  <thead><tr><th>Data</th><th>Exchange</th><th class="n">Pairs</th><th class="n">Rows</th><th>Oldest</th><th>Newest</th></tr></thead>
+  <tbody>
+  {% for f in futures %}
+  <tr><td>{{ f.kind }}</td><td>{{ f.exchange }}</td><td class="n">{{ f.pairs }}</td><td class="n">{{ "{:,}".format(f.n) }}</td>
+    <td>{{ f.first_ts | local("%Y-%m-%d") }}</td><td class="{{ 'down' if stale(f.last_ts, 2 * 86400) }}">{{ f.last_ts | local }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p>No swap data collected yet.</p>
+{% endif %}
+
+<h2>Candles</h2>
 <div class="scroll">
 <table>
   <thead><tr><th>Exchange</th><th>Pair</th><th>Timeframe</th><th>Oldest candle</th><th>Newest candle</th><th class="n">Candles</th><th class="n">Gaps</th><th class="n">Missing candles</th><th title="The backfill has reached the oldest candle the exchange serves">Full history</th></tr></thead>
