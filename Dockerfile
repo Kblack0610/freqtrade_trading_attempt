@@ -17,3 +17,7 @@ ENV PYTHONPATH=/repo/lab
 # per exchange) and the loser exits with "exists already and is not a directory".
 RUN mkdir -p user_data/logs user_data/data user_data/backtest_results user_data/hyperopt_results user_data/plot
 # The entrypoint stays freqtrade's: every workload in home-config sets its own command.
+# Healthy when the bot API (lab/league.py, :8080) or the site (web/app.py, :8000) answers. Docker
+# and compose read this; k8s ignores it and uses the probes in home-config. A one-shot job has
+# neither port, so it shows unhealthy under docker until it exits.
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 CMD ["python", "/repo/lab/healthcheck.py"]

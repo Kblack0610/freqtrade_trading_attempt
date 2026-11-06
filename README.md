@@ -15,6 +15,7 @@ Results go to the `trader` database in the cluster's shared Postgres, which the 
 | `lab/patterns.py` | Causal chart-pattern signals: swing pivots, support and resistance breaks, double tops and bottoms, triangles, flags |
 | `user_data/config.base.json` | Shared config: dry run, 1000 USD wallet, spot, static pair list |
 | `user_data/exchanges/<name>.json` | Per-exchange overlay: name, pair whitelist, pricing quirks; no keys |
+| `lab/healthcheck.py` | The image's Docker `HEALTHCHECK`: healthy when the bot API (:8080) or the site (:8000) answers; k8s ignores it and uses home-config's probes |
 | `lab/league.py` | Bot entrypoint: picks its roster row from the pod ordinal, refuses anything but key-less spot dry run, writes the API config, execs `freqtrade trade` |
 | `lab/pairs.py` | By hand: a research venue's whitelist, its most traded pairs with history since 2022 |
 | `lab/futures.py` | Daily job: funding rates and open interest for the okx and kucoin swaps into `funding_rates` and `open_interest` (see Price data) |
@@ -76,7 +77,13 @@ Backfill knobs (env): `BACKFILL_EXCHANGES` (`binanceus coinbase kraken`), `TIMEF
 
 ## CI
 
-`.github/workflows/image.yml` runs on every pull request and on each push to master. `test` builds the image, runs the migrations twice and the tests against a Postgres 17 service; the second run must report `0 new`, which proves a migration applies once and a rerun is a no-op:
+`.github/workflows/image.yml` runs on every pull request and on each push to master. `secrets` runs gitleaks v8.28.0 over the commits the PR or push adds and fails on any finding. It does not scan all history: one full scan on 2026-11-06 found 801 hits in 94 commits, all freqtrade API JWTs in logs committed in 2023-2025 and an old `jwt_secret_key` and `ws_token` in old config files, none of them still in HEAD. To repeat that scan:
+
+```sh
+docker run --rm -v "$PWD:/repo:ro" zricethezav/gitleaks:v8.28.0 git /repo --redact --no-banner
+```
+
+Each test step stops after 10 minutes (`timeout-minutes`), so a hung test fails the run instead of holding a runner for six hours. `test` builds the image, runs the migrations twice and the tests against a Postgres 17 service; the second run must report `0 new`, which proves a migration applies once and a rerun is a no-op:
 
 ```sh
 python lab/migrate.py && python lab/migrate.py | grep -q "0 new" && python -m pytest -q -p no:cacheprovider lab/tests
@@ -91,7 +98,7 @@ freqtrade list-strategies --recursive-strategy-search \
 ! grep -E 'LOAD FAILED|DUPLICATE' strategies.txt
 ```
 
-`test-ml` builds the ML image (`--build-arg FREQTRADE_TAG=2026.9_freqai`) and runs `lab/tests/test_ml.py` and `lab/tests/test_families.py` there. `publish` runs only on a push to master, after both pass, and pushes `trader` and `trader-ml` to GHCR as `sha-<7>` and `latest`.
+`test-ml` builds the ML image (`--build-arg FREQTRADE_TAG=2026.9_freqai`) and runs `lab/tests/test_ml.py` and `lab/tests/test_families.py` there. `publish` runs only on a push to master, after `secrets`, `test` and `test-ml` pass, and pushes `trader` and `trader-ml` to GHCR as `sha-<7>` and `latest`.
 
 `bump-home-config` then runs `ci/bump_home_config.py`: it sets the `trader` digest in home-config `apps/freqtrade/kustomization.yaml` (`images:`) to the one just pushed, opens that change on Forgejo as PR `trader-sha-<7>` through the public API at git.kennethblack.me, and closes the older open `trader-sha-*` PR it supersedes. Merging that PR is the deploy. It skips when master has already moved past the commit (the newer build opens the bump) and warns and skips when the repo secret `FORGEJO_DEPLOY_TOKEN` is unset. That secret is a Forgejo token with write on home-config, the same one the Forgejo deploy workflows use:
 
