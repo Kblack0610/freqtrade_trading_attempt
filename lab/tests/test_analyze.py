@@ -166,6 +166,24 @@ def test_a_changed_file_reruns_its_chunks_and_bias(lab):
     assert len(r.backtests) == 5 and len(r.checks) == 2
 
 
+def test_candles_added_to_a_past_year_rerun_only_that_year(lab):
+    """Kraken's quarterly archive lands after its year ends, when that year's range no longer changes."""
+    path = analyze.RESULTS / "data" / "binanceus" / "BTC_USD-5m.feather"
+    path.parent.mkdir(parents=True)
+    days = pd.date_range("2024-03-01", "2026-11-03", freq="D", tz="UTC")
+    pd.DataFrame({"date": days, "close": 1.0}).to_feather(path)
+    assert analyze.main(FakeRunner([strat("Good")]), TODAY) == 0
+    late = pd.date_range("2024-12-31 00:05", periods=3, freq="5min", tz="UTC")
+    pd.concat([pd.DataFrame({"date": days, "close": 1.0}), pd.DataFrame({"date": late, "close": 2.0})],
+              ignore_index=True).to_feather(path)
+    r = FakeRunner([strat("Good")])
+    assert analyze.main(r, TODAY) == 0
+    assert r.backtests == [("Good", "binanceus", dt.date(2024, 1, 1))]
+    r = FakeRunner([strat("Good")])
+    assert analyze.main(r, TODAY) == 0
+    assert r.backtests == []
+
+
 def test_failed_chunks_retry_three_times_and_fail_the_run(lab):
     found = [strat("Good"), strat("Flaky")]
     codes, calls = [], []

@@ -6,7 +6,9 @@
 2. Backtests: each strategy x exchange over its whole history, one calendar year per chunk, run in
    parallel (up to ANALYZE_WORKERS freqtrade processes, fewer when their estimated memory would pass
    ANALYZE_MEMORY_GB: a year of 1m candles needs about four times a year of 5m). A chunk is cached by its cache_key (strategy file,
-   config files, Freqtrade version, range): past years run once, the current year reruns each night.
+   config files, Freqtrade version, range, and a digest of that year's candles at the strategy's timeframe):
+   past years run once, again only when their candles change (Kraken's quarterly archive lands after its
+   year ends), and the current year reruns each night.
    Its trades go to `backtest_trades`. A chunk starts from the config's wallet, so a long history is
    many short compounding runs chained by their daily returns, not one run that compounds for years.
 3. Bias: lookahead-analysis and recursive-analysis per strategy, rerun when its file hash changes.
@@ -136,9 +138,26 @@ class Budget:
                 self.cv.notify_all()
 
 
-def chunk_key(file_hash: str, exchange: str, start: dt.date, end: dt.date, ft_version: str) -> str:
+def chunk_key(file_hash: str, exchange: str, start: dt.date, end: dt.date, ft_version: str, candles: str) -> str:
     cfg = "".join(sha256(p.read_bytes()) for p in config_files(exchange))
-    return sha256(json.dumps([file_hash, cfg, ft_version, exchange, str(start), str(end)]).encode())
+    return sha256(json.dumps([file_hash, cfg, ft_version, exchange, str(start), str(end), candles]).encode())
+
+
+def candle_digests(exchange: str, timeframe: str) -> dict[int, str]:
+    """Per calendar year, a digest of the whitelisted pairs' candles at this timeframe. Informative
+    timeframes a strategy also loads are not covered."""
+    from freqtrade.misc import pair_to_filename
+
+    years = {}
+    for pair in sorted(whitelist(exchange)):
+        path = RESULTS / "data" / exchange / f"{pair_to_filename(pair)}-{timeframe}.feather"
+        if not path.exists():
+            continue
+        df = pd.read_feather(path)
+        for year, rows in df.groupby(df["date"].dt.year):
+            years.setdefault(int(year), hashlib.sha256()).update(
+                pair.encode() + pd.util.hash_pandas_object(rows, index=False).values.tobytes())
+    return {y: h.hexdigest() for y, h in years.items()}
 
 
 def chunks(first: dt.date, today: dt.date) -> list[tuple[dt.date, dt.date]]:
@@ -360,6 +379,7 @@ def plan(conn, found: list[dict], first: dict, today: dt.date, ft_version: str) 
     done = {(s, e, c): (k, ok, n) for s, e, c, k, ok, n in conn.execute(
         "SELECT strategy, exchange, chunk_start, cache_key, ok, attempts FROM backtest_chunks")}
     todo, cached, skipped = [], 0, []
+    digests: dict[tuple[str, str], dict[int, str]] = {}
     for s in found:
         if s["load_error"] or (ONLY and s["name"] not in ONLY):
             continue
@@ -368,8 +388,10 @@ def plan(conn, found: list[dict], first: dict, today: dt.date, ft_version: str) 
             if since is None:
                 skipped.append(f"{s['name']} on {ex}: {s['timeframe']} not fully backfilled")
                 continue
+            if (ex, s["timeframe"]) not in digests:
+                digests[ex, s["timeframe"]] = candle_digests(ex, s["timeframe"])
             for start, end in chunks(since.date(), today):
-                key = chunk_key(s["file_hash"], ex, start, end, ft_version)
+                key = chunk_key(s["file_hash"], ex, start, end, ft_version, digests[ex, s["timeframe"]].get(start.year, ""))
                 prior = done.get((s["name"], ex, start))
                 if prior and prior[0] == key and (prior[1] or prior[2] >= MAX_ATTEMPTS):
                     cached += 1
