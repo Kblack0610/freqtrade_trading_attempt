@@ -1,5 +1,6 @@
 # On top of the Freqtrade image, which already ships pandas, numpy, scipy,
 # sqlalchemy, fastapi, uvicorn, jinja2, httpx and requests.
 psycopg[binary]==3.2.12
+psycopg-pool==3.2.8
 pytest==8.4.2
 prometheus-client==0.22.1
