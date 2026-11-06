@@ -6,6 +6,10 @@ The repo README is the reference for layout, the analysis and the site. These pa
 
 - [live.md](live.md): why nothing trades money, what `lab/live.py` would check, how a human lifts the guard, reconciliation and backups.
 
+## Platforms
+
+- [platforms.md](platforms.md): every broker, exchange, wallet and market we use or might use, what an agent can automate on each (API, the agent machine, the person), sign-in and 2FA, terms on automation, kill switches, paper paths and cost.
+
 ## Markets
 
 - [markets.md](markets.md): the venue reference behind `lab/markets/` (Kalshi, Polymarket, PredictIt, Manifold, The Odds API), the recorder, links, backtest, paper league and demo orders.
