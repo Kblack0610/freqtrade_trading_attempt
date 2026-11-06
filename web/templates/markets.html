@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}Markets{% endblock %}
+{% block body %}
+<h1>Markets</h1>
+{% include "_markets_nav.html" %}
+<p class="muted">Event contracts across venues, read only. The recorder sweeps each venue's open markets on its own schedule and writes only the quotes that changed, to parquet in MinIO; this page is each venue's newest sweep. A venue whose last good sweep is over {{ max_age }} minutes old shows red: the paper league takes no entries there until it recovers, and the stale-recorder alert fires.</p>
+
+<h2>Recorder</h2>
+{% if venues %}
+<div class="scroll">
+<table>
+  <thead><tr><th>Venue</th><th>Kind</th><th>Newest sweep</th><th>Last good sweep</th><th class="n">Took</th><th class="n">Open outcomes</th><th class="n">Changed quotes</th><th class="n">New markets</th><th class="n">Resolved</th><th class="n">Failed, last day</th></tr></thead>
+  <tbody>
+  {% for v in venues %}
+  <tr><td>{{ v.title }} <span class="muted">{{ v.venue }}</span></td><td>{{ v.kind }}</td>
+    <td>{% if v.started_at %}{{ v.started_at | ago }}{% if not v.ok %} <span class="down" title="{{ v.error }}">failed</span>{% endif %}{% else %}<span class="muted">never swept</span>{% endif %}</td>
+    <td class="{{ 'down' if v.started_at and stale(v.last_ok, max_age * 60) }}">{{ v.last_ok | ago }}</td>
+    <td class="n">{{ "%.0f s" | format(v.took.total_seconds()) if v.took else "-" }}</td>
+    <td class="n">{{ "{:,}".format(v.seen) if v.seen is not none else "-" }}</td><td class="n">{{ "{:,}".format(v.changes) if v.changes is not none else "-" }}</td>
+    <td class="n">{{ "{:,}".format(v.new_markets) if v.new_markets is not none else "-" }}</td><td class="n">{{ "{:,}".format(v.resolved) if v.resolved is not none else "-" }}</td>
+    <td class="n {{ 'down' if v.failed_1d }}">{{ v.failed_1d }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}<p class="muted">No venue recorded yet: the recorder CronJob writes a row per venue on its first sweep.</p>{% endif %}
+
+{% if errors %}
+<h2>Failed sweeps, last 7 days</h2>
+<table>
+  <thead><tr><th>Venue</th><th>Started</th><th>Error</th></tr></thead>
+  <tbody>
+  {% for e in errors %}<tr><td>{{ e.venue }}</td><td>{{ e.started_at | local }}</td><td><code>{{ e.error }}</code></td></tr>{% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
+<h2>History backfill</h2>
+<p class="muted">Settled markets, hourly price bars and large Kalshi trades from before the recorder started. Each job walks one unit at a time (a settle date, or the settled walk as one unit) and resumes where it stopped.</p>
+{% if backfill %}
+<table>
+  <thead><tr><th>Venue</th><th>Job</th><th class="n">Units done</th><th>Dates</th><th class="n">Rows</th><th>Last write</th></tr></thead>
+  <tbody>
+  {% for b in backfill %}
+  <tr><td>{{ b.venue }}</td><td>{{ b.job }}</td><td class="n">{{ b.done }} of {{ b.units }}</td>
+    <td>{% if b.first_unit %}{{ b.first_unit }} to {{ b.last_unit }}{% else %}-{% endif %}</td>
+    <td class="n">{{ "{:,}".format(b.rows) }}</td><td>{{ b.updated | ago }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}<p class="muted">No backfill has run yet.</p>{% endif %}
+{% endblock %}

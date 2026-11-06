@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}Markets book{% endblock %}
+{% block body %}
+<h1>Markets book</h1>
+{% include "_markets_nav.html" %}
+<p class="muted">The event-contract strategy families: every backtested variant, then the paper league that trades them against the recorder's live books. Paper money only: nothing here can reach a venue's order API.</p>
+
+<h2>Backtests</h2>
+<p class="muted">One row per family, venue and variant, from the newest run. Each variant is a trial in the register before its result is read, so the deflated Sharpe counts every variant tried. The interval is a block bootstrap of the net return per trade, after fees.</p>
+{% if backtests %}
+<div class="scroll">
+<table>
+  <thead><tr><th>Family</th><th>Venue</th><th>Variant</th><th>Window</th><th class="n">Orders</th><th class="n">Fills</th><th class="n">Settled</th><th class="n">Open</th><th class="n">Per trade (interval)</th><th class="n">Win rate</th><th class="n" title="Deflated Sharpe at the trial count">DSR</th><th class="n">Trials</th><th class="n">Score</th><th>Run</th></tr></thead>
+  <tbody>
+  {% for b in backtests %}
+  <tr><td>{{ b.family }}</td><td>{{ b.venue }}</td><td><span title="{{ b.params | tojson }}">{{ b.variant[:8] }}</span></td>
+    <td>{{ b.start_at | local("%Y-%m-%d") }} to {{ b.end_at | local("%Y-%m-%d") }}</td>
+    <td class="n">{{ "{:,}".format(b.orders) }}</td><td class="n">{{ "{:,}".format(b.fills) }}</td><td class="n">{{ "{:,}".format(b.trades) }}</td><td class="n">{{ "{:,}".format(b.open_fills) }}</td>
+    <td class="n {{ b.expectancy | tone }}">{{ b.expectancy | pct(2) }} <span class="muted">{{ b.expectancy_lo | pct(2) }} to {{ b.expectancy_hi | pct(2) }}</span></td>
+    <td class="n">{{ b.metrics.winrate | pct(0) }}</td><td class="n">{{ b.dsr | num(2) }}</td><td class="n">{{ b.trials }}</td>
+    <td class="n">{{ "%.0f" | format(b.score) if b.score is not none else "-" }}</td><td>{{ b.computed_at | ago }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}<p class="muted">No markets backtest has run yet.</p>{% endif %}
+
+<h2>Paper league</h2>
+<p class="muted">Each account is one family variant with its own paper capital. Equity is capital, plus realized profit, plus each open position at its exit price. The watcher holds each account to the daily loss limit and runs the kill drill on it; the drawdown alert fires {{ hard_stop | pct(0) }} of capital below an account's peak, the book's hard stop.</p>
+{% if accounts %}
+<div class="scroll">
+<table>
+  <thead><tr><th>Account</th><th>Family</th><th>Venue</th><th class="n">Capital</th><th class="n">Equity</th><th class="n">Return</th><th class="n">Realized</th><th class="n">Open</th><th class="n">Fills</th><th class="n">Settled</th><th>Watch</th><th>Marked</th></tr></thead>
+  <tbody>
+  {% for a in accounts %}
+  <tr><td><span title="{{ a.params | tojson }}">{{ a.account }}</span></td><td>{{ a.family }}</td><td>{{ a.venue }}</td>
+    <td class="n">{{ a.capital | num(0) }}</td><td class="n">{{ a.equity | num(2) }}</td><td class="n {{ a.ret | tone }}">{{ a.ret | pct(2) }}</td>
+    <td class="n {{ a.realized | tone }}">{{ a.realized | num(2) }}</td><td class="n">{{ a.open_positions if a.open_positions is not none else "-" }}</td>
+    <td class="n">{{ a.fills }}</td><td class="n">{{ a.settled }}</td>
+    <td>{% if a.stopped_at %}<span class="down">stopped</span>{% elif a.breached_at %}<span class="down">day limit hit</span>{% else %}{{ a.state or "-" }}{% endif %}</td>
+    <td class="{{ 'down' if stale(a.marked_at, 3600) }}">{{ a.marked_at | ago }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}<p class="muted">The paper league has not run yet.</p>{% endif %}
+
+{% if fills %}
+<h3>Newest paper fills</h3>
+<div class="scroll">
+<table>
+  <thead><tr><th>Sent</th><th>Account</th><th>Market</th><th>Side</th><th class="n">Contracts</th><th class="n">Price</th><th class="n">Fee</th><th>Settled</th><th class="n">Profit</th></tr></thead>
+  <tbody>
+  {% for o in fills %}
+  <tr><td>{{ o.sent_at | local }}</td><td>{{ o.account }}</td><td>{{ o.title or o.market_id }}{% if o.subtitle %} <span class="muted">{{ o.subtitle }}</span>{% endif %}</td><td>{{ o.side }}</td>
+    <td class="n">{{ o.contracts }}</td><td class="n">{{ o.price | num(2) }}</td><td class="n">{{ o.fee | num(2) }}</td>
+    <td>{{ o.settled_at | local if o.settled_at else "open" }}</td><td class="n {{ o.profit | tone }}">{{ o.profit | num(2) }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endif %}
+
+<h2>Demo orders</h2>
+<p class="muted">The order path on the Kalshi demo exchange, mock funds only: the drill rests one contract at 1c and cancels it.</p>
+{% if demo %}
+<table>
+  <thead><tr><th>Placed</th><th>Venue</th><th>Ticker</th><th class="n">Price</th><th class="n">Count</th><th>Status</th><th>Canceled</th><th>Error</th></tr></thead>
+  <tbody>
+  {% for d in demo %}
+  <tr><td>{{ d.placed_at | local }}</td><td>{{ d.venue }}</td><td>{{ d.ticker }}</td><td class="n">{{ d.price | num(2) }}</td><td class="n">{{ d.count }}</td>
+    <td>{{ d.status or "-" }}</td><td>{{ d.canceled_at | local }}</td><td>{% if d.error %}<code class="down">{{ d.error }}</code>{% endif %}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}<p class="muted">No demo order yet.</p>{% endif %}
+{% endblock %}

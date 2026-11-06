@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}Links{% endblock %}
+{% block body %}
+<h1>Cross-venue links</h1>
+{% include "_markets_nav.html" %}
+<p class="muted">A link says one outcome on one venue pays exactly when an outcome on another pays. Rules confirm the links they make; the LLM only proposes. Once both markets resolve, an agreeing link is confirmed and a disagreeing one rejected, a rule's included, so a broken rule shows up as rejections. Strategies use confirmed links only.</p>
+
+<h2>By source</h2>
+{% if summary %}
+<table>
+  <thead><tr><th>Source</th><th>Status</th><th class="n">Links</th><th class="n">Resolved apart</th></tr></thead>
+  <tbody>
+  {% for r in summary %}<tr><td>{{ r.source }}</td><td>{{ r.status }}</td><td class="n">{{ "{:,}".format(r.n) }}</td><td class="n {{ 'down' if r.disagreed }}">{{ r.disagreed }}</td></tr>{% endfor %}
+  </tbody>
+</table>
+{% else %}<p class="muted">No links yet: the linker needs a recorded venue pair, such as odds_api against Kalshi.</p>{% endif %}
+
+{% if asks %}
+<h2>LLM asks</h2>
+<table>
+  <thead><tr><th>Model</th><th>Against</th><th class="n">Markets asked</th><th class="n">Links proposed</th><th>Last ask</th></tr></thead>
+  <tbody>
+  {% for a in asks %}<tr><td>{{ a.model }}</td><td>{{ a.venue_b }}</td><td class="n">{{ "{:,}".format(a.asked) }}</td><td class="n">{{ "{:,}".format(a.proposed) }}</td><td>{{ a.last | ago }}</td></tr>{% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
+<h2>Newest links</h2>
+<p>{% for s in [""] + statuses|list %}{% if not loop.first %} - {% endif %}{% if s == status %}<strong>{{ s or "all" }}</strong>{% else %}<a href="/links{{ '?status=' ~ s if s }}">{{ s or "all" }}</a>{% endif %}{% endfor %}</p>
+{% if links %}
+<div class="scroll">
+<table>
+  <thead><tr><th>Market</th><th>Pays when</th><th>Linked to</th><th>Pays when</th><th>Source</th><th>Status</th><th>Proposed</th><th>Closes</th></tr></thead>
+  <tbody>
+  {% for l in links %}
+  <tr><td>{{ l.title_a }}{% if l.subtitle_a %} <span class="muted">{{ l.subtitle_a }}</span>{% endif %}<br><span class="muted">{{ l.venue_a }} {{ l.market_id_a }}</span></td><td>{{ l.outcome_a }}</td>
+    <td>{{ l.title_b }}{% if l.subtitle_b %} <span class="muted">{{ l.subtitle_b }}</span>{% endif %}<br><span class="muted">{{ l.venue_b }} {{ l.market_id_b }}</span></td><td>{{ l.outcome_b }}</td>
+    <td title="{{ l.reason or '' }}">{{ l.source }}{% if l.score is not none %} <span class="muted">{{ l.score | num(2) }}</span>{% endif %}</td>
+    <td class="{{ 'down' if l.status == 'rejected' else ('up' if l.status == 'confirmed' else '') }}">{{ l.status }}{% if l.confirmed_by %} <span class="muted">by {{ l.confirmed_by }}</span>{% endif %}</td>
+    <td>{{ l.proposed_at | local }}</td><td>{{ l.close_a | local }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}<p class="muted">No {{ status or "" }} links.</p>{% endif %}
+{% endblock %}

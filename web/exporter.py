@@ -37,6 +37,23 @@ SELECT 'funding' AS kind, exchange, max(ts) AS newest FROM funding_rates GROUP B
 UNION ALL SELECT 'open_interest', exchange, max(ts) FROM open_interest GROUP BY exchange
 """
 SUGGESTIONS = "SELECT kind, count(*) AS n FROM suggestions GROUP BY kind"
+# Event-contract markets (lab/markets). A venue counts while it has a recorder sweep in the last week, so a venue
+# whose CronJob is removed stops reporting instead of alerting stale forever.
+SWEEPS = """
+SELECT DISTINCT ON (venue) venue, ok,
+       max(finished_at) FILTER (WHERE ok) OVER w AS last_ok,
+       count(*) FILTER (WHERE started_at > now() - interval '1 hour') OVER w AS runs_1h,
+       count(*) FILTER (WHERE NOT ok AND started_at > now() - interval '1 hour') OVER w AS failed_1h
+FROM market_sweeps WHERE started_at > now() - interval '7 days'
+WINDOW w AS (PARTITION BY venue)
+ORDER BY venue, started_at DESC
+"""
+LAST_SWEEP = """
+SELECT DISTINCT ON (venue) venue, seen, changes, extract(epoch FROM finished_at - started_at) AS took
+FROM market_sweeps WHERE ok AND started_at > now() - interval '7 days' ORDER BY venue, started_at DESC
+"""
+LINKS = "SELECT split_part(source, ':', 1) AS source, status, count(*) AS n FROM market_links GROUP BY 1, 2"
+PAPER = "SELECT account, capital, equity, open_positions, marked_at FROM paper_accounts WHERE marked_at IS NOT NULL"
 
 
 def age(now: dt.datetime, t: dt.datetime | None) -> float | None:
@@ -67,6 +84,10 @@ class TraderCollector:
                 candles = cur.execute(CANDLES).fetchall()
                 futures = cur.execute(FUTURES).fetchall()
                 suggestions = cur.execute(SUGGESTIONS).fetchall()
+                sweeps = cur.execute(SWEEPS).fetchall()
+                last_sweep = cur.execute(LAST_SWEEP).fetchall()
+                links = cur.execute(LINKS).fetchall()
+                paper = cur.execute(PAPER).fetchall()
         except Exception:  # noqa: BLE001 - any failure is reported as the db being unreadable
             up.add_metric([], 0)
             yield up
@@ -80,6 +101,8 @@ class TraderCollector:
         yield family("trader_futures_age_seconds", "Seconds since the newest funding or open interest row of each exchange",
                      ["kind", "exchange"], (([f["kind"], f["exchange"]], age(now, f["newest"])) for f in futures))
         yield from suggestion_metrics(suggestions)
+        yield from market_metrics(now, sweeps, last_sweep, links)
+        yield from paper_metrics(now, paper)
 
 
 def family(name: str, doc: str, labels: list[str], items) -> GaugeMetricFamily:
@@ -145,6 +168,36 @@ def candle_metrics(now, candles):
 def suggestion_metrics(suggestions):
     yield family("trader_suggestions", "Open suggestions of each kind", ["kind"],
                  (([s["kind"]], s["n"]) for s in suggestions))
+
+
+def market_metrics(now, sweeps, last_sweep, links):
+    yield family("trader_markets_sweep_age_seconds", "Seconds since the venue's newest successful recorder sweep ended",
+                 ["venue"], (([s["venue"]], age(now, s["last_ok"])) for s in sweeps))
+    yield family("trader_markets_sweep_ok", "1 when the venue's newest recorder sweep succeeded", ["venue"],
+                 (([s["venue"]], int(s["ok"])) for s in sweeps))
+    yield family("trader_markets_sweeps_1h", "Recorder sweeps of the venue started in the last hour", ["venue"],
+                 (([s["venue"]], s["runs_1h"]) for s in sweeps))
+    yield family("trader_markets_sweeps_failed_1h", "Recorder sweeps of the venue that failed in the last hour, an "
+                 "adapter or venue error each", ["venue"], (([s["venue"]], s["failed_1h"]) for s in sweeps))
+    yield family("trader_markets_sweep_seen", "Open outcomes in the venue's newest successful sweep", ["venue"],
+                 (([s["venue"]], s["seen"]) for s in last_sweep))
+    yield family("trader_markets_sweep_changes", "Changed quotes the venue's newest successful sweep wrote", ["venue"],
+                 (([s["venue"]], s["changes"]) for s in last_sweep))
+    yield family("trader_markets_sweep_duration_seconds", "How long the venue's newest successful sweep took",
+                 ["venue"], (([s["venue"]], s["took"]) for s in last_sweep))
+    yield family("trader_markets_links", "Cross-venue links by how they were made (rule, llm) and their status",
+                 ["source", "status"], (([r["source"], r["status"]], r["n"]) for r in links))
+
+
+def paper_metrics(now, paper):
+    yield family("trader_paper_equity", "A paper account's equity at its last mark: capital, realized, open marked",
+                 ["account"], (([p["account"]], p["equity"]) for p in paper))
+    yield family("trader_paper_capital", "A paper account's starting capital", ["account"],
+                 (([p["account"]], p["capital"]) for p in paper))
+    yield family("trader_paper_open_positions", "A paper account's open filled positions", ["account"],
+                 (([p["account"]], p["open_positions"]) for p in paper))
+    yield family("trader_paper_marked_age_seconds", "Seconds since the paper league last marked the account",
+                 ["account"], (([p["account"]], age(now, p["marked_at"])) for p in paper))
 
 
 def serve(port: int | None = None) -> CollectorRegistry:

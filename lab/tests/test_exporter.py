@@ -79,3 +79,40 @@ def test_watch_metrics(conn):
     assert m['trader_watch_breached{bot="a"}'] == 1 and m['trader_watch_breached{bot="new"}'] == 0
     assert m['trader_watch_running{bot="a"}'] == 0 and 'trader_watch_running{bot="new"}' not in m
     assert m['trader_watch_unseen_seconds{bot="a"}'] >= 360 and m["trader_watch_age_seconds"] < 60
+
+
+def test_market_metrics(conn):
+    import db
+    from web.exporter import TraderCollector
+
+    now = dt.datetime.now(dt.timezone.utc)
+    conn.execute("INSERT INTO market_sweeps (venue, started_at, finished_at, seen, new_markets, changes, resolved, ok, error) VALUES "
+                 "('kalshi', %s, %s, 179000, 0, 12000, 40, true, NULL), ('kalshi', %s, %s, 0, 0, 0, 0, false, 'boom'), "
+                 "('kalshi', %s, %s, 0, 0, 0, 0, false, 'boom'), ('manifold', %s, %s, 26000, 0, 9, 0, true, NULL), "
+                 "('predictit', %s, %s, 900, 0, 1, 0, true, NULL)",
+                 (now - dt.timedelta(minutes=30), now - dt.timedelta(minutes=27), now - dt.timedelta(minutes=10),
+                  now - dt.timedelta(minutes=10), now - dt.timedelta(minutes=5), now - dt.timedelta(minutes=5),
+                  now - dt.timedelta(minutes=3), now - dt.timedelta(minutes=2), now - dt.timedelta(days=8),
+                  now - dt.timedelta(days=8)))
+    conn.execute("INSERT INTO venues (venue, title, kind) VALUES ('kalshi', 'Kalshi', 'exchange'), ('odds_api', 'Odds', 'sportsbook')")
+    conn.execute("INSERT INTO markets (venue, market_id, title, market_type, status, first_seen, updated_at) VALUES "
+                 "('kalshi', 'K', 't', 'binary', 'open', now(), now()), ('odds_api', 'g', 't', 'binary', 'open', now(), now())")
+    conn.execute("INSERT INTO market_links (venue_a, market_id_a, outcome_a, venue_b, market_id_b, outcome_b, source, status) VALUES "
+                 "('odds_api', 'g', 'A', 'kalshi', 'K', 'yes', 'rule:kalshi_game', 'confirmed'), "
+                 "('odds_api', 'g', 'B', 'kalshi', 'K', 'no', 'llm:claude-haiku', 'proposed')")
+    conn.execute("INSERT INTO paper_accounts (account, family, venue, variant, params, capital, started_at, equity, open_positions, marked_at) "
+                 "VALUES ('paper-a', 'longshot', 'kalshi', 'v', '{}', 1000, %s, 900, 4, %s), "
+                 "('paper-new', 'longshot', 'kalshi', 'w', '{}', 1000, %s, NULL, NULL, NULL)", (now, now - dt.timedelta(minutes=5), now))
+    m = scrape(TraderCollector(db.connect))
+    assert 1600 < m['trader_markets_sweep_age_seconds{venue="kalshi"}'] < 1700
+    assert m['trader_markets_sweep_ok{venue="kalshi"}'] == 0 and m['trader_markets_sweep_ok{venue="manifold"}'] == 1
+    assert m['trader_markets_sweeps_failed_1h{venue="kalshi"}'] == 2 and m['trader_markets_sweeps_1h{venue="kalshi"}'] == 3
+    assert m['trader_markets_sweep_seen{venue="kalshi"}'] == 179000 and m['trader_markets_sweep_changes{venue="kalshi"}'] == 12000
+    assert m['trader_markets_sweep_duration_seconds{venue="kalshi"}'] == 180
+    assert not any('venue="predictit"' in k for k in m)  # no sweep in a week: the venue is not recorded any more
+    assert m['trader_markets_links{source="rule",status="confirmed"}'] == 1
+    assert m['trader_markets_links{source="llm",status="proposed"}'] == 1
+    assert m['trader_paper_equity{account="paper-a"}'] == 900 and m['trader_paper_capital{account="paper-a"}'] == 1000
+    assert m['trader_paper_open_positions{account="paper-a"}'] == 4
+    assert 290 < m['trader_paper_marked_age_seconds{account="paper-a"}'] < 320
+    assert not any('account="paper-new"' in k for k in m)  # never marked: no equity to alert on yet
