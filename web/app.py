@@ -10,7 +10,6 @@ import datetime as dt
 import math
 import os
 import re
-import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -21,13 +20,10 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from psycopg.rows import dict_row
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lab"))
-import book as book_lab  # noqa: E402
-import metrics  # noqa: E402
-import suggest  # noqa: E402
-from db import connect  # noqa: E402
-
-from web import auth, charts, exporter  # noqa: E402
+from lab import book as book_lab
+from lab import metrics, suggest
+from lab.db import connect
+from web import auth, charts, exporter
 
 HERE = Path(__file__).resolve().parent
 TZ = ZoneInfo(os.environ.get("TRADER_WEB_TZ", "UTC"))

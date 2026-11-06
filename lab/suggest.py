@@ -22,8 +22,9 @@ from pathlib import Path
 
 from psycopg.types.json import Jsonb
 
-import metrics
-from db import connect
+from lab import metrics
+from lab.db import connect
+from lab.util import finite
 
 CONFIG = Path(os.environ.get("SUGGEST_CONFIG", Path(__file__).resolve().parent / "suggest.toml"))
 ROSTER_STALE = dt.timedelta(days=1)  # a bot unseen this long no longer counts toward the league
@@ -34,9 +35,7 @@ def load_config(path: Path = CONFIG) -> dict:
 
 
 def gate(name: str, value, need: str, ok: bool) -> dict:
-    if isinstance(value, float) and not math.isfinite(value):
-        value = None
-    return {"gate": name, "value": value, "need": need, "pass": bool(ok)}
+    return {"gate": name, "value": finite(value), "need": need, "pass": bool(ok)}
 
 
 def edge_on(series: dict, p: dict) -> bool:

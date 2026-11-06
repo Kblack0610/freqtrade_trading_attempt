@@ -2,7 +2,7 @@
 """Strategy families v1 for event contracts. Each is a backtest.Strategy, and its command backtests every variant
 in its grid through backtest.run(), which registers the trial before it reads the result.
 
-  python -m markets.families {longshot,calibration,gap} [--venue V] [--start D] [--end D] [--book bars|quotes]
+  python -m lab.markets.families {longshot,calibration,gap} [--venue V] [--start D] [--end D] [--book bars|quotes]
 
 The book is the history backfill's bars of the markets that settled start to end (end exclusive), or the
 recorder's quotes of those days. Knobs and grids are [families.<name>] in lab/markets.toml: a list is a grid
@@ -41,12 +41,12 @@ from collections import defaultdict
 import numpy as np
 import pandas as pd
 
-from db import connect
-from markets import backtest
-from markets.backtest import Market, Order
-from markets.history import _midnight
-from markets.links import outcome_word
-from markets.recorder import load_config, s3_from_env
+from lab.db import connect
+from lab.markets import backtest
+from lab.markets.backtest import Market, Order
+from lab.markets.history import _midnight
+from lab.markets.links import outcome_word
+from lab.markets.recorder import load_config, s3_from_env
 
 UTC = dt.timezone.utc
 COMMANDS = ("longshot", "calibration", "gap")

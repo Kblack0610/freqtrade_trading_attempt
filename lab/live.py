@@ -12,8 +12,8 @@ import os
 import sys
 from pathlib import Path
 
-import suggest
-from db import connect
+from lab import suggest
+from lab.db import connect
 
 GUARD_LIFTED = False
 

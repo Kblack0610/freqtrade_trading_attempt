@@ -19,8 +19,8 @@ import datetime as dt
 import json
 from typing import Iterator
 
-from markets.api import Api, epoch_s, num, result_of, when
-from markets.venue import Bar, Quote, Resolution, Settled, Span
+from lab.markets.api import Api, epoch_s, num, result_of, when
+from lab.markets.venue import Bar, Quote, Resolution, Settled, Span
 
 DATA_API = "https://data-api.polymarket.com"
 

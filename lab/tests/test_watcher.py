@@ -1,13 +1,9 @@
 import datetime as dt
-import sys
-from pathlib import Path
 
 import pytest
 from psycopg.rows import dict_row
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-
-import watcher  # noqa: E402
+from lab import watcher
 
 NOW = dt.datetime(2026, 11, 5, 12, tzinfo=dt.timezone.utc)
 LIMIT = 0.03

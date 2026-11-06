@@ -1,6 +1,6 @@
 import pytest
 
-import migrate
+from lab import migrate
 
 
 def test_second_run_is_a_noop(conn, capsys):

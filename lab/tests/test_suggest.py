@@ -1,6 +1,6 @@
 import datetime as dt
 
-import suggest
+from lab import suggest
 
 CFG = suggest.load_config()
 

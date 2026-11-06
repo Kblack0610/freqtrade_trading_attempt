@@ -11,7 +11,7 @@ import hashlib
 import sys
 from pathlib import Path
 
-from db import connect
+from lab.db import connect
 
 MIGRATIONS = Path(__file__).resolve().parent / "migrations"
 LOCK_KEY = 7_270_001  # any constant; only this script takes it

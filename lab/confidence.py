@@ -27,10 +27,9 @@ import pandas as pd
 from psycopg.types.json import Jsonb
 from scipy.stats import norm
 
-import metrics
-import suggest
-from db import connect
-from suggest import gate
+from lab import metrics, suggest
+from lab.db import connect
+from lab.suggest import gate
 
 USER_DATA = Path(os.environ.get("FT_USER_DATA", Path(__file__).resolve().parents[1] / "user_data"))
 REGISTER = [

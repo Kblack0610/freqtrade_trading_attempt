@@ -1,7 +1,7 @@
 import datetime as dt
 import pytest
 
-import ingest
+from lab import ingest
 
 T0 = dt.datetime(2026, 11, 4, 12, tzinfo=dt.timezone.utc)
 

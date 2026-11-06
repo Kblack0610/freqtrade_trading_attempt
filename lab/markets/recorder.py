@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """One sweep per venue: open markets and their top of book, change-only, plus the markets resolved since the last run.
 
-  python -m markets.recorder [venue ...]     # default: [recorder] default_venues in lab/markets.toml
+  python -m lab.markets.recorder [venue ...]     # default: [recorder] default_venues in lab/markets.toml
 
 For each venue it reads every open market a page at a time and diffs each outcome's quote against the last one stored
 in Postgres (outcomes). Only the changed quotes are written, as one parquet object in MinIO, and only then is the
@@ -23,13 +23,13 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 from pyarrow import fs as pafs
 
-from db import connect
-from markets.kalshi import Kalshi
-from markets.manifold import Manifold
-from markets.odds import OddsApi
-from markets.polymarket import Polymarket, PolymarketUS
-from markets.predictit import PredictIt
-from markets.venue import Quote, Venue
+from lab.db import connect
+from lab.markets.kalshi import Kalshi
+from lab.markets.manifold import Manifold
+from lab.markets.odds import OddsApi
+from lab.markets.polymarket import Polymarket, PolymarketUS
+from lab.markets.predictit import PredictIt
+from lab.markets.venue import Quote, Venue
 
 CONFIG = Path(os.environ.get("MARKETS_CONFIG", Path(__file__).resolve().parents[1] / "markets.toml"))
 ADAPTERS = {a.name: a for a in (Kalshi, PolymarketUS, Polymarket, PredictIt, Manifold, OddsApi)}

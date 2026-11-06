@@ -209,7 +209,7 @@ def test_pages_render_on_an_empty_database(conn, signed_in):
 
 
 def test_suggestions_show_each_kind_with_its_gates(conn, signed_in):
-    import suggest
+    from lab import suggest
 
     seed(conn)
     assert suggest.run(conn)["suggestions"] == {"retire": 2, "fix": 1}

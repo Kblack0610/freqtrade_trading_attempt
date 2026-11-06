@@ -7,9 +7,7 @@ from freqtrade import exchange as venues
 from freqtrade.configuration import Configuration
 from freqtrade.configuration.config_validation import validate_config_consistency, validate_config_schema
 
-import league
-import live
-import suggest
+from lab import league, live, suggest
 
 USER_DATA = Path(__file__).resolve().parents[2] / "user_data"
 API = {"username": "u", "password": "p", "jwt_secret_key": "j" * 32, "ws_token": "w"}

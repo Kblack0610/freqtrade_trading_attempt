@@ -4,9 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-import book
-import metrics
-import suggest
+from lab import book, metrics, suggest
 
 CFG = suggest.load_config()
 PAIR = ("Good", "binanceus")

@@ -28,10 +28,10 @@ from concurrent.futures import ThreadPoolExecutor
 
 from psycopg.rows import dict_row
 
-from db import connect
-from ingest import ROSTER, Fetch, http_fetch
-from league import roster_rows
-from suggest import load_config
+from lab.db import connect
+from lab.ingest import ROSTER, Fetch, http_fetch
+from lab.league import roster_rows
+from lab.suggest import load_config
 
 UPSERT = """
 INSERT INTO watch (bot, checked_at, seen_at, error, dry_run, state, capital, equity, day, day_open,

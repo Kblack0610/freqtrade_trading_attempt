@@ -8,6 +8,8 @@ Results go to the `trader` database in the cluster's shared Postgres, which the 
 
 ## Layout
 
+`lab` and `web` are packages imported from the repo root: `from lab import metrics`, `from lab.markets import fees`. The image sets `PYTHONPATH=/repo`; a job runs as `python /repo/lab/<job>.py`, or `python -m lab.markets.<module>` for the markets jobs.
+
 | Path | What it is |
 |---|---|
 | `user_data/strategies/` | Strategies, found with `--recursive-strategy-search` |
@@ -32,6 +34,7 @@ Results go to the `trader` database in the cluster's shared Postgres, which the 
 | `lab/watcher.py` | Daily loss watch: each bot's marked-to-market equity every 60 s into `watch`, and the kill drill. See Watcher |
 | `lab/migrate.py`, `lab/migrations/` | Schema: numbered SQL files applied once each, in order, under an advisory lock; runs as the init container of every job |
 | `lab/db.py` | The one Postgres connection: `DATABASE_URL` |
+| `lab/util.py` | `utc()`, any timestamp (epoch ms, ISO string, datetime) as UTC, and `finite()`, NaN and infinity as null before Postgres or jsonb |
 | `web/` | The site: FastAPI and Jinja, read-only, Forgejo sign-in (`web/auth.py`), server-drawn SVG charts (`web/charts.py`); pages Overview, bot detail, Strategies, strategy detail, Walk-forward, Suggestions, Confidence, Book, Markets (`/markets`, `/links`, `/markets/book`), Coverage, Guide, Data, Runs; `/guide` is the reading order (see The site) |
 | `lab/tests/` | pytest; the DB tests need `DATABASE_URL` pointing at a throwaway database |
 | `Dockerfile`, `lab/requirements.txt` | The `trader` image |

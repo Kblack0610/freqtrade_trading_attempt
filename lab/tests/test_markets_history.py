@@ -5,11 +5,11 @@ import pytest
 from markets_fakes import Session
 from pyarrow import fs as pafs
 
-from markets import history
-from markets.kalshi import Kalshi
-from markets.manifold import Manifold
-from markets.polymarket import Polymarket, PolymarketUS
-from markets.venue import Bar, Quote, Resolution, Settled, Span, Trade
+from lab.markets import history
+from lab.markets.kalshi import Kalshi
+from lab.markets.manifold import Manifold
+from lab.markets.polymarket import Polymarket, PolymarketUS
+from lab.markets.venue import Bar, Quote, Resolution, Settled, Span, Trade
 
 UTC = dt.timezone.utc
 D1, D2 = dt.date(2026, 11, 3), dt.date(2026, 11, 4)

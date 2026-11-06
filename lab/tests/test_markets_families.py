@@ -6,12 +6,12 @@ import pyarrow.parquet as pq
 import pytest
 from pyarrow import fs as pafs
 
-from markets import backtest, families
-from markets.backtest import Lookahead, Market
-from markets.families import Calibration, Forecaster, Gap, Longshot, RefBook
-from markets.history import SCHEMAS
-from markets.recorder import load_config
-from markets.venue import Resolution
+from lab.markets import backtest, families
+from lab.markets.backtest import Lookahead, Market
+from lab.markets.families import Calibration, Forecaster, Gap, Longshot, RefBook
+from lab.markets.history import SCHEMAS
+from lab.markets.recorder import load_config
+from lab.markets.venue import Resolution
 
 UTC = dt.timezone.utc
 T0 = dt.datetime(2026, 11, 1, tzinfo=UTC)

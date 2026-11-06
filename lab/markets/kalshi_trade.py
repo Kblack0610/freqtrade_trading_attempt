@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """The Kalshi order path, on the demo exchange only: mock funds, keys apart from production.
 
-  python -m markets.kalshi_trade balance
-  python -m markets.kalshi_trade drill [--ticker T]   # rest one contract, read it back, cancel it, read it back
+  python -m lab.markets.kalshi_trade balance
+  python -m lab.markets.kalshi_trade drill [--ticker T]   # rest one contract, read it back, cancel it, read it back
 
 KalshiDemo refuses any base URL whose host is not the demo's (DEMO_HOSTS), so no config or env can point it at
 real money; P9 adds Kalshi to the live path behind its own guard (docs/live.md), never by widening this one.
@@ -31,9 +31,9 @@ import requests
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519, padding, rsa
 
-from db import connect
-from markets.api import num
-from markets.recorder import load_config
+from lab.db import connect
+from lab.markets.api import num
+from lab.markets.recorder import load_config
 
 DEMO_HOSTS = frozenset({"external-api.demo.kalshi.co", "demo-api.kalshi.co"})
 UTC = dt.timezone.utc

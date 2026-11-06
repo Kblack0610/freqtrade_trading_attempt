@@ -6,8 +6,8 @@ import json
 
 import pytest
 
-from markets import links
-from markets.recorder import load_config
+from lab.markets import links
+from lab.markets.recorder import load_config
 
 UTC = dt.timezone.utc
 NOW = dt.datetime(2026, 11, 6, 8, tzinfo=UTC)

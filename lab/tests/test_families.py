@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from families import generate
+from lab.families import generate
 
 LAB = Path(__file__).resolve().parents[1]
 FAMILIES = LAB / "families"
@@ -47,7 +47,7 @@ def test_the_skipped_candle_patterns_are_bearish_only():
 def test_every_family_strategy_loads_by_name():
     """freqtrade finds a strategy by name only in a file containing `class <Name>(`; this is the load
     a backtest does, which list-strategies alone does not prove."""
-    import analyze
+    from lab import analyze
     from freqtrade.configuration import Configuration
     from freqtrade.resolvers import StrategyResolver
 
@@ -61,11 +61,12 @@ def test_every_family_strategy_loads_by_name():
 
 
 def test_no_lab_module_shadows_an_installed_one():
-    """The image sets PYTHONPATH=/repo/lab so strategies can import patterns, which puts every lab
-    module ahead of site-packages."""
+    """The jobs run `python /repo/lab/<job>.py`, which puts lab/ first on sys.path, and the image's
+    PYTHONPATH=/repo puts the lab and web packages ahead of site-packages."""
     lab = {p.stem for p in LAB.glob("*.py")} | {p.name for p in LAB.iterdir() if p.is_dir() and not p.name.startswith(("_", "."))}
-    installed = {m.name for m in pkgutil.iter_modules([p for p in sys.path if p and Path(p).resolve() != LAB])}
-    assert lab & (installed | set(sys.stdlib_module_names)) == set()
+    repo = {"lab", "web"}
+    installed = {m.name for m in pkgutil.iter_modules([p for p in sys.path if p and Path(p).resolve() not in (LAB, LAB.parent)])}
+    assert (lab | repo) & (installed | set(sys.stdlib_module_names)) == set()
 
 
 def synthetic_candles(start: dt.datetime, end: dt.datetime, freq: str) -> pd.DataFrame:
@@ -80,7 +81,7 @@ def synthetic_candles(start: dt.datetime, end: dt.datetime, freq: str) -> pd.Dat
 
 @pytest.fixture
 def bias_data(tmp_path, monkeypatch):
-    import analyze
+    from lab import analyze
 
     now = dt.datetime.now(dt.timezone.utc).replace(minute=0, second=0, microsecond=0)
     data = tmp_path / "data" / analyze.BIAS_EXCHANGE
@@ -104,7 +105,7 @@ def test_the_nightly_lookahead_check_on_synthetic_prices(bias_data, strategy, fo
 def test_the_nightly_analysis_does_not_scan_the_staged_families():
     """Staged means no trials: the analysis searches user_data/strategies only. Switching a family on
     moves its folder there and drops this test."""
-    import analyze
+    from lab import analyze
 
     staged = {p.stem for fam in generate.families() for p in fam.glob("*.py")}
     assert staged and not staged & {s["name"] for s in analyze.Cli().discover()}
