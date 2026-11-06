@@ -86,7 +86,7 @@ Backfill knobs (env): `BACKFILL_EXCHANGES` (`binanceus coinbase kraken`), `TIMEF
 docker run --rm -v "$PWD:/repo:ro" zricethezav/gitleaks:v8.28.0 git /repo --redact --no-banner
 ```
 
-Each test step stops after 10 minutes (`timeout-minutes`), so a hung test fails the run instead of holding a runner for six hours. `test` builds the image, runs the migrations twice and the tests against a Postgres 17 service; the second run must report `0 new`, which proves a migration applies once and a rerun is a no-op:
+`secrets`, the migrate-and-test step and the ML test step each stop after 10 minutes (`timeout-minutes`), so a hung test fails the run instead of holding a runner for six hours. `test` builds the image, runs the migrations twice and the tests against a Postgres 17 service; the second run must report `0 new`, which proves a migration applies once and a rerun is a no-op:
 
 ```sh
 python lab/migrate.py && python lab/migrate.py | grep -q "0 new" && python -m pytest -q -p no:cacheprovider lab/tests
