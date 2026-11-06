@@ -105,20 +105,26 @@ def _empty() -> pd.DataFrame:
                                             else float) for c in BOOK}))
 
 
-def load_quotes(fs: pafs.FileSystem, root: str, venue: str, start: dt.date, end: dt.date) -> pd.DataFrame:
-    """The recorder's quotes (<root>/venue=<v>/date=<d>/*.parquet) for the days start to end, end exclusive.
-    Recording is change-only, so a market first appears at its first change in the window. A run of equal quotes,
-    which a recorder retry writes, keeps its first row."""
+def read_quotes(fs: pafs.FileSystem, root: str, venue: str, start: dt.date, end: dt.date) -> pd.DataFrame:
+    """Every outcome's quotes from the recorder's objects (<root>/venue=<v>/date=<d>/*.parquet) for the days start
+    to end, end exclusive, as written: market_id, outcome, ts, bid, ask, bid_size, ask_size."""
+    cols = ["market_id", "outcome", "ts", "bid", "ask", "bid_size", "ask_size"]
     parts = []
     for d in _days(start, end):
         sel = pafs.FileSelector(f"{root}/venue={venue}/date={d}", allow_not_found=True)
         for info in sorted(fs.get_file_info(sel), key=lambda i: i.path):
             if info.type == pafs.FileType.File and info.path.endswith(".parquet"):
-                parts.append(pq.read_table(info.path, filesystem=fs, columns=[
-                    "market_id", "outcome", "ts", "bid", "ask", "bid_size", "ask_size"]).to_pandas())
-    if not parts:
+                parts.append(pq.read_table(info.path, filesystem=fs, columns=cols).to_pandas())
+    return pd.concat(parts, ignore_index=True) if parts else pd.DataFrame(columns=cols)
+
+
+def load_quotes(fs: pafs.FileSystem, root: str, venue: str, start: dt.date, end: dt.date) -> pd.DataFrame:
+    """The recorder's yes quotes for the days start to end, end exclusive, as a book. Recording is change-only, so
+    a market first appears at its first change in the window. A run of equal quotes, which a recorder retry
+    writes, keeps its first row."""
+    q = read_quotes(fs, root, venue, start, end)
+    if q.empty:
         return _empty()
-    q = pd.concat(parts, ignore_index=True)
     q = q[q["outcome"] == "yes"].sort_values(["market_id", "ts"], kind="stable")
     book = ["bid", "ask", "bid_size", "ask_size"]
     same = (q[book].fillna(-1) == q.groupby("market_id")[book].shift().fillna(-1)).all(axis=1)

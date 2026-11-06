@@ -173,3 +173,52 @@ rounding = "none"
 kind = "profit"
 share = 0.10
 rounding = "none"
+
+[families]
+# python -m markets.families <family> (lab/markets/families.py). Each family below is a grid: a list is an axis, a
+# list of tables merges each table into the variant, anything else is fixed. Every variant is a trial, and the
+# deflated Sharpe counts them all, so an axis is added only when its answer would change what trades.
+# The window when no --start is given: this many days before --end.
+days = 90
+
+[families.longshot]
+# Favourite-longshot bias: longshots are bought too dear and favourites too cheap. Buy one side of every market
+# whose yes mid sits in the band, within `hours` of close.
+stake = 10
+max_spread = 0.05
+hours = [24, 168]
+bands = [{ buy = "no", lo = 0.01, hi = 0.10 }, { buy = "no", lo = 0.10, hi = 0.20 },
+         { buy = "yes", lo = 0.80, hi = 0.90 }, { buy = "yes", lo = 0.90, hi = 0.99 }]
+
+[families.calibration]
+# Base rates: how often markets entered this way resolved yes over the `train_days` before the window, per price
+# bucket of `width`, across the venue (all) or per series; `prior` markets shrink a thin bucket toward its own
+# price, and a bucket under `min_n` markets is not traded. Trade when the rate beats the price by `edge`; the
+# edge has to cover the fee, about 1.75c a contract at 50c on Kalshi.
+stake = 10
+max_spread = 0.05
+hours = 168
+width = 0.05
+prior = 10
+min_n = 30
+train_days = 30
+key = ["all", "series"]
+edge = [0.03, 0.06]
+
+[families.gap]
+# Cross-venue gaps against a reference venue's fair price, over the links one rule made (market_links). One
+# source a variant, so results are read per link source; LLM links are refused (lab/markets/families.py).
+stake = 10
+max_spread = 0.05
+ref_venue = "odds_api"
+source = ["rule:kalshi_game"]
+edge = [0.03, 0.06]
+
+[families.llm]
+# The forecaster is forward only: backtest.replay refuses any book that starts before this, the model's training
+# cutoff. The model's own cutoff is not published, so this is the day forward scoring starts, which is no earlier.
+cutoff = 2026-11-06T00:00:00Z
+stake = 10
+max_spread = 0.05
+hours = 168
+edge = 0.06

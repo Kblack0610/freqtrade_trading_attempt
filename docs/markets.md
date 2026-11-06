@@ -54,7 +54,7 @@ What the venues serve:
 
 ## Backtest
 
-`lab/markets/backtest.py` replays a venue's books through a strategy and scores the result with the crypto lab's statistics; fees are `lab/markets/fees.py`. Knobs are `[backtest]` and `[backtest.fees.<venue>]` in `lab/markets.toml`; results are `market_backtests` (migration 022). It has no command yet: the strategy families of P6 call `run()`.
+`lab/markets/backtest.py` replays a venue's books through a strategy and scores the result with the crypto lab's statistics; fees are `lab/markets/fees.py`. Knobs are `[backtest]` and `[backtest.fees.<venue>]` in `lab/markets.toml`; results are `market_backtests` (migration 022). Its callers are the strategy families (Families, below).
 
 - Books: `load_quotes` reads the recorder's change-only quotes, `load_bars` the backfill's bars by settle date. Bars carry no sizes, so each side's depth is `bar_volume_share` (10%) of the period's traded contracts. A market first appears at its first change in the window.
 - Fills: the strategy sees each row in time order with the market's metadata, never its resolution. An order fills against the book as it stood `latency_s` later: YES at the ask, NO at one minus the bid, whole contracts, at most `depth_share` (half) of that side's top-of-book size less what earlier orders took from the same row. The rest is cancelled, because only the top of the book is recorded. Nothing fills once the market has closed or settled.
@@ -62,6 +62,15 @@ What the venues serve:
 - Fees: Kalshi `ceil(0.07 * C * P * (1 - P))` to the cent per order, checked against the schedule's examples (100 at 50c is $1.75, at 10c or 90c $0.63). Polymarket US 0.0695 with half-even cents. Polymarket global at 0.07, its highest category, since the markets table holds no category. PredictIt 10% of a winning position's profit. Manifold nothing. Maker fees are not modelled: every fill is a taker.
 - Lookahead: a strategy with a `cutoff` (an LLM forecaster's training cutoff) is refused outright on a book that starts before it.
 - Scoring: each fill is a trade in the shape `metrics.window_metrics` reads (close_rate is the payout, so the gross edge is payout over price), with daily returns on a 1000 USD wallet. `confidence.interval` gives the per-trade interval and `confidence.scores` the score across every stored backtest, with `suggest.toml [confidence]` unchanged. `run()` writes the trial to `trials` (strategy = family, exchange = venue, variant = md5 of the params) before it reads a result, a refused run included. The deflated Sharpe counts every trial on a markets venue by the plain count, which can only overstate the bar compared with the effective count the crypto lab uses.
+
+## Families
+
+`python -m markets.families {longshot,calibration,gap} [--venue kalshi] [--start D] [--end D] [--book bars|quotes]` (same cwd and path as the recorder) backtests every variant of one family through `backtest.run()`, which registers each in `trials` before it reads the result. The book is the backfill's bars of the markets that settled start to end (default the last `[families] days`, 90), or the recorder's quotes of those days. Each family's grid is `[families.<name>]` in `lab/markets.toml`: a list is an axis, a list of tables merges each table into the variant. Every family enters a market at most once, on its first row with a spread no wider than `max_spread`, and holds to resolution.
+
+- `longshot`, favourite-longshot bias: within `hours` of close, buy no on a yes mid in a longshot band or yes in a favourite band. 8 variants.
+- `calibration`, base rates: count how often markets entered the same way resolved yes over the `train_days` before the window, per 5c price bucket, across the venue or per series, shrunk toward the bucket's price by `prior` markets; trade when the rate beats the ask (or the bid beats it) by `edge`. Only resolutions settled before the window are counted and no row before it is traded. 4 variants.
+- `gap`, cross-venue gaps: a market linked by a rule (`market_links`, `confirmed_by = 'rule'`) to a reference venue's market trades when the reference's fair price beats its price by `edge`. A sportsbook's fair price is each book's implied odds divided by their sum, median across books; a binary venue's is its mid. A rule link later rejected by its resolution still trades, because the rule would have traded it. LLM links confirm only by resolving, so gap refuses them, and each rule source is its own variant, so results read per source. 2 variants. It needs the recorder's quotes of the reference venue, so `--book quotes` and a recorded `odds_api` (not yet scheduled).
+- `llm`, the forecaster: forward only. `backtest.replay` refuses any book that starts before its `cutoff` (`[families.llm]`, 2026-11-06: the model states no training cutoff, so the day forward scoring starts). It has no command here; the paper league scores it.
 
 ## Kalshi
 
