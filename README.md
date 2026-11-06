@@ -32,7 +32,7 @@ Results go to the `trader` database in the cluster's shared Postgres, which the 
 | `lab/watcher.py` | Daily loss watch: each bot's marked-to-market equity every 60 s into `watch`, and the kill drill. See Watcher |
 | `lab/migrate.py`, `lab/migrations/` | Schema: numbered SQL files applied once each, in order, under an advisory lock; runs as the init container of every job |
 | `lab/db.py` | The one Postgres connection: `DATABASE_URL` |
-| `web/` | The site: FastAPI and Jinja, read-only, Forgejo sign-in (`web/auth.py`), server-drawn SVG charts (`web/charts.py`); pages Overview, bot detail, Strategies, strategy detail, Walk-forward, Suggestions, Confidence, Book, Coverage, Guide, Data, Runs; `/guide` is the reading order (see The site) |
+| `web/` | The site: FastAPI and Jinja, read-only, Forgejo sign-in (`web/auth.py`), server-drawn SVG charts (`web/charts.py`); pages Overview, bot detail, Strategies, strategy detail, Walk-forward, Suggestions, Confidence, Book, Markets (`/markets`, `/links`, `/markets/book`), Coverage, Guide, Data, Runs; `/guide` is the reading order (see The site) |
 | `lab/tests/` | pytest; the DB tests need `DATABASE_URL` pointing at a throwaway database |
 | `Dockerfile`, `lab/requirements.txt` | The `trader` image |
 | `.github/workflows/image.yml` | CI: build, migrate twice, tests, every strategy loads; on master also push to GHCR |
@@ -276,6 +276,11 @@ The event-contract paper league's accounts (`paper-<family>-<variant>`) get watc
 | `trader_candle_age_seconds`, `trader_coverage_age_seconds`, `trader_coverage_series` | `exchange` | Newest stored candle, newest backfill write, series stored |
 | `trader_futures_age_seconds` | `kind`, `exchange` | Newest funding (`funding`) or open interest (`open_interest`) row |
 | `trader_suggestions` | `kind` | Open suggestions |
+| `trader_markets_sweep_age_seconds`, `trader_markets_sweep_ok` | `venue` | Since the newest successful recorder sweep ended, and 1 when the newest sweep succeeded. A venue reports while it has a sweep in the last 7 days |
+| `trader_markets_sweeps_1h`, `trader_markets_sweeps_failed_1h` | `venue` | Recorder sweeps started in the last hour, and those that failed (an adapter or venue error each) |
+| `trader_markets_sweep_seen`, `trader_markets_sweep_changes`, `trader_markets_sweep_duration_seconds` | `venue` | The newest successful sweep's open outcomes, changed quotes written, and run time |
+| `trader_markets_links` | `source` (`rule`, `llm`), `status` | Cross-venue links |
+| `trader_paper_equity`, `trader_paper_capital`, `trader_paper_open_positions`, `trader_paper_marked_age_seconds` | `account` | Each marked paper account's equity, starting capital, open positions and time since its last mark |
 
 ## Troubleshooting
 
