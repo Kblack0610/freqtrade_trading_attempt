@@ -92,7 +92,7 @@ def render(family: Path) -> dict[str, str]:
             name = cfg["prefix"] + key
             args = ", ".join(f"{k}={json.dumps(v)}" for k, v in spec["args"].items())
             out[f"{name}.py"] = TEMPLATE.format(
-                **common, name=name, extra=f"# lab/patterns.py sha256 {digest}\n", imports="import patterns",
+                **common, name=name, extra=f"# lab/patterns.py sha256 {digest}\n", imports="from lab import patterns",
                 doc=f"Chart-pattern family: enter long on patterns.{spec['call']}, on the close that completes it.",
                 signal=f"patterns.{spec['call']}(dataframe, {args}).astype(int)")
     else:

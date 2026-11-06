@@ -9,8 +9,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-import analyze
-import metrics
+from lab import analyze, metrics
 
 TODAY = dt.date(2026, 11, 4)
 REPO = Path(__file__).resolve().parents[2]

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Link the same event across venues: rules first, then LLM proposals, then confirmation by resolution.
 
-  python -m markets.links [--no-llm]
+  python -m lab.markets.links [--no-llm]
 
 Rules are exact and confirm a link when they make it. The LLM, reached through the LiteLLM gateway with a scoped key
 (LITELLM_API_KEY; base URL and model in lab/markets.toml [links.llm]), only proposes: its links stay `proposed` until
@@ -28,8 +28,8 @@ from zoneinfo import ZoneInfo
 
 import requests
 
-from db import connect
-from markets.recorder import load_config
+from lab.db import connect
+from lab.markets.recorder import load_config
 
 EASTERN = ZoneInfo("America/New_York")
 MONTHS = {m: i for i, m in enumerate(("JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV",

@@ -45,15 +45,12 @@ from functools import cache
 from pathlib import Path
 from typing import Protocol
 
-import numpy as np
 import pandas as pd
 from psycopg.types.json import Jsonb
 
-import metrics
-import book
-import confidence
-import suggest
-from db import connect
+from lab import metrics, book, confidence, suggest
+from lab.db import connect
+from lab.util import finite, utc
 
 REPO = Path(os.environ.get("REPO", "/repo"))
 RESULTS = Path(os.environ.get("LAB_RESULTS", "/lab"))
@@ -241,7 +238,7 @@ class Cli:
             s = load_backtest_stats(Path(d))["strategy"][strategy]
             trades = load_backtest_data(Path(d), strategy)
         return {"ok": True, "error": None, "duration_s": time.monotonic() - t0, "trades": trades,
-                "bt_start": metrics.utc(s["backtest_start"]), "bt_end": metrics.utc(s["backtest_end"]),
+                "bt_start": utc(s["backtest_start"]), "bt_end": utc(s["backtest_end"]),
                 "start_balance": float(s["starting_balance"]), "final_balance": float(s["final_balance"]),
                 "max_drawdown": float(s.get("max_drawdown_account") or 0.0)}
 
@@ -324,18 +321,7 @@ def store_chunk(conn, task: dict, res: dict, run_id: int) -> None:
         if trades is not None and len(trades):
             with conn.cursor().copy(f"COPY backtest_trades (chunk_id, {', '.join(TRADE_COLS)}) FROM STDIN") as cp:
                 for row in trades[TRADE_COLS].itertuples(index=False):
-                    cp.write_row([chunk_id, *[None if isinstance(v, float) and math.isnan(v) else v for v in row]])
-
-
-def finite(v):
-    """jsonb has no NaN or Infinity, which Python's json writes, so a non-finite number is stored as null."""
-    if isinstance(v, float):
-        return v if math.isfinite(v) else None
-    if isinstance(v, dict):
-        return {k: finite(x) for k, x in v.items()}
-    if isinstance(v, (list, tuple)):
-        return [finite(x) for x in v]
-    return v
+                    cp.write_row([chunk_id, *map(finite, row)])
 
 
 def store_bias(conn, strategy: str, kind: str, file_hash: str, res: dict) -> None:
@@ -457,7 +443,7 @@ def store_drift(conn, task: dict, res: dict) -> None:
     cols = ", ".join(DRIFT_COLS)
     conn.execute(f"INSERT INTO drift ({cols}) VALUES ({', '.join(['%s'] * len(DRIFT_COLS))}) ON CONFLICT (bot) DO UPDATE"
                  " SET " + ", ".join(f"{c} = EXCLUDED.{c}" for c in DRIFT_COLS[1:]) + ", computed_at = now()",
-                 [clean(row.get(c)) for c in DRIFT_COLS])
+                 [finite(row.get(c)) for c in DRIFT_COLS])
 
 
 def load_series(conn) -> dict[tuple[str, str], tuple[pd.DataFrame, pd.DataFrame]]:
@@ -594,16 +580,8 @@ def regime_rows(close: pd.Series) -> list[dict]:
     if close.empty:
         return []
     r = metrics.regimes(close)
-    return [{k: (None if isinstance(v, float) and math.isnan(v) else v) for k, v in row.items()}
+    return [finite(row)
             for row in r.to_dict("records")]
-
-
-def clean(v):
-    if isinstance(v, (np.floating, float)):
-        return None if not math.isfinite(v) else float(v)
-    if isinstance(v, np.integer):
-        return int(v)
-    return v
 
 
 def insert_many(conn, table: str, rows: list[dict], cols: list[str]) -> None:
@@ -611,7 +589,7 @@ def insert_many(conn, table: str, rows: list[dict], cols: list[str]) -> None:
         return
     with conn.cursor().copy(f"COPY {table} ({', '.join(cols)}) FROM STDIN") as cp:
         for r in rows:
-            cp.write_row([clean(r.get(c)) for c in cols])
+            cp.write_row([finite(r.get(c)) for c in cols])
 
 
 WINDOW_COLS = ["strategy", "exchange", "win", "days", "start_day", "end_day", "trades", "total_return", "cagr", "sharpe",

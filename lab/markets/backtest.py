@@ -42,12 +42,11 @@ import pyarrow.parquet as pq
 from psycopg.types.json import Jsonb
 from pyarrow import fs as pafs
 
-import confidence
-import metrics
-import suggest
-from markets import fees
-from markets.recorder import load_config
-from markets.venue import Resolution
+from lab import confidence, metrics, suggest
+from lab.markets import fees
+from lab.markets.recorder import load_config
+from lab.markets.venue import Resolution
+from lab.util import finite
 
 BOOK = ["market_id", "ts", "bid", "ask", "depth_yes", "depth_no"]
 SIDES = ("yes", "no")
@@ -254,7 +253,7 @@ def evaluate(trades: pd.DataFrame, start: dt.datetime, end: dt.datetime, wallet:
     w = metrics.window_metrics(daily, trades, seed)
     ev = confidence.interval(trades["profit_ratio"], seed, ccfg)
     dsr = metrics.deflated_sharpe(w["_sr_daily"], w["days"], w["_skew"], w["_kurt"], trials)
-    m = {k: None if isinstance(v, float) and not math.isfinite(v) else v.isoformat() if isinstance(v, dt.date) else v
+    m = {k: v.isoformat() if isinstance(v, dt.date) else finite(v)
          for k, v in w.items() if not k.startswith("_")}
     return {"metrics": m, "interval": ev, "dsr": dsr}
 

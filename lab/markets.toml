@@ -8,11 +8,11 @@ prefix = "quotes"
 # The first run with no earlier sweep reads resolutions this far back; later runs overlap the last one by this.
 resolutions_lookback_h = 1
 # What a run with no venue named sweeps. The 5-min CronJob runs it bare, so a venue joins here only once its sweep
-# fits that cadence alongside Kalshi's 3 to 4.5 min; the others run by name (python -m markets.recorder manifold).
+# fits that cadence alongside Kalshi's 3 to 4.5 min; the others run by name (python -m lab.markets.recorder manifold).
 default_venues = ["kalshi"]
 
 [history]
-# python -m markets.history (lab/markets/history.py). Objects: <recorder bucket>/<prefix>/<job>/venue=<v>/date=<d>.parquet
+# python -m lab.markets.history (lab/markets/history.py). Objects: <recorder bucket>/<prefix>/<job>/venue=<v>/date=<d>.parquet
 prefix = "history"
 # A run stops between pages (settled) or settle dates (bars, trades) once it has taken this long; the next resumes.
 budget_min = 50
@@ -175,7 +175,7 @@ share = 0.10
 rounding = "none"
 
 [families]
-# python -m markets.families <family> (lab/markets/families.py). Each family below is a grid: a list is an axis, a
+# python -m lab.markets.families <family> (lab/markets/families.py). Each family below is a grid: a list is an axis, a
 # list of tables merges each table into the variant, anything else is fixed. Every variant is a trial, and the
 # deflated Sharpe counts them all, so an axis is added only when its answer would change what trades.
 # The window when no --start is given: this many days before --end.
@@ -224,7 +224,7 @@ hours = 168
 edge = 0.06
 
 [paper]
-# python -m markets.paper (lab/markets/paper.py): each variant of each family here is one paper account. Only families
+# python -m lab.markets.paper (lab/markets/paper.py): each variant of each family here is one paper account. Only families
 # that need no fit and no key run here (lab/markets/paper.py docstring); the recorder's books are Kalshi only.
 venues = ["kalshi"]
 families = ["longshot"]

@@ -18,7 +18,8 @@ import time
 from pathlib import Path
 from typing import Protocol
 
-from db import connect
+from lab.db import connect
+from lab.util import utc
 
 REPO = Path(os.environ.get("REPO", "/repo"))
 VENUES = os.environ.get("FUTURES_EXCHANGES", "okx kucoin").split()
@@ -77,10 +78,6 @@ def pairs_of(exchange: str) -> list[str]:
 
 def ms(t: dt.datetime) -> int:
     return int(t.timestamp() * 1000)
-
-
-def utc(m: int) -> dt.datetime:
-    return dt.datetime.fromtimestamp(m / 1000, dt.timezone.utc)
 
 
 def collect_funding(v: Venue, conn, exchange: str, symbol: str, now: int) -> int:

@@ -21,8 +21,9 @@ from typing import Callable
 
 from psycopg.types.json import Jsonb
 
-from db import connect
-from league import roster_rows
+from lab.db import connect
+from lab.league import roster_rows
+from lab.util import utc
 
 ROSTER = Path(os.environ.get("LEAGUE_ROSTER", "/etc/freqtrade-league/roster.tsv"))
 # Pod N of the StatefulSet answers at <set>-N.<service>; both names default to freqtrade-league.
@@ -41,25 +42,13 @@ def http_fetch(i: int, path: str, post: bool = False) -> object:
         return json.load(resp)
 
 
-def ms(value: int | None) -> dt.datetime | None:
-    return None if value is None else dt.datetime.fromtimestamp(value / 1000, dt.timezone.utc)
-
-
-def utc(value: str | None) -> dt.datetime | None:
-    """Freqtrade's 'YYYY-MM-DD HH:MM:SS' strings are UTC with no offset."""
-    if not value:
-        return None
-    t = dt.datetime.fromisoformat(value)
-    return t if t.tzinfo else t.replace(tzinfo=dt.timezone.utc)
-
-
 def trade_row(t: dict) -> dict:
     return {
         "trade_id": t["trade_id"],
-        "open_date": ms(t.get("open_timestamp")) or utc(t["open_date"]),
+        "open_date": utc(t.get("open_timestamp")) or utc(t["open_date"]),
         "pair": t["pair"],
         "is_open": bool(t["is_open"]),
-        "close_date": ms(t.get("close_timestamp")) or utc(t.get("close_date")),
+        "close_date": utc(t.get("close_timestamp")) or utc(t.get("close_date")),
         "open_rate": t.get("open_rate"),
         "close_rate": t.get("close_rate"),
         "amount": t.get("amount"),
@@ -86,7 +75,7 @@ def snapshot_row(cfg: dict, prof: dict, bal: dict) -> dict:
         "max_drawdown_pct": None if mdd is None else 100 * mdd,
         "profit_factor": prof.get("profit_factor"),
         "balance_total": bal.get("total"),
-        "bot_start": ms(prof.get("bot_start_timestamp")) or utc(prof.get("bot_start_date")),
+        "bot_start": utc(prof.get("bot_start_timestamp")) or utc(prof.get("bot_start_date")),
         "error": None if cfg.get("dry_run") is True else "NOT DRY RUN",
         "raw": Jsonb({"profit": prof, "balance": {k: v for k, v in bal.items() if k != "currencies"}}),
     }

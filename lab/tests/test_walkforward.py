@@ -3,9 +3,8 @@ import json
 
 import pytest
 
-import analyze
-import metrics
-import walkforward as wf
+from lab import analyze, metrics
+from lab import walkforward as wf
 from test_analyze import REPO
 
 TODAY = dt.date(2026, 11, 4)
@@ -177,7 +176,7 @@ def test_a_fold_hyperopt_could_not_tune_is_ok_and_keeps_its_base(wlab, monkeypat
 
 
 def test_retune_rows_come_from_stored_folds(wlab, monkeypatch):
-    import suggest
+    from lab import suggest
 
     monkeypatch.setattr(wf, "ONLY", {"Live"})
     wf.main(FakeRunner(), TODAY)

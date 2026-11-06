@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The event-contract paper league: strategy families trade paper money against the live recorded books.
 
-  python -m markets.paper [--venue kalshi]     # one pass; the CronJob runs it after each recorder sweep
+  python -m lab.markets.paper [--venue kalshi]     # one pass; the CronJob runs it after each recorder sweep
 
 Each variant of each family in `[paper] families` (lab/markets.toml) is one account with `[paper] capital`. A pass:
 1. Settles every open fill whose market has a resolution, with backtest.payout and fees.settlement.
@@ -30,11 +30,11 @@ from collections import namedtuple
 import pandas as pd
 from psycopg.types.json import Jsonb
 
-from db import connect
-from markets import backtest, fees
-from markets.backtest import Market
-from markets.families import Longshot, variants
-from markets.recorder import load_config
+from lab.db import connect
+from lab.markets import backtest, fees
+from lab.markets.backtest import Market
+from lab.markets.families import Longshot, variants
+from lab.markets.recorder import load_config
 
 UTC = dt.timezone.utc
 FAMILIES = {"longshot": Longshot}

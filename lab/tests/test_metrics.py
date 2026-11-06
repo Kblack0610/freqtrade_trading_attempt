@@ -5,14 +5,15 @@ import numpy as np
 import pandas as pd
 import pytest
 
-import metrics
+from lab import metrics
+from lab.util import utc
 
 
 FEE = 0.002  # round trip
 
 
 def trades(*rows) -> pd.DataFrame:
-    return pd.DataFrame([{"open_date": metrics.utc(o), "close_date": metrics.utc(c), "open_rate": 100.0,
+    return pd.DataFrame([{"open_date": utc(o), "close_date": utc(c), "open_rate": 100.0,
                           "close_rate": 100.0 * (1 + p / 100 + FEE), "min_rate": 100.0 + min(p, 0), "profit_abs": p, "profit_ratio": p / 100}
                          for o, c, p in rows])
 
@@ -142,7 +143,7 @@ def test_regimes_need_200_days_for_a_trend():
 
 
 def test_drift_matches_entries_within_a_candle():
-    t = metrics.utc
+    t = utc
     live = pd.DataFrame({"pair": ["BTC/USD", "BTC/USD", "ETH/USD"],
                          "open_date": [t("2026-11-01 10:02"), t("2026-11-02 09:00"), t("2026-11-02 12:00")],
                          "is_open": [False, False, True], "profit_ratio": [0.01, -0.02, 0.0], "profit_abs": [3.0, -6.0, 0.0]})

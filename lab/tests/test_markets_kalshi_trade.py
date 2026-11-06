@@ -4,8 +4,8 @@ import pytest
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519, padding, rsa
 
-from markets import kalshi_trade
-from markets.kalshi_trade import KalshiDemo, NotDemo
+from lab.markets import kalshi_trade
+from lab.markets.kalshi_trade import KalshiDemo, NotDemo
 
 DEMO = {"base_url": "https://external-api.demo.kalshi.co/trade-api/v2", "timeout_s": 5}
 

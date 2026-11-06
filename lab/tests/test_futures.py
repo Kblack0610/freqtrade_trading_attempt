@@ -1,6 +1,7 @@
 import datetime as dt
 
-import futures
+from lab import futures
+from lab.util import utc
 
 UTC = dt.timezone.utc
 DAY = futures.DAY_MS
@@ -43,7 +44,7 @@ def test_funding_walks_forward_in_windows_and_resumes_from_the_newest_row(conn, 
     assert futures.collect(v, conn, "kucoin", ["BTC/USDT", "SOL/USDT"], now)
     (pair, n, first, last), = stored(conn, "funding_rates")
     assert pair == "BTC/USDT:USDT" and n == 60 * 3 + 1  # SOL has no swap listed, so it is skipped
-    assert first == start + dt.timedelta(days=10) and last == futures.utc(now)
+    assert first == start + dt.timedelta(days=10) and last == utc(now)
     assert sum(c[0] == "funding" for c in v.calls) == 3  # 70 days in 30-day windows
 
     v.calls.clear()
@@ -77,7 +78,7 @@ def test_open_interest_overlaps_without_duplicates_and_only_kucoin_gets_a_since(
 
 def test_one_failing_swap_is_reported_and_the_rest_are_kept(conn, monkeypatch):
     now = futures.ms(dt.datetime(2026, 11, 5, tzinfo=UTC))
-    monkeypatch.setattr(futures, "FUNDING_FROM", futures.utc(now - 5 * DAY))
+    monkeypatch.setattr(futures, "FUNDING_FROM", utc(now - 5 * DAY))
     v = FakeVenue(listed=now - 5 * DAY, now=now, broken={"BAD/USDT:USDT"})
     assert not futures.collect(v, conn, "okx", ["BAD/USDT", "BTC/USDT"], now)
     assert [r[0] for r in stored(conn, "funding_rates")] == ["BTC/USDT:USDT"]

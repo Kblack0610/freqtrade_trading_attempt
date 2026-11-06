@@ -11,8 +11,8 @@ import datetime as dt
 from typing import Iterator
 from zoneinfo import ZoneInfo
 
-from markets.api import Api, num
-from markets.venue import Quote, Resolution
+from lab.markets.api import Api, num
+from lab.markets.venue import Quote, Resolution
 
 EASTERN = ZoneInfo("America/New_York")
 

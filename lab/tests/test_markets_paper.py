@@ -4,9 +4,9 @@ import datetime as dt
 import pandas as pd
 import pytest
 
-import watcher
-from markets import backtest, paper
-from markets.recorder import load_config
+from lab import watcher
+from lab.markets import backtest, paper
+from lab.markets.recorder import load_config
 
 NOW = dt.datetime(2026, 11, 6, 12, tzinfo=dt.timezone.utc)
 BAND = {"stake": 10, "max_spread": 0.05, "hours": 24, "bands": [{"buy": "no", "lo": 0.01, "hi": 0.10}]}

@@ -87,7 +87,7 @@ def candles(z: zipfile.ZipFile, pair: str, timeframe: str, floor: str | None = N
 
 
 def main() -> int:
-    import backfill
+    from lab import backfill
 
     z = zipfile.ZipFile(RangeFile(sys.argv[1:]))
     series = [(p, tf) for p in backfill.pairs_of("kraken") for tf in MINUTES if tf in backfill.TIMEFRAMES]

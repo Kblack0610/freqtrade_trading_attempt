@@ -1,6 +1,6 @@
 import datetime as dt
 
-import pairs
+from lab import pairs
 
 D = dt.date
 
