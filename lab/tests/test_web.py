@@ -1,5 +1,6 @@
 import datetime as dt
 import json
+import re
 import urllib.parse
 
 import pytest
@@ -74,13 +75,14 @@ def seed(c):
               "('Strategy001', 'recursive', 'h1', NULL, NULL)")
     c.execute("INSERT INTO data_coverage (exchange, pair, timeframe, first_ts, last_ts, rows, oldest_reached) "
               "VALUES ('binanceus', 'BTC/USD', '5m', '2019-09-01', %s, 700000, true)", (NOW,))
+    c.execute("INSERT INTO open_interest (exchange, pair, ts, value_usd) VALUES ('okx', 'BTC/USDT:USDT', '2026-08-03', 3.6e9)")
 
 
 def test_healthz_needs_no_sign_in(site):
     assert site[1].get("/healthz").text == "ok"
 
 
-@pytest.mark.parametrize("path", ["/", "/bots/x", "/strategies", "/strategies/x", "/suggestions", "/confidence", "/book", "/guide", "/data", "/runs", "/runs/1"])
+@pytest.mark.parametrize("path", ["/", "/bots/x", "/strategies", "/strategies/x", "/suggestions", "/confidence", "/book", "/coverage", "/guide", "/data", "/runs", "/runs/1"])
 def test_signed_out_goes_to_login(site, path):
     r = site[1].get(path)
     assert r.status_code == 303 and r.headers["location"] == "/login"
@@ -162,7 +164,7 @@ def test_every_page_renders_with_data(conn, signed_in):
              "/strategies/Strategy001": ["binanceus", "<svg", "3.2%", "Strategy002: 0.83", "bull", "ETH/USD",
                                          "exit 2: boom", "not checked", "clean", "31%", "1.45%", "0.25%", "20%", "12.3%",
                                          "-5.0%", "-27.1%", "4321"],
-             "/data": ["BTC/USD", "700,000", "2019-09-01"],
+             "/data": ["BTC/USD", "700,000", "2019-09-01", "Open interest", "<td>okx</td>", "2026-08-03"],
              "/runs": ["2026-11-04 03:00:00", "ok", "60 min"],
              "/runs/1": ["exit 2: boom", "binanceus: no 1m candles: Scalp", "4 strategies", "Strategy001"]}
     for path, needles in pages.items():
@@ -202,7 +204,7 @@ def test_overview_warns_when_a_bot_is_not_dry_run(conn, signed_in):
 
 
 def test_pages_render_on_an_empty_database(conn, signed_in):
-    for path in ("/", "/data", "/runs", "/strategies", "/suggestions", "/walkforward"):
+    for path in ("/", "/data", "/runs", "/strategies", "/suggestions", "/walkforward", "/coverage"):
         assert signed_in[1].get(path).status_code == 200, path
 
 
@@ -256,7 +258,7 @@ def test_until_scored_both_pages_show_how_far_the_population_is(conn, signed_in)
 def test_guide_lists_every_page_in_reading_order(conn, signed_in):
     body = signed_in[1].get("/guide").text
     order = [body.index(f'<li><a href="{p}">') for p in ("/", "/data", "/strategies", "/walkforward", "/suggestions",
-                                                          "/confidence", "/book", "/runs")]
+                                                          "/confidence", "/book", "/coverage", "/runs")]
     assert order == sorted(order) and "needs 20 strategies with at least 30" in body and "trial register" in body
 
 
@@ -306,3 +308,66 @@ def test_walkforward_pools_the_months_with_intervals_and_efficiency(conn, signed
     for needle in ('id="walk-forward"', "2026-09", "2026-03-05 to 2026-09-01", "hyperopt exit 2: boom", "beat as is in 1 of 2"):
         assert needle in page, needle
     assert "Not a walk-forward candidate yet" in signed_in[1].get("/strategies/Planted").text
+
+
+def families():
+    from web import app as app_mod
+
+    return app_mod.suggest.load_config(app_mod.FAMILIES)
+
+
+def test_every_strategy_class_has_a_family():
+    from web import app as app_mod
+
+    toml, on_disk = families(), app_mod.strategy_classes()
+    assert {"Strategy001", "ADXMomentum", "DevilStra"} <= on_disk and "StrategyHelper" not in on_disk
+    research = app_mod.STRATEGY_CLASS.findall((app_mod.HERE.parent / "lab/research/BustShort.py").read_text())
+    assert set(toml["strategies"]) == on_disk | set(research), "add the class to lab/families.toml, or drop a stale line"
+    assert {t["family"] for t in toml["strategies"].values()} <= set(toml["families"])
+    assert all(t["inputs"] for t in toml["strategies"].values())
+
+
+def test_coverage_joins_the_families_to_the_results(conn, signed_in):
+    seed(conn)
+    conn.execute("DELETE FROM trials WHERE strategy IN ('Strategy001', 'Mystery')")  # keeps the migration's seed rows
+    conn.execute("INSERT INTO strategies (name, file, file_hash, timeframe) VALUES ('Mystery', 'x.py', 'h4', '5m')")
+    for name, exchange, trades in (("Strategy001", "binanceus", 120), ("Strategy001", "kraken", 30), ("Mystery", "binanceus", 7)):
+        conn.execute("INSERT INTO strategy_windows (strategy, exchange, win, days, trades) VALUES (%s, %s, 'all', 900, %s)",
+                     (name, exchange, trades))
+    for month, ok in ((8, False), (9, True), (10, True)):
+        start = dt.date(2026, month, 1)
+        conn.execute("INSERT INTO walkforward (strategy, exchange, fold_start, train_start, test_end, cache_key, ok) "
+                     "VALUES ('Strategy001', 'binanceus', %s, %s, %s, 'k', %s)", (start, start - dt.timedelta(days=180), start, ok))
+    conn.execute("INSERT INTO trials (strategy, exchange, variant) VALUES ('Strategy001', 'binanceus', 'as-is'), "
+                 "('Strategy001', 'binanceus', 'p1'), ('Strategy001', 'kraken', 'as-is'), ('Mystery', 'binanceus', 'as-is')")
+    gates = [{"gate": g, "pass": True} for g in "abcde"]
+    for exchange, passed, oos in (("binanceus", 3, 42), ("kraken", 4, 8)):
+        conn.execute("INSERT INTO confidence (strategy, exchange, score, ready, passed, oos_trades, gates) "
+                     "VALUES ('Strategy001', %s, NULL, false, %s, %s, %s)", (exchange, passed, oos, Jsonb(gates)))
+    trend = sum(t["family"] == "trend" for t in families()["strategies"].values())
+    body = signed_in[1].get("/coverage").text
+    for needle in (f'1 of {trend}<br><span class="muted">2 months, 2 trials</span>',  # binanceus: a failed fold is no month
+                   f'1 of {trend}<br><span class="muted">0 months, 1 trials</span>',  # kraken
+                   f'1 of {trend}<br><span class="muted">2 months, 3 trials</span>',  # all venues
+                   "binanceus, kraken", ">150<", ">50<", "4 of 5 on kraken", "Hyperopt picks which raw columns cross",
+                   '<td title="In the results only, not on disk.">gone</td>'):
+        assert needle in body, needle
+    # Mystery has results but no file and no toml line: gone, not untagged, and listed after every family.
+    assert re.search(r"<td>Mystery</td>\s*<td>gone</td>", body) and ">untagged<" not in body
+    assert body.index("/strategies/Strategy001") < body.index(">Mystery<")
+
+
+def test_coverage_on_an_empty_database_has_no_untagged_row(conn, signed_in):
+    body = signed_in[1].get("/coverage").text
+    assert ">untagged<" not in body and ">Diamond</a>" in body and ">BustShort<" in body
+
+
+def test_a_strategy_class_missing_from_the_toml_shows_untagged(conn, signed_in, tmp_path, monkeypatch):
+    app_mod, client = signed_in
+    (tmp_path / "Strategy001.py").write_text("class Strategy001(IStrategy):\n    pass\n")
+    (tmp_path / "sub").mkdir()
+    (tmp_path / "sub" / "Ghost.py").write_text("class Ghost(IStrategy):\n    pass\n\n\nclass Helper:\n    pass\n")
+    monkeypatch.setattr(app_mod, "STRATEGY_DIR", tmp_path)
+    assert app_mod.strategy_classes() == {"Strategy001", "Ghost"}
+    body = client.get("/coverage").text
+    assert '<td class="down">untagged</td>' in body and ">Ghost</a>" in body and ">Helper<" not in body
