@@ -19,7 +19,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from psycopg.rows import dict_row
@@ -65,6 +65,18 @@ LEFT JOIN drift d ON d.bot = b.name
 """
 BOT = BOTS + "WHERE b.name = %s"
 BOTS += "ORDER BY s.profit_all_pct DESC NULLS LAST, b.name"
+# Every bot's newest snapshot with its open trades, one row per trade (or one empty row for a bot with none).
+LIVE = """
+SELECT b.name, b.exchange, b.strategy, s.ts, s.error, s.raw->>'timeframe' AS timeframe, s.raw->'candles' AS candles,
+       t.trade_id, t.pair, t.open_date, t.open_rate, t.stake_amount, t.profit_ratio, t.profit_abs,
+       (t.raw->>'current_rate')::double precision AS last_price
+FROM bots b
+LEFT JOIN LATERAL (SELECT * FROM bot_snapshots WHERE bot = b.name ORDER BY ts DESC LIMIT 1) s ON true
+LEFT JOIN bot_trades t ON t.bot = b.name AND t.is_open
+ORDER BY b.name, t.open_date
+"""
+LIVE_POLL = "30s"  # the table re-fetches this often; ingest writes the numbers, so this only bounds how late they show
+TF_SECONDS = {"m": 60, "h": 3600, "d": 86400, "w": 604800}
 # The last snapshot of each hour, so the chart's points stay one per hour however often ingest runs.
 BOT_SERIES = """
 SELECT DISTINCT ON (date_trunc('hour', ts)) ts, profit_all_pct FROM bot_snapshots
@@ -305,6 +317,8 @@ class SignIn(Exception):
 
 @app.exception_handler(SignIn)
 def _sign_in(request: Request, _exc: SignIn):
+    if request.headers.get("HX-Request"):  # a poll: htmx loads /login as a page instead of swapping it into the table
+        return Response(status_code=204, headers={"HX-Redirect": "/login"})
     return RedirectResponse("/login", status_code=303)
 
 
@@ -400,6 +414,47 @@ def overview(request: Request):
                 coverage=rows(COVERAGE_BY_EXCHANGE), last_run=(rows(RUNS) or [None])[0],
                 top=[r for r in rows(LEADERBOARD, ("365d",)) if not r["biased"] and r["trades"] >= MIN_TRADES][:5],
                 suggested=rows("SELECT kind, count(*) AS n FROM suggestions GROUP BY kind"))
+
+
+def tf_seconds(tf: str | None) -> int | None:
+    """A freqtrade timeframe ("5m", "1h") in seconds."""
+    if not tf or tf[-1] not in TF_SECONDS or not tf[:-1].isdigit():
+        return None
+    return int(tf[:-1]) * TF_SECONDS[tf[-1]]
+
+
+def live_view() -> dict:
+    """Each bot with its open positions, and the totals over them. A candle is late when the bot's newest one was
+    more than two timeframes old at snapshot time: its prices had stopped moving, whatever the snapshot age says."""
+    bots: dict[str, dict] = {}
+    for r in rows(LIVE):
+        b = bots.setdefault(r["name"], {k: r[k] for k in ("name", "exchange", "strategy", "ts", "error", "timeframe")}
+                            | {"positions": []})
+        if r["trade_id"] is None:
+            continue
+        ms = (r["candles"] or {}).get(r["pair"])
+        candle = dt.datetime.fromtimestamp(ms / 1000, dt.timezone.utc) if ms else None
+        step = tf_seconds(b["timeframe"])
+        r["candle"] = candle
+        r["candle_late"] = bool(candle and step and b["ts"] and (b["ts"] - candle).total_seconds() > 2 * step)
+        b["positions"].append(r)
+    found = list(bots.values())
+    open_ = [p for b in found for p in b["positions"]]
+    return {"bots": found, "poll": LIVE_POLL, "positions": len(open_),
+            "unrealized": sum(p["profit_abs"] or 0 for p in open_), "stake": sum(p["stake_amount"] or 0 for p in open_),
+            "newest": max((b["ts"] for b in found if b["ts"]), default=None)}
+
+
+@app.get("/live", response_class=HTMLResponse)
+def live(request: Request):
+    user_of(request)
+    return page(request, "live.html", **live_view())
+
+
+@app.get("/live/rows", response_class=HTMLResponse)
+def live_rows(request: Request):
+    user_of(request)
+    return page(request, "_live.html", **live_view())
 
 
 @app.get("/bots/{name}", response_class=HTMLResponse)

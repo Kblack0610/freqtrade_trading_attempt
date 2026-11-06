@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}trader{% endblock %} - trader</title>
 <link rel="stylesheet" href="/static/style.css">
+<script src="/static/htmx.min.js" defer></script>
 </head>
 <body>
 <header class="top">
@@ -12,6 +13,7 @@
   {% if user %}
   <nav>
     <a href="/" {% if request.url.path == "/" %}aria-current="page"{% endif %}>Overview</a>
+    <a href="/live" {% if request.url.path.startswith("/live") %}aria-current="page"{% endif %}>Live</a>
     <a href="/strategies" {% if request.url.path.startswith("/strategies") %}aria-current="page"{% endif %}>Strategies</a>
     <a href="/walkforward" {% if request.url.path.startswith("/walkforward") %}aria-current="page"{% endif %}>Walk-forward</a>
     <a href="/suggestions" {% if request.url.path.startswith("/suggestions") %}aria-current="page"{% endif %}>Suggestions</a>

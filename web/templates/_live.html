@@ -1,0 +1,31 @@
+<section class="tiles">
+  <div class="tile"><span class="label">Open positions</span><span class="value">{{ positions }}</span></div>
+  <div class="tile"><span class="label">Unrealized</span><span class="value {{ unrealized | tone }}">{{ unrealized | num(2, " USD") }}</span></div>
+  <div class="tile"><span class="label">At stake</span><span class="value">{{ stake | num(2, " USD") }}</span></div>
+  <div class="tile"><span class="label">Newest snapshot</span><span class="value {{ 'down' if stale(newest) }}">{{ newest | ago }}</span></div>
+</section>
+{% if bots %}
+<div class="scroll">
+<table>
+  <thead><tr><th>Bot</th><th>Pair</th><th>Opened</th><th class="n">Entry</th><th class="n">Last price</th><th class="n">Stake</th><th class="n">Unrealized</th><th class="n">USD</th><th>Candle</th><th>Snapshot</th></tr></thead>
+  <tbody>
+  {% for b in bots %}
+  {% set snap %}<td class="{{ 'down' if b.error or stale(b.ts) }}">{{ "unreachable" if b.error else (b.ts | ago) }}</td>{% endset %}
+  {% for p in b.positions %}
+  <tr>
+    <td><a href="/bots/{{ b.name }}">{{ b.name }}</a></td><td>{{ p.pair }}</td><td>{{ p.open_date | local }}</td>
+    <td class="n">{{ p.open_rate | num(4) }}</td><td class="n">{{ p.last_price | num(4) }}</td>
+    <td class="n">{{ p.stake_amount | num(2) }}</td>
+    <td class="n {{ p.profit_ratio | tone }}">{{ p.profit_ratio | pct(2) }}</td>
+    <td class="n {{ p.profit_abs | tone }}">{{ p.profit_abs | num(2) }}</td>
+    <td class="{{ 'down' if p.candle_late }}" title="{{ b.timeframe or '' }} candles">{{ p.candle | ago if p.candle else "-" }}</td>
+    {{ snap }}
+  </tr>
+  {% else %}
+  <tr class="muted"><td><a href="/bots/{{ b.name }}">{{ b.name }}</a></td><td colspan="8">no open positions</td>{{ snap }}</tr>
+  {% endfor %}
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}<p class="muted">No bots yet: the first update adds them.</p>{% endif %}
