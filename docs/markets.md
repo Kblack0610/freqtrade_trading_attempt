@@ -72,6 +72,26 @@ What the venues serve:
 - `gap`, cross-venue gaps: a market linked by a rule (`market_links`, `confirmed_by = 'rule'`) to a reference venue's market trades when the reference's fair price beats its price by `edge`. A sportsbook's fair price is each book's implied odds divided by their sum, median across books; a binary venue's is its mid. A rule link later rejected by its resolution still trades, because the rule would have traded it. LLM links confirm only by resolving, so gap refuses them, and each rule source is its own variant, so results read per source. 2 variants. It needs the recorder's quotes of the reference venue, so `--book quotes` and a recorded `odds_api` (not yet scheduled).
 - `llm`, the forecaster: forward only. `backtest.replay` refuses any book that starts before its `cutoff` (`[families.llm]`, 2026-11-06: the model states no training cutoff, so the day forward scoring starts). It has no command here; the paper league scores it.
 
+## Paper league
+
+`python -m markets.paper [--venue kalshi]` (same cwd and path as the recorder) is one pass of the paper league; it is meant to run after each recorder sweep. Each variant of each family in `[paper] families` (`lab/markets.toml`) is one account, `paper-<family>-<md5[:8]>`, with `[paper] capital` (1000) of paper money. Results are `paper_accounts` and `paper_orders` (migration 023). A pass:
+
+- Settles every open fill whose market has a resolution, with the backtest's payout and fees.
+- Shows each account the latest recorded book (`outcomes`, the recorder's last quote) of every unresolved open market closing within `horizon_h` (168), but only when the venue's last good sweep finished under `max_book_age_min` (15) ago. A dead recorder means no entries, not entries at old prices.
+- Fills through `backtest.take`, the backtest's own fill model: the spread is crossed and at most `depth_share` of the side's top-of-book size is taken. Fees come from `fees.entry`, so a paper fill and a backtest fill of one book cost the same. Every order is stored, filled or not, so an account enters a market once, as in a backtest. An order the account's cash cannot cover is dropped unstored and asked again next pass.
+- Marks equity: capital, plus realized profit, plus each open position at its exit price (a yes at the bid, a no at one minus the ask) less its cost.
+
+The league runs `longshot` only (8 accounts). `calibration` needs a bars fit each pass, `gap` needs a recorded `odds_api`, and `llm` needs a LiteLLM key. The forecaster's paper scores are its only scores, so it joins once the key is in SOPS. `lab/watcher.py` watches each account for the daily loss limit and runs the kill drill on it; see the README, Watcher. Deploy: a CronJob in home-config `apps/freqtrade/`, not yet scheduled.
+
+## Demo orders
+
+`python -m markets.kalshi_trade {balance,drill [--ticker T]}` is the order path, on the Kalshi demo exchange only. `KalshiDemo` refuses any base URL whose host is not `external-api.demo.kalshi.co` or `demo-api.kalshi.co`, so no config can point it at real money; P9 adds Kalshi to the live path behind that path's own guard. Keys are the demo account's: `KALSHI_DEMO_KEY_ID` and `KALSHI_DEMO_KEY_FILE` (an RSA or Ed25519 PEM).
+
+- Signing (doc, https://docs.kalshi.com/getting_started/api_keys, 2026-11-06): `KALSHI-ACCESS-KEY`, `KALSHI-ACCESS-TIMESTAMP` in epoch ms, and `KALSHI-ACCESS-SIGNATURE`, the base64 signature of timestamp + method + path. The path includes `/trade-api/v2` and drops the query. RSA keys sign with PSS SHA-256 and a digest-length salt.
+- Orders (doc, api-reference create-order-v2, cancel-order-v2, get-order, 2026-11-06): `POST /portfolio/events/orders` takes `side` (`bid` buys yes), with `count` and `price` (dollars) as fixed-point strings. `DELETE /portfolio/events/orders/{id}?market_ticker=T` cancels. `GET /portfolio/orders/{id}` returns `status` (`resting`, `canceled` or `executed`). The legacy `/portfolio/orders` POST is deprecated.
+- The drill picks an open demo market with an ask above `drill_price` (1c), or takes `--ticker`. It rests one yes contract at 1c, post only, reads it back, cancels it and reads it back again, writing each step to `demo_orders`. It exits 1 unless the order was seen resting and then canceled. A POST is never retried, because a timeout may already have placed it.
+- Not yet run against the demo exchange: there is no demo account key in SOPS.
+
 ## Kalshi
 
 API (doc, https://docs.kalshi.com/getting_started/api_environments.md):
@@ -89,7 +109,7 @@ Fees (secondary, quoting the fee schedule PDF effective 2026-07-07; the PDF itse
 - Rounding: the model fee is ceiled to 6 decimals and the overpayment is rebated per order (doc, fee_rounding.md). The backtester takes the fill's `fee_cost` as the authority where it has one, and the fee model is tested against the PDF's own examples once fetched.
 - No deposit, settlement or membership fee (doc, help.kalshi.com fees article, 2026-08-24).
 
-Demo (doc, https://docs.kalshi.com/getting_started/demo_env): REST `https://demo-api.kalshi.co/trade-api/v2`, websocket `wss://demo-api.kalshi.co/trade-api/ws/v2`, account at https://demo.kalshi.co/ with mock funds and separate keys. Demo prices do not track the real book, so P7 uses demo only to prove the order path, never to score a strategy.
+Demo (doc, https://docs.kalshi.com/getting_started/demo_env, rechecked 2026-11-06): REST `https://external-api.demo.kalshi.co/trade-api/v2` (recommended) or `https://demo-api.kalshi.co/trade-api/v2`, websocket `wss://demo-api.kalshi.co/trade-api/ws/v2`, account at https://demo.kalshi.co/ with mock funds and separate keys. Demo prices do not track the real book, so P7 uses demo only to prove the order path, never to score a strategy.
 
 History (doc, historical_data.md): `GET /historical/cutoff` gives the timestamps where records move from the live endpoints to `/historical/markets`, `/historical/markets/{t}/candlesticks` and `/historical/trades`. The live endpoints stop returning them after the move, so a backfill reads both sides of the cutoff. No earliest date is stated and there is no bulk download; P4 found it reaches 2021-06 (see History).
 

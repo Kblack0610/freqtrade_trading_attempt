@@ -12,6 +12,10 @@ way a live breach will:
 
   python lab/watcher.py --drill <bot>       the next pass stops entries, open trades stay managed
   python lab/watcher.py --drill-end <bot>   clear the breach and start entries again
+
+The event-contract paper league's accounts (lab/markets/paper.py) are watched the same way, one row each, read from
+paper_accounts: equity is the last paper pass's mark, and seen_at that pass's time, so a dead paper job ages its rows
+like a dead bot. A drilled account is stopped by its watch row, which the next paper pass obeys; no API is called.
 """
 
 import argparse
@@ -78,8 +82,16 @@ def tick(conn, bots: list[str], day_loss: float, fetch: Fetch, now: dt.datetime)
 
     with conn.cursor(row_factory=dict_row) as cur:
         prev = {r["bot"]: r for r in cur.execute("SELECT * FROM watch").fetchall()}
-    with ThreadPoolExecutor(max_workers=len(bots)) as pool:
+    with ThreadPoolExecutor(max_workers=max(1, len(bots))) as pool:
         seen = list(pool.map(probe, range(len(bots))))
+    for name, capital, equity, marked_at in conn.execute(
+            "SELECT account, capital, equity, marked_at FROM paper_accounts WHERE marked_at IS NOT NULL").fetchall():
+        p = prev.get(name)
+        row = step(p, {"dry_run": True, "state": None, "capital": capital, "equity": equity}, now, day_loss)
+        if p is not None and p["drill_at"] is not None:
+            row["stopped_at"] = row["stopped_at"] or now
+        conn.execute(UPSERT, {"bot": name, **row, "seen_at": marked_at,
+                              "state": "paused" if row["stopped_at"] else "running"})
     for i, (bot, s) in enumerate(zip(bots, seen)):
         if isinstance(s, Exception):
             conn.execute(FAILED, {"bot": bot, "now": now, "error": f"{type(s).__name__}: {s}"[:300]})
@@ -111,7 +123,8 @@ def drill_end(conn, bot: str, bots: list[str], fetch: Fetch) -> None:
     conn.commit()
     if not n:
         sys.exit(f"watcher: {bot!r} has no drill running")
-    fetch(bots.index(bot), "start", True)
+    if bot in bots:  # a paper account has no API: its cleared row is what starts it
+        fetch(bots.index(bot), "start", True)
     print(f"watcher: drill over on {bot}; entries started again")
 
 
