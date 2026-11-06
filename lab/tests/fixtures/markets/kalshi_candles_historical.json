@@ -1,0 +1,55 @@
+{
+ "candlesticks": [
+  {
+   "end_period_ts": 1788674400,
+   "open_interest": "1304.00",
+   "price": {
+    "close": "0.6800",
+    "high": "0.6800",
+    "low": "0.6800",
+    "mean": "0.6800",
+    "open": "0.6800",
+    "previous": null
+   },
+   "volume": "1304.00",
+   "yes_ask": {
+    "close": "0.6700",
+    "high": "0.9900",
+    "low": "0.6600",
+    "open": "0.9900"
+   },
+   "yes_bid": {
+    "close": "0.4800",
+    "high": "0.5100",
+    "low": "0.0000",
+    "open": "0.0000"
+   }
+  },
+  {
+   "end_period_ts": 1788678000,
+   "open_interest": "31219.08",
+   "price": {
+    "close": "0.4400",
+    "high": "0.8600",
+    "low": "0.1700",
+    "mean": "0.4455",
+    "open": "0.6700",
+    "previous": "0.6800"
+   },
+   "volume": "32383.41",
+   "yes_ask": {
+    "close": "0.4400",
+    "high": "0.8900",
+    "low": "0.1700",
+    "open": "0.6700"
+   },
+   "yes_bid": {
+    "close": "0.3800",
+    "high": "0.7500",
+    "low": "0.1600",
+    "open": "0.4800"
+   }
+  }
+ ],
+ "ticker": "KXITFMATCH-26SEP06VANKAM-VAN"
+}

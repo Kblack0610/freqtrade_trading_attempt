@@ -1,0 +1,17 @@
+[
+  {"id": "e912304de2b2ce35b473ce2ecd3d1502", "sport_key": "basketball_nba", "sport_title": "NBA",
+   "commence_time": "2026-11-10T01:00:00Z", "completed": true, "home_team": "Phoenix Suns", "away_team": "San Antonio Spurs",
+   "scores": [{"name": "Phoenix Suns", "score": "104"}, {"name": "San Antonio Spurs", "score": "112"}],
+   "last_update": "2026-11-10T03:31:05Z"},
+  {"id": "aa11", "sport_key": "basketball_nba", "sport_title": "NBA",
+   "commence_time": "2026-11-10T02:00:00Z", "completed": true, "home_team": "Utah Jazz", "away_team": "Denver Nuggets",
+   "scores": [{"name": "Utah Jazz", "score": "99"}, {"name": "Denver Nuggets", "score": "99"}],
+   "last_update": "2026-11-10T04:40:00Z"},
+  {"id": "bb22", "sport_key": "basketball_nba", "sport_title": "NBA",
+   "commence_time": "2026-11-10T03:00:00Z", "completed": false, "home_team": "Los Angeles Lakers", "away_team": "Boston Celtics",
+   "scores": [{"name": "Los Angeles Lakers", "score": "51"}, {"name": "Boston Celtics", "score": "48"}],
+   "last_update": "2026-11-10T04:41:00Z"},
+  {"id": "cc33", "sport_key": "basketball_nba", "sport_title": "NBA",
+   "commence_time": "2026-11-12T00:00:00Z", "completed": false, "home_team": "Miami Heat", "away_team": "Chicago Bulls",
+   "scores": null, "last_update": null}
+]

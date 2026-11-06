@@ -11,13 +11,14 @@ Results go to the `trader` database in the cluster's shared Postgres, which the 
 | Path | What it is |
 |---|---|
 | `user_data/strategies/` | Strategies, found with `--recursive-strategy-search` |
-| `lab/families/` | Staged strategy families, not yet scanned (see Staged families) |
+| `lab/families/` | Staged strategy families, not yet scanned: candles, chart and the FreqAI `ml/` (see Staged families) |
 | `lab/patterns.py` | Causal chart-pattern signals: swing pivots, support and resistance breaks, double tops and bottoms, triangles, flags |
 | `user_data/config.base.json` | Shared config: dry run, 1000 USD wallet, spot, static pair list |
 | `user_data/exchanges/<name>.json` | Per-exchange overlay: name, pair whitelist, pricing quirks; no keys |
 | `lab/league.py` | Bot entrypoint: picks its roster row from the pod ordinal, refuses anything but key-less spot dry run, writes the API config, execs `freqtrade trade` |
 | `lab/pairs.py` | By hand: a research venue's whitelist, its most traded pairs with history since 2022 |
 | `lab/futures.py` | Daily job: funding rates and open interest for the okx and kucoin swaps into `funding_rates` and `open_interest` (see Price data) |
+| `lab/markets/`, `lab/markets.toml` | Event contracts, kept out of the Freqtrade runtime: the venue adapter interface (`venue.py`), read-only adapters for Kalshi, Polymarket US and global, PredictIt, Manifold and The Odds API (sportsbook odds), the cross-venue linker (`links.py`: rules, LLM proposals, confirmation by resolution), the recorder, a 5-min job writing change-only quotes to MinIO parquet and market metadata to Postgres, the history backfill (`history.py`: settled markets, price bars and Kalshi trades from before the recorder started), and the backtester (`backtest.py`, `fees.py`: depth-limited taker fills, per-venue fees, settlement at resolution, scored through `metrics.py` and `confidence.py`; see `docs/markets.md`, Recorder, History and Backtest) |
 | `lab/backfill.py` | Hourly job: price history for every exchange x pair x timeframe into `data/<exchange>/` on the lab PVC, and what it holds into `data_coverage` (see Price data) |
 | `lab/analyze.py` | Nightly job: every strategy x exchange backtested in calendar-year chunks over the whole history, lookahead and recursive bias checks, then the derived tables (see The analysis) |
 | `lab/walkforward.py` | Weekly job: hyperopt on the months before each of the last whole months, then that unseen month backtested as is and tuned (see Walk-forward) |
@@ -162,6 +163,8 @@ Drop the `.py` in `user_data/strategies/` (any subfolder). It must import on the
 
 `lab/families/` holds whole method families waiting to be switched on: `candles/`, one strategy per TA-Lib candlestick pattern that can signal bullish, and `chart/`, one per long signal in `lab/patterns.py`. Each family shares one fixed exit (ROI table, stoploss, time stop), and its `family.toml` holds that exit and every parameter. The strategy files are generated from it: edit the toml or `lab/patterns.py`, then run `python lab/families/generate.py`; `lab/tests/test_families.py` fails while a file is stale. The nightly analysis searches only `user_data/strategies/`, so these add no trials yet; the pre-registered stop rule reads the trial count on 2026-11-07. CI still checks that each one loads and that one of each passes the lookahead check on synthetic prices. Switching a family on is a PR that moves its folder to `user_data/strategies/<family>/` and drops the test that says it is not scanned.
 
+`ml/` is the machine-learning family, hand-written rather than generated: `MLLightGBMBaseline`, a FreqAI LightGBM regressor that predicts the mean close over the next 24 hourly candles and goes long when the prediction clears 1%, with its FreqAI settings in `ml/freqai.json` (30 training days, 7-day windows, `n_jobs` 2: LightGBM's default of one thread per core thrashed for 90 seconds per fit on a loaded hp-victus, against under 5 seconds pinned). It needs lightgbm, which only the ML image has: `ghcr.io/kblack0610/trader-ml`, this same Dockerfile built with `--build-arg FREQTRADE_TAG=2026.9_freqai` (2.7 GB against 1.3 GB), so the bots never run on it. CI builds it and runs `lab/tests/test_ml.py` there, which checks that each 7-day window is predicted only by a model fit before it; the plain image skips that test. It stays off until walk-forward purges trades across fold boundaries, since a 24-candle label spills into the next fold.
+
 ## Price data
 
 `lab/backfill.py` owns the candles; nothing else downloads them. Per exchange and timeframe:
@@ -205,6 +208,9 @@ The first run fetches full history (5m since 2019 on binanceus is the long pole)
 - `014`: `book`, projected return ranges per scored strategy and for holding BTC.
 - `015`: `benchmarks`, the plain alternatives to an active strategy.
 - `018`: `funding_rates` and `open_interest`, measured swap data per exchange, swap symbol and time, written by `lab/futures.py`.
+- `019`: `venues`, `markets`, `outcomes` (each outcome's latest quote), `resolutions` and `market_sweeps` (one row per recorder run), written by `lab/markets/recorder.py`. Quote history is parquet in MinIO, never Postgres.
+- `020`: `market_links` (the same event across venues, proposed, confirmed or rejected) and `market_link_asks` (each market the LLM was asked about), written by `lab/markets/links.py`.
+- `021`: `resolutions.volume` (each settled market's lifetime volume) and `market_backfill` (progress of each history job, per venue and unit), written by `lab/markets/history.py`.
 
  A schema change is a new numbered file; never edit an applied one.
 

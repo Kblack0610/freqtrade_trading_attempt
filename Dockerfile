@@ -1,5 +1,6 @@
 # The trader image: the pinned Freqtrade release plus this repo, so the bots, the jobs
 # and the site all run one artifact. home-config pins it by digest.
+# FREQTRADE_TAG=2026.9_freqai builds the ML image (trader-ml) for lab/families/ml; the bots never run on it.
 ARG FREQTRADE_TAG=2026.9
 FROM freqtradeorg/freqtrade:${FREQTRADE_TAG}
 

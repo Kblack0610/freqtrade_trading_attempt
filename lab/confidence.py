@@ -90,15 +90,20 @@ def load(conn, cfg: dict, now: dt.datetime | None = None) -> dict:
     return facts
 
 
+def interval(returns, seed: int, cfg: dict) -> dict:
+    """Per-trade net returns in time order with the mean's block-bootstrap interval: what scores() reads. Its callers
+    are walk-forward folds here and event-contract backtests (lab/markets/backtest.py)."""
+    x = np.asarray(returns, dtype=float)
+    lo, hi = metrics.block_mean_ci(x, seed, level=cfg["expectancy_level"])
+    return {"returns": x, "trades": len(x), "mean": float(x.mean()) if len(x) else None, "lo": lo, "hi": hi}
+
+
 def evidence(walkforward: dict, cfg: dict) -> dict:
     """Each pair's pooled tuned returns, in fold order, with their interval and each month's expectancy."""
-    out = {}
-    for (s, e), folds in walkforward.items():
-        x = np.concatenate([np.asarray(f["tuned_returns"] or [], dtype=float) for f in folds])
-        lo, hi = metrics.block_mean_ci(x, metrics.seed_of(s, e, "confidence"), level=cfg["expectancy_level"])
-        out[(s, e)] = {"returns": x, "trades": len(x), "mean": float(x.mean()) if len(x) else None, "lo": lo, "hi": hi,
-                       "months": [f["tuned_expectancy"] for f in folds if f["tuned_trades"]]}
-    return out
+    return {(s, e): {**interval(np.concatenate([np.asarray(f["tuned_returns"] or [], dtype=float) for f in folds]),
+                                metrics.seed_of(s, e, "confidence"), cfg),
+                     "months": [f["tuned_expectancy"] for f in folds if f["tuned_trades"]]}
+            for (s, e), folds in walkforward.items()}
 
 
 def scores(ev: dict, cfg: dict) -> dict:
