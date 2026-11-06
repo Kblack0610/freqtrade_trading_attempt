@@ -136,3 +136,40 @@ horizon_d = 14
 window_h = 96
 candidates = 15
 stopwords = ["will", "the", "win", "wins", "winner", "at", "vs", "and", "or", "of", "in", "on", "to", "a", "by", "be", "game", "match", "yes", "no", "2026", "2027"]
+
+[backtest]
+# lab/markets/backtest.py. Results are scored with suggest.toml [confidence], the crypto lab's own bar.
+# Daily returns chain on this wallet, as the crypto backtests' 1000 USD.
+wallet = 1000
+# An order meets the book as it stood this long after the row that prompted it. The recorder sweeps every 5 min
+# and bars are hourly, so on today's data this rarely moves a fill; it matters once the websocket feeds (tr-50).
+latency_s = 2
+# An order takes at most this share of the top-of-book size on its side; the rest is cancelled, never walked
+# up the book, because only the top is recorded.
+depth_share = 0.5
+# Bars carry no sizes: each side's depth is this share of the contracts the period traded.
+bar_volume_share = 0.1
+
+# Fees per venue (lab/markets/fees.py; facts in docs/markets.md, Fees). A venue with no table costs nothing.
+[backtest.fees.kalshi]
+# ceil(0.07 * C * P * (1 - P)) up to the cent per order. The maker rate is not modelled: every fill here is a taker.
+kind = "pq"
+rate = 0.07
+rounding = "ceil"
+
+[backtest.fees.polymarket_us]
+kind = "pq"
+rate = 0.0695
+rounding = "half_even"
+
+[backtest.fees.polymarket]
+# The rate is by category and the markets table holds none, so the highest (crypto 0.07). Read-only: no US trading.
+kind = "pq"
+rate = 0.07
+rounding = "none"
+
+[backtest.fees.predictit]
+# 10% of the profit on a winning position, nothing on entry.
+kind = "profit"
+share = 0.10
+rounding = "none"

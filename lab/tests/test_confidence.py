@@ -207,3 +207,21 @@ def test_nothing_inside_the_lockbox_reaches_the_score(conn):
     assert [f["fold_start"] for f in facts["walkforward"][key]] == [dt.date(2026, 4, 1)]
     assert list(facts["daily"][key].index) == [dt.date(2026, 4, 30)]
     assert len(facts["pairs"][key]) == 1
+
+
+def test_evidence_and_scores_are_unchanged_by_the_returns_input():
+    # Golden values from master before confidence.interval was split out of evidence (P5 of the markets plan).
+    rng = np.random.default_rng(42)
+    wf = {(f"S{i}", "okx"): [
+        {"tuned_returns": list(rng.normal(0.002 * (i - 10), 0.03, 40)), "tuned_expectancy": 0.001, "tuned_trades": 40},
+        {"tuned_returns": list(rng.normal(0.001, 0.03, 30)), "tuned_expectancy": -0.001, "tuned_trades": 30}]
+        for i in range(22)}
+    ev = confidence.evidence(wf, C)
+    s = confidence.scores(ev, C)
+    for k, mean, lo, hi, score in [
+            ("S0", -0.009282064138291163, -0.01622398703761035, -0.0010675201060717546, 2.041151978047268),
+            ("S15", 0.010890307166464469, 0.004794840497024354, 0.017003900255372965, 99.91366937280887),
+            ("S21", 0.009201126807628404, -0.0028057990507848593, 0.018756305800261462, 89.6049698260757)]:
+        e = ev[(k, "okx")]
+        assert (e["mean"], e["lo"], e["hi"], s[(k, "okx")]) == (mean, lo, hi, score)
+        assert e["trades"] == 70 and e["months"] == [0.001, -0.001]
