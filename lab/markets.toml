@@ -7,6 +7,9 @@ bucket = "trader-markets"
 prefix = "quotes"
 # The first run with no earlier sweep reads resolutions this far back; later runs overlap the last one by this.
 resolutions_lookback_h = 1
+# What a run with no venue named sweeps. The 5-min CronJob runs it bare, so a venue joins here only once its sweep
+# fits that cadence alongside Kalshi's 3 to 4.5 min; the others run by name (python -m markets.recorder manifold).
+default_venues = ["kalshi"]
 
 [venues.kalshi]
 title = "Kalshi"
@@ -18,3 +21,47 @@ page_limit = 1000
 page_gap_s = 0.5
 retries = 6
 timeout_s = 30
+
+[venues.polymarket_us]
+title = "Polymarket US"
+kind = "exchange"
+url = "https://polymarket.us"
+base_url = "https://gateway.polymarket.us"
+# The list caps a page at 500. The public gateway allows 20 requests/s per IP (docs/markets.md, Polymarket US).
+page_limit = 500
+page_gap_s = 0.1
+retries = 6
+timeout_s = 30
+
+[venues.polymarket]
+# Global prices, read-only: a US resident may not trade this book.
+title = "Polymarket (global)"
+kind = "exchange"
+url = "https://polymarket.com"
+base_url = "https://gamma-api.polymarket.com"
+# /markets/keyset caps a page at 100; Gamma /markets allows 300 requests per 10 s.
+page_limit = 100
+page_gap_s = 0.1
+retries = 6
+timeout_s = 30
+
+[venues.predictit]
+title = "PredictIt"
+kind = "exchange"
+url = "https://www.predictit.org"
+base_url = "https://www.predictit.org/api"
+# One request a sweep; the snapshot refreshes about once a minute, so poll no faster.
+page_gap_s = 1
+retries = 4
+timeout_s = 30
+
+[venues.manifold]
+title = "Manifold"
+kind = "play-money"
+url = "https://manifold.markets"
+base_url = "https://api.manifold.markets"
+# search-markets caps a page at 1000; 500 requests/min per IP.
+page_limit = 1000
+page_gap_s = 0.2
+retries = 6
+timeout_s = 60
