@@ -20,13 +20,14 @@ class FakeBots:
 
     def __init__(self, *bots: dict):
         self.bots = list(bots)
+        self.candle_paths: list[str] = []
 
     def __call__(self, i: int, path: str):
         b = self.bots[i]
         if b.get("down"):
             raise ConnectionError("connection refused")
         if path == "show_config":
-            return {"dry_run": b.get("dry_run", True)}
+            return {"dry_run": b.get("dry_run", True), "timeframe": "5m"}
         if path == "profit":
             n = len(b["closed"]) + len(b["open"])
             return {"closed_trade_count": len(b["closed"]), "trade_count": n, "profit_closed_percent": 1.5,
@@ -36,6 +37,9 @@ class FakeBots:
             return {"total": 1007.9, "currencies": [{"currency": "USD"}]}
         if path == "status":
             return b["open"]
+        if path.startswith("pair_candles?"):
+            self.candle_paths.append(path)
+            return {"data_stop_ts": 1793794800000}
         if path.startswith("trades?"):
             q = dict(kv.split("=") for kv in path.split("?")[1].split("&"))
             off, lim = int(q["offset"]), int(q["limit"])
@@ -70,6 +74,14 @@ def test_rerun_adds_no_duplicates_and_tracks_closes(conn, monkeypatch):
     bots.bots[0]["open"] = []  # trade 5 timed out unfilled and the bot dropped it
     ingest.ingest_bot(conn, bots, 0, "k-s", "kraken", "S", T0 + dt.timedelta(hours=3))
     assert count(conn, "SELECT count(*) FROM bot_trades") == 4
+
+
+def test_snapshot_keeps_the_newest_candle_of_each_open_pair(conn):
+    bots = FakeBots({"closed": [trade(1, False)], "open": [trade(2, True), trade(3, True)]})
+    ingest.ingest_bot(conn, bots, 0, "k-s", "kraken", "S", T0)
+    raw = conn.execute("SELECT raw FROM bot_snapshots WHERE bot = 'k-s'").fetchone()[0]
+    assert raw["timeframe"] == "5m" and raw["candles"] == {"BTC/USD": 1793794800000}
+    assert bots.candle_paths == ["pair_candles?pair=BTC%2FUSD&timeframe=5m&limit=1"]  # one call per pair, not per trade
 
 
 def test_down_bot_gets_an_error_snapshot_and_keeps_its_trades(conn):

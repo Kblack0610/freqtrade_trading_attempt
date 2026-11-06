@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}Live{% endblock %}
+{% block body %}
+<h1>Live</h1>
+<p class="muted">Every league bot's open positions as of its newest snapshot. Last price and unrealized profit are what the bot reported then; the candle age is how old the bot's newest candle for that pair was at that moment, late when it is more than two timeframes behind. This table refreshes every {{ poll }}, and the numbers change when the next update lands.</p>
+<div id="live" hx-get="/live/rows" hx-trigger="every {{ poll }}" hx-swap="innerHTML">
+{% include "_live.html" %}
+</div>
+{% endblock %}

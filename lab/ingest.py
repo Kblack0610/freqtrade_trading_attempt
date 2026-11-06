@@ -3,8 +3,9 @@
 
 Per bot: closed trades (/trades, paged) and open trades (/status) are upserted by
 (bot, trade_id, open_date), and one bot_snapshots row is written from /profit, /balance and
-/show_config. Re-running adds no duplicates. An open trade the bot no longer reports (an entry
-that timed out unfilled) is deleted. One unreachable bot gets a snapshot with its error and the
+/show_config, with the newest candle time of each open trade's pair (/pair_candles) for /live.
+Re-running adds no duplicates. An open trade the bot no longer reports (an entry that timed out
+unfilled) is deleted. One unreachable bot gets a snapshot with its error and the
 others carry on.
 
 Exits 1 if any bot says it is not dry run, so the CronJob fails loudly.
@@ -15,6 +16,7 @@ import datetime as dt
 import json
 import os
 import sys
+import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Callable
@@ -59,6 +61,17 @@ def trade_row(t: dict) -> dict:
         "enter_tag": t.get("enter_tag") or None,
         "raw": Jsonb(t),
     }
+
+
+def candles(fetch: Fetch, i: int, timeframe: str | None, pairs: set[str]) -> dict[str, int | None]:
+    """Each pair's newest candle open time in epoch ms, as the bot sees it: /live shows its age."""
+    if not timeframe:
+        return {}
+    out = {}
+    for pair in sorted(pairs):
+        got = fetch(i, f"pair_candles?pair={urllib.parse.quote(pair, safe='')}&timeframe={timeframe}&limit=1")
+        out[pair] = got.get("data_stop_ts") or None
+    return out
 
 
 def snapshot_row(cfg: dict, prof: dict, bal: dict) -> dict:
@@ -119,7 +132,10 @@ def ingest_bot(conn, fetch: Fetch, i: int, name: str, exchange: str, strategy: s
     try:
         cfg, prof, bal = fetch(i, "show_config"), fetch(i, "profit"), fetch(i, "balance")
         snap.update(snapshot_row(cfg, prof, bal))
-        trades = [trade_row(t) for t in closed_trades(fetch, i) + list(fetch(i, "status"))]
+        status = list(fetch(i, "status"))
+        trades = [trade_row(t) for t in closed_trades(fetch, i) + status]
+        snap["raw"].obj.update(timeframe=cfg.get("timeframe"),
+                               candles=candles(fetch, i, cfg.get("timeframe"), {t["pair"] for t in status}))
     except Exception as e:  # one dead bot must not hide the others
         snap["error"] = f"{type(e).__name__}: {e}"
         trades = []

@@ -84,10 +84,39 @@ def test_healthz_needs_no_sign_in(site):
     assert site[1].get("/healthz").text == "ok"
 
 
-@pytest.mark.parametrize("path", ["/", "/bots/x", "/strategies", "/strategies/x", "/suggestions", "/confidence", "/book", "/coverage", "/guide", "/data", "/runs", "/runs/1", "/markets", "/links", "/markets/book"])
+@pytest.mark.parametrize("path", ["/", "/live", "/live/rows", "/bots/x", "/strategies", "/strategies/x", "/suggestions", "/confidence", "/book", "/coverage", "/guide", "/data", "/runs", "/runs/1", "/markets", "/links", "/markets/book"])
 def test_signed_out_goes_to_login(site, path):
     r = site[1].get(path)
     assert r.status_code == 303 and r.headers["location"] == "/login"
+
+
+def test_a_signed_out_poll_redirects_the_page_not_the_table(site):
+    r = site[1].get("/live/rows", headers={"HX-Request": "true"})
+    assert r.status_code == 204 and r.headers["HX-Redirect"] == "/login"
+
+
+def test_live_shows_open_positions_with_candle_and_snapshot_age(conn, signed_in):
+    seed(conn)
+    conn.execute("INSERT INTO bots (name, exchange, strategy) VALUES ('okx-idle', 'okx', 'Idle')")
+    snap = NOW - dt.timedelta(minutes=3)
+    late = NOW - dt.timedelta(minutes=30)  # 27 min before the snapshot: over two 5m candles
+    conn.execute("INSERT INTO bot_snapshots (bot, ts, dry_run, raw) VALUES ('kraken-s001', %s, true, %s)",
+                 (snap, Jsonb({"timeframe": "5m", "candles": {"ETH/USD": int((snap - dt.timedelta(minutes=5)).timestamp() * 1000),
+                                                              "SOL/USD": int(late.timestamp() * 1000)}})))
+    for tid, pair, ratio, usd, price in ((7, "ETH/USD", 0.021, 6.93, 3063.0), (8, "SOL/USD", -0.04, -13.2, 144.0)):
+        conn.execute("INSERT INTO bot_trades (bot, trade_id, open_date, pair, is_open, open_rate, stake_amount, profit_ratio, "
+                     "profit_abs, raw) VALUES ('kraken-s001', %s, %s, %s, true, 3000, 330, %s, %s, %s)",
+                     (tid, NOW - dt.timedelta(hours=tid), pair, ratio, usd, Jsonb({"current_rate": price})))
+    _, client = signed_in
+    page = client.get("/live")
+    assert page.status_code == 200 and 'hx-get="/live/rows"' in page.text and "every 30s" in page.text
+    assert "/static/htmx.min.js" in page.text
+    rows_ = client.get("/live/rows", headers={"HX-Request": "true"})
+    assert rows_.status_code == 200 and "<header" not in rows_.text
+    for needle in ("ETH/USD", "3,063.0000", "2.10%", "6.93", "SOL/USD", "-4.00%", "-6.27 USD", "660.00 USD",
+                   "3m ago", "8m ago", '<td class="down" title="5m candles">30m ago</td>', "okx-idle", "no open positions"):
+        assert needle in rows_.text, needle
+    assert '<td class="" title="5m candles">8m ago</td>' in rows_.text
 
 
 def test_login_redirects_to_forgejo_with_state(site):
