@@ -35,7 +35,8 @@ Results go to the `trader` database in the cluster's shared Postgres, which the 
 | `web/` | The site: FastAPI and Jinja, read-only, Forgejo sign-in (`web/auth.py`), server-drawn SVG charts (`web/charts.py`); pages Overview, bot detail, Strategies, strategy detail, Walk-forward, Suggestions, Confidence, Book, Markets (`/markets`, `/links`, `/markets/book`), Coverage, Guide, Data, Runs; `/guide` is the reading order (see The site) |
 | `lab/tests/` | pytest; the DB tests need `DATABASE_URL` pointing at a throwaway database |
 | `Dockerfile`, `lab/requirements.txt` | The `trader` image |
-| `.github/workflows/image.yml` | CI: build, migrate twice, tests, every strategy loads; on master also push to GHCR |
+| `.github/workflows/image.yml` | CI: build, migrate twice, tests, every strategy loads; on master also push to GHCR. See CI |
+| `docs/README.md` | Index of the pages in `docs/` |
 
 ## The no-real-money guard
 
@@ -62,7 +63,7 @@ docker network create trader-test
 docker run -d --rm --name trader-pg --network trader-test -e POSTGRES_PASSWORD=test -e POSTGRES_DB=trader postgres:17
 export DATABASE_URL=postgresql://postgres:test@trader-pg/trader
 docker run --rm --network trader-test -e DATABASE_URL -v "$PWD:/repo" --entrypoint bash trader \
-  -c 'python lab/migrate.py && python lab/migrate.py && python -m pytest -q -p no:cacheprovider lab/tests'
+  -c 'python lab/migrate.py && python lab/migrate.py | grep -q "0 new" && python -m pytest -q -p no:cacheprovider lab/tests'
 docker rm -f trader-pg && docker network rm trader-test
 ```
 
@@ -71,6 +72,25 @@ A quick analysis of two strategies: run a backfill into the mounted `/lab` first
 Analysis knobs (env): `ANALYZE_EXCHANGES` (`binanceus coinbase`), `ANALYZE_STRATEGIES` (empty means all), `ANALYZE_WORKERS` (at most 6 backtests at once), `ANALYZE_MEMORY_GB` (10: the estimated memory of the tasks in flight together; keep it 2 GB under the pod limit), `BIAS_EXCHANGE` (`binanceus`), `LOOKAHEAD_DAYS` (120), `RECURSIVE_DAYS` (30), `REGIME_EXCHANGE` (`coinbase`, the longest BTC history), `CHUNK_TIMEOUT` (3600 s).
 
 Backfill knobs (env): `BACKFILL_EXCHANGES` (`binanceus coinbase kraken`), `TIMEFRAMES` (`1m 5m 15m 30m 1h 4h 1d`, each capped at what the exchange offers), `FORWARD_EXCHANGES` (`kraken`), `PREPEND_FROM` (`20150101`), `PREPEND_FLOORS` (`1m=20240101`: space-separated `<timeframe>=<date>` pairs, the oldest candle a timeframe is prepended to), `LAB_RESULTS` (`/lab`). For a quick local run, add `-e TIMEFRAMES='4h 1d' -v "$HOME/.cache/trader-lab:/lab"` to the test container and run `python lab/backfill.py`.
+
+## CI
+
+`.github/workflows/image.yml` runs on every pull request and on each push to master. `test` builds the image, runs the migrations twice and the tests against a Postgres 17 service; the second run must report `0 new`, which proves a migration applies once and a rerun is a no-op:
+
+```sh
+python lab/migrate.py && python lab/migrate.py | grep -q "0 new" && python -m pytest -q -p no:cacheprovider lab/tests
+```
+
+It then lists the strategies, the staged families in `lab/families` too, and fails on a load error or a duplicate name:
+
+```sh
+freqtrade list-strategies --recursive-strategy-search \
+  --strategy-path /repo/lab/families --userdir /repo/user_data -c /repo/user_data/config.base.json -c /repo/user_data/exchanges/binanceus.json \
+  | tee strategies.txt
+! grep -E 'LOAD FAILED|DUPLICATE' strategies.txt
+```
+
+`test-ml` builds the ML image (`--build-arg FREQTRADE_TAG=2026.9_freqai`) and runs `lab/tests/test_ml.py` and `lab/tests/test_families.py` there. `publish` runs only on a push to master, after both pass, and pushes `trader` and `trader-ml` to GHCR as `sha-<7>` and `latest`.
 
 ## The analysis
 
