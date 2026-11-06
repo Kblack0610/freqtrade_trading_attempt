@@ -62,7 +62,20 @@ SELECT b.name, b.exchange, b.strategy, s.ts, s.dry_run, s.closed_trades, s.open_
 FROM bots b
 LEFT JOIN LATERAL (SELECT * FROM bot_snapshots WHERE bot = b.name ORDER BY ts DESC LIMIT 1) s ON true
 LEFT JOIN drift d ON d.bot = b.name
-ORDER BY s.profit_all_pct DESC NULLS LAST, b.name
+"""
+BOT = BOTS + "WHERE b.name = %s"
+BOTS += "ORDER BY s.profit_all_pct DESC NULLS LAST, b.name"
+# The last snapshot of each hour, so the chart's points stay one per hour however often ingest runs.
+BOT_SERIES = """
+SELECT DISTINCT ON (date_trunc('hour', ts)) ts, profit_all_pct FROM bot_snapshots
+WHERE bot = %s AND profit_all_pct IS NOT NULL ORDER BY date_trunc('hour', ts), ts DESC
+"""
+# The newest 100 trades of each chunk through backtest_trades (chunk_id, close_date), then the newest 100 of those,
+# so the page never sorts every trade a strategy has.
+STRATEGY_TRADES = """
+SELECT t.* FROM backtest_chunks c
+CROSS JOIN LATERAL (SELECT * FROM backtest_trades WHERE chunk_id = c.id ORDER BY close_date DESC LIMIT 100) t
+WHERE c.strategy = %s AND c.exchange = %s ORDER BY t.close_date DESC LIMIT 100
 """
 COVERAGE_BY_EXCHANGE = """
 SELECT exchange, count(*) AS series, count(*) FILTER (WHERE oldest_reached) AS at_oldest,
@@ -392,11 +405,10 @@ def overview(request: Request):
 @app.get("/bots/{name}", response_class=HTMLResponse)
 def bot(request: Request, name: str):
     user_of(request)
-    found = [b for b in rows(BOTS) if b["name"] == name]
+    found = rows(BOT, (name,))
     if not found:
         raise HTTPException(404, f"No bot named {name}")
-    series = rows("SELECT ts, profit_all_pct FROM bot_snapshots WHERE bot = %s AND profit_all_pct IS NOT NULL "
-                  "ORDER BY ts", (name,))
+    series = rows(BOT_SERIES, (name,))
     trades = rows("SELECT * FROM bot_trades WHERE bot = %s ORDER BY is_open DESC, "
                   "coalesce(close_date, open_date) DESC LIMIT 500", (name,))
     chart = charts.line([(r["ts"].astimezone(TZ), r["profit_all_pct"]) for r in series], label=f"{name} profit over time")
@@ -461,8 +473,7 @@ def strategy(request: Request, name: str, exchange: str = ""):
         suggestions=rows("SELECT * FROM suggestions WHERE strategy = %s ORDER BY kind, exchange, bot", (name,)),
         correlations=rows("SELECT * FROM correlations WHERE strategy = %s AND exchange = %s ORDER BY abs(rho) DESC", key),
         chunks=rows("SELECT * FROM backtest_chunks WHERE strategy = %s AND exchange = %s ORDER BY chunk_start DESC", key),
-        trades=rows("SELECT t.* FROM backtest_trades t JOIN backtest_chunks c ON c.id = t.chunk_id "
-                    "WHERE c.strategy = %s AND c.exchange = %s ORDER BY t.close_date DESC LIMIT 100", key))
+        trades=rows(STRATEGY_TRADES, key))
 
 
 def pooled(folds: list[dict]) -> dict:
