@@ -15,8 +15,8 @@ can follow it. Live candles carry `*_dollars` and `*_fp` fields, historical ones
 import datetime as dt
 from typing import Iterator
 
-from markets.api import Api, epoch_s, num, when
-from markets.venue import Bar, Quote, Resolution, Settled, Span, Trade
+from lab.markets.api import Api, epoch_s, num, when
+from lab.markets.venue import Bar, Quote, Resolution, Settled, Span, Trade
 
 MAX_CANDLES = 5000
 

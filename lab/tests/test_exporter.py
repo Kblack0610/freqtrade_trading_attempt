@@ -17,7 +17,7 @@ def scrape(collector) -> dict[str, float]:
 
 
 def test_metrics_read_the_newest_state(conn):
-    import db
+    from lab import db
     from web.exporter import TraderCollector
 
     conn.execute("INSERT INTO bots (name, exchange, strategy) VALUES ('a', 'kraken', 'S'), ('b', 'kraken', 'S')")
@@ -66,7 +66,7 @@ def test_an_unreadable_database_reports_down():
 
 
 def test_watch_metrics(conn):
-    import db
+    from lab import db
     from web.exporter import TraderCollector
 
     now = dt.datetime.now(dt.timezone.utc)  # not the module's NOW: the age check is relative to the scrape
@@ -82,7 +82,7 @@ def test_watch_metrics(conn):
 
 
 def test_market_metrics(conn):
-    import db
+    from lab import db
     from web.exporter import TraderCollector
 
     now = dt.datetime.now(dt.timezone.utc)

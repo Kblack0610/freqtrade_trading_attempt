@@ -3,7 +3,7 @@ import datetime as dt
 import pytest
 from markets_fakes import Session, fixture
 
-from markets.kalshi import Kalshi
+from lab.markets.kalshi import Kalshi
 
 CFG = {"base_url": "https://kalshi.test/v2", "page_limit": 2, "page_gap_s": 0.5, "retries": 2}
 

@@ -6,8 +6,8 @@ import pytest
 import requests
 from markets_fakes import Resp, Session
 
-from markets import odds
-from markets.odds import OddsApi
+from lab.markets import odds
+from lab.markets.odds import OddsApi
 
 UTC = dt.timezone.utc
 

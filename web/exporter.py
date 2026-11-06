@@ -11,7 +11,7 @@ from prometheus_client import CollectorRegistry, start_http_server
 from prometheus_client.core import GaugeMetricFamily
 from psycopg.rows import dict_row
 
-from db import connect
+from lab.db import connect
 
 RUN_KINDS = ("analysis", "walkforward")
 

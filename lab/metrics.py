@@ -13,6 +13,8 @@ import numpy as np
 import pandas as pd
 from scipy.stats import norm
 
+from lab.util import utc
+
 YEAR = 365
 EULER_GAMMA = 0.5772156649015329
 
@@ -21,11 +23,6 @@ def seed_of(*parts: object) -> int:
     """A seed that depends only on its parts, not on run order or the process. 32 bits, the most
     numpy's RandomState, and so hyperopt's optuna samplers, accept."""
     return int(hashlib.sha256("|".join(map(str, parts)).encode()).hexdigest()[:8], 16)
-
-
-def utc(t) -> pd.Timestamp:
-    t = pd.Timestamp(t)
-    return t.tz_localize("UTC") if t.tzinfo is None else t.tz_convert("UTC")
 
 
 def daily_returns(trades: pd.DataFrame, start: pd.Timestamp, end: pd.Timestamp, wallet: float) -> pd.DataFrame:

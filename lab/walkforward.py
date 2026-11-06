@@ -33,12 +33,8 @@ from typing import Protocol
 
 from psycopg.types.json import Jsonb
 
-import analyze
-import book
-import confidence
-import metrics
-import suggest
-from db import connect
+from lab import analyze, book, confidence, metrics, suggest
+from lab.db import connect
 
 EXCHANGES = os.environ.get("WF_EXCHANGES", "binanceus").split()
 FOLDS = int(os.environ.get("WF_FOLDS", "6"))

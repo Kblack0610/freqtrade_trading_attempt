@@ -11,8 +11,8 @@ newest first, 1000 a page by the `before` id, keeping the resolved binary ones.
 import datetime as dt
 from typing import Iterator
 
-from markets.api import Api, num, result_of, when
-from markets.venue import Quote, Resolution, Settled
+from lab.markets.api import Api, num, result_of, when
+from lab.markets.venue import Quote, Resolution, Settled
 
 MAX_OFFSET = 1000
 

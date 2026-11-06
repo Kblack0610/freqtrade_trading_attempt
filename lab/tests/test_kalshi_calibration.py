@@ -1,11 +1,6 @@
-import sys
-from pathlib import Path
-
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "markets" / "research"))
-
-import kalshi_calibration as kc  # noqa: E402
+from lab.markets.research import kalshi_calibration as kc
 
 EXP = "2026-10-01T20:00:00Z"
 T = kc.ts(EXP)

@@ -18,7 +18,7 @@ REPO = LAB.parent
 
 
 def test_the_nightly_analysis_does_not_scan_the_ml_family():
-    import analyze
+    from lab import analyze
 
     assert "MLLightGBMBaseline" not in {s["name"] for s in analyze.Cli().discover()}
 

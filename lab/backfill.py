@@ -41,8 +41,8 @@ from freqtrade.enums import CandleType
 from freqtrade.exchange import timeframe_to_seconds
 from freqtrade.misc import pair_to_filename
 
-import archive
-from db import connect
+from lab import archive
+from lab.db import connect
 
 REPO = Path(os.environ.get("REPO", "/repo"))
 RESULTS = Path(os.environ.get("LAB_RESULTS", "/lab"))

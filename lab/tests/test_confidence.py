@@ -3,9 +3,7 @@ import datetime as dt
 import numpy as np
 import pandas as pd
 
-import confidence
-import metrics
-import suggest
+from lab import confidence, metrics, suggest
 
 CFG = suggest.load_config()
 C = CFG["confidence"]

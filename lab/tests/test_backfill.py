@@ -5,8 +5,7 @@ import zipfile
 import pandas as pd
 import pytest
 
-import archive
-import backfill
+from lab import archive, backfill
 
 UTC = dt.timezone.utc
 LISTED = dt.datetime(2026, 1, 1, tzinfo=UTC)

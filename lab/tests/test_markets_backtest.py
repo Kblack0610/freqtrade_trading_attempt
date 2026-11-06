@@ -7,10 +7,10 @@ import pyarrow.parquet as pq
 import pytest
 from pyarrow import fs as pafs
 
-from markets import backtest, fees
-from markets.backtest import Lookahead, Market, Order
-from markets.recorder import SCHEMA, load_config
-from markets.venue import Resolution
+from lab.markets import backtest, fees
+from lab.markets.backtest import Lookahead, Market, Order
+from lab.markets.recorder import SCHEMA, load_config
+from lab.markets.venue import Resolution
 
 UTC = dt.timezone.utc
 T0 = dt.datetime(2026, 11, 1, 12, tzinfo=UTC)
@@ -225,7 +225,7 @@ def test_load_quotes_reads_the_recorders_objects_and_keeps_the_first_of_equal_qu
 
 
 def test_load_bars_takes_a_share_of_each_periods_volume_as_depth(tmp_path):
-    from markets.history import SCHEMAS
+    from lab.markets.history import SCHEMAS
     fs, root = pafs.LocalFileSystem(), str(tmp_path / "bars")
     fs.create_dir(f"{root}/venue=kalshi", recursive=True)
     pq.write_table(pa.table({"venue": ["kalshi"], "market_id": ["A"], "ts": [T0], "period_s": [3600], "bid": [0.4],

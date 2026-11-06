@@ -14,9 +14,8 @@ import sys
 
 import pandas as pd
 
-import metrics
-import suggest
-from db import connect
+from lab import metrics, suggest
+from lab.db import connect
 
 FOLDS = """
 SELECT w.strategy, w.exchange, w.fold_start, w.test_end, coalesce(w.tuned_profit, 0)

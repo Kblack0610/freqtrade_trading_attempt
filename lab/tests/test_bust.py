@@ -1,15 +1,12 @@
-import sys
-from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "research"))
 freqtrade_strategy = pytest.importorskip("freqtrade.strategy")
 
-import bust  # noqa: E402
-from BustShort import signals  # noqa: E402
+from lab.research import bust  # noqa: E402
+from lab.research.BustShort import signals  # noqa: E402
 
 
 def series(values):

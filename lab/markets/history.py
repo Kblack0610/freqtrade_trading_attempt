@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """History backfill: each venue's settled markets and how they paid, then their price bars and trades.
 
-  python -m markets.history settled [venue ...]   # markets and resolutions into Postgres
-  python -m markets.history bars [venue ...]      # price bars per settle date into parquet
-  python -m markets.history trades [venue ...]    # trades per settle date into parquet
+  python -m lab.markets.history settled [venue ...]   # markets and resolutions into Postgres
+  python -m lab.markets.history bars [venue ...]      # price bars per settle date into parquet
+  python -m lab.markets.history trades [venue ...]    # trades per settle date into parquet
       --budget-min N   stop between pages or dates once a run has taken N minutes ([history] budget_min)
       --restart        settled only: walk again from the newest market
 
@@ -32,9 +32,9 @@ import traceback
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from db import connect
-from markets.recorder import ADAPTERS, META, load_config, s3_from_env
-from markets.venue import Span
+from lab.db import connect
+from lab.markets.recorder import ADAPTERS, META, load_config, s3_from_env
+from lab.markets.venue import Span
 
 TS = pa.timestamp("us", tz="UTC")
 SCHEMAS = {

@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-import patterns
+from lab import patterns
 
 
 def frame(close, noise: float = 0.0, seed: int = 0) -> pd.DataFrame:

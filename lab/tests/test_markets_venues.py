@@ -5,11 +5,11 @@ import datetime as dt
 import pytest
 from markets_fakes import Session, fixture
 
-from markets import predictit
-from markets.manifold import Manifold
-from markets.polymarket import Polymarket, PolymarketUS
-from markets.predictit import PredictIt
-from markets.recorder import ADAPTERS, load_config
+from lab.markets import predictit
+from lab.markets.manifold import Manifold
+from lab.markets.polymarket import Polymarket, PolymarketUS
+from lab.markets.predictit import PredictIt
+from lab.markets.recorder import ADAPTERS, load_config
 
 UTC = dt.timezone.utc
 

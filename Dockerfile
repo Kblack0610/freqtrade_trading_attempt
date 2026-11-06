@@ -9,9 +9,10 @@ RUN pip install --user --no-cache-dir -r /tmp/lab-requirements.txt
 
 COPY --chown=ftuser:ftuser . /repo
 WORKDIR /repo
-# Strategies can `import patterns` (lab/patterns.py). No lab module shares a name with an installed
-# one; lab/tests/test_families.py checks that.
-ENV PYTHONPATH=/repo/lab
+# lab and web are packages imported from the repo root (`from lab import patterns`, `uvicorn web.app:app`).
+# A job run as `python /repo/lab/<job>.py` also has lab/ first on sys.path, so no lab module shares a name
+# with an installed one; lab/tests/test_families.py checks that.
+ENV PYTHONPATH=/repo
 # The userdir subfolders .dockerignore leaves out. freqtrade creates missing ones itself, but its
 # check-then-create races when several freqtrade processes start at once (lab/backfill.py runs one
 # per exchange) and the loser exits with "exists already and is not a directory".

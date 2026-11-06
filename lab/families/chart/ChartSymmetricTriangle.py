@@ -4,7 +4,7 @@
 
 from datetime import timedelta
 
-import patterns
+from lab import patterns
 from pandas import DataFrame
 
 from freqtrade.strategy import IStrategy

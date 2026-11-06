@@ -20,8 +20,8 @@ from typing import Iterator
 
 import requests
 
-from markets.api import Api, num, when
-from markets.venue import Quote, Resolution
+from lab.markets.api import Api, num, when
+from lab.markets.venue import Quote, Resolution
 
 
 def quotes(event: dict, ts: dt.datetime) -> list[Quote]:
