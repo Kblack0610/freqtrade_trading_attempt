@@ -21,13 +21,14 @@ Results go to the `trader` database in the cluster's shared Postgres, which the 
 | `lab/metrics.py` | Pure functions behind the derived tables: daily returns, Sharpe, Sortino, drawdown, block-bootstrap intervals, deflated Sharpe with effective trials, overfit probability (CSCV), trades still needed, Monte Carlo, BTC regimes |
 | `lab/suggest.py`, `lab/suggest.toml` | After each analysis and walk-forward: promote, watch, demote, retire, fix and retune suggestions from the derived tables, with the thresholds as data (see Suggestions) |
 | `lab/confidence.py` | After each analysis and walk-forward: the score and gates that say whether a strategy has earned real money, and the trial register (see Confidence) |
+| `lab/families.toml` | By hand: each strategy class's method family (trend, mean-reversion, momentum and the rest) and data inputs, for `/coverage` |
 | `lab/book.py` | After the score: what each scored strategy might return beside holding BTC, and what each stage costs and can lose. |
 | `lab/live.py` | Live bot entry point: always refuses, nothing deploys it. See `docs/live.md` |
 | `lab/ingest.py` | Hourly job: every bot's trades (closed and open) and a snapshot (profit, balance, dry-run flag) into Postgres |
 | `lab/watcher.py` | Daily loss watch: each bot's marked-to-market equity every 60 s into `watch`, and the kill drill. See Watcher |
 | `lab/migrate.py`, `lab/migrations/` | Schema: numbered SQL files applied once each, in order, under an advisory lock; runs as the init container of every job |
 | `lab/db.py` | The one Postgres connection: `DATABASE_URL` |
-| `web/` | The site: FastAPI and Jinja, read-only, Forgejo sign-in (`web/auth.py`), server-drawn SVG charts (`web/charts.py`); pages Overview, bot detail, Strategies, strategy detail, Walk-forward, Suggestions, Confidence, Book, Guide, Data, Runs; `/guide` is the reading order (see The site) |
+| `web/` | The site: FastAPI and Jinja, read-only, Forgejo sign-in (`web/auth.py`), server-drawn SVG charts (`web/charts.py`); pages Overview, bot detail, Strategies, strategy detail, Walk-forward, Suggestions, Confidence, Book, Coverage, Guide, Data, Runs; `/guide` is the reading order (see The site) |
 | `lab/tests/` | pytest; the DB tests need `DATABASE_URL` pointing at a throwaway database |
 | `Dockerfile`, `lab/requirements.txt` | The `trader` image |
 | `.github/workflows/image.yml` | CI: build, migrate twice, tests, every strategy loads; on master also push to GHCR |
@@ -152,7 +153,7 @@ Analysis also fills `benchmarks` from the regime venue's daily closes: holding B
 
 ## Adding a strategy
 
-Drop the `.py` in `user_data/strategies/` (any subfolder). It must import on the pinned image: Python 3.14, NumPy 2 (`np.nan`, not `np.NaN`), no `ta` package. Check with `freqtrade list-strategies --recursive-strategy-search --userdir user_data -c user_data/config.base.json -c user_data/exchanges/binanceus.json`. The next nightly analysis backtests its whole history and checks it for bias.
+Drop the `.py` in `user_data/strategies/` (any subfolder). It must import on the pinned image: Python 3.14, NumPy 2 (`np.nan`, not `np.NaN`), no `ta` package. Check with `freqtrade list-strategies --recursive-strategy-search --userdir user_data -c user_data/config.base.json -c user_data/exchanges/binanceus.json`. The next nightly analysis backtests its whole history and checks it for bias. Give its class a line in `lab/families.toml`, or `/coverage` lists it as untagged and the tests fail.
 
 ## Price data
 
@@ -221,6 +222,8 @@ docker run --rm -p 127.0.0.1:18765:8000 --entrypoint uvicorn -e DATABASE_URL=...
 ```
 
 Sign-in cannot complete against a fake Forgejo; mint a cookie with `auth.make_session(auth.Config(), "kblack0610")` under the same `SESSION_KEY` and send it as `trader_session`.
+
+`/coverage` joins `lab/families.toml` to the results already stored: whole-history backtests (`strategy_windows`), walk-forward test months, the trial register and the confidence gates, as a family by venue matrix with one row per strategy below it. A strategy class under `user_data/strategies` with no line in the toml shows in an untagged row, and a name only the results still hold (a deleted strategy, the three dropped hyperopts) in a gone row.
 
 ### Watcher
 

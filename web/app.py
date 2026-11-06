@@ -9,6 +9,7 @@ Run: uvicorn web.app:app (env: DATABASE_URL plus the web/auth.py Config variable
 import datetime as dt
 import math
 import os
+import re
 import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -32,6 +33,20 @@ HERE = Path(__file__).resolve().parent
 TZ = ZoneInfo(os.environ.get("TRADER_WEB_TZ", "UTC"))
 STALE = dt.timedelta(hours=2)
 TF_ORDER = ["1m", "5m", "15m", "30m", "1h", "4h", "1d"]
+FAMILIES = HERE.parent / "lab" / "families.toml"
+STRATEGY_DIR = HERE.parent / "user_data" / "strategies"
+# Direct IStrategy subclasses, read from source so the toml check needs neither freqtrade nor a database.
+STRATEGY_CLASS = re.compile(r"^class (\w+)\(IStrategy\)", re.M)
+UNTAGGED = "untagged"  # on disk, no line in lab/families.toml
+GONE = "gone"  # in the results only: a deleted strategy, or the trial register's "(dropped)" hyperopts
+# What /coverage joins to lab/families.toml, each one row per strategy x exchange.
+COVER = {
+    "trades": "SELECT strategy, exchange, trades AS n FROM strategy_windows WHERE win = 'all'",
+    "months": "SELECT strategy, exchange, count(DISTINCT date_trunc('month', fold_start)) FILTER (WHERE ok) AS n "
+              "FROM walkforward GROUP BY strategy, exchange",
+    "trials": "SELECT strategy, exchange, count(*) AS n FROM trials GROUP BY strategy, exchange",
+    "confidence": "SELECT strategy, exchange, passed, jsonb_array_length(gates) AS gates, ready, oos_trades FROM confidence",
+}
 
 BOTS = """
 SELECT b.name, b.exchange, b.strategy, s.ts, s.dry_run, s.closed_trades, s.open_trades,
@@ -412,6 +427,54 @@ def book(request: Request):
                 benchmarks=rows("SELECT * FROM benchmarks ORDER BY end_day - start_day, name"),
                 short=cfg["book"]["horizon_months"][0], long=cfg["book"]["horizon_months"][-1],
                 stake=cfg["book"]["stages"][0]["stake"])
+
+
+def strategy_classes() -> set[str]:
+    """Every strategy class under user_data/strategies, subfolders included."""
+    return {name for p in STRATEGY_DIR.rglob("*.py") for name in STRATEGY_CLASS.findall(p.read_text(encoding="utf-8"))}
+
+
+def coverage_board(tags: dict, families: list[str], on_disk: set[str], found: dict[str, list[dict]]) -> dict:
+    """The family x exchange matrix and one row per strategy, from lab/families.toml and the COVER results.
+
+    A strategy on disk but not in the toml is untagged, so drift shows; one only in the results is gone."""
+    cells: dict[str, dict[str, dict]] = {}
+    for kind, rs in found.items():
+        for r in rs:
+            cells.setdefault(r["strategy"], {}).setdefault(r["exchange"], {})[kind] = r if kind == "confidence" else r["n"]
+    exchanges = sorted({e for by in cells.values() for e in by if e})
+    family_of = {n: tags[n]["family"] if n in tags else UNTAGGED if n in on_disk else GONE
+                 for n in set(tags) | on_disk | set(cells)}
+    order = families + [f for f in (UNTAGGED, GONE) if f in family_of.values()]
+    strategies = []
+    for name in sorted(family_of, key=lambda n: (order.index(family_of[n]), n.casefold())):
+        mine = cells.get(name, {})
+        conf = [c["confidence"] for c in mine.values() if "confidence" in c]
+        strategies.append({
+            "inputs": [], "note": None, **tags.get(name, {}), "name": name, "family": family_of[name], "on_disk": name in on_disk, "cells": mine,
+            "venues": sorted(e for e, c in mine.items() if "trades" in c),
+            **{k: sum(c.get(k, 0) for c in mine.values()) for k in ("trades", "months", "trials")},
+            "best": max(conf, key=lambda c: (c["ready"], c["passed"]), default=None),
+            "oos_trades": sum(c["oos_trades"] for c in conf)})
+    def cell(members: list[dict], col: str | None) -> dict:
+        """None is every venue together, so a trial with no venue (a load failure) counts only there."""
+        picked = [c for s in members for e, c in s["cells"].items() if col is None or e == col]
+        return {"tested": sum(bool(s["venues"]) if col is None else col in s["venues"] for s in members),
+                **{k: sum(c.get(k, 0) for c in picked) for k in ("months", "trials")}}
+
+    by_family = {f: [s for s in strategies if s["family"] == f] for f in order}
+    matrix = [{"family": f, "n": len(ms), "cells": [cell(ms, col) for col in exchanges + [None]]} for f, ms in by_family.items()]
+    return {"matrix": matrix, "strategies": strategies, "exchanges": exchanges}
+
+
+@app.get("/coverage", response_class=HTMLResponse)
+def coverage(request: Request):
+    user_of(request)
+    toml = suggest.load_config(FAMILIES)
+    board = coverage_board(toml["strategies"], list(toml["families"]), strategy_classes(),
+                           {kind: rows(sql) for kind, sql in COVER.items()})
+    return page(request, "coverage.html", untagged=UNTAGGED, **board, families={
+        **toml["families"], UNTAGGED: "On disk, no line in lab/families.toml.", GONE: "In the results only, not on disk."})
 
 
 @app.get("/runs", response_class=HTMLResponse)

@@ -1,0 +1,83 @@
+# Which method family each strategy belongs to, and what data it reads. /coverage (web/app.py) joins this to the
+# results tables to show which families have been tested where. Keyed by strategy class name, not file name.
+# Classified from each file's entry rule. A `note` marks a call that could reasonably go another way.
+# A new strategy file shows on /coverage as untagged until it gets a line here; lab/tests/test_web.py checks
+# that every class under user_data/strategies has one.
+
+# Family order on /coverage, with what puts a strategy in it.
+[families]
+trend = "Enters with the trend: a moving-average cross, MA ordering, Supertrend or ADX direction."
+mean-reversion = "Buys a dip: oversold RSI, MFI, CCI or stochastics, or a close under a lower Bollinger band."
+momentum = "Buys strength: MACD above its signal or zero, rising closes, positive momentum."
+breakout = "Buys a price pushing through a level."
+candlestick-pattern = "Enters on a candle or count pattern."
+time-based = "Enters by the clock."
+exit-example = "A Freqtrade example of an exit or stoploss hook; the entry is a placeholder."
+template = "A sample or no-op strategy, kept as a reference, not a method."
+biased-control = "Known lookahead bias; kept so the bias check has something to catch. Its results are void."
+short = "Shorts on futures; research only, outside user_data/strategies."
+
+[strategies]
+# user_data/strategies/
+Bandtastic = { family = "mean-reversion", inputs = ["ohlcv"] }
+BreakEven = { family = "exit-example", inputs = ["ohlcv"] }
+CustomStoplossWithPSAR = { family = "exit-example", inputs = ["ohlcv"] }
+Diamond = { family = "breakout", inputs = ["ohlcv"], note = "Hyperopt picks which raw columns cross; the default, a shifted high over the close times a push, reads as a breakout." }
+hlhb = { family = "trend", inputs = ["ohlcv"] }
+HourBasedStrategy = { family = "time-based", inputs = ["ohlcv"] }
+InformativeSample = { family = "trend", inputs = ["ohlcv"], note = "Also reads a 15m informative timeframe." }
+mabStra = { family = "trend", inputs = ["ohlcv"], note = "Ratios between three moving averages inside tuned bands; could be read as momentum." }
+MultiMa = { family = "trend", inputs = ["ohlcv"] }
+multi_tf = { family = "mean-reversion", inputs = ["ohlcv"], note = "RSI across 5m, 30m and 1h plus BTC and ETH/BTC informative pairs." }
+PatternRecognition = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+PowerTower = { family = "momentum", inputs = ["ohlcv"] }
+SampleStrategy = { family = "template", inputs = ["ohlcv"] }
+Strategy001 = { family = "trend", inputs = ["ohlcv"] }
+Strategy001_custom_exit = { family = "exit-example", inputs = ["ohlcv"] }
+Strategy002 = { family = "mean-reversion", inputs = ["ohlcv"], note = "Oversold under the lower band, filtered by a hammer candle." }
+Strategy003 = { family = "mean-reversion", inputs = ["ohlcv"] }
+Strategy004 = { family = "mean-reversion", inputs = ["ohlcv"] }
+Strategy005 = { family = "mean-reversion", inputs = ["ohlcv"], note = "Needs a 4x volume spike as well as a close under the SMA." }
+Supertrend = { family = "trend", inputs = ["ohlcv"] }
+SwingHighToSky = { family = "mean-reversion", inputs = ["ohlcv"] }
+UniversalMACD = { family = "momentum", inputs = ["ohlcv"], note = "Fast over slow EMA ratio inside a tuned band; could be read as trend." }
+
+# user_data/strategies/berlinguyinca/
+ADXMomentum = { family = "momentum", inputs = ["ohlcv"] }
+AdxSmas = { family = "trend", inputs = ["ohlcv"] }
+ASDTSRockwellTrading = { family = "momentum", inputs = ["ohlcv"] }
+AverageStrategy = { family = "trend", inputs = ["ohlcv"] }
+AwesomeMacd = { family = "momentum", inputs = ["ohlcv"] }
+BbandRsi = { family = "mean-reversion", inputs = ["ohlcv"] }
+BinHV27 = { family = "mean-reversion", inputs = ["ohlcv"], note = "Several ADX and DI branches, all gated on a low EMA of RSI and a close under its SMAs." }
+BinHV45 = { family = "mean-reversion", inputs = ["ohlcv"] }
+CCIStrategy = { family = "mean-reversion", inputs = ["ohlcv"] }
+ClucMay72018 = { family = "mean-reversion", inputs = ["ohlcv"] }
+CMCWinner = { family = "mean-reversion", inputs = ["ohlcv"] }
+CofiBitStrategy = { family = "mean-reversion", inputs = ["ohlcv"] }
+CombinedBinHAndCluc = { family = "mean-reversion", inputs = ["ohlcv"] }
+DoesNothingStrategy = { family = "template", inputs = ["ohlcv"] }
+EMASkipPump = { family = "mean-reversion", inputs = ["ohlcv"] }
+Freqtrade_backtest_validation_freqtrade1 = { family = "trend", inputs = ["ohlcv"] }
+Low_BB = { family = "mean-reversion", inputs = ["ohlcv"] }
+MACDStrategy = { family = "momentum", inputs = ["ohlcv"], note = "MACD over its signal while CCI is low: half momentum, half dip." }
+MACDStrategy_crossed = { family = "momentum", inputs = ["ohlcv"], note = "MACD crossing its signal while CCI is low: half momentum, half dip." }
+MultiRSI = { family = "mean-reversion", inputs = ["ohlcv"] }
+Quickie = { family = "mean-reversion", inputs = ["ohlcv"] }
+ReinforcedAverageStrategy = { family = "trend", inputs = ["ohlcv"] }
+ReinforcedQuickie = { family = "mean-reversion", inputs = ["ohlcv"] }
+ReinforcedSmoothScalp = { family = "mean-reversion", inputs = ["ohlcv"] }
+Scalp = { family = "mean-reversion", inputs = ["ohlcv"] }
+Simple = { family = "momentum", inputs = ["ohlcv"], note = "MACD over zero, RSI over 70 and a rising upper band; close to a breakout." }
+SmoothOperator = { family = "mean-reversion", inputs = ["ohlcv"] }
+SmoothScalp = { family = "mean-reversion", inputs = ["ohlcv"] }
+TDSequentialStrategy = { family = "candlestick-pattern", inputs = ["ohlcv"], note = "A TD Sequential close count, an exhaustion signal; could be read as mean-reversion." }
+TechnicalExampleStrategy = { family = "template", inputs = ["ohlcv"], note = "An example of the technical library: buys whenever CMF is below zero." }
+
+# user_data/strategies/lookahead_bias/
+DevilStra = { family = "biased-control", inputs = ["ohlcv"] }
+GodStraNew = { family = "biased-control", inputs = ["ohlcv"] }
+wtc = { family = "biased-control", inputs = ["ohlcv"] }
+
+# lab/research/
+BustShort = { family = "short", inputs = ["ohlcv", "funding"], note = "Funding is an assumed constant per variant, not measured history (docs/short-bust.md)." }
