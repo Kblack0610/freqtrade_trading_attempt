@@ -15,6 +15,7 @@ Results go to the `trader` database in the cluster's shared Postgres, which the 
 | `user_data/exchanges/<name>.json` | Per-exchange overlay: name, pair whitelist, pricing quirks; no keys |
 | `lab/league.py` | Bot entrypoint: picks its roster row from the pod ordinal, refuses anything but key-less spot dry run, writes the API config, execs `freqtrade trade` |
 | `lab/pairs.py` | By hand: a research venue's whitelist, its most traded pairs with history since 2022 |
+| `lab/futures.py` | Daily job: funding rates and open interest for the okx and kucoin swaps into `funding_rates` and `open_interest` (see Price data) |
 | `lab/backfill.py` | Hourly job: price history for every exchange x pair x timeframe into `data/<exchange>/` on the lab PVC, and what it holds into `data_coverage` (see Price data) |
 | `lab/analyze.py` | Nightly job: every strategy x exchange backtested in calendar-year chunks over the whole history, lookahead and recursive bias checks, then the derived tables (see The analysis) |
 | `lab/walkforward.py` | Weekly job: hyperopt on the months before each of the last whole months, then that unseen month backtested as is and tuned (see Walk-forward) |
@@ -182,6 +183,8 @@ binanceus has no USD pair trading $5M a day, so its backtests assume fills its b
 
 The research venues are backfilled by their own job (`5m` and up, no 1m), so their slow first pass never holds back the hourly candles of the bot venues. OKX serves 100 candles per request, so its first pass takes several runs; each run keeps the pairs it finished.
 
+**Perpetual swaps.** `lab/futures.py` collects funding rates and daily open interest for the okx and kucoin swap of each whitelisted pair through ccxt (Freqtrade cannot download kucoin futures) into `funding_rates` and `open_interest`, and is their only writer. Free history is short: okx serves funding from about three months back and open interest from 180 days; kucoin serves funding from 2024 (`FUNDING_FROM`, the first run's floor) and open interest from about 98 days. So collection runs daily and the rows are kept forever. Each run resumes funding from the newest stored row; open interest is refetched over its window, so a missed day is refilled. Knobs: `FUTURES_EXCHANGES` (`okx kucoin`), `FUNDING_FROM` (`2024-01-01`). The first run took about two minutes, later ones about 30 seconds.
+
 The first run fetches full history (5m since 2019 on binanceus is the long pole) and can take hours; later runs take under a minute. Exchanges run in parallel, each with its own rate limit.
 
 ## The database
@@ -195,6 +198,7 @@ The first run fetches full history (5m since 2019 on binanceus is the long pole)
 - `013`: `watch`, one row per bot rewritten by `lab/watcher.py`: equity, the day's opening equity, breach, drill
 - `014`: `book`, projected return ranges per scored strategy and for holding BTC.
 - `015`: `benchmarks`, the plain alternatives to an active strategy.
+- `018`: `funding_rates` and `open_interest`, measured swap data per exchange, swap symbol and time, written by `lab/futures.py`.
 
  A schema change is a new numbered file; never edit an applied one.
 
@@ -255,6 +259,7 @@ The first flags the bot; the next pass marks it breached and POSTs `/stopentry`,
 | `trader_watch_unseen_seconds`, `trader_watch_running`, `trader_watch_breached`, `trader_watch_day_loss_ratio` | `bot` | Since the last good read, 1 when taking entries, 1 after a daily loss breach, and the loss so far today as a share of capital |
 | `trader_run_started_timestamp_seconds`, `trader_run_finished_timestamp_seconds`, `trader_run_ok`, `trader_run_last_ok_timestamp_seconds` | `kind` (`analysis`, `walkforward`) | Newest run started, newest run finished and whether it succeeded, newest success |
 | `trader_candle_age_seconds`, `trader_coverage_age_seconds`, `trader_coverage_series` | `exchange` | Newest stored candle, newest backfill write, series stored |
+| `trader_futures_age_seconds` | `kind`, `exchange` | Newest funding (`funding`) or open interest (`open_interest`) row |
 | `trader_suggestions` | `kind` | Open suggestions |
 
 ## Troubleshooting

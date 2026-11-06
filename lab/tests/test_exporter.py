@@ -33,6 +33,8 @@ def test_metrics_read_the_newest_state(conn):
     conn.execute("INSERT INTO data_coverage (exchange, pair, timeframe, last_ts) VALUES "
                  "('kraken', 'BTC/USD', '5m', %s), ('kraken', 'ETH/USD', '5m', %s)",
                  (NOW - dt.timedelta(minutes=20), NOW - dt.timedelta(hours=5)))
+    conn.execute("INSERT INTO funding_rates (exchange, pair, ts, rate) VALUES ('okx', 'BTC/USDT:USDT', %s, 0.0001)",
+                 (NOW - dt.timedelta(hours=8),))
     conn.execute("INSERT INTO suggestions (kind, strategy, exchange, summary, action, gates) VALUES "
                  "('promote', 'S', 'kraken', 's', 'a', '[]'), ('promote', 'T', 'kraken', 's', 'a', '[]')")
 
@@ -50,6 +52,8 @@ def test_metrics_read_the_newest_state(conn):
     assert 1100 < m['trader_candle_age_seconds{exchange="kraken"}'] < 1300
     assert m['trader_coverage_series{exchange="kraken"}'] == 2
     assert m['trader_suggestions{kind="promote"}'] == 2
+    assert 28700 < m['trader_futures_age_seconds{exchange="okx",kind="funding"}'] < 28900
+    assert 'trader_futures_age_seconds{exchange="okx",kind="open_interest"}' not in m
 
 
 def test_an_unreadable_database_reports_down():
