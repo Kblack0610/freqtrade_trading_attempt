@@ -32,6 +32,10 @@ CANDLES = """
 SELECT exchange, max(last_ts) AS newest, max(updated_at) AS updated, count(*) AS series
 FROM data_coverage GROUP BY exchange
 """
+FUTURES = """
+SELECT 'funding' AS kind, exchange, max(ts) AS newest FROM funding_rates GROUP BY exchange
+UNION ALL SELECT 'open_interest', exchange, max(ts) FROM open_interest GROUP BY exchange
+"""
 SUGGESTIONS = "SELECT kind, count(*) AS n FROM suggestions GROUP BY kind"
 
 
@@ -61,6 +65,7 @@ class TraderCollector:
                 watch = cur.execute(WATCH).fetchall()
                 runs = cur.execute(RUNS, (list(RUN_KINDS),)).fetchall()
                 candles = cur.execute(CANDLES).fetchall()
+                futures = cur.execute(FUTURES).fetchall()
                 suggestions = cur.execute(SUGGESTIONS).fetchall()
         except Exception:  # noqa: BLE001 - any failure is reported as the db being unreadable
             up.add_metric([], 0)
@@ -72,6 +77,8 @@ class TraderCollector:
         yield from watch_metrics(now, watch)
         yield from run_metrics(runs)
         yield from candle_metrics(now, candles)
+        yield family("trader_futures_age_seconds", "Seconds since the newest funding or open interest row of each exchange",
+                     ["kind", "exchange"], (([f["kind"], f["exchange"]], age(now, f["newest"])) for f in futures))
         yield from suggestion_metrics(suggestions)
 
 
