@@ -1,0 +1,37 @@
+{
+  "freqaimodel": "LightGBMRegressor",
+  "freqai": {
+    "enabled": true,
+    "identifier": "lgbm-baseline",
+    "purge_old_models": 2,
+    "train_period_days": 30,
+    "backtest_period_days": 7,
+    "live_retrain_hours": 0,
+    "feature_parameters": {
+      "include_timeframes": [
+        "1h"
+      ],
+      "include_corr_pairlist": [],
+      "label_period_candles": 24,
+      "include_shifted_candles": 2,
+      "indicator_periods_candles": [
+        10,
+        20
+      ],
+      "DI_threshold": 0.9,
+      "weight_factor": 0.9
+    },
+    "data_split_parameters": {
+      "test_size": 0.25,
+      "shuffle": false
+    },
+    "model_training_parameters": {
+      "n_estimators": 200,
+      "learning_rate": 0.05,
+      "num_leaves": 31,
+      "verbose": -1,
+      "n_jobs": 2
+    },
+    "data_kitchen_thread_count": 2
+  }
+}

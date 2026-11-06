@@ -36,8 +36,19 @@ jobs:
             | tee strategies.txt
           ! grep -E 'LOAD FAILED|DUPLICATE' strategies.txt
 
+  test-ml:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the ML image (freqtrade's _freqai base, for lightgbm)
+        run: docker build --build-arg FREQTRADE_TAG=2026.9_freqai -t trader-ml:ci .
+      - name: FreqAI trains and predicts; the families still load and shadow nothing
+        run: >-
+          docker run --rm --entrypoint python trader-ml:ci
+          -m pytest -q -p no:cacheprovider lab/tests/test_ml.py lab/tests/test_families.py
+
   publish:
-    needs: test
+    needs: [test, test-ml]
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
@@ -66,3 +77,19 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+      - id: meta-ml
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/kblack0610/trader-ml
+          tags: |
+            type=sha,format=short
+            type=raw,value=latest
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          build-args: FREQTRADE_TAG=2026.9_freqai
+          tags: ${{ steps.meta-ml.outputs.tags }}
+          labels: ${{ steps.meta-ml.outputs.labels }}
+          cache-from: type=gha,scope=ml
+          cache-to: type=gha,mode=max,scope=ml
