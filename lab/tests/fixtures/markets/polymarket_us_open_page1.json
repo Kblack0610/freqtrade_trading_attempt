@@ -1,0 +1,164 @@
+{
+  "markets": [
+    {
+      "active": true,
+      "archived": false,
+      "assetPriceTerms": null,
+      "bestAskQuote": {
+        "currency": "USD",
+        "value": "0.1960"
+      },
+      "bestBidQuote": {
+        "currency": "USD",
+        "value": "0.1650"
+      },
+      "category": "sports",
+      "closed": false,
+      "color": "#00245E",
+      "comboEnabled": false,
+      "createdAt": "2026-03-19T21:31:54Z",
+      "endDate": "2027-01-01T21:20:09Z",
+      "ep3Status": "OPEN",
+      "ep3SyncedAt": "2026-10-29T12:04:57Z",
+      "eventSubcategory": "SOCCER",
+      "feeCoefficient": 0.0695,
+      "gameStartTime": "2026-02-21T00:00:00Z",
+      "hidden": false,
+      "id": "7974",
+      "manualActivation": false,
+      "marketSides": [
+        {
+          "createdAt": "2026-03-19T21:31:54Z",
+          "description": "Yes",
+          "id": "15947",
+          "identifier": "tec-mls-winner-2026-11-07-vwh",
+          "long": true,
+          "marketId": 7974,
+          "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+          "price": "0.1960",
+          "quote": {
+            "currency": "USD",
+            "value": "0.1960"
+          },
+          "teamId": 2282,
+          "tradable": true,
+          "updatedAt": "2026-03-19T21:31:54Z"
+        },
+        {
+          "createdAt": "2026-03-19T21:31:54Z",
+          "description": "No",
+          "id": "15948",
+          "identifier": "tec-mls-winner-2026-11-07-vwh",
+          "long": false,
+          "marketId": 7974,
+          "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+          "price": "0.835",
+          "quote": {
+            "currency": "USD",
+            "value": "0.835"
+          },
+          "teamId": 2282,
+          "tradable": true,
+          "updatedAt": "2026-03-19T21:31:54Z"
+        }
+      ],
+      "marketType": "futures",
+      "minimumTradeQty": 1,
+      "orderPriceMinTickSize": 0.001,
+      "outcomePrices": "[\"0.1960\",\"0.835\"]",
+      "outcomes": "[\"No\",\"Yes\"]",
+      "politics": null,
+      "question": "Major League Soccer Champion",
+      "slug": "tec-mls-winner-2026-11-07-vwh",
+      "sportsMarketType": "futures",
+      "sportsMarketTypeV2": "SPORTS_MARKET_TYPE_FUTURE",
+      "startDate": "2026-03-19T21:25:04Z",
+      "status": "MARKET_STATUS_OPEN",
+      "subtitle": "10-2-2",
+      "tags": [],
+      "title": "Vancouver Whitecaps FC",
+      "titleShort": "Vancouver Whitecaps FC",
+      "updatedAt": "2026-11-06T05:30:07Z"
+    },
+    {
+      "active": true,
+      "archived": false,
+      "assetPriceTerms": null,
+      "bestAskQuote": {
+        "currency": "USD",
+        "value": "0.0200"
+      },
+      "bestBidQuote": {
+        "currency": "USD",
+        "value": "0.0050"
+      },
+      "category": "sports",
+      "closed": false,
+      "color": "#2B2707",
+      "comboEnabled": false,
+      "createdAt": "2026-03-19T21:31:54Z",
+      "endDate": "2027-01-01T21:20:09Z",
+      "ep3Status": "OPEN",
+      "ep3SyncedAt": "2026-10-29T12:04:57Z",
+      "eventSubcategory": "SOCCER",
+      "feeCoefficient": 0.0695,
+      "gameStartTime": "2026-02-21T00:00:00Z",
+      "hidden": false,
+      "id": "7976",
+      "manualActivation": false,
+      "marketSides": [
+        {
+          "createdAt": "2026-03-19T21:31:54Z",
+          "description": "Yes",
+          "id": "15951",
+          "identifier": "tec-mls-winner-2026-11-07-clb",
+          "long": true,
+          "marketId": 7976,
+          "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+          "price": "0.0200",
+          "quote": {
+            "currency": "USD",
+            "value": "0.0200"
+          },
+          "teamId": 2265,
+          "tradable": true,
+          "updatedAt": "2026-03-19T21:31:54Z"
+        },
+        {
+          "createdAt": "2026-03-19T21:31:54Z",
+          "description": "No",
+          "id": "15952",
+          "identifier": "tec-mls-winner-2026-11-07-clb",
+          "long": false,
+          "marketId": 7976,
+          "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+          "price": "0.995",
+          "quote": {
+            "currency": "USD",
+            "value": "0.995"
+          },
+          "teamId": 2265,
+          "tradable": true,
+          "updatedAt": "2026-03-19T21:31:54Z"
+        }
+      ],
+      "marketType": "futures",
+      "minimumTradeQty": 1,
+      "orderPriceMinTickSize": 0.001,
+      "outcomePrices": "[\"0.0200\",\"0.995\"]",
+      "outcomes": "[\"Yes\",\"No\"]",
+      "politics": null,
+      "question": "Major League Soccer Champion",
+      "slug": "tec-mls-winner-2026-11-07-clb",
+      "sportsMarketType": "futures",
+      "sportsMarketTypeV2": "SPORTS_MARKET_TYPE_FUTURE",
+      "startDate": "2026-03-19T21:25:04Z",
+      "status": "MARKET_STATUS_OPEN",
+      "subtitle": "4-4-7",
+      "tags": [],
+      "title": "Columbus Crew",
+      "titleShort": "Columbus Crew",
+      "updatedAt": "2026-11-05T22:17:01Z"
+    }
+  ]
+}

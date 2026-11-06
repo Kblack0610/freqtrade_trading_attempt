@@ -1,0 +1,29 @@
+[
+  {
+    "closeTime": 1796525880000,
+    "createdTime": 1793933924354,
+    "creatorId": "cPQMzdgrnFZIhyYJ1SYB7OyUmsR2",
+    "creatorName": "spiderduckpig",
+    "creatorUsername": "spiderduckpig",
+    "id": "UnEEQq9IuC",
+    "isResolved": false,
+    "lastBetTime": 1793946446804,
+    "lastUpdatedTime": 1793946446804,
+    "mechanism": "cpmm-1",
+    "outcomeType": "BINARY",
+    "p": 0.49999999999999994,
+    "pool": {
+      "NO": 90.90909090499959,
+      "YES": 110.00000000495046
+    },
+    "probability": 0.4524886877605064,
+    "question": "Will a new brawl occur in Armenian Parliament over the Ministry of Sex issue",
+    "slug": "will-a-new-brawl-occur-in-armenian",
+    "token": "MANA",
+    "totalLiquidity": 100,
+    "uniqueBettorCount": 2,
+    "url": "https://manifold.markets/spiderduckpig/will-a-new-brawl-occur-in-armenian",
+    "volume": 11.999999995049542,
+    "volume24Hours": 11.999999995049542
+  }
+]

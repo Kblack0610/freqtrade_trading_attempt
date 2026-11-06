@@ -1,37 +1,11 @@
 import datetime as dt
-import json
-from pathlib import Path
 
 import pytest
+from markets_fakes import Session, fixture
 
 from markets.kalshi import Kalshi
 
-FIX = Path(__file__).parent / "fixtures" / "markets"
 CFG = {"base_url": "https://kalshi.test/v2", "page_limit": 2, "page_gap_s": 0.5, "retries": 2}
-
-
-class Resp:
-    def __init__(self, status, body=None):
-        self.status_code, self.body = status, body
-
-    def json(self):
-        return self.body
-
-    def raise_for_status(self):
-        if self.status_code >= 400:
-            raise RuntimeError(f"HTTP {self.status_code}")
-
-
-class Session:
-    """Answers each GET from a queue of (status, fixture name) and records the params it was sent."""
-
-    def __init__(self, *answers):
-        self.answers, self.calls = list(answers), []
-
-    def get(self, url, params, timeout):
-        self.calls.append((url, dict(params)))
-        status, name = self.answers.pop(0)
-        return Resp(status, json.loads((FIX / name).read_text()) if name else None)
 
 
 def test_open_markets_follow_the_cursor_and_parse_dollar_strings():
@@ -39,7 +13,7 @@ def test_open_markets_follow_the_cursor_and_parse_dollar_strings():
     pages = list(Kalshi(CFG, s, sleep=slept.append).open_markets())
     assert [len(p) for p in pages] == [2, 2]
     assert s.calls[0][1] == {"status": "open", "mve_filter": "exclude", "limit": 2}
-    assert s.calls[1][1]["cursor"] == json.loads((FIX / "kalshi_open_page1.json").read_text())["cursor"]
+    assert s.calls[1][1]["cursor"] == fixture("kalshi_open_page1.json")["cursor"]
     assert slept == [0.5]  # spaced between pages, not after the last
     q = pages[0][0]
     assert (q.market_id, q.outcome, q.status, q.market_type) == ("KXNBA4QSPREAD-26NOV06PORLAL-POR9", "yes", "active", "binary")

@@ -18,7 +18,7 @@ Results go to the `trader` database in the cluster's shared Postgres, which the 
 | `lab/league.py` | Bot entrypoint: picks its roster row from the pod ordinal, refuses anything but key-less spot dry run, writes the API config, execs `freqtrade trade` |
 | `lab/pairs.py` | By hand: a research venue's whitelist, its most traded pairs with history since 2022 |
 | `lab/futures.py` | Daily job: funding rates and open interest for the okx and kucoin swaps into `funding_rates` and `open_interest` (see Price data) |
-| `lab/markets/`, `lab/markets.toml` | Event contracts, kept out of the Freqtrade runtime: the venue adapter interface (`venue.py`), the read-only Kalshi adapter, and the recorder, a 5-min job writing change-only quotes to MinIO parquet and market metadata to Postgres (see `docs/markets.md`, Recorder) |
+| `lab/markets/`, `lab/markets.toml` | Event contracts, kept out of the Freqtrade runtime: the venue adapter interface (`venue.py`), read-only adapters for Kalshi, Polymarket US and global, PredictIt, Manifold and The Odds API (sportsbook odds), the cross-venue linker (`links.py`: rules, LLM proposals, confirmation by resolution), and the recorder, a 5-min job writing change-only quotes to MinIO parquet and market metadata to Postgres (see `docs/markets.md`, Recorder) |
 | `lab/backfill.py` | Hourly job: price history for every exchange x pair x timeframe into `data/<exchange>/` on the lab PVC, and what it holds into `data_coverage` (see Price data) |
 | `lab/analyze.py` | Nightly job: every strategy x exchange backtested in calendar-year chunks over the whole history, lookahead and recursive bias checks, then the derived tables (see The analysis) |
 | `lab/walkforward.py` | Weekly job: hyperopt on the months before each of the last whole months, then that unseen month backtested as is and tuned (see Walk-forward) |
@@ -209,6 +209,7 @@ The first run fetches full history (5m since 2019 on binanceus is the long pole)
 - `015`: `benchmarks`, the plain alternatives to an active strategy.
 - `018`: `funding_rates` and `open_interest`, measured swap data per exchange, swap symbol and time, written by `lab/futures.py`.
 - `019`: `venues`, `markets`, `outcomes` (each outcome's latest quote), `resolutions` and `market_sweeps` (one row per recorder run), written by `lab/markets/recorder.py`. Quote history is parquet in MinIO, never Postgres.
+- `020`: `market_links` (the same event across venues, proposed, confirmed or rejected) and `market_link_asks` (each market the LLM was asked about), written by `lab/markets/links.py`.
 
  A schema change is a new numbered file; never edit an applied one.
 

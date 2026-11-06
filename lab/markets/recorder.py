@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """One sweep per venue: open markets and their top of book, change-only, plus the markets resolved since the last run.
 
-  python -m markets.recorder [venue ...]     # default: every venue in lab/markets.toml
+  python -m markets.recorder [venue ...]     # default: [recorder] default_venues in lab/markets.toml
 
 For each venue it reads every open market a page at a time and diffs each outcome's quote against the last one stored
 in Postgres (outcomes). Only the changed quotes are written, as one parquet object in MinIO, and only then is the
@@ -25,10 +25,14 @@ from pyarrow import fs as pafs
 
 from db import connect
 from markets.kalshi import Kalshi
+from markets.manifold import Manifold
+from markets.odds import OddsApi
+from markets.polymarket import Polymarket, PolymarketUS
+from markets.predictit import PredictIt
 from markets.venue import Quote, Venue
 
 CONFIG = Path(os.environ.get("MARKETS_CONFIG", Path(__file__).resolve().parents[1] / "markets.toml"))
-ADAPTERS = {"kalshi": Kalshi}
+ADAPTERS = {a.name: a for a in (Kalshi, PolymarketUS, Polymarket, PredictIt, Manifold, OddsApi)}
 META = ("event_id", "series_id", "title", "subtitle", "market_type", "status", "open_time", "close_time")
 BOOK = ("bid", "ask", "last", "bid_size", "ask_size", "volume", "open_interest")
 SCHEMA = pa.schema([
@@ -120,8 +124,8 @@ def sweep(v: Venue, vcfg: dict, conn, fs: pafs.FileSystem, root: str, lookback: 
 def main(argv: list[str] | None = None, fs: pafs.FileSystem | None = None, adapters: dict | None = None) -> int:
     cfg = load_config()
     adapters = adapters or ADAPTERS
-    names = (argv if argv is not None else sys.argv[1:]) or list(cfg["venues"])
     rec = cfg["recorder"]
+    names = (argv if argv is not None else sys.argv[1:]) or rec.get("default_venues") or list(cfg["venues"])
     fs = fs or s3_from_env()
     root = f"{rec['bucket']}/{rec['prefix']}"
     lookback = dt.timedelta(hours=rec.get("resolutions_lookback_h", 1))
