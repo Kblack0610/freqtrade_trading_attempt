@@ -9,6 +9,24 @@ permissions:
   contents: read
 
 jobs:
+  # gitleaks over the commits this push or PR adds. History before 2026-11 holds freqtrade API
+  # JWTs in old committed logs and a retired jwt_secret_key, none of it in HEAD (README, CI), so
+  # a full-history scan here would always be red.
+  secrets:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: gitleaks over the new commits
+        env:
+          RANGE: ${{ github.event_name == 'pull_request' && format('{0}..{1}', github.event.pull_request.base.sha, github.event.pull_request.head.sha) || format('{0}..{1}', github.event.before, github.sha) }}
+        run: |
+          case "$RANGE" in 0000000000000000000000000000000000000000..*) RANGE="-1 $GITHUB_SHA";; esac
+          docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:v8.28.0@sha256:cdbb7c955abce02001a9f6c9f602fb195b7fadc1e812065883f695d1eeaba854 \
+            git /repo --log-opts="$RANGE" --redact --no-banner
+
   test:
     runs-on: ubuntu-latest
     services:
@@ -25,6 +43,7 @@ jobs:
       - name: Build
         run: docker build -t trader:ci .
       - name: Migrate twice, then the tests
+        timeout-minutes: 10
         run: >-
           docker run --rm --network host --entrypoint bash
           -e DATABASE_URL=postgresql://postgres:test@localhost:5432/trader trader:ci
@@ -43,12 +62,13 @@ jobs:
       - name: Build the ML image (freqtrade's _freqai base, for lightgbm)
         run: docker build --build-arg FREQTRADE_TAG=2026.9_freqai -t trader-ml:ci .
       - name: FreqAI trains and predicts; the families still load and shadow nothing
+        timeout-minutes: 10
         run: >-
           docker run --rm --entrypoint python trader-ml:ci
           -m pytest -q -p no:cacheprovider lab/tests/test_ml.py lab/tests/test_families.py
 
   publish:
-    needs: [test, test-ml]
+    needs: [secrets, test, test-ml]
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     outputs:
