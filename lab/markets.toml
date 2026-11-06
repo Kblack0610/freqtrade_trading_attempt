@@ -65,3 +65,37 @@ page_limit = 1000
 page_gap_s = 0.2
 retries = 6
 timeout_s = 60
+
+[venues.odds_api]
+# Sportsbook implied odds, read-only; the key comes from ODDS_API_KEY. Credits a run: per sport, 1 per region for the
+# odds plus 2 for /scores. One sport every 5 min is about 8,600 a month against the free tier's 500, so the cadence
+# and the sports list wait on the plan the human buys (docs/markets.md, The Odds API).
+title = "The Odds API"
+kind = "sportsbook"
+url = "https://the-odds-api.com"
+base_url = "https://api.the-odds-api.com"
+sports = ["basketball_nba"]
+regions = "us"
+page_gap_s = 1
+retries = 4
+timeout_s = 30
+
+[links.rules.kalshi_game]
+# The odds_api sport key and the Kalshi game-winner series it links to.
+series = { basketball_nba = "KXNBAGAME", americanfootball_nfl = "KXNFLGAME", icehockey_nhl = "KXNHLGAME", baseball_mlb = "KXMLBGAME" }
+
+[links.llm]
+# Proposals only, through the LiteLLM gateway with a scoped key (LITELLM_API_KEY). A local model: free, and the
+# market titles never leave the house.
+base_url = "https://llm.kblab.me"
+model = "reasoning (Qwen3.6-35B-A3B-4bit)"
+timeout_s = 120
+# Each [a, b]: open markets of a that are not yet linked or asked about, each asked against b's candidates.
+pairs = [["odds_api", "kalshi"], ["polymarket_us", "kalshi"]]
+# Markets asked about per run, across all pairs, soonest closing first, and only those closing within horizon_d.
+max_asks = 50
+horizon_d = 14
+# A candidate closes within window_h of the market and shares a title word; the best `candidates` by shared words go.
+window_h = 96
+candidates = 15
+stopwords = ["will", "the", "win", "wins", "winner", "at", "vs", "and", "or", "of", "in", "on", "to", "a", "by", "be", "game", "match", "yes", "no", "2026", "2027"]

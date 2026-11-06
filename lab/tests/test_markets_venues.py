@@ -24,7 +24,7 @@ def nosleep(_):
 
 def test_every_venue_in_the_config_has_an_adapter_and_the_bare_run_stays_kalshi():
     c = load_config()
-    assert set(c["venues"]) == set(ADAPTERS) == {"kalshi", "polymarket_us", "polymarket", "predictit", "manifold"}
+    assert set(c["venues"]) == set(ADAPTERS) == {"kalshi", "polymarket_us", "polymarket", "predictit", "manifold", "odds_api"}
     assert c["recorder"]["default_venues"] == ["kalshi"]
     assert all(ADAPTERS[n].name == n for n in ADAPTERS)
 

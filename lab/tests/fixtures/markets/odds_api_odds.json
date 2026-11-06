@@ -1,0 +1,41 @@
+[
+  {
+    "id": "e912304de2b2ce35b473ce2ecd3d1502",
+    "sport_key": "basketball_nba",
+    "sport_title": "NBA",
+    "commence_time": "2026-11-10T01:00:00Z",
+    "home_team": "Phoenix Suns",
+    "away_team": "San Antonio Spurs",
+    "bookmakers": [
+      {
+        "key": "draftkings",
+        "title": "DraftKings",
+        "last_update": "2026-11-06T07:10:12Z",
+        "markets": [
+          {"key": "h2h", "last_update": "2026-11-06T07:10:12Z",
+           "outcomes": [{"name": "Phoenix Suns", "price": 2.6}, {"name": "San Antonio Spurs", "price": 1.53}]}
+        ]
+      },
+      {
+        "key": "fanduel",
+        "title": "FanDuel",
+        "last_update": "2026-11-06T07:09:40Z",
+        "markets": [
+          {"key": "h2h", "last_update": "2026-11-06T07:09:40Z",
+           "outcomes": [{"name": "Phoenix Suns", "price": 2.5}, {"name": "San Antonio Spurs", "price": 1.56}]},
+          {"key": "spreads", "last_update": "2026-11-06T07:09:40Z",
+           "outcomes": [{"name": "Phoenix Suns", "price": 1.91, "point": 4.5}, {"name": "San Antonio Spurs", "price": 1.91, "point": -4.5}]}
+        ]
+      }
+    ]
+  },
+  {
+    "id": "4b4f1d2c2a0e6c1f2b8f3e5d7a9c1e3f",
+    "sport_key": "basketball_nba",
+    "sport_title": "NBA",
+    "commence_time": "2026-11-11T03:00:00Z",
+    "home_team": "Sacramento Kings",
+    "away_team": "Orlando Magic",
+    "bookmakers": []
+  }
+]

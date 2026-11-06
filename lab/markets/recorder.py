@@ -26,12 +26,13 @@ from pyarrow import fs as pafs
 from db import connect
 from markets.kalshi import Kalshi
 from markets.manifold import Manifold
+from markets.odds import OddsApi
 from markets.polymarket import Polymarket, PolymarketUS
 from markets.predictit import PredictIt
 from markets.venue import Quote, Venue
 
 CONFIG = Path(os.environ.get("MARKETS_CONFIG", Path(__file__).resolve().parents[1] / "markets.toml"))
-ADAPTERS = {a.name: a for a in (Kalshi, PolymarketUS, Polymarket, PredictIt, Manifold)}
+ADAPTERS = {a.name: a for a in (Kalshi, PolymarketUS, Polymarket, PredictIt, Manifold, OddsApi)}
 META = ("event_id", "series_id", "title", "subtitle", "market_type", "status", "open_time", "close_time")
 BOOK = ("bid", "ask", "last", "bid_size", "ask_size", "volume", "open_interest")
 SCHEMA = pa.schema([
