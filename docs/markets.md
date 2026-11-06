@@ -52,6 +52,17 @@ What the venues serve:
 - Polymarket US: `/v1/price-history?symbol=<slug>` returns `longPrice` and `shortPrice`; the YES ask is `longPrice` and the bid is 1 - `shortPrice`. Its list carries no volume.
 - Manifold: `/v0/markets` pages by the last id, 1,000 a page; history keeps resolved binary markets.
 
+## Backtest
+
+`lab/markets/backtest.py` replays a venue's books through a strategy and scores the result with the crypto lab's statistics; fees are `lab/markets/fees.py`. Knobs are `[backtest]` and `[backtest.fees.<venue>]` in `lab/markets.toml`; results are `market_backtests` (migration 022). It has no command yet: the strategy families of P6 call `run()`.
+
+- Books: `load_quotes` reads the recorder's change-only quotes, `load_bars` the backfill's bars by settle date. Bars carry no sizes, so each side's depth is `bar_volume_share` (10%) of the period's traded contracts. A market first appears at its first change in the window.
+- Fills: the strategy sees each row in time order with the market's metadata, never its resolution. An order fills against the book as it stood `latency_s` later: YES at the ask, NO at one minus the bid, whole contracts, at most `depth_share` (half) of that side's top-of-book size less what earlier orders took from the same row. The rest is cancelled, because only the top of the book is recorded. Nothing fills once the market has closed or settled.
+- Settlement: every fill is held to resolution. YES pays the resolution's value, NO one minus it, void refunds the price and keeps the fee. A strategy exits early by buying the other side.
+- Fees: Kalshi `ceil(0.07 * C * P * (1 - P))` to the cent per order, checked against the schedule's examples (100 at 50c is $1.75, at 10c or 90c $0.63). Polymarket US 0.0695 with half-even cents. Polymarket global at 0.07, its highest category, since the markets table holds no category. PredictIt 10% of a winning position's profit. Manifold nothing. Maker fees are not modelled: every fill is a taker.
+- Lookahead: a strategy with a `cutoff` (an LLM forecaster's training cutoff) is refused outright on a book that starts before it.
+- Scoring: each fill is a trade in the shape `metrics.window_metrics` reads (close_rate is the payout, so the gross edge is payout over price), with daily returns on a 1000 USD wallet. `confidence.interval` gives the per-trade interval and `confidence.scores` the score across every stored backtest, with `suggest.toml [confidence]` unchanged. `run()` writes the trial to `trials` (strategy = family, exchange = venue, variant = md5 of the params) before it reads a result, a refused run included. The deflated Sharpe counts every trial on a markets venue by the plain count, which can only overstate the bar compared with the effective count the crypto lab uses.
+
 ## Kalshi
 
 API (doc, https://docs.kalshi.com/getting_started/api_environments.md):
