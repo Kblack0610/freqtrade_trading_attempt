@@ -11,6 +11,8 @@ Results go to the `trader` database in the cluster's shared Postgres, which the 
 | Path | What it is |
 |---|---|
 | `user_data/strategies/` | Strategies, found with `--recursive-strategy-search` |
+| `lab/families/` | Staged strategy families, not yet scanned (see Staged families) |
+| `lab/patterns.py` | Causal chart-pattern signals: swing pivots, support and resistance breaks, double tops and bottoms, triangles, flags |
 | `user_data/config.base.json` | Shared config: dry run, 1000 USD wallet, spot, static pair list |
 | `user_data/exchanges/<name>.json` | Per-exchange overlay: name, pair whitelist, pricing quirks; no keys |
 | `lab/league.py` | Bot entrypoint: picks its roster row from the pod ordinal, refuses anything but key-less spot dry run, writes the API config, execs `freqtrade trade` |
@@ -155,6 +157,10 @@ Analysis also fills `benchmarks` from the regime venue's daily closes: holding B
 ## Adding a strategy
 
 Drop the `.py` in `user_data/strategies/` (any subfolder). It must import on the pinned image: Python 3.14, NumPy 2 (`np.nan`, not `np.NaN`), no `ta` package. Check with `freqtrade list-strategies --recursive-strategy-search --userdir user_data -c user_data/config.base.json -c user_data/exchanges/binanceus.json`. The next nightly analysis backtests its whole history and checks it for bias. Give its class a line in `lab/families.toml`, or `/coverage` lists it as untagged and the tests fail.
+
+## Staged families
+
+`lab/families/` holds whole method families waiting to be switched on: `candles/`, one strategy per TA-Lib candlestick pattern that can signal bullish, and `chart/`, one per long signal in `lab/patterns.py`. Each family shares one fixed exit (ROI table, stoploss, time stop), and its `family.toml` holds that exit and every parameter. The strategy files are generated from it: edit the toml or `lab/patterns.py`, then run `python lab/families/generate.py`; `lab/tests/test_families.py` fails while a file is stale. The nightly analysis searches only `user_data/strategies/`, so these add no trials yet; the pre-registered stop rule reads the trial count on 2026-11-07. CI still checks that each one loads and that one of each passes the lookahead check on synthetic prices. Switching a family on is a PR that moves its folder to `user_data/strategies/<family>/` and drops the test that says it is not scanned.
 
 ## Price data
 

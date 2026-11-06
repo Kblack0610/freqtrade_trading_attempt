@@ -1,0 +1,24 @@
+# The candlestick family: one strategy per TA-Lib "Pattern Recognition" function, entering long when
+# the pattern's value is above zero on the candle close, all with the same fixed exit.
+# lab/families/generate.py writes the strategy files from this file: edit here, then rerun it.
+# TA-Lib reports some neutral patterns (doji, spinning top, high wave) as +100; the rule takes them as
+# written, value above zero, rather than guessing a direction for them.
+kind = "candles"
+prefix = "Candle"
+timeframe = "1h"
+# TA-Lib's candle averages look back at most 10 bars and the longest pattern spans 5.
+startup_candle_count = 30
+
+[exit]
+minimal_roi = { "0" = 0.03, "360" = 0.015 }
+stoploss = -0.03
+time_stop_hours = 24
+
+# TA-Lib only ever returns zero or a negative value for these, so a long-only strategy on one could
+# never enter and would add a trial that cannot trade. lab/tests/test_families.py checks the list.
+[skip]
+bearish_only = [
+    "CDL2CROWS", "CDL3BLACKCROWS", "CDLADVANCEBLOCK", "CDLDARKCLOUDCOVER", "CDLEVENINGDOJISTAR",
+    "CDLEVENINGSTAR", "CDLHANGINGMAN", "CDLIDENTICAL3CROWS", "CDLINNECK", "CDLONNECK",
+    "CDLSHOOTINGSTAR", "CDLSTALLEDPATTERN", "CDLTHRUSTING", "CDLUPSIDEGAP2CROWS",
+]
