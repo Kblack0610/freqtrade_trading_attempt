@@ -29,6 +29,8 @@ CCXT_ID = {"okx": "okx", "kucoin": "kucoinfutures"}
 # okx rejects a since on open interest ("Illegal time range") and serves 180 days without one;
 # kucoin serves 30 days unless ccxt pages back from a since, then about 98
 OI_PAGED = {"okx": False, "kucoin": True}
+# okx caps open-interest history at 5 requests per 2s per IP, shared with the league bots, so a 429 waits and retries
+RETRY_WAITS = (2.0, 4.0, 8.0)
 
 
 class Venue(Protocol):
@@ -38,19 +40,29 @@ class Venue(Protocol):
 
 
 class Ccxt:
-    def __init__(self, exchange: str):
+    def __init__(self, exchange: str, sleep=time.sleep):
         import ccxt
         self.ex = getattr(ccxt, CCXT_ID[exchange])({"enableRateLimit": True})
+        self.throttled, self.sleep = ccxt.RateLimitExceeded, sleep
+
+    def _call(self, fetch, *args, **kwargs):
+        for wait in RETRY_WAITS:
+            try:
+                return fetch(*args, **kwargs)
+            except self.throttled:
+                self.sleep(wait)
+        return fetch(*args, **kwargs)
 
     def swaps(self) -> set[str]:
         return {s for s, m in self.ex.load_markets().items() if m.get("swap") and m.get("linear")}
 
     def funding(self, symbol, since, until):
-        rows = self.ex.fetch_funding_rate_history(symbol, since=since, params={"until": until})
+        rows = self._call(self.ex.fetch_funding_rate_history, symbol, since=since, params={"until": until})
         return [(r["timestamp"], r["fundingRate"]) for r in rows if r.get("fundingRate") is not None]
 
     def open_interest(self, symbol, since):
-        rows = self.ex.fetch_open_interest_history(symbol, "1d", since=since, params={"paginate": since is not None})
+        rows = self._call(self.ex.fetch_open_interest_history, symbol, "1d", since=since,
+                          params={"paginate": since is not None})
         return [(r["timestamp"], r.get("openInterestAmount"), r.get("openInterestValue")) for r in rows]
 
 
