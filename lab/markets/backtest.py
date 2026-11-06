@@ -159,6 +159,30 @@ def load_markets(conn, venue: str, ids: Iterable[str]) -> tuple[dict, dict]:
     return markets, res
 
 
+def take(o: Order, bid: float, ask: float, depth_yes: float, depth_no: float, taken: float,
+         share: float) -> tuple[int, float] | None:
+    """The whole contracts and price a taker order gets from one book row (module docstring), `taken` contracts of
+    its side already gone to earlier orders; None when it gets nothing. The paper league fills through this too."""
+    if o.side not in SIDES:
+        raise ValueError(f"order side {o.side!r}")
+    price = ask if o.side == "yes" else 1.0 - bid
+    if not 0 < price < 1 or (o.limit is not None and price > o.limit):
+        return None
+    room = (depth_yes if o.side == "yes" else depth_no) * share - taken
+    n = min(math.floor(o.stake / price + 1e-9), math.floor(room)) if np.isfinite(room) else 0
+    return (n, float(price)) if n >= 1 else None
+
+
+def payout(side: str, price: float, res: Resolution) -> float | None:
+    """What one contract bought at `price` pays at resolution (module docstring); None for an unknown result."""
+    if res.result == "void":
+        return price
+    v = res.value if res.value is not None else {"yes": 1.0, "no": 0.0}.get(res.result)
+    if v is None:
+        return None
+    return v if side == "yes" else 1.0 - v
+
+
 def replay(book: pd.DataFrame, markets: dict, resolutions: dict, strategy: Strategy, bcfg: dict,
            fee_cfg: dict | None) -> tuple[pd.DataFrame, int]:
     """Every fill the strategy's orders get from the book, and how many orders it sent."""
@@ -175,8 +199,6 @@ def replay(book: pd.DataFrame, markets: dict, resolutions: dict, strategy: Strat
     fills, sent = [], 0
 
     def fill(o: Order, t: int) -> dict | None:
-        if o.side not in SIDES:
-            raise ValueError(f"order side {o.side!r}")
         idx, at = rows.get(o.market_id), pd.Timestamp(t, tz="UTC")
         if idx is None:
             return None
@@ -185,16 +207,13 @@ def replay(book: pd.DataFrame, markets: dict, resolutions: dict, strategy: Strat
         if j < 0 or (m and m.close_time and at >= m.close_time) or (res and at >= res.settled_at):
             return None
         r = idx[j]
-        price = ask[r] if o.side == "yes" else 1.0 - bid[r]
-        if not 0 < price < 1 or (o.limit is not None and price > o.limit):
+        got = take(o, bid[r], ask[r], depth["yes"][r], depth["no"][r], taken.get((r, o.side), 0), share)
+        if got is None:
             return None
-        room = depth[o.side][r] * share - taken.get((r, o.side), 0)
-        n = min(math.floor(o.stake / price + 1e-9), math.floor(room)) if np.isfinite(room) else 0
-        if n < 1:
-            return None
+        n, price = got
         taken[(r, o.side)] = taken.get((r, o.side), 0) + n
-        return {"market_id": o.market_id, "side": o.side, "open_date": at, "contracts": n, "price": float(price),
-                "fee": fees.entry(fee_cfg, n, float(price))}
+        return {"market_id": o.market_id, "side": o.side, "open_date": at, "contracts": n, "price": price,
+                "fee": fees.entry(fee_cfg, n, price)}
 
     for i, row in enumerate(book.itertuples(index=False)):
         m = markets.get(row.market_id)
@@ -213,15 +232,8 @@ def settle(fills: pd.DataFrame, resolutions: dict, fee_cfg: dict | None) -> pd.D
     out = []
     for f in fills.itertuples(index=False):
         res = resolutions.get(f.market_id)
-        if res is None:
+        if res is None or (pay := payout(f.side, f.price, res)) is None:
             continue
-        if res.result == "void":
-            pay = f.price
-        else:
-            v = res.value if res.value is not None else {"yes": 1.0, "no": 0.0}.get(res.result)
-            if v is None:
-                continue
-            pay = v if f.side == "yes" else 1.0 - v
         cost = f.contracts * f.price + f.fee
         profit = f.contracts * pay - cost - fees.settlement(fee_cfg, f.contracts * f.price, f.contracts * pay)
         out.append({"market_id": f.market_id, "side": f.side, "contracts": f.contracts, "open_date": f.open_date,

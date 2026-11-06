@@ -18,7 +18,7 @@ Results go to the `trader` database in the cluster's shared Postgres, which the 
 | `lab/league.py` | Bot entrypoint: picks its roster row from the pod ordinal, refuses anything but key-less spot dry run, writes the API config, execs `freqtrade trade` |
 | `lab/pairs.py` | By hand: a research venue's whitelist, its most traded pairs with history since 2022 |
 | `lab/futures.py` | Daily job: funding rates and open interest for the okx and kucoin swaps into `funding_rates` and `open_interest` (see Price data) |
-| `lab/markets/`, `lab/markets.toml` | Event contracts, kept out of the Freqtrade runtime: the venue adapter interface (`venue.py`), read-only adapters for Kalshi, Polymarket US and global, PredictIt, Manifold and The Odds API (sportsbook odds), the cross-venue linker (`links.py`: rules, LLM proposals, confirmation by resolution), the recorder, a 5-min job writing change-only quotes to MinIO parquet and market metadata to Postgres, the history backfill (`history.py`: settled markets, price bars and Kalshi trades from before the recorder started), the backtester (`backtest.py`, `fees.py`: depth-limited taker fills, per-venue fees, settlement at resolution, scored through `metrics.py` and `confidence.py`), and the strategy families (`families.py`: favourite-longshot, base-rate calibration, cross-venue gaps, and a forward-only LLM forecaster; see `docs/markets.md`, Recorder, History, Backtest and Families) |
+| `lab/markets/`, `lab/markets.toml` | Event contracts, kept out of the Freqtrade runtime: the venue adapter interface (`venue.py`), read-only adapters for Kalshi, Polymarket US and global, PredictIt, Manifold and The Odds API (sportsbook odds), the cross-venue linker (`links.py`: rules, LLM proposals, confirmation by resolution), the recorder, a 5-min job writing change-only quotes to MinIO parquet and market metadata to Postgres, the history backfill (`history.py`: settled markets, price bars and Kalshi trades from before the recorder started), the backtester (`backtest.py`, `fees.py`: depth-limited taker fills, per-venue fees, settlement at resolution, scored through `metrics.py` and `confidence.py`), and the strategy families (`families.py`: favourite-longshot, base-rate calibration, cross-venue gaps, and a forward-only LLM forecaster), the paper league (`paper.py`: each family variant trades paper money against the recorder's live books, watched by `lab/watcher.py`) and the order path on the Kalshi demo exchange (`kalshi_trade.py`, demo hosts only); see `docs/markets.md`, Recorder, History, Backtest, Families, Paper league and Demo orders |
 | `lab/backfill.py` | Hourly job: price history for every exchange x pair x timeframe into `data/<exchange>/` on the lab PVC, and what it holds into `data_coverage` (see Price data) |
 | `lab/analyze.py` | Nightly job: every strategy x exchange backtested in calendar-year chunks over the whole history, lookahead and recursive bias checks, then the derived tables (see The analysis) |
 | `lab/walkforward.py` | Weekly job: hyperopt on the months before each of the last whole months, then that unseen month backtested as is and tuned (see Walk-forward) |
@@ -211,6 +211,7 @@ The first run fetches full history (5m since 2019 on binanceus is the long pole)
 - `019`: `venues`, `markets`, `outcomes` (each outcome's latest quote), `resolutions` and `market_sweeps` (one row per recorder run), written by `lab/markets/recorder.py`. Quote history is parquet in MinIO, never Postgres.
 - `020`: `market_links` (the same event across venues, proposed, confirmed or rejected) and `market_link_asks` (each market the LLM was asked about), written by `lab/markets/links.py`.
 - `021`: `resolutions.volume` (each settled market's lifetime volume) and `market_backfill` (progress of each history job, per venue and unit), written by `lab/markets/history.py`.
+- `023`: `paper_accounts` and `paper_orders` (the event-contract paper league, written by `lab/markets/paper.py`) and `demo_orders` (each order on the Kalshi demo exchange, written by `lab/markets/kalshi_trade.py`).
 
  A schema change is a new numbered file; never edit an applied one.
 
@@ -255,6 +256,8 @@ python lab/watcher.py --drill-end <bot>
 ```
 
 The first flags the bot; the next pass marks it breached and POSTs `/stopentry`, which keeps managing open trades. `stopped_at` minus `drill_at` in `watch` is the time taken, and the plan's gate is two cadences. The pass repeats the stop while the drill lasts, because a restarted bot comes back running. The second clears the breach and POSTs `/start`.
+
+The event-contract paper league's accounts (`paper-<family>-<variant>`) get watch rows too, read from `paper_accounts` rather than an API, with `seen_at` the last paper pass. A drill on one sets `stopped_at`, and the next `markets.paper` pass takes no entries for it while its open fills still settle and mark; `--drill-end` clears the row, which is all that starts it again.
 
 ### Metrics
 
