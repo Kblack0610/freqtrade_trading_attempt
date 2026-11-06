@@ -51,6 +51,8 @@ jobs:
     needs: [test, test-ml]
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
     permissions:
       contents: read
       packages: write
@@ -69,7 +71,8 @@ jobs:
           tags: |
             type=sha,format=short
             type=raw,value=latest
-      - uses: docker/build-push-action@v6
+      - id: build
+        uses: docker/build-push-action@v6
         with:
           context: .
           push: true
@@ -93,3 +96,30 @@ jobs:
           labels: ${{ steps.meta-ml.outputs.labels }}
           cache-from: type=gha,scope=ml
           cache-to: type=gha,mode=max,scope=ml
+
+  # Opens the home-config PR that pins this build's trader digest
+  # (apps/freqtrade/kustomization.yaml, images: trader) and closes the one it
+  # supersedes. Merging that PR on Forgejo is the deploy.
+  bump-home-config:
+    needs: publish
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    concurrency: home-config-bump
+    steps:
+      - uses: actions/checkout@v4
+      - name: Open the digest-bump PR on Forgejo
+        env:
+          FORGEJO_TOKEN: ${{ secrets.FORGEJO_DEPLOY_TOKEN }}
+          DIGEST: ${{ needs.publish.outputs.digest }}
+          SUBJECT: ${{ github.event.head_commit.message }}
+        run: |
+          if [ -z "$FORGEJO_TOKEN" ]; then
+            echo "::warning::FORGEJO_DEPLOY_TOKEN is not set, so no home-config bump PR was opened (README, CI)"
+            exit 0
+          fi
+          tip=$(git ls-remote "https://github.com/${GITHUB_REPOSITORY}" refs/heads/master | cut -f1)
+          if [ "$tip" != "$GITHUB_SHA" ]; then
+            echo "master moved on to ${tip:0:7}; that build opens the bump"
+            exit 0
+          fi
+          python3 ci/bump_home_config.py
