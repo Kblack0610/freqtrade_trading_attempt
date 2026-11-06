@@ -24,6 +24,10 @@ def when(v) -> dt.datetime | None:
     return t if t.tzinfo else t.replace(tzinfo=dt.timezone.utc)
 
 
+def epoch_s(v: float) -> dt.datetime:
+    return dt.datetime.fromtimestamp(v, dt.timezone.utc)
+
+
 def result_of(value: float | None) -> str:
     """The yes outcome's payout as the Resolution.result word: yes, no, split (a partial payout) or void."""
     if value is None:

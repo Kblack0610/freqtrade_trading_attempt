@@ -1,0 +1,45 @@
+{
+ "cursor": "",
+ "markets": [
+  {
+   "ticker": "KXITFMATCH-26SEP06VANKAM-VAN",
+   "event_ticker": "KXITFMATCH-26SEP06VANKAM",
+   "title": "Wihan Van Der Merwe wins",
+   "yes_sub_title": "Wihan Van Der Merwe",
+   "market_type": "binary",
+   "status": "finalized",
+   "open_time": "2026-09-06T05:48:00Z",
+   "close_time": "2026-09-06T07:45:59Z",
+   "yes_bid_dollars": "0.0000",
+   "yes_ask_dollars": "1.0000",
+   "last_price_dollars": "0.0100",
+   "yes_bid_size_fp": "0.00",
+   "yes_ask_size_fp": "0.00",
+   "volume_fp": "207766.16",
+   "open_interest_fp": "0.00",
+   "result": "no",
+   "settlement_value_dollars": "0.0000",
+   "settlement_ts": "2026-09-06T07:48:05.490376Z"
+  },
+  {
+   "ticker": "KXITFMATCH-26SEP06VANKAM-KAM",
+   "event_ticker": "KXITFMATCH-26SEP06VANKAM",
+   "title": "Veerawit Kamput wins",
+   "yes_sub_title": "Veerawit Kamput",
+   "market_type": "binary",
+   "status": "finalized",
+   "open_time": "2026-09-06T05:48:00Z",
+   "close_time": "2026-09-06T07:45:59Z",
+   "yes_bid_dollars": "0.0000",
+   "yes_ask_dollars": "1.0000",
+   "last_price_dollars": "0.9900",
+   "yes_bid_size_fp": "0.00",
+   "yes_ask_size_fp": "0.00",
+   "volume_fp": "131115.08",
+   "open_interest_fp": "0.00",
+   "result": "yes",
+   "settlement_value_dollars": "1.0000",
+   "settlement_ts": "2026-09-06T07:48:05.490376Z"
+  }
+ ]
+}

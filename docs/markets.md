@@ -33,6 +33,25 @@ Reading the parquet: a row is a quote as first seen at `ts`. If the database com
 - The LLM proposes, through the LiteLLM gateway (`LITELLM_API_KEY`, a scoped virtual key; model in `[links.llm]`). For each `[a, b]` pair it takes a's open markets that are not yet linked or asked about, closing within `horizon_d`, offers the `candidates` b markets that close within `window_h` and share the most title words, and keeps only matches that name an offered candidate and offered outcomes. Its links stay `proposed`. `market_link_asks` records each market asked about, so a market with no match is not paid for twice. With no key the pass is skipped and the run says so.
 - Every run ends with the resolution check: once both markets resolve and neither is void, an agreeing link becomes `confirmed` (by `resolution` unless a rule already confirmed it) and a disagreeing one `rejected`, a rule's included, so a broken rule shows as rejections. Report a strategy's results per link `source`.
 
+## History
+
+`python -m markets.history {settled,bars,trades} [venue ...] [--budget-min N] [--restart]` (same cwd and path as the recorder) backfills what the recorder cannot see: markets that settled before it started. Knobs are `[history]` and `[history.<venue>]` in `lab/markets.toml`; progress is `market_backfill` (migration 021). A run stops between pages or dates after `budget_min` (50) minutes and the next run resumes, so each job can run as a CronJob until it reports nothing left.
+
+- `settled` walks each venue's settled markets newest first into `markets` and `resolutions`, plus each market's lifetime volume (`resolutions.volume`, 021). A row the recorder already wrote is kept; only a missing volume is filled in. The cursor is saved per page, and a finished walk is not repeated. Kalshi skips markets under `settled_min_volume` (100 contracts). Venues: Kalshi, Polymarket US and global, Manifold. PredictIt states no results and The Odds API sells history only on paid plans, so neither is here.
+- `bars` writes hourly price bars, one object per venue and UTC settle date: `s3://trader-markets/history/bars/venue=<v>/date=<YYYY-MM-DD>.parquet` (venue, market_id, ts, period_s, bid, ask, open, high, low, close, volume, open_interest; a field the venue does not serve is null). It covers markets over `bars_min_volume` that settled within `bars_since_days`: Kalshi 100 contracts and 3 years, Polymarket global $1,000 and 3 years, Polymarket US everything in its 45 days.
+- `trades` writes Kalshi trades the same way under `history/trades/` (trade_id, ts, price, count, taker_side), for markets over 10,000 contracts in the last 90 days. Kalshi prints about 3k trades a minute, so every trade back to 2021 is out of reach.
+
+A date is marked done with its market count. When a later walk or the recorder adds markets to that date, the date is written again, and the new object replaces the old one. Rerunning is safe: Postgres writes are `ON CONFLICT`, and a parquet object is published only when it is closed.
+
+Measured 2026-11-06, 3 minutes per venue against the live APIs: Kalshi walked 341k settled markets (5 days of the live side; 71k over 100 contracts), Polymarket global 40k (1 day; 8k over $1,000), Polymarket US 46k (under a day), and Manifold finished all 111k resolved binary markets, back to 2021-12. At those rates the two months of Kalshi's live side take about 40 minutes, and Polymarket global's 3 years about 55 hours of budget. Bars cost one request a market: a Kalshi date has about 14k markets over 100 contracts, about an hour at 0.15 s a market, and a date is never split, so a run can overrun its budget by one date.
+
+What the venues serve:
+
+- Kalshi: `/historical/cutoff` was 2026-09-06 for both markets and trades. The archive reaches back to 2021-06, and markets settled in the few hours around the cutoff appear on both sides. Archive candles use bare field names (`yes_bid.close`), live ones the `_dollars` and `_fp` names; the adapter reads both. One request returns at most 5,000 candles, so a long market is read in windows.
+- Polymarket global: `/v2/prices-history` takes the YES token id. The list gives the condition id, so each market costs one Gamma lookup (`/markets?condition_ids=<id>&closed=true`, first of `clobTokenIds`) before its history, which pages by cursor. Only a price is served, stored as `close`.
+- Polymarket US: `/v1/price-history?symbol=<slug>` returns `longPrice` and `shortPrice`; the YES ask is `longPrice` and the bid is 1 - `shortPrice`. Its list carries no volume.
+- Manifold: `/v0/markets` pages by the last id, 1,000 a page; history keeps resolved binary markets.
+
 ## Kalshi
 
 API (doc, https://docs.kalshi.com/getting_started/api_environments.md):
@@ -52,7 +71,7 @@ Fees (secondary, quoting the fee schedule PDF effective 2026-07-07; the PDF itse
 
 Demo (doc, https://docs.kalshi.com/getting_started/demo_env): REST `https://demo-api.kalshi.co/trade-api/v2`, websocket `wss://demo-api.kalshi.co/trade-api/ws/v2`, account at https://demo.kalshi.co/ with mock funds and separate keys. Demo prices do not track the real book, so P7 uses demo only to prove the order path, never to score a strategy.
 
-History (doc, historical_data.md): `GET /historical/cutoff` gives the timestamps where records move from the live endpoints to `/historical/markets`, `/historical/markets/{t}/candlesticks` and `/historical/trades`. The live endpoints stop returning them after the move, so a backfill reads both sides of the cutoff. No earliest date is stated and there is no bulk download; P4 measures how far back it goes.
+History (doc, historical_data.md): `GET /historical/cutoff` gives the timestamps where records move from the live endpoints to `/historical/markets`, `/historical/markets/{t}/candlesticks` and `/historical/trades`. The live endpoints stop returning them after the move, so a backfill reads both sides of the cutoff. No earliest date is stated and there is no bulk download; P4 found it reaches 2021-06 (see History).
 
 Terms (secondary): API use is under the Developer Agreement, which we have not read. Own-account automated trading looks allowed; redistributing market data does not. trader.kblab.me is sign-in only, which keeps it out of redistribution, and P8 re-checks against the agreement.
 
@@ -125,7 +144,7 @@ Chosen over OpticOdds, SportsDataIO and Sportradar, whose prices are unpublished
 
 - Target load: about 180k open markets across venues, up from the 10k the plan assumed, almost all on Kalshi. A 5-min sweep is still cheap: about 180 Kalshi list requests at 1000 a page, well inside the 200 reads/s Basic tier. The naive row count is about 52M a day, so change-only parquet in MinIO is the right store and Postgres holds only market metadata.
 - The websocket for watched markets needs a Kalshi API key, so P1 polls REST until tr-50 is done.
-- Polymarket US keeps only 45 days of market data, so P4's backfill for it is whatever the recorder has kept.
+- Polymarket US keeps only 45 days of market data, so P4's backfill for it covers 45 days and the recorder keeps everything after.
 - Only Kalshi has a retail demo, so P7's order path is Kalshi only, as planned.
 
 ## Not verified
@@ -134,5 +153,5 @@ Chosen over OpticOdds, SportsDataIO and Sportradar, whose prices are unpublished
 - Whether the Kalshi rate table includes the 2026-09-24 uplift for upper tiers.
 - PredictIt's own terms, rate limit and state list (the site renders in JS).
 - The Polymarket US bot terms, and whether its markets websocket needs a key.
-- How far back Kalshi `/historical` and Polymarket `/v2/prices-history` reach.
+- How far back Polymarket `/v2/prices-history` reaches: P4 read 2026 markets only.
 - Court status past each source's date. Everything under Legality comes from trackers and law-firm alerts; no docket was read.

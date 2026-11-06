@@ -8,14 +8,21 @@ US: `/v1/markets` pages by offset, 500 at most, and its list carries bestBidQuot
 needs no per-market /bbo call. Resolved markets come newest first with orderBy=updated_at; updatedAt is the
 settled time we store, the nearest the list has. Global: `/markets/keyset` pages by after_cursor, 100 at most
 (plain /markets refuses an offset past 2,100); closed markets come newest first with order=closedTime.
+
+History: US `/v1/price-history` takes the slug as `symbol` and returns longPrice (the yes ask) and shortPrice (the
+no ask, 1 - the yes bid) per `fidelity` minutes; the venue keeps 45 days. Global `/v2/prices-history` on the data
+host takes the yes token id, not the condition id, so each market's token is looked up on Gamma first; its `price`
+per bucket goes in `close`, and it pages by cursor.
 """
 
 import datetime as dt
 import json
 from typing import Iterator
 
-from markets.api import Api, num, result_of, when
-from markets.venue import Quote, Resolution
+from markets.api import Api, epoch_s, num, result_of, when
+from markets.venue import Bar, Quote, Resolution, Settled, Span
+
+DATA_API = "https://data-api.polymarket.com"
 
 
 def _px(v) -> float | None:
@@ -46,14 +53,18 @@ def us_resolution(m: dict) -> Resolution | None:
     return Resolution(market_id=m["slug"], result=result_of(value), value=value, settled_at=when(m["updatedAt"]))
 
 
+def _span(span: Span) -> tuple[int, int]:
+    end = int(span.settled_at.timestamp())
+    return (int(span.open_time.timestamp()) if span.open_time else end - 45 * 86400), end
+
+
 class PolymarketUS:
     name = "polymarket_us"
 
     def __init__(self, cfg: dict, session=None, sleep=None):
         self.api = Api(self.name, cfg, session, sleep)
 
-    def _pages(self, params: dict) -> Iterator[tuple[list[dict], dt.datetime]]:
-        offset = 0
+    def _pages(self, params: dict, offset: int = 0) -> Iterator[tuple[list[dict], dt.datetime]]:
         while True:
             markets = self.api.get("/v1/markets", {**params, "limit": self.api.limit, "offset": offset}).get("markets") or []
             yield markets, dt.datetime.now(dt.timezone.utc)
@@ -61,6 +72,23 @@ class PolymarketUS:
                 return
             offset += self.api.limit
             self.api.sleep(self.api.gap)
+
+    def settled(self, cursor: str | None) -> Iterator[tuple[list[Settled], str | None]]:
+        """Offset paging, so a market resolving mid-walk shifts the list down: a page may repeat, none is skipped."""
+        offset = int(cursor or 0)
+        for markets, _ in self._pages({"closed": "true", "orderBy": "updated_at", "orderDirection": "desc"}, offset):
+            offset += len(markets)
+            page = [Settled(us_quote(m, r.settled_at), r) for m in markets if (r := us_resolution(m)) is not None]
+            yield page, str(offset) if len(markets) == self.api.limit else None
+
+    def bars(self, span: Span, period_s: int) -> list[Bar]:
+        start, end = _span(span)
+        body = self.api.get("/v1/price-history", {"symbol": span.market_id, "timestamp.startTimestamp": start,
+                                                  "timestamp.endTimestamp": end, "fidelity": period_s // 60})
+        return [Bar(market_id=span.market_id, ts=epoch_s(h["timestamp"]), period_s=period_s,
+                    bid=None if h.get("shortPrice") is None else round(1 - h["shortPrice"], 6),
+                    ask=num(h.get("longPrice")), open=None, high=None, low=None, close=None, volume=None,
+                    open_interest=None) for h in body.get("history") or []]
 
     def open_markets(self) -> Iterator[list[Quote]]:
         for markets, ts in self._pages({"active": "true", "closed": "false"}):
@@ -94,7 +122,7 @@ def global_resolution(m: dict) -> Resolution | None:
         return None
     value = num((json.loads(m.get("outcomePrices") or "[]") or [None])[0])
     return Resolution(market_id=m["conditionId"], result=result_of(value), value=value,
-                      settled_at=when(m["closedTime"]))
+                      settled_at=when(m["closedTime"]), volume=num(m.get("volumeNum")))
 
 
 class Polymarket:
@@ -102,24 +130,48 @@ class Polymarket:
 
     def __init__(self, cfg: dict, session=None, sleep=None):
         self.api = Api(self.name, cfg, session, sleep)
+        self.data = Api(self.name, {**cfg, "base_url": DATA_API}, session, sleep)
 
-    def _pages(self, params: dict) -> Iterator[tuple[list[dict], dt.datetime]]:
-        cursor = None
+    def _walk(self, params: dict, cursor: str | None = None) -> Iterator[tuple[list[dict], dt.datetime, str | None]]:
         while True:
             body = self.api.get("/markets/keyset", {**params, "limit": self.api.limit,
                                                     **({"after_cursor": cursor} if cursor else {})})
-            yield body.get("markets") or [], dt.datetime.now(dt.timezone.utc)
-            cursor = body.get("next_cursor")
-            if not cursor or not body.get("markets"):
+            markets = body.get("markets") or []
+            cursor = body.get("next_cursor") if markets else None
+            yield markets, dt.datetime.now(dt.timezone.utc), cursor or None
+            if not cursor:
                 return
             self.api.sleep(self.api.gap)
 
     def open_markets(self) -> Iterator[list[Quote]]:
-        for markets, ts in self._pages({}):  # closed omitted means open
+        for markets, ts, _ in self._walk({}):  # closed omitted means open
             yield [global_quote(m, ts) for m in markets]
 
+    def settled(self, cursor: str | None) -> Iterator[tuple[list[Settled], str | None]]:
+        for markets, _, nxt in self._walk({"closed": "true", "order": "closedTime", "ascending": "false"}, cursor):
+            yield [Settled(global_quote(m, r.settled_at), r) for m in markets
+                   if (r := global_resolution(m)) is not None], nxt
+
+    def bars(self, span: Span, period_s: int) -> list[Bar]:
+        found = self.api.get("/markets", {"condition_ids": span.market_id, "closed": "true"})
+        tokens = json.loads(found[0].get("clobTokenIds") or "[]") if found else []
+        if not tokens:
+            return []
+        start, end = _span(span)
+        params, out = {"token_id": tokens[0], "start": start, "end": end, "bucket_seconds": period_s}, []
+        while True:
+            self.api.sleep(self.api.gap)
+            body = self.data.get("/v2/prices-history", params)
+            out += [Bar(market_id=span.market_id, ts=epoch_s(h["timestamp"]), period_s=period_s, bid=None, ask=None,
+                        open=None, high=None, low=None, close=num(h.get("price")), volume=None, open_interest=None)
+                    for h in body.get("data") or []]
+            page = body.get("pagination") or {}
+            if not page.get("has_more") or not page.get("next_cursor"):
+                return out
+            params = {**params, "cursor": page["next_cursor"]}
+
     def resolutions(self, since: dt.datetime) -> Iterator[Resolution]:
-        for markets, _ in self._pages({"closed": "true", "order": "closedTime", "ascending": "false"}):
+        for markets, _, _ in self._walk({"closed": "true", "order": "closedTime", "ascending": "false"}):
             for m in markets:
                 if m.get("closedTime") and when(m["closedTime"]) < since:
                     return
