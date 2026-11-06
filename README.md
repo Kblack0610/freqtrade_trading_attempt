@@ -38,7 +38,8 @@ Results go to the `trader` database in the cluster's shared Postgres, which the 
 | `web/` | The site: FastAPI and Jinja, read-only, Forgejo sign-in (`web/auth.py`), server-drawn SVG charts (`web/charts.py`); pages Overview, bot detail, Strategies, strategy detail, Walk-forward, Suggestions, Confidence, Book, Markets (`/markets`, `/links`, `/markets/book`), Coverage, Guide, Data, Runs; `/guide` is the reading order (see The site) |
 | `lab/tests/` | pytest; the DB tests need `DATABASE_URL` pointing at a throwaway database |
 | `Dockerfile`, `lab/requirements.txt` | The `trader` image |
-| `.github/workflows/image.yml` | CI: build, migrate twice, tests, every strategy loads; on master also push to GHCR. See CI |
+| `.github/workflows/image.yml` | CI: build, migrate twice, tests, every strategy loads; on master also push to GHCR and open the home-config digest-bump PR. See CI |
+| `ci/bump_home_config.py` | The home-config digest-bump PR CI opens after each master build. See CI |
 | `docs/README.md` | Index of the pages in `docs/` |
 
 ## The no-real-money guard
@@ -94,6 +95,12 @@ freqtrade list-strategies --recursive-strategy-search \
 ```
 
 `test-ml` builds the ML image (`--build-arg FREQTRADE_TAG=2026.9_freqai`) and runs `lab/tests/test_ml.py` and `lab/tests/test_families.py` there. `publish` runs only on a push to master, after both pass, and pushes `trader` and `trader-ml` to GHCR as `sha-<7>` and `latest`.
+
+`bump-home-config` then runs `ci/bump_home_config.py`: it sets the `trader` digest in home-config `apps/freqtrade/kustomization.yaml` (`images:`) to the one just pushed, opens that change on Forgejo as PR `trader-sha-<7>` through the public API at git.kennethblack.me, and closes the older open `trader-sha-*` PR it supersedes. Merging that PR is the deploy. It skips when master has already moved past the commit (the newer build opens the bump) and warns and skips when the repo secret `FORGEJO_DEPLOY_TOKEN` is unset. That secret is a Forgejo token with write on home-config, the same one the Forgejo deploy workflows use:
+
+```sh
+gh secret set FORGEJO_DEPLOY_TOKEN -R Kblack0610/freqtrade_trading_attempt --body "$(rbw get forgejo_deploy)"
+```
 
 ## The analysis
 
@@ -310,6 +317,7 @@ The event-contract paper league's accounts (`paper-<family>-<variant>`) get watc
 | Symptom | Cause | Fix |
 |---|---|---|
 | A `watch` row has `error` set and `seen_at` falling behind | That bot's API did not answer, or an open trade has no price so `profit_all_coin` is NaN | The row clears on the next good read; TraderWatchBotBlind fires after 5 minutes |
+| A master build went green but no home-config PR appeared | `FORGEJO_DEPLOY_TOKEN` is unset (the `bump-home-config` log warns), or master moved on and the newer build owns the bump | Set the secret (see CI) and re-run the job; a 401 or 403 in its log means the token expired or lost write on home-config |
 | `migrate: 00N_x.sql changed after it was applied` | An applied migration file was edited | Revert the edit and put the change in the next numbered file |
 | `DATABASE_URL is not set` (exit 2) | The job has no `trader-db` secret mounted | home-config `apps/freqtrade/trader-db-secret.sops.yaml` holds it |
 | An ingest snapshot has `error` set and no trades moved | That bot's API was unreachable that hour | The next run catches up: trades are upserted from the bot's own history |
