@@ -342,6 +342,15 @@ def test_book_sets_a_strategy_beside_hold(conn, signed_in):
     assert "(baseline)" in body and "Alpha binanceus 50%" in body and "96 in the register" in body and "0.42" in body
 
 
+def test_book_shows_whether_har_beats_the_plain_forecasts(conn, signed_in):
+    assert "No forecast scores yet" in signed_in[1].get("/book").text
+    conn.execute("INSERT INTO vol_verdict VALUES ('binanceus', 'mean', 12, 900, 0.21, 0.27, -0.08, -0.03, true), "
+                 "('binanceus', 'ewma', 12, 900, 0.21, 0.22, -0.04, 0.01, false)")
+    body = signed_in[1].get("/book").text
+    for needle in ("Forecasting volatility", "30-day mean", "EWMA", "-0.080 to -0.030", "0.270"):
+        assert needle in body, needle
+
+
 def test_chart_draws_only_with_two_points():
     from web import charts
 

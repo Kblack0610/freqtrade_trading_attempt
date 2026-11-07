@@ -30,6 +30,7 @@ Results go to the `trader` database in the cluster's shared Postgres, which the 
 | `lab/suggest.py`, `lab/suggest.toml` | After each analysis and walk-forward: promote, watch, demote, retire, fix and retune suggestions from the derived tables, with the thresholds as data (see Suggestions) |
 | `lab/confidence.py` | After each analysis and walk-forward: the score and gates that say whether a strategy has earned real money, and the trial register (see Confidence) |
 | `lab/families.toml` | By hand: each strategy class's method family (trend, mean-reversion, momentum and the rest) and data inputs, for `/coverage` |
+| `lab/volatility.py` | After the derived tables: HAR against a 30-day mean and an EWMA as daily variance forecasts, scored by QLIKE on months before the lockbox. |
 | `lab/scorecard.py` | After the mixtures: each strategy's, mixture's and BTC hold's out-of-sample annual return per market climate (BTC trend x volatility tercile) with a 90% interval, from `walkforward_daily`; the "By market climate" table on `/book`. Markets backtests are split by contract category (`lab/markets.toml` [categories]) into `market_category_results`, shown on `/markets/book`. |
 | `lab/book.py` | After the score: what each scored strategy might return beside holding BTC, and what each stage costs and can lose. |
 | `lab/mixtures.py` | After the book: strategies run together (1/N, inverse volatility, HRP, each with or without a regime gate), weights and gates fit on earlier walk-forward months and scored on the next, every mixture a `trials` row, PBO across the set; "Running bots together" on `/book`. Spec space and budget: `lab/suggest.toml` [mixtures]. |
@@ -187,6 +188,8 @@ Four gates in `lab/confidence.py` reuse trades already stored, so they add no tr
 
 Analysis also fills `benchmarks` from the regime venue's daily closes: holding BTC, holding BTC and ETH, monthly DCA into BTC, and BTC only above its 200-day mean, each over the last 1, 3 and 5 years and the whole shared history. Tax rates there are guesses, in config.
 
+Analysis also scores a volatility forecast (`lab/volatility.py`, knobs in `lab/suggest.toml` [volatility]): per analysis venue and whitelisted pair, daily realized variance from 5m candles, forecast the day before by HAR (log variance on its 1, 7 and 30-day means, refit each month on the days before it) and by two plain baselines, a 30-day mean and an EWMA. Each is scored by QLIKE on every month before the lockbox into `vol_scores`; `vol_verdict` says per venue whether HAR beats both, by a block-bootstrap interval on the daily QLIKE difference that has to sit below zero. `/book` shows the verdict. Sizing (inverse-vol weights, a vol-target stake variant) may use HAR only on a venue where it wins.
+
 ## Confidence
 
 `lab/confidence.py` runs after suggestions (alone: `python lab/confidence.py`) and rebuilds `confidence`, one row per strategy and exchange, shown on `/confidence`. Promote decides who enters the dry-run league; this decides who could touch money, so its gates are stricter. It is advice: nothing here touches a bot, and `lab/league.py` still refuses real money.
@@ -251,7 +254,6 @@ The first run fetches full history (5m since 2019 on binanceus is the long pole)
 - `013`: `watch`, one row per bot rewritten by `lab/watcher.py`: equity, the day's opening equity, breach, drill
 - `014`: `book`, projected return ranges per scored strategy and for holding BTC.
 - `015`: `benchmarks`, the plain alternatives to an active strategy.
-- `029`: `mixtures` and `mixture_daily`, written by `lab/mixtures.py`; drops `portfolio` (016), the equal-weight pick on in-sample backtest returns it replaces.
 - `018`: `funding_rates` and `open_interest`, measured swap data per exchange, swap symbol and time, written by `lab/futures.py`.
 - `019`: `venues`, `markets`, `outcomes` (each outcome's latest quote), `resolutions` and `market_sweeps` (one row per recorder run), written by `lab/markets/recorder.py`. Quote history is parquet in MinIO, never Postgres.
 - `020`: `market_links` (the same event across venues, proposed, confirmed or rejected) and `market_link_asks` (each market the LLM was asked about), written by `lab/markets/links.py`.
@@ -259,6 +261,8 @@ The first run fetches full history (5m since 2019 on binanceus is the long pole)
 - `023`: `paper_accounts` and `paper_orders` (the event-contract paper league, written by `lab/markets/paper.py`) and `demo_orders` (each drill order, written by `lab/markets/kalshi_trade.py`, `lab/markets/manifold_trade.py` and `lab/broker.py`).
 - `025`: `broker_balances`, each read of a broker paper account, written by `lab/broker.py`. Its drill writes to `demo_orders`.
 - `026`: `broker_balances.paper`, since the table now also holds read-only reads of real accounts.
+- `029`: `vol_scores` and `vol_verdict`, the volatility forecast's QLIKE per venue, pair, model and month, and whether HAR beats each baseline, rebuilt by `lab/volatility.py` on every analysis.
+- `030`: `mixtures` and `mixture_daily`, written by `lab/mixtures.py`; drops `portfolio` (016), the equal-weight pick on in-sample backtest returns it replaces.
 
  A schema change is a new numbered file; never edit an applied one.
 

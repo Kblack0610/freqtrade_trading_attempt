@@ -632,6 +632,8 @@ def book(request: Request):
     return page(request, "book.html", board=board, bands=bands, pop=None if board else population(cfg["confidence"]), budget=book_lab.budget(cfg),
                 hurdle=book_lab.hurdle(cfg), yield_=cfg["book"]["tbill_yield"], tax=cfg["book"]["tax_short"],
                 mixtures=rows(MIXTURES, (cfg["mixtures"]["show"] + 1,)), climates=climate_table(rows(CLIMATES)),
+                vol=rows("SELECT * FROM vol_verdict ORDER BY exchange, baseline"),
+                vol_days=cfg["volatility"]["baseline_days"], vol_level=cfg["volatility"]["level"],
                 benchmarks=rows("SELECT * FROM benchmarks ORDER BY end_day - start_day, name"),
                 short=cfg["book"]["horizon_months"][0], long=cfg["book"]["horizon_months"][-1],
                 stake=cfg["book"]["stages"][0]["stake"], min_days=cfg["scorecard"]["min_days"])
