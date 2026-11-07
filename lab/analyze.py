@@ -49,7 +49,7 @@ from typing import Protocol
 import pandas as pd
 from psycopg.types.json import Jsonb
 
-from lab import metrics, book, confidence, mixtures, scorecard, suggest, volatility, horizon
+from lab import metrics, book, confidence, mixtures, scorecard, suggest, universe, volatility, horizon
 from lab.db import connect
 from lab.util import finite, utc
 
@@ -657,7 +657,7 @@ def main(runner: Runner | None = None, today: dt.date | None = None) -> int:
     runner = runner or Cli()
     today = today or dt.datetime.now(dt.timezone.utc).date()
     started = dt.datetime.now(dt.timezone.utc)
-    summary: dict = {"exchanges": EXCHANGES, "only": sorted(ONLY)}
+    summary: dict = {"exchanges": EXCHANGES, "only": sorted(ONLY), "universe": universe.describe_all(USER_DATA, EXCHANGES)}
     with connect(autocommit=True) as conn:
         run_id = conn.execute("INSERT INTO runs (kind, name, raw, started_at) VALUES ('analysis', %s, '{}', %s) RETURNING id",
                               (started.strftime("%Y-%m-%d %H:%M:%S"), started)).fetchone()[0]

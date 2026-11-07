@@ -108,6 +108,8 @@ def test_full_history_in_yearly_chunks_then_cached(lab):
     assert one(lab, "SELECT count(*) FROM backtest_trades") > 0
     raw = one(lab, "SELECT raw FROM runs WHERE kind = 'analysis'")
     assert raw["chunks_run"] == 15 and raw["load_failed"] == 1
+    assert sorted(raw["universe"]) == ["binanceus", "coinbase"]
+    assert all(u["source"] == "current-listing" and u["pairs"] > 0 for u in raw["universe"].values())
     assert sorted(raw["skipped"]) == ["Scalper on binanceus: 1m not fully backfilled", "Scalper on coinbase: 1m not fully backfilled"]
     assert one(lab, "SELECT bool_and(ok AND finished_at IS NOT NULL) FROM runs")
 

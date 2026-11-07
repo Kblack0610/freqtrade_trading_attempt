@@ -342,6 +342,21 @@ def test_book_sets_a_strategy_beside_hold(conn, signed_in):
     assert "(baseline)" in body and "Alpha binanceus 50%" in body and "96 in the register" in body and "0.42" in body
 
 
+def test_book_flags_venues_whose_pairs_are_today_survivors(conn, signed_in):
+    body = signed_in[1].get("/book").text
+    assert "Survivors only" not in body
+    universe = {"okx": {"source": "current-listing", "recorded": True, "pairs": 22, "as_of": "2026-11-07",
+                        "listed_by": "2022-01-01", "min_volume": 2e6},
+                "binanceus": {"source": "current-listing", "recorded": False, "pairs": 10},
+                "kucoin": {"source": "point-in-time", "recorded": True, "pairs": 18, "as_of": "2026-11-07",
+                           "listed_by": "2022-01-01", "min_volume": 2e6}}
+    conn.execute("INSERT INTO runs (kind, name, raw, started_at, finished_at, ok) VALUES ('analysis', 'a', %s, now(), now(), true)",
+                 (Jsonb({"universe": universe}),))
+    body = signed_in[1].get("/book").text
+    assert "Survivors only" in body and "okx: 22 pairs, volume floor $2M a day, picked 2026-11-07" in body
+    assert "binanceus: no pick record, 10 pairs" in body and "kucoin:" not in body
+
+
 def test_book_shows_whether_har_beats_the_plain_forecasts(conn, signed_in):
     assert "No forecast scores yet" in signed_in[1].get("/book").text
     conn.execute("INSERT INTO vol_verdict VALUES ('binanceus', 'mean', 12, 900, 0.21, 0.27, -0.08, -0.03, true), "

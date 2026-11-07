@@ -27,7 +27,7 @@ from psycopg_pool import ConnectionPool
 from starlette.concurrency import run_in_threadpool
 
 from lab import book as book_lab
-from lab import db, metrics, suggest
+from lab import db, metrics, suggest, universe
 from web import auth, charts, exporter
 
 HERE = Path(__file__).resolve().parent
@@ -106,6 +106,7 @@ RUNS = """
 SELECT id, name, started_at, finished_at, ok, raw, finished_at - started_at AS took
 FROM runs WHERE kind = 'analysis' ORDER BY started_at DESC NULLS LAST, id DESC
 """
+UNIVERSE = "SELECT raw->'universe' AS universe FROM runs WHERE kind = 'analysis' AND raw ? 'universe' ORDER BY started_at DESC NULLS LAST, id DESC LIMIT 1"
 WINDOWS = ["30d", "90d", "180d", "365d", "all"]
 SECTIONS = [
     ("promote", "Promote", "Clears every gate on an exchange where the league does not run it yet."),
@@ -622,6 +623,12 @@ def climate_table(scores: list[dict]) -> list[dict]:
     return out
 
 
+def survivor_venues() -> dict[str, dict]:
+    """Venues of the latest analysis whose pair list is not point-in-time, so their results are an upper bound."""
+    latest = rows(UNIVERSE)
+    return {ex: u for ex, u in (latest[0]["universe"] if latest else {}).items() if u["source"] != universe.POINT_IN_TIME}
+
+
 @app.get("/book", response_class=HTMLResponse)
 def book(request: Request):
     user_of(request)
@@ -629,7 +636,7 @@ def book(request: Request):
     bands = {(r["strategy"], r["exchange"], r["basis"], r["horizon_months"]): {**r, "after_tax": book_lab.median_after_tax(r, cfg)}
              for r in rows("SELECT * FROM book")}
     board = rows(BOOK)
-    return page(request, "book.html", board=board, bands=bands, pop=None if board else population(cfg["confidence"]), budget=book_lab.budget(cfg),
+    return page(request, "book.html", survivors=survivor_venues(), board=board, bands=bands, pop=None if board else population(cfg["confidence"]), budget=book_lab.budget(cfg),
                 hurdle=book_lab.hurdle(cfg), yield_=cfg["book"]["tbill_yield"], tax=cfg["book"]["tax_short"],
                 mixtures=rows(MIXTURES, (cfg["mixtures"]["show"] + 1,)), climates=climate_table(rows(CLIMATES)),
                 vol=rows("SELECT * FROM vol_verdict ORDER BY exchange, baseline"),
