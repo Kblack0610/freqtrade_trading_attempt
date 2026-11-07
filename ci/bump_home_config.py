@@ -4,7 +4,10 @@
 CI runs this after `publish` on each master push. It rewrites the `trader`
 entry under `images:` in apps/freqtrade/kustomization.yaml through the Forgejo
 API (no clone), pushes it as branch trader-sha-<7>, opens the PR, and closes
-any older open trader-sha-* PR it supersedes. Merging the PR is the deploy.
+any older open trader-sha-* PR it supersedes, then squash-merges it. That merge
+is the deploy: Flux rolls the bots onto the new digest. The image already
+passed this repo's test gate before publish, and home-config's own PR checks
+never exercise a digest line, so the merge does not wait on them.
 
 Env: DIGEST (sha256:...), GITHUB_SHA, SUBJECT (commit message),
 FORGEJO_TOKEN (write:repository on home-config; no issue scope needed), DRY_RUN=1 to print only.
@@ -103,12 +106,26 @@ def main():
             "body": (
                 f"Pins `ghcr.io/kblack0610/trader` to `{digest}` ({tag}), built from "
                 f"Kblack0610/freqtrade_trading_attempt@{tag.removeprefix('sha-')}. "
-                "Opened by that repo's image workflow; merging it restarts the bots on the new image."
+                "Opened by that repo's image workflow; it merges this PR itself, which restarts the bots on the new image."
             ),
         })
     print(f"PR #{mine['number']}: {mine.get('html_url', '')}")
 
     close_superseded(open_prs, branch, mine["number"], tag)
+    merge(mine["number"])
+
+
+def merge(number):
+    """Squash-merge the bump PR and delete its branch; exit non-zero if it did not merge.
+
+    Forgejo answers the merge call 200 even when nothing merged, so the PR is read back.
+    """
+    call("POST", f"/repos/{REPO}/pulls/{number}/merge",
+         {"Do": "squash", "delete_branch_after_merge": True})
+    pr = call("GET", f"/repos/{REPO}/pulls/{number}")
+    if not pr.get("merged"):
+        raise SystemExit(f"PR #{number} did not merge (state {pr.get('state')}, mergeable {pr.get('mergeable')})")
+    print(f"merged #{number} as {pr.get('merge_commit_sha', '')[:7]}")
 
 
 def close_superseded(open_prs, branch, number, tag):
