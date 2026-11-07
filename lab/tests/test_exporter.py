@@ -103,6 +103,8 @@ def test_market_metrics(conn):
     conn.execute("INSERT INTO paper_accounts (account, family, venue, variant, params, capital, started_at, equity, open_positions, marked_at) "
                  "VALUES ('paper-a', 'longshot', 'kalshi', 'v', '{}', 1000, %s, 900, 4, %s), "
                  "('paper-new', 'longshot', 'kalshi', 'w', '{}', 1000, %s, NULL, NULL, NULL)", (now, now - dt.timedelta(minutes=5), now))
+    conn.execute("INSERT INTO broker_balances (broker, read_at, equity, error) VALUES ('alpaca_paper', %s, 100000, NULL), "
+                 "('alpaca_paper', %s, NULL, 'HTTP 503')", (now - dt.timedelta(minutes=10), now))
     m = scrape(TraderCollector(db.connect))
     assert 1600 < m['trader_markets_sweep_age_seconds{venue="kalshi"}'] < 1700
     assert m['trader_markets_sweep_ok{venue="kalshi"}'] == 0 and m['trader_markets_sweep_ok{venue="manifold"}'] == 1
@@ -116,3 +118,5 @@ def test_market_metrics(conn):
     assert m['trader_paper_open_positions{account="paper-a"}'] == 4
     assert 290 < m['trader_paper_marked_age_seconds{account="paper-a"}'] < 320
     assert not any('account="paper-new"' in k for k in m)  # never marked: no equity to alert on yet
+    assert m['trader_broker_equity{broker="alpaca_paper"}'] == 100000  # the good read, not the failed newer one
+    assert 590 < m['trader_broker_read_age_seconds{broker="alpaca_paper"}'] < 620

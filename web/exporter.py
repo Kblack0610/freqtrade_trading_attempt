@@ -54,6 +54,7 @@ FROM market_sweeps WHERE ok AND started_at > now() - interval '7 days' ORDER BY 
 """
 LINKS = "SELECT split_part(source, ':', 1) AS source, status, count(*) AS n FROM market_links GROUP BY 1, 2"
 PAPER = "SELECT account, capital, equity, open_positions, marked_at FROM paper_accounts WHERE marked_at IS NOT NULL"
+BROKERS = "SELECT DISTINCT ON (broker) broker, equity, read_at FROM broker_balances WHERE error IS NULL ORDER BY broker, read_at DESC"
 
 
 def age(now: dt.datetime, t: dt.datetime | None) -> float | None:
@@ -88,6 +89,7 @@ class TraderCollector:
                 last_sweep = cur.execute(LAST_SWEEP).fetchall()
                 links = cur.execute(LINKS).fetchall()
                 paper = cur.execute(PAPER).fetchall()
+                brokers = cur.execute(BROKERS).fetchall()
         except Exception:  # noqa: BLE001 - any failure is reported as the db being unreadable
             up.add_metric([], 0)
             yield up
@@ -103,6 +105,7 @@ class TraderCollector:
         yield from suggestion_metrics(suggestions)
         yield from market_metrics(now, sweeps, last_sweep, links)
         yield from paper_metrics(now, paper)
+        yield from broker_metrics(now, brokers)
 
 
 def family(name: str, doc: str, labels: list[str], items) -> GaugeMetricFamily:
@@ -198,6 +201,13 @@ def paper_metrics(now, paper):
                  (([p["account"]], p["open_positions"]) for p in paper))
     yield family("trader_paper_marked_age_seconds", "Seconds since the paper league last marked the account",
                  ["account"], (([p["account"]], age(now, p["marked_at"])) for p in paper))
+
+
+def broker_metrics(now, brokers):
+    yield family("trader_broker_equity", "A broker paper account's equity at its last good read", ["broker"],
+                 (([b["broker"]], b["equity"]) for b in brokers))
+    yield family("trader_broker_read_age_seconds", "Seconds since the last good read of a broker account", ["broker"],
+                 (([b["broker"]], age(now, b["read_at"])) for b in brokers))
 
 
 def serve(port: int | None = None) -> CollectorRegistry:
