@@ -25,6 +25,22 @@
 </div>
 {% else %}<p class="muted">No markets backtest has run yet.</p>{% endif %}
 
+<h3>By contract category</h3>
+<p class="muted">The same backtests split by the category of each trade's series (<code>lab/markets.toml</code> [categories]; series that match none are "other"), since the longshot bias differs by category. Net return per trade with its block-bootstrap interval; a thin category has no interval.</p>
+{% if categories %}
+<div class="scroll">
+<table>
+  <thead><tr><th>Category</th><th>Family</th><th>Venue</th><th>Variant</th><th class="n">Trades</th><th class="n">Per trade (interval)</th></tr></thead>
+  <tbody>
+  {% for c in categories %}
+  <tr><td>{{ c.category }}</td><td>{{ c.family }}</td><td>{{ c.venue }}</td><td>{{ c.variant[:8] }}</td><td class="n">{{ "{:,}".format(c.trades) }}</td>
+    <td class="n {{ c.mean | tone }}">{{ c.mean | pct(2) }} <span class="muted">{{ c.lo | pct(2) if c.lo is not none else "-" }} to {{ c.hi | pct(2) if c.hi is not none else "-" }}</span></td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}<p class="muted">No split yet: it fills when a backtest next runs.</p>{% endif %}
+
 <h2>Paper league</h2>
 <p class="muted">Each account is one family variant with its own paper capital. Equity is capital, plus realized profit, plus each open position at its exit price. The watcher holds each account to the daily loss limit and runs the kill drill on it; the drawdown alert fires {{ hard_stop | pct(0) }} of capital below an account's peak, the book's hard stop.</p>
 {% if accounts %}

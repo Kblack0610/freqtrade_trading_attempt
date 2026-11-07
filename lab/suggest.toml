@@ -172,3 +172,10 @@ stoploss_on_exchange_interval = 60
 cadence_seconds = 60
 # Equity down this share of capital since the UTC day's first reading. Alert only at Stage 0.
 day_loss = 0.03
+
+[scorecard]
+# lab/scorecard.py: the out-of-sample result per market climate shown on /book. A climate is the BTC trend bucket
+# ([confidence] trend_band) and the volatility tercile of the day before. Under min_days days a cell gets no interval.
+level = 0.90
+min_days = 30
+block = 10

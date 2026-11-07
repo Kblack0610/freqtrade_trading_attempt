@@ -30,6 +30,7 @@ Results go to the `trader` database in the cluster's shared Postgres, which the 
 | `lab/suggest.py`, `lab/suggest.toml` | After each analysis and walk-forward: promote, watch, demote, retire, fix and retune suggestions from the derived tables, with the thresholds as data (see Suggestions) |
 | `lab/confidence.py` | After each analysis and walk-forward: the score and gates that say whether a strategy has earned real money, and the trial register (see Confidence) |
 | `lab/families.toml` | By hand: each strategy class's method family (trend, mean-reversion, momentum and the rest) and data inputs, for `/coverage` |
+| `lab/scorecard.py` | After the book: each strategy's and BTC hold's out-of-sample annual return per market climate (BTC trend x volatility tercile) with a 90% interval, from `walkforward_daily`; the "By market climate" table on `/book`. Markets backtests are split by contract category (`lab/markets.toml` [categories]) into `market_category_results`, shown on `/markets/book`. |
 | `lab/book.py` | After the score: what each scored strategy might return beside holding BTC, and what each stage costs and can lose. |
 | `lab/live.py` | Live bot entry point: always refuses, nothing deploys it. See `docs/live.md` and the operator rules in `docs/operating-rules.md` |
 | `lab/ingest.py` | Job run every 5 minutes: every bot's trades (closed and open) and a snapshot (profit, balance, dry-run flag, each open pair's newest candle time) into Postgres |

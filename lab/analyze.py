@@ -48,7 +48,7 @@ from typing import Protocol
 import pandas as pd
 from psycopg.types.json import Jsonb
 
-from lab import metrics, book, confidence, suggest
+from lab import metrics, book, confidence, scorecard, suggest
 from lab.db import connect
 from lab.util import finite, utc
 
@@ -718,6 +718,7 @@ def main(runner: Runner | None = None, today: dt.date | None = None) -> int:
             summary.update(suggest.run(conn))
             summary.update(confidence.run(conn))
             summary.update(book.run(conn))
+            summary.update(scorecard.run(conn))
             ok = failed <= FAIL_SHARE * max(len(todo), 1)
             print(f"analyze: done: {json.dumps({k: v for k, v in summary.items() if k not in ('failures', 'skipped')})}",
                   flush=True)
