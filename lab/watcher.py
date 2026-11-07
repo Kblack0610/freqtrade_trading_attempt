@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Daily loss watch: every league bot's marked-to-market equity, once a cadence, into `watch`.
 
-Runs apart from the hourly ingest so a loss or a dead bot shows in minutes. Equity is the bot's
+Runs apart from the 5-minute ingest so a loss or a dead bot shows in minutes. Equity is the bot's
 starting capital plus /profit's profit_all_coin, which values open trades at the current rate; its
 /balance wallet refreshes at most hourly. A bot is breached once equity falls suggest.toml [watcher] day_loss of
 capital below the day's first reading, and stays breached until the next UTC day.
