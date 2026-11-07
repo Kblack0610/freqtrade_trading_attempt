@@ -10,6 +10,11 @@ suggest.toml [confidence] passes, the score included. It means worth a small cap
 Out of sample means the tuned returns: months hyperopt never saw. So the score is about tuning on the months
 before and trading the next, and the walk-forward candidates were themselves chosen on a trailing year.
 
+Retiring is its own test, apart from lab/watcher.py's hard stop on capital: decay() runs a one-sided CUSUM (Page 1954;
+a sequential probability ratio test restarted at zero) over a bot's closed dry-run trades, against the low end of
+the strategy's out-of-sample interval. A crossing is the "not decayed" gate failing and a retire suggestion for each
+bot running it. One bad week cannot cross the bar; a sustained run of trades below the out-of-sample edge does.
+
 Every run first adds what was tried to the trial register, `trials`, which keeps a row when its strategy goes.
 The effective trial count is the register's size at the window's effective share (metrics.effective_trials).
 
@@ -47,6 +52,12 @@ FROM bots b JOIN bot_trades t ON t.bot = b.name GROUP BY 1, 2
 """
 
 
+LIVE_RETURNS = """
+SELECT b.strategy, b.exchange, t.profit_ratio FROM bots b JOIN bot_trades t ON t.bot = b.name
+WHERE NOT t.is_open AND t.profit_ratio IS NOT NULL ORDER BY t.close_date, t.trade_id
+"""
+ROSTER = "SELECT strategy, exchange, name FROM bots WHERE last_seen >= %s ORDER BY name"
+
 PAIRS = """
 SELECT c.strategy, c.exchange, count(*), sum(t.profit_ratio)
 FROM backtest_trades t JOIN backtest_chunks c ON c.id = t.chunk_id WHERE t.close_date < %s
@@ -83,6 +94,12 @@ def load(conn, cfg: dict, now: dt.datetime | None = None) -> dict:
         facts["drift"][(s, e)] = {"gap": gap, "trades": n}  # most trades last, so that bot's gap stands
     facts["live"] = {(s, e): {"since": since, "closed": closed, "stopouts": stops}
                      for s, e, since, closed, stops in conn.execute(LIVE)}
+    facts["live_returns"] = {}
+    for s, e, ret in conn.execute(LIVE_RETURNS):
+        facts["live_returns"].setdefault((s, e), []).append(ret)
+    facts["roster"] = {}
+    for s, e, name in conn.execute(ROSTER, (now - suggest.ROSTER_STALE,)):
+        facts["roster"].setdefault((s, e), []).append(name)
     facts["pairs"] = {}
     for s, e, n, total in conn.execute(PAIRS, (lockbox,)):
         facts["pairs"].setdefault((s, e), []).append((n, total))
@@ -155,6 +172,39 @@ def live_gate(live: dict | None, close: pd.Series, now: dt.datetime, c: dict) ->
                 and drop >= c["min_live_btc_drop"] and live["stopouts"] >= c["min_live_stopouts"])
 
 
+def decay(live, ev: dict, c: dict) -> dict | None:
+    """CUSUM of the log-likelihood ratio, no edge against the out-of-sample low end, over live trades in close order.
+
+    Normal trades with the pooled out-of-sample standard deviation: H0 mean is the interval's low end (the worst edge
+    the walk-forward still supports), H1 mean is zero. The statistic floors at zero, so old good trades bank nothing.
+    The bar is ln(decay_false_alarm_trades), Lorden's bound: if the edge is at least the low end, one false alarm
+    takes that many trades on average. None when there is no edge to decay from or no live trade."""
+    x = np.asarray(live, dtype=float)
+    r = np.asarray(ev["returns"], dtype=float)
+    if not len(x) or ev["lo"] is None or ev["lo"] <= 0 or len(r) < c["min_member_trades"] or not r.std(ddof=1):
+        return None
+    mu0, var = ev["lo"], r.var(ddof=1)
+    step = (mu0 / var) * (mu0 / 2 - x)
+    stat, peak, at = 0.0, 0.0, None
+    bar = float(np.log(c["decay_false_alarm_trades"]))
+    for i, v in enumerate(step, 1):
+        stat = max(0.0, stat + v)
+        peak = max(peak, stat)
+        if at is None and stat >= bar:
+            at = i
+    return {"stat": stat, "peak": peak, "bar": bar, "trades": len(x), "at": at}
+
+
+def decay_gate(d: dict | None, c: dict) -> dict:
+    need = (f"CUSUM under ln({c['decay_false_alarm_trades']}) = {np.log(c['decay_false_alarm_trades']):.1f}: live trades "
+            "not sustained below the out-of-sample low end")
+    if d is None:
+        return gate("not decayed", "nothing to test", need, True)
+    value = (f"decayed at trade {d['at']} of {d['trades']}" if d["at"]
+             else f"{d['stat']:.1f} of {d['bar']:.1f}, {d['trades']} trades")
+    return gate("not decayed", value, need, d["at"] is None)
+
+
 def without_best_pair(pairs: list[tuple] | None) -> float | None:
     """Expectancy of every trade outside the strategy's most profitable pair, from (trades, summed return) per pair."""
     if not pairs or len(pairs) < 2:
@@ -223,6 +273,7 @@ def gates(pair: tuple, facts: dict, ev: dict | None, score: float | None, trials
         gate("drift", None if d is None else d["gap"], f"inside the interval, >= {c['min_drift_trades']} trades",
              d is not None and width is not None and d["trades"] >= c["min_drift_trades"] and abs(d["gap"]) <= width),
         live_gate(facts["live"].get(pair), facts["close"], facts["now"], c),
+        decay_gate(decay(facts["live_returns"].get(pair, []), ev, c), c),
         gate("score", score, f">= {c['ready_score']}", score is not None and score >= c["ready_score"]),
     ]
 
@@ -240,17 +291,41 @@ def rows(facts: dict, trials: int, cfg: dict) -> list[dict]:
     return out
 
 
+def retire_rows(facts: dict, cfg: dict) -> list[dict]:
+    """A retire suggestion for each roster bot whose strategy's live trades crossed the decay bar."""
+    c, out = cfg["confidence"], []
+    ev = evidence(facts["walkforward"], c)
+    for pair, bots in sorted(facts["roster"].items()):
+        d = decay(facts["live_returns"].get(pair, []), ev.get(pair) or {"returns": [], "lo": None}, c)
+        if not d or d["at"] is None:
+            continue
+        g = decay_gate(d, c)
+        for bot in bots:
+            out.append(dict(kind="retire", strategy=pair[0], exchange=pair[1], bot=bot, score=None,
+                            summary=f"Live trades have decayed: the CUSUM crossed its bar of {d['bar']:.1f} at trade {d['at']} "
+                                    f"of {d['trades']}, so they sit below the out-of-sample low end of "
+                                    f"{ev[pair]['lo']:+.2%} a trade for long enough that chance is unlikely.",
+                            action=f"Retire {bot} once it is flat: replace its row of roster.tsv in place with a promoted "
+                                   "candidate and delete that pod's state-freqtrade-league-<N> PVC. This is the decay test "
+                                   "of docs/operating-rules.md; a drawdown alone is not.",
+                            gates=[g]))
+    return out
+
+
 def run(conn, cfg: dict | None = None) -> dict:
     cfg = cfg or suggest.load_config()
     trials = register(conn)
-    out = rows(load(conn, cfg), trials, cfg)
+    facts = load(conn, cfg)
+    out = rows(facts, trials, cfg)
     with conn.transaction():
         conn.execute("DELETE FROM confidence")
         with conn.cursor() as cur:
             cur.executemany("INSERT INTO confidence (strategy, exchange, score, ready, passed, oos_trades, oos_expectancy, "
                             "gates) VALUES (%(strategy)s, %(exchange)s, %(score)s, %(ready)s, %(passed)s, %(oos_trades)s, "
                             "%(oos_expectancy)s, %(gates)s)", out)
-    return {"confidence": len(out), "confidence_ready": sum(r["ready"] for r in out), "trial_register": trials}
+    retired = suggest.store(conn, retire_rows(facts, cfg), suggest.DECAY)
+    return {"confidence": len(out), "confidence_ready": sum(r["ready"] for r in out), "trial_register": trials,
+            "decayed": sum(retired["suggestions"].values())}
 
 
 if __name__ == "__main__":

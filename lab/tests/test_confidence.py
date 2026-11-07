@@ -41,7 +41,9 @@ def good_facts():
             "series": {PAIR: {"windows": {"all": w}}}, "walkforward": wf, "daily": {PAIR: daily}, "close": close,
             "trend": metrics.regimes(close, C["trend_band"], 90).set_index("day")["trend"],
             "overfit": {("binanceus", "all"): 0.1}, "pairs": {PAIR: [(100, 2.0), (100, 1.5), (100, 1.0)]}, "drift": {PAIR: {"gap": 0.0005, "trades": 40}},
-            "live": {PAIR: {"since": dt.datetime(2025, 1, 1, tzinfo=dt.timezone.utc), "closed": 80, "stopouts": 3}}, "now": NOW}
+            "live": {PAIR: {"since": dt.datetime(2025, 1, 1, tzinfo=dt.timezone.utc), "closed": 80, "stopouts": 3}},
+            "live_returns": {PAIR: list(np.random.default_rng(2).normal(0.02, 0.03, 80))}, "roster": {PAIR: ["bot-good"]},
+            "now": NOW}
 
 
 def result(facts, trials=30):
@@ -84,7 +86,7 @@ def test_no_score_without_a_population():
 
 def test_every_gate_passing_is_ready():
     row = result(good_facts())
-    assert failed(row) == [] and row["ready"] and row["passed"] == len(row["gates"].obj) == 18
+    assert failed(row) == [] and row["ready"] and row["passed"] == len(row["gates"].obj) == 19
     assert row["oos_trades"] == 300
 
 
@@ -104,11 +106,14 @@ def spoil(facts, name):
         facts["drift"][PAIR]["gap"] = -0.05
     elif name == "dry run":
         facts["live"][PAIR]["closed"] = 59
+    elif name == "not decayed":
+        facts["live_returns"][PAIR] = list(np.random.default_rng(3).normal(-0.02, 0.03, 80))
     return facts
 
 
 def test_one_bad_gate_is_named_and_blocks_ready_whatever_the_score():
-    for name in ("bias", "costs", "overfit probability", "excess over hold, low", "worst open loss", "drift", "dry run"):
+    for name in ("bias", "costs", "overfit probability", "excess over hold, low", "worst open loss", "drift", "dry run",
+                 "not decayed"):
         row = result(spoil(good_facts(), name))
         assert failed(row) == [name] and not row["ready"] and row["score"] >= C["ready_score"]
 
@@ -161,6 +166,96 @@ def test_a_dry_run_needs_a_real_btc_fall():
     facts["close"] = pd.Series(np.linspace(100, 200, 1500), index=days())
     facts["live"][PAIR]["since"] = dt.datetime(2025, 6, 1, tzinfo=dt.timezone.utc)
     assert "dry run" in failed(result(facts))
+
+
+def edge(n=300, mean=0.02, sd=0.03, seed=5):
+    return confidence.interval(np.random.default_rng(seed).normal(mean, sd, n), 1, C)
+
+
+def test_live_trades_at_the_true_edge_do_not_decay_and_at_the_low_end_rarely_do():
+    ev = edge()
+    sd = ev["returns"].std()
+    at_edge = [confidence.decay(np.random.default_rng(i).normal(0.02, sd, 1000), ev, C)["at"] for i in range(40)]
+    assert at_edge == [None] * 40
+    at_low = [confidence.decay(np.random.default_rng(i).normal(ev["lo"], sd, 1000), ev, C)["at"] for i in range(40)]
+    assert sum(a is not None for a in at_low) <= 12  # Lorden: one alarm in 1000 trades on average, so far under 63% in 1000
+
+
+def test_a_sustained_loss_run_decays_but_one_bad_week_does_not():
+    ev = edge()
+    good = list(np.random.default_rng(6).normal(0.02, 0.03, 200))
+    week = [-0.03] * 5
+    assert confidence.decay(good + week + good, ev, C)["at"] is None
+    d = confidence.decay(good + [-0.02] * 120, ev, C)
+    assert d["at"] is not None and 200 < d["at"] < 320
+
+
+def test_decay_waits_for_a_trade_and_an_edge_to_decay_from():
+    ev = edge()
+    assert confidence.decay([], ev, C) is None
+    assert confidence.decay([-0.05] * 50, edge(mean=0.0), C) is None
+    assert confidence.decay([-0.05] * 50, edge(n=10), C) is None
+    assert confidence.decay_gate(None, C)["pass"]
+
+
+def test_old_good_trades_bank_nothing_against_a_later_decay():
+    ev = edge()
+    bad = [-0.02] * 120
+    alone = confidence.decay(bad, ev, C)["at"]
+    after = confidence.decay([0.05] * 2000 + bad, ev, C)["at"]
+    assert alone is not None and after == alone + 2000
+
+
+def test_decay_retires_only_roster_bots_and_leaves_the_hard_stop_alone():
+    facts = good_facts()
+    assert confidence.retire_rows(facts, CFG) == []
+    facts["live_returns"][PAIR] = list(np.random.default_rng(3).normal(-0.02, 0.03, 200))
+    [r] = confidence.retire_rows(facts, CFG)
+    assert (r["kind"], r["strategy"], r["exchange"], r["bot"]) == ("retire", "Good", "binanceus", "bot-good")
+    assert "not decayed" in failed(result(facts)) and "trades reordered, worst fall" not in failed(result(facts))
+    facts["roster"] = {}
+    assert confidence.retire_rows(facts, CFG) == []
+
+
+def test_a_decayed_bot_is_retired_through_the_database_and_cleared_when_it_recovers(conn):
+    conn.execute("INSERT INTO strategies (name, file, file_hash) VALUES ('S', 'x', 'h')")
+    for i, part in enumerate(np.array_split(np.random.default_rng(1).normal(0.02, 0.03, 300), 6)):
+        conn.execute("INSERT INTO walkforward (strategy, exchange, fold_start, train_start, test_end, cache_key, ok, "
+                     "tuned_trades, tuned_expectancy, tuned_returns) VALUES ('S', 'binanceus', %s, %s, %s, 'k', true, %s, %s, %s)",
+                     (dt.date(2023, 1 + i, 1), dt.date(2022, 1, 1), dt.date(2023, 2 + i, 1), len(part), part.mean(),
+                      list(part)))
+    conn.execute("INSERT INTO bots (name, strategy, exchange) VALUES ('bot-s', 'S', 'binanceus')")
+
+    def trades(returns):
+        conn.execute("DELETE FROM bot_trades")
+        for i, r in enumerate(returns):
+            day = dt.datetime(2026, 1, 1, tzinfo=dt.timezone.utc) + dt.timedelta(hours=i)
+            conn.execute("INSERT INTO bot_trades (bot, trade_id, open_date, pair, is_open, close_date, profit_ratio, raw) "
+                         "VALUES ('bot-s', %s, %s, 'BTC/USDT', false, %s, %s, '{}')", (i, day, day, r))
+
+    def retires():
+        return conn.execute("SELECT bot FROM suggestions WHERE kind = 'retire' AND exchange <> ''").fetchall()
+
+    trades([0.02] * 150 + [-0.02] * 150)
+    assert confidence.run(conn)["decayed"] == 1 and retires() == [("bot-s",)]
+    suggest.run(conn)
+    assert retires() == [("bot-s",)]
+    trades([0.02] * 150)
+    assert confidence.run(conn)["decayed"] == 0 and retires() == []
+    gate = conn.execute("SELECT gates FROM confidence").fetchone()[0]
+    assert next(g for g in gate if g["gate"] == "not decayed")["pass"]
+
+
+def test_the_decay_retire_survives_suggest_and_goes_when_the_decay_does(conn):
+    keep = dict(kind="retire", strategy="S", exchange="binanceus", bot="b", score=None, summary="s", action="a", gates=[])
+    gone = dict(kind="retire", strategy="L", exchange="", bot="", score=None, summary="s", action="a", gates=[])
+    suggest.store(conn, [keep])
+    suggest.store(conn, [gone])
+    assert conn.execute("SELECT strategy FROM suggestions ORDER BY 1").fetchall() == [("L",), ("S",)]
+    suggest.store(conn, [])
+    assert conn.execute("SELECT strategy FROM suggestions").fetchall() == [("S",)]
+    suggest.store(conn, [], suggest.DECAY)
+    assert conn.execute("SELECT count(*) FROM suggestions").fetchone()[0] == 0
 
 
 def test_no_walkforward_is_not_ready_and_says_so():
