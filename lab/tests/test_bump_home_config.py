@@ -56,3 +56,19 @@ def test_superseded_prs_close_with_a_note_and_no_issue_comment(monkeypatch):
     assert calls == [("PATCH", "/repos/kblack0610/home-config/pulls/644",
                       {"state": "closed", "body": "Pins it.\n\nSuperseded by #645 (sha-2222222)."}),
                      ("DELETE", "/repos/kblack0610/home-config/branches/trader-sha-1111111", None)]
+
+
+def test_merge_squashes_and_checks_it_merged(monkeypatch):
+    calls = []
+    def fake(method, path, body=None, ok_404=False):
+        calls.append((method, path, body))
+        return {"merged": merged, "merge_commit_sha": "abcdef0123", "state": "closed"}
+    monkeypatch.setattr(bump_home_config, "call", fake)
+    merged = True
+    bump_home_config.merge(645)
+    assert calls == [("POST", "/repos/kblack0610/home-config/pulls/645/merge",
+                      {"Do": "squash", "delete_branch_after_merge": True}),
+                     ("GET", "/repos/kblack0610/home-config/pulls/645", None)]
+    merged = False
+    with pytest.raises(SystemExit):
+        bump_home_config.merge(645)

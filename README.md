@@ -40,8 +40,8 @@ Results go to the `trader` database in the cluster's shared Postgres, which the 
 | `web/` | The site: FastAPI and Jinja, read-only, Forgejo sign-in (`web/auth.py`), server-drawn SVG charts (`web/charts.py`), htmx (`web/static/htmx.min.js`, 2.0.4) for the one polled table; pages Overview, Live (every bot's open positions, re-fetched every 30s), bot detail, Strategies, strategy detail, Walk-forward, Suggestions, Confidence, Book, Markets (`/markets`, `/links`, `/markets/book`), Coverage, Guide, Data, Runs; `/guide` is the reading order (see The site) |
 | `lab/tests/` | pytest; the DB tests need `DATABASE_URL` pointing at a throwaway database |
 | `Dockerfile`, `lab/requirements.txt` | The `trader` image |
-| `.github/workflows/image.yml` | CI: build, migrate twice, tests, every strategy loads; on master also push to GHCR and open the home-config digest-bump PR. See CI |
-| `ci/bump_home_config.py` | The home-config digest-bump PR CI opens after each master build. See CI |
+| `.github/workflows/image.yml` | CI: build, migrate twice, tests, every strategy loads; on master also push to GHCR and open and merge the home-config digest-bump PR. See CI |
+| `ci/bump_home_config.py` | Opens and merges the home-config digest-bump PR after each master build (the deploy). See CI |
 | `docs/README.md` | Index of the pages in `docs/` |
 
 ## The no-real-money guard
@@ -104,7 +104,7 @@ freqtrade list-strategies --recursive-strategy-search \
 
 `test-ml` builds the ML image (`--build-arg FREQTRADE_TAG=2026.9_freqai`) and runs `lab/tests/test_ml.py` and `lab/tests/test_families.py` there. `publish` runs only on a push to master, after `secrets`, `test` and `test-ml` pass, and pushes `trader` and `trader-ml` to GHCR as `sha-<7>` and `latest`.
 
-`bump-home-config` then runs `ci/bump_home_config.py`: it sets the `trader` digest in home-config `apps/freqtrade/kustomization.yaml` (`images:`) to the one just pushed, opens that change on Forgejo as PR `trader-sha-<7>` through the public API at git.kennethblack.me, and closes the older open `trader-sha-*` PR it supersedes. Merging that PR is the deploy. It skips when master has already moved past the commit (the newer build opens the bump) and warns and skips when the repo secret `FORGEJO_DEPLOY_TOKEN` is unset. That secret is a Forgejo token with write on home-config, the same one the Forgejo deploy workflows use:
+`bump-home-config` then runs `ci/bump_home_config.py`: it sets the `trader` digest in home-config `apps/freqtrade/kustomization.yaml` (`images:`) to the one just pushed, opens that change on Forgejo as PR `trader-sha-<7>` through the public API at git.kennethblack.me, closes the older open `trader-sha-*` PRs it supersedes, then squash-merges its own. That merge is the deploy: Flux rolls the bots onto the new digest. It does not wait on home-config's PR checks, which never exercise a digest line; the image already passed `test` and `test-ml`. A bump that cannot merge fails the job and stays open for a person. It skips when master has already moved past the commit (the newer build opens the bump) and warns and skips when the repo secret `FORGEJO_DEPLOY_TOKEN` is unset. That secret is a Forgejo token with write on home-config, the same one the Forgejo deploy workflows use:
 
 ```sh
 gh secret set FORGEJO_DEPLOY_TOKEN -R Kblack0610/freqtrade_trading_attempt --body "$(rbw get forgejo_deploy)"
