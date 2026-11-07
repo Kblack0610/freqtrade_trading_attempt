@@ -66,12 +66,14 @@ Pod keys live in SOPS in home-config, as in [live.md](live.md). The person creat
 
 | Platform | Native switch | Confidence |
 |---|---|---|
-| Kraken | `CancelAllOrdersAfter` dead-man timer: re-arm every 15 to 30 s with a 60 s timeout. Futures has `/cancelallordersafter` | snippet |
-| Gemini | Heartbeat flag on the key: a missed heartbeat cancels open orders | snippet |
+| Kraken | `POST /0/private/CancelAllOrdersAfter` dead-man timer: re-arm every 15 to 30 s with a 60 s timeout, `timeout` 0 disables it, max 86399. Needs the Create & Modify Orders or Cancel/Close Orders permission. Futures has `/cancelallordersafter` | doc (spot) |
+| Gemini | `require-heartbeat` flag on the key: a missed heartbeat cancels open orders. Timeout and how the flag is set: Not verified. Also Cancel All Active Orders and Cancel All Session Orders (POST) | doc (heartbeat), listing only (cancel-all) |
 | Alpaca | `DELETE /v2/orders` cancels all orders. `DELETE /v2/positions?cancel_orders=true` closes everything | snippet |
 | Kalshi | Order groups auto-cancel when a 15 s fill cap is hit. Self-exclusion and funding caps cannot be lifted early | doc |
 | Polymarket global | `DELETE /cancel-all` | doc |
-| Binance.US, Coinbase, IBKR, Schwab, Tastytrade, Polymarket US | Not verified | |
+| Binance.US | No dead-man switch and no account-wide cancel-all found: `DELETE /api/v3/openOrders` needs a `symbol`, so the watcher loops over the pairs. Last resort: delete the key | doc (first 200k chars of the page) |
+| Coinbase | No dead-man switch on Spot. `POST /orders/batch_cancel` cancels listed order ids. Cancel-on-disconnect exists only on Global Derivatives | doc |
+| IBKR, Schwab, Tastytrade, Polymarket US | Not verified | |
 
 **2FA as a decision.** A TOTP secret in rbw lets the agent machine pass 2FA unattended. On a money account that widens what an agent can do. The person decides per account whether to store the secret, or to approve each 2FA prompt instead.
 
@@ -147,6 +149,25 @@ Freqtrade's official spot list includes Kraken, OKX, Kucoin and others. Binance.
 - Cost: Not verified.
 - Paper: the Gemini sandbox.
 - Verified: 2026-11-06. Sources: https://developer.gemini.com/rate-limit, https://developer.gemini.com/trading/rest-api/orders/heartbeat.
+
+### Read-only key checklist (crypto exchanges)
+
+Verified 2026-11-06 from each venue's docs. The person creates every key. No agent does, and none is created until the person decides to connect the venue. A key is read-only when no trade, cancel, deposit, withdraw or earn permission is ticked.
+
+| Venue | Tick for the read key | Leave off | IP binding | Native kill switch (for the Stage 1 trade key) |
+|---|---|---|---|---|
+| Kraken | Query Funds; Query Open Orders & Trades; Query Closed Orders & Trades; Query Ledger Entries (doc) | Create & Modify Orders; Cancel/Close Orders; Deposit Funds; Withdraw Funds; Earn; Export Data | Recommended (doc). The settings are not documented on that page: Not verified | `CancelAllOrdersAfter`. The trade key also needs Create & Modify or Cancel/Close. Withdraw stays off |
+| Binance.US | Security types USER_DATA and MARKET_DATA only, under Edit restrictions. Spot Trading off (doc) | Enable Spot Trading; any withdraw-capable route. A separate withdraw toggle is not documented: Not verified | Recommended but optional (doc) | None native. The watcher cancels per symbol and stops entries. Check `GET /api/v3/account` `canWithdraw` is false on the read key |
+| Coinbase | `view` only (doc) | `trade`; `transfer` | Not verified | Not applicable: Coinbase is read-only or manual here (see its record) |
+| Gemini | Auditor-style role, if the venue offers one: Not verified on the pages read | Trader; Fund Manager | Not verified | `require-heartbeat` on the trade key |
+
+Checks after the person makes a read key, before it goes in SOPS:
+- A balance call succeeds.
+- A trade call is refused. Use `POST /api/v3/order/test` on Binance.US only if its docs say what it does: Not verified. Otherwise test the refusal with a deliberately invalid, far-from-market order on the real account, and only with the person's say-so.
+- The key is stored under the exchange name in SOPS, as in [live.md](live.md), and never in the repo or rbw.
+- The reconciliation in [live.md](live.md) uses this key and nothing else.
+
+Not verified in this pass, for P2 follow-up: Kraken key expiry and nonce window; Gemini key roles and how `require-heartbeat` is enabled; Coinbase IP allowlist and rate limits; Binance.US pages past the first 200k characters. Sign-in and 2FA for all four, and the Kraken and Gemini terms on automation, are also still open.
 
 Other US venues worth a record later: Bitstamp, Crypto.com. Not researched.
 
