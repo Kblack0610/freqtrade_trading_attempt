@@ -115,6 +115,7 @@ def test_every_backfilled_venue_gets_its_own_folds(wlab, monkeypatch):
     assert dict(wlab.execute("SELECT exchange, count(*) FROM walkforward GROUP BY 1").fetchall()) == {"binanceus": 3, "okx": 2}
     raw = wlab.execute("SELECT raw FROM runs WHERE kind = 'walkforward'").fetchone()[0]
     assert raw["exchanges"] == ["binanceus", "okx", "kucoin"]
+    assert sorted(raw["universe"]) == ["binanceus", "kucoin", "okx"] and raw["universe"]["okx"]["source"] == "current-listing"
     assert "Live on kucoin: 5m not fully backfilled" in raw["skipped"]
     assert "Live on okx 2026-08: training starts before its first candle" in raw["skipped"]
 

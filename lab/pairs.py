@@ -3,13 +3,15 @@
 
 `python lab/pairs.py <exchange> [--quote USDT] [--count 40] [--listed-by 2022-01-01] [--min-volume 2e6]`
 ranks the exchange's active spot pairs in the quote currency by mean daily quote volume over the last
-30 days, keeps those that trade at least --min-volume a day (a thinner book would not fill a backtest's
-orders at its candle prices) and whose first daily candle is on or before --listed-by (so every pair
-covers the 2022 bear market), and writes the top --count into
-user_data/exchanges/<exchange>.json as pair_whitelist. Only that key changes; the file must exist.
+30 days, keeps those that trade at least --min-volume a day both over the last 30 days and over the 30 days from
+--listed-by (a thinner book would not fill a backtest's orders at its candle prices, then or now) and whose first
+daily candle is on or before --listed-by (so every pair covers the 2022 bear market), and writes the top --count
+into user_data/exchanges/<exchange>.json as pair_whitelist. Only that key changes; the file must exist.
 
-Run it by hand and review the diff: the list is today's liquid survivors, so a refresh changes what
-every past year is backtested on, and the analysis cache reruns those chunks.
+Each run also records the list's source (current-listing: today's liquid survivors), date, floor and per-pair
+volumes in user_data/universe.json (lab/universe.py), which analysis and walk-forward copy onto their run and
+/book reads. Run it by hand and review the diff: a refresh changes what every past year is backtested on, and
+the analysis cache reruns those chunks.
 """
 
 import argparse
@@ -18,6 +20,8 @@ import json
 import os
 import sys
 from pathlib import Path
+
+from lab import universe
 
 REPO = Path(os.environ.get("REPO", Path(__file__).resolve().parents[1]))
 # Pegged or wrapped coins track something else, and leveraged tokens decay by design.
@@ -34,37 +38,53 @@ def tradable(market: dict, quote: str) -> bool:
             and base not in NOT_TRADED and not any(base.endswith(s) and base != s for s in LEVERAGED))
 
 
-def pick(volumes: dict[str, float], firsts: dict[str, dt.date], count: int, listed_by: dt.date,
-         min_volume: float) -> list[str]:
-    """The `count` pairs with the most volume among those trading min_volume a day, listed by `listed_by`."""
-    ok = [p for p, v in volumes.items() if v >= min_volume and firsts.get(p) and firsts[p] <= listed_by]
+def pick(volumes: dict[str, float], then: dict[str, float], firsts: dict[str, dt.date], count: int,
+         listed_by: dt.date, min_volume: float) -> list[str]:
+    """The `count` pairs with the most volume among those trading min_volume a day now and in the 30 days from
+    `listed_by`, listed by `listed_by`."""
+    ok = [p for p, v in volumes.items()
+          if v >= min_volume and then.get(p, 0) >= min_volume and firsts.get(p) and firsts[p] <= listed_by]
     return sorted(ok, key=lambda p: -volumes[p])[:count]
 
 
-def survey(ex, quote: str, now: dt.datetime, listed_by: dt.date) -> tuple[dict[str, float], dict[str, dt.date]]:
-    """30-day volume per candidate, and its first daily candle from two weeks before listed_by on. OKX and
+def mean_volume(days: list) -> float:
+    return sum(c[4] * c[5] for c in days) / max(len(days), 1)
+
+
+def survey(ex, quote: str, now: dt.datetime, listed_by: dt.date,
+           min_volume: float) -> tuple[dict[str, float], dict[str, float], dict[str, dt.date]]:
+    """30-day volume per candidate, its volume over the 30 days from listed_by (asked only of pairs that clear the
+    floor now and have a candle by then), and its first daily candle from two weeks before listed_by on. OKX and
     KuCoin return nothing for a start far before the first candle, so the oldest one cannot be asked for."""
     markets = [m for m in ex.load_markets().values() if tradable(m, quote)]
     tickers = ex.fetch_tickers([m["symbol"] for m in markets]) if ex.has.get("fetchTickers") else {}
     by_24h = sorted(markets, key=lambda m: -((tickers.get(m["symbol"]) or {}).get("quoteVolume") or 0))[:CANDIDATES]
     since = int((now - dt.timedelta(days=VOLUME_DAYS + 1)).timestamp() * 1000)
     probe = int(dt.datetime.combine(listed_by - dt.timedelta(days=14), dt.time(), dt.timezone.utc).timestamp() * 1000)
-    volumes, firsts = {}, {}
+    then_ms = int(dt.datetime.combine(listed_by, dt.time(), dt.timezone.utc).timestamp() * 1000)
+    volumes, then, firsts = {}, {}, {}
     for m in by_24h:
         p = m["symbol"]
         days = ex.fetch_ohlcv(p, "1d", since=since, limit=VOLUME_DAYS + 1)[:-1]  # the last day is still open
-        volumes[p] = sum(c[4] * c[5] for c in days) / max(len(days), 1)
+        volumes[p] = mean_volume(days)
         first = ex.fetch_ohlcv(p, "1d", since=probe, limit=1)
         if first:
             firsts[p] = dt.datetime.fromtimestamp(first[0][0] / 1000, dt.timezone.utc).date()
-    return volumes, firsts
+        if volumes[p] >= min_volume and firsts.get(p) and firsts[p] <= listed_by:
+            then[p] = mean_volume(ex.fetch_ohlcv(p, "1d", since=then_ms, limit=VOLUME_DAYS))
+    return volumes, then, firsts
 
 
-def write(exchange: str, pairs: list[str]) -> Path:
-    path = REPO / "user_data" / "exchanges" / f"{exchange}.json"
+def write(exchange: str, pairs: list[str], volumes: dict[str, float], then: dict[str, float], listed_by: dt.date,
+          min_volume: float, today: dt.date) -> Path:
+    user_data = REPO / "user_data"
+    path = user_data / "exchanges" / f"{exchange}.json"
     cfg = json.loads(path.read_text())
     cfg["exchange"]["pair_whitelist"] = pairs
     path.write_text(json.dumps(cfg, indent=4) + "\n")
+    universe.save(user_data, exchange, {"source": universe.CURRENT_LISTING, "as_of": today.isoformat(),
+                             "listed_by": listed_by.isoformat(), "min_volume": min_volume,
+                             "pairs": {p: {"volume": round(volumes[p]), "volume_then": round(then[p])} for p in pairs}})
     return path
 
 
@@ -79,14 +99,16 @@ def main(argv: list[str] | None = None) -> int:
     a.add_argument("--min-volume", type=float, default=2e6)
     args = a.parse_args(argv)
     ex = getattr(ccxt, args.exchange)({"enableRateLimit": True})
-    volumes, firsts = survey(ex, args.quote, dt.datetime.now(dt.timezone.utc), args.listed_by)
-    pairs = pick(volumes, firsts, args.count, args.listed_by, args.min_volume)
+    now = dt.datetime.now(dt.timezone.utc)
+    volumes, then, firsts = survey(ex, args.quote, now, args.listed_by, args.min_volume)
+    pairs = pick(volumes, then, firsts, args.count, args.listed_by, args.min_volume)
     for p in pairs:
-        print(f"{p:<14} {volumes[p] / 1e6:10.1f}M/day")
+        print(f"{p:<14} {volumes[p] / 1e6:10.1f}M/day now {then[p] / 1e6:10.1f}M/day from {args.listed_by}")
     young = [p for p in sorted(volumes, key=lambda p: -volumes[p]) if volumes[p] >= args.min_volume and p not in pairs]
     if young:
-        print(f"listed after {args.listed_by}, left out: {' '.join(young)}")
-    print(f"wrote {len(pairs)} pairs to {write(args.exchange, pairs)}")
+        print(f"listed after {args.listed_by} or thin then, left out: {' '.join(young)}")
+    path = write(args.exchange, pairs, volumes, then, args.listed_by, args.min_volume, now.date())
+    print(f"wrote {len(pairs)} pairs to {path} and the {universe.CURRENT_LISTING} record to user_data/universe.json")
     return 0 if pairs else 1
 
 

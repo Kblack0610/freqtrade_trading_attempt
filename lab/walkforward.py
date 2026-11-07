@@ -35,7 +35,7 @@ from typing import Protocol
 
 from psycopg.types.json import Jsonb
 
-from lab import analyze, book, confidence, horizon, metrics, mixtures, scorecard, suggest
+from lab import analyze, book, confidence, horizon, metrics, mixtures, scorecard, suggest, universe
 from lab.db import connect
 
 EXCHANGES = os.environ.get("WF_EXCHANGES", "binanceus").split()
@@ -237,7 +237,8 @@ def main(runner: Runner | None = None, today: dt.date | None = None) -> int:
         started = dt.datetime.now(dt.timezone.utc)
         run_id = conn.execute("INSERT INTO runs (kind, name, raw, started_at) VALUES ('walkforward', %s, '{}', %s) "
                               "RETURNING id", (started.strftime("%Y-%m-%d %H:%M:%S"), started)).fetchone()[0]
-        report: dict = {"exchanges": EXCHANGES, "folds": FOLDS, "train_days": TRAIN_DAYS, "epochs": EPOCHS, "loss": LOSS}
+        report: dict = {"exchanges": EXCHANGES, "universe": universe.describe_all(analyze.USER_DATA, EXCHANGES), "folds": FOLDS,
+                        "train_days": TRAIN_DAYS, "epochs": EPOCHS, "loss": LOSS}
         ok = False
         try:
             found = candidates(conn)

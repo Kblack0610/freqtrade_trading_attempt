@@ -4,6 +4,9 @@
 {% macro taxed(s, h) %}{{ s.after_tax | pct(0) if s else "-" }} / {{ h.after_tax | pct(0) if h else "-" }}{% endmacro %}
 {% block body %}
 <h1>Strategy book</h1>
+{% if survivors %}
+<p class="alert"><strong>Survivors only.</strong> {{ survivors | join(", ") }} {{ "is" if survivors | length == 1 else "are" }} tested on pairs picked from what is liquid today, so a coin that traded well in the early years and has since died is missing. Read every number for {{ "that venue" if survivors | length == 1 else "those venues" }} as an upper bound, and trust a strategy more where it also holds on a venue not marked here.{% for ex, u in survivors.items() %}{% if u.recorded %} {{ ex }}: {{ u.pairs }} pairs, volume floor ${{ "%.0f" | format(u.min_volume / 1e6) }}M a day, picked {{ u.as_of }}.{% else %} {{ ex }}: no pick record, {{ u.pairs }} pairs.{% endif %}{% endfor %}</p>
+{% endif %}
 <p class="muted">What each scored strategy might return if the months it was tested on repeat, beside holding BTC over the same months. Each range is the 5th, 50th and 95th percentile. These are estimates from a small number of months, not promises. Nothing here trades: the league is paper only.</p>
 {% if board %}
 <p>{{ board | selectattr("ready") | list | length }} of {{ board | length }} scored strategy and exchange pairs are ready for a small real-money test.</p>
@@ -13,7 +16,7 @@
   <tbody>
   {% for r in board %}
   {% set y = bands.get((r.strategy, r.exchange, "strategy", short)) %}
-  <tr><td><a href="/strategies/{{ r.strategy }}?exchange={{ r.exchange }}">{{ r.strategy }}</a></td><td>{{ r.exchange }}</td><td class="n">{{ "%.0f" | format(r.score) }}</td><td class="n">{{ r.passed }} of {{ r.gates }}</td><td class="n">{{ y.basis_months if y else "-" }}</td>
+  <tr><td><a href="/strategies/{{ r.strategy }}?exchange={{ r.exchange }}">{{ r.strategy }}</a></td><td>{{ r.exchange }}{% if r.exchange in survivors %} <span class="muted" title="pairs picked from what is liquid today">survivors only</span>{% endif %}</td><td class="n">{{ "%.0f" | format(r.score) }}</td><td class="n">{{ r.passed }} of {{ r.gates }}</td><td class="n">{{ y.basis_months if y else "-" }}</td>
     <td class="n">{{ band(y) }}</td><td class="n">{{ band(bands.get((r.strategy, r.exchange, "hold", short))) }}</td>
     <td class="n">{{ band(bands.get((r.strategy, r.exchange, "strategy", long))) }}</td><td class="n">{{ band(bands.get((r.strategy, r.exchange, "hold", long))) }}</td>
     <td class="n">{{ taxed(y, bands.get((r.strategy, r.exchange, "hold", short))) }}</td><td class="n">{{ taxed(bands.get((r.strategy, r.exchange, "strategy", long)), bands.get((r.strategy, r.exchange, "hold", long))) }}</td>
