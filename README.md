@@ -134,7 +134,7 @@ The leaderboard ranks by the low end of the Sharpe interval, so a strategy has t
 
 ## Walk-forward
 
-A backtest of a strategy as it is says nothing about tuning it, and hyperopt's best result on a span is fitted to that span. `lab/walkforward.py` runs weekly to measure how much of hyperopt's gain survives on data it never saw:
+A backtest of a strategy as it is says nothing about tuning it, and hyperopt's best result on a span is fitted to that span. `lab/walkforward.py` runs weekly to measure how much of hyperopt's gain survives on data it never saw: Each test-month trade, dated and purged, is also kept in `walkforward_trades` (variant `base` or `tuned`), with `walkforward_daily` summing profit ratio per UTC close day: the dated out-of-sample series.
 
 - **Candidates.** The league's strategies, then the promote suggestions, then the watch ones by score, then the best 365-day expectancy low end on each venue in `WF_EXCHANGES`, taking one venue's next best after another, all loadable and lookahead-clean, up to `WF_LIMIT`. coinbase is not a walk-forward venue: its 2.4% round trip leaves nothing to tune.
 - **Venues.** Every candidate runs on every venue in `WF_EXCHANGES`, one fold row per venue, once that venue's candles for its timeframe are fully backfilled (the same coverage guard as the analysis). A fold whose training span starts before the venue's first candle is skipped, and the run's `skipped` list says why.
