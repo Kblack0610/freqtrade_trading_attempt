@@ -235,7 +235,7 @@ The first run fetches full history (5m since 2019 on binanceus is the long pole)
 
 ## The database
 
-- `001`: `bots`, `bot_trades` (one row per trade, keyed by bot, trade id and open date, so a bot whose sqlite is lost keeps its old trades), `bot_snapshots` (hourly from ingest; rows with `source = 'report'` came from the retired daily report), `runs`.
+- `001`: `bots`, `bot_trades` (one row per trade, keyed by bot, trade id and open date, so a bot whose sqlite is lost keeps its old trades), `bot_snapshots` (one row per bot per ingest; rows with `source = 'report'` came from the retired daily report; each ingest thins it to every row for 7 days, the last of each hour to 90 days and the last of each UTC day after that, and never prunes a row showing a bot was not dry run), `runs`.
 - `002`: `data_coverage`, first and last candle, rows, gaps and missing candles per exchange x pair x timeframe, written by every backfill run.
 - `003`: the analysis. `strategies` (every file found, its hash and load error), `backtest_chunks` and `backtest_trades` (the cache and its trades), `bias_checks`; derived, rebuilt in one transaction at the end of each run: `strategy_daily`, `strategy_windows`, `estimates`, `regimes`, `correlations`. `runs` rows of kind `analysis` carry the run summary in `raw`.
 - `004`: clears bias checks that errored before subfolder strategies could load, so they rerun.
