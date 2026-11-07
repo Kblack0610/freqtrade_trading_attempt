@@ -17,11 +17,13 @@ LAB = Path(__file__).resolve().parents[1]
 FAMILIES = LAB / "families"
 CANDLES = FAMILIES / "candles"
 CHART = FAMILIES / "chart"
+TREND = FAMILIES / "trend"
+RANGE = FAMILIES / "range"
 PLANTED = LAB / "tests" / "fixtures" / "strategies"
 
 
 def test_every_family_file_is_what_the_generator_writes():
-    assert {f.name for f in generate.families()} >= {"candles", "chart"}
+    assert {f.name for f in generate.families()} >= {"candles", "chart", "trend", "range"}
     for fam in generate.families():
         assert generate.stale(fam) == [], f"rerun python lab/families/generate.py ({fam.name})"
 
@@ -51,13 +53,14 @@ def test_every_family_strategy_loads_by_name():
     from freqtrade.configuration import Configuration
     from freqtrade.resolvers import StrategyResolver
 
-    cfg = Configuration.from_files([str(p) for p in analyze.config_files(analyze.BIAS_EXCHANGE)])
+    base = Configuration.from_files([str(p) for p in analyze.config_files(analyze.BIAS_EXCHANGE)])
     for fam in generate.families():
-        cfg["strategy_path"] = str(fam)
+        timeframe = tomllib.loads((fam / "family.toml").read_text()).get("timeframe", "1h")
         for f in sorted(fam.glob("*.py")):
-            cfg["strategy"] = f.stem
-            s = StrategyResolver.load_strategy(cfg)
-            assert s.timeframe == "1h" and s.can_short is False and s.stoploss < 0, f.stem
+            # A fresh copy each time: the resolver writes the strategy's timeframe and exit into the config,
+            # where they would override the next strategy's own.
+            s = StrategyResolver.load_strategy({**base, "strategy_path": str(fam), "strategy": f.stem})
+            assert s.timeframe == timeframe and s.can_short is False and s.stoploss < 0, f.stem
 
 
 def test_no_lab_module_shadows_an_installed_one():
@@ -88,15 +91,25 @@ def bias_data(tmp_path, monkeypatch):
     data.mkdir(parents=True)
     for tf, freq in (("1h", "h"), ("5m", "5min")):
         synthetic_candles(now - dt.timedelta(days=analyze.LOOKAHEAD_DAYS + 30), now, freq).to_feather(data / f"BTC_USD-{tf}.feather")
+    # Daily candles reach far enough back for a 200-day startup before a 1d strategy's longer window, and for
+    # the range family's BTC 200-day mean.
+    day = now.replace(hour=0)
+    synthetic_candles(day - dt.timedelta(days=DAILY_DAYS + 400), day - dt.timedelta(days=1), "D").to_feather(data / "BTC_USD-1d.feather")
     monkeypatch.setattr(analyze, "RESULTS", tmp_path)
     return analyze
 
 
+DAILY_DAYS = 900  # a 1d strategy's lookahead window: 120 daily candles hold too few entries for the check
+
+
 @pytest.mark.parametrize("strategy, folder, biased", [
     ("CandleENGULFING", CANDLES, False), ("ChartResistanceBreak", CHART, False),
+    ("TrendDonchianFast", TREND, False), ("RangeZ24", RANGE, False),
     ("PlantedLookahead", PLANTED, True),  # the control: the same check on the same data must catch it
 ])
-def test_the_nightly_lookahead_check_on_synthetic_prices(bias_data, strategy, folder, biased):
+def test_the_nightly_lookahead_check_on_synthetic_prices(bias_data, monkeypatch, strategy, folder, biased):
+    if folder == TREND:
+        monkeypatch.setattr(bias_data, "LOOKAHEAD_DAYS", DAILY_DAYS)
     res = bias_data.bias_one("lookahead", strategy, str(folder))
     assert res.get("error") is None, res
     assert res["has_bias"] is biased and res["detail"]["signals"] > 0, res

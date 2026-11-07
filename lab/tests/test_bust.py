@@ -42,8 +42,47 @@ def test_a_signal_does_not_change_with_later_candles():
     assert whole.iloc[:280].tolist() == cut.tolist()
 
 
-def test_funding_is_paid_on_the_stake_for_the_days_held():
-    trades = pd.DataFrame({"open_date": pd.to_datetime(["2022-01-01"]), "close_date": pd.to_datetime(["2022-01-11"]),
-                           "profit_abs": [100.0], "stake_amount": [1000.0]})
-    assert bust.result(trades, 0.0) == (0.1, 1, 1.0)
-    assert bust.result(trades, 0.001)[0] == pytest.approx(0.07)
+def trade(open_, close, pair="BTC/USDT:USDT", short=True, profit=10.0, fees=0.0):
+    return {"pair": pair, "open_date": pd.Timestamp(open_), "close_date": pd.Timestamp(close), "is_short": short,
+            "profit_abs": profit, "stake_amount": 1000.0, "funding_fees": fees}
+
+
+def rates(rows):
+    return pd.DataFrame(rows, columns=["exchange", "pair", "ts", "rate"]).assign(ts=lambda d: pd.to_datetime(d["ts"]))
+
+
+FUNDING = rates([("kucoin", "BTC/USDT:USDT", f"2024-01-0{d} {h:02d}:00", 0.0001) for d in (1, 2, 3) for h in (0, 8, 16)]
+                + [("okx", "BTC/USDT:USDT", "2024-01-02 08:00", 0.0005), ("okx", "BTC/USDT:USDT", "2024-01-02 16:00", 0.0005)])
+
+
+def test_measured_funding_pays_the_short_a_positive_rate_and_charges_the_long():
+    t = pd.DataFrame([trade("2024-01-01 00:00", "2024-01-02 00:00"), trade("2024-01-01 00:00", "2024-01-02 00:00", short=False)])
+    out = bust.measured(t, FUNDING)
+    # Settlements in (open, close]: 08:00, 16:00 and the next 00:00, kucoin, since okx starts later.
+    assert out["funding"].tolist() == pytest.approx([0.3, -0.3]) and out["funding_from"].tolist() == ["kucoin", "kucoin"]
+
+
+def test_the_trade_venue_wins_where_it_covers_and_an_uncovered_trade_gets_no_guess():
+    t = pd.DataFrame([trade("2024-01-02 08:00", "2024-01-02 16:00"), trade("2023-06-01", "2023-06-05"),
+                      trade("2024-01-01", "2024-01-02", pair="TAO/USDT:USDT")])
+    out = bust.measured(t, FUNDING)
+    assert out["funding"].iloc[0] == pytest.approx(0.5) and out["funding_from"].iloc[0] == "okx"
+    assert out["funding"].iloc[1:].isna().all() and out["funding_from"].iloc[1:].isna().all()
+
+
+def test_freqtrades_own_funding_is_taken_out_before_the_measured_is_added():
+    t = bust.measured(pd.DataFrame([trade("2024-01-01 00:00", "2024-01-02 00:00", profit=12.0, fees=2.0)]), FUNDING)
+    assert bust.result(t, False) == (pytest.approx(0.01), 1, 1.0)
+    assert bust.result(t, True)[0] == pytest.approx(10.3 / bust.WALLET)
+    assert bust.result(t.assign(funding=float("nan")), True) == (0.0, 0, 0.0)
+
+
+def test_the_long_short_trend_research_is_causal_and_trades_both_ways():
+    from lab.research.DonchianLongShort import signals as both
+
+    close = np.r_[np.linspace(100, 300, 300), np.linspace(300, 80, 300)]
+    df = frame(close).assign(volume=1.0)
+    whole = both(df)
+    assert whole["enter_long"].sum() > 0 and whole["enter_short"].sum() > 0
+    cut = both(df.iloc[:450])
+    pd.testing.assert_frame_equal(cut, whole.iloc[:450])

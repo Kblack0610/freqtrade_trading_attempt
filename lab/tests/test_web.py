@@ -409,7 +409,7 @@ def test_every_strategy_class_has_a_family():
 
     toml, on_disk = families(), app_mod.strategy_classes()
     assert {"Strategy001", "ADXMomentum", "DevilStra"} <= on_disk and "StrategyHelper" not in on_disk
-    research = app_mod.STRATEGY_CLASS.findall((app_mod.HERE.parent / "lab/research/BustShort.py").read_text())
+    research = {c for f in (app_mod.HERE.parent / "lab/research").glob("*.py") for c in app_mod.STRATEGY_CLASS.findall(f.read_text())}
     assert set(toml["strategies"]) == on_disk | set(research), "add the class to lab/families.toml, or drop a stale line"
     assert {t["family"] for t in toml["strategies"].values()} <= set(toml["families"])
     assert all(t["inputs"] for t in toml["strategies"].values())

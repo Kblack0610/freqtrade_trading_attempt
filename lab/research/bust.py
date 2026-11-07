@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""By hand: test BustShort on every BTC fall in the okx swap history, and print a markdown report.
+"""By hand: test a research strategy on every BTC fall in the okx swap history, and print a markdown report.
 
-python lab/research/bust.py <userdir>. Backtests only. Funding history on okx reaches about three
-months, so older funding is the constant of each variant. See docs/short-bust.md.
+python lab/research/bust.py <userdir> [strategy]. Backtests only; the strategy is BustShort unless named.
+Funding is measured, from funding_rates (lab/futures.py, DATABASE_URL): okx's own series where it covers
+a trade's whole hold, else kucoin's for the same swap. A trade neither covers is counted apart, with no
+funding guessed for it. See docs/short-bust.md.
 """
 
 import json
@@ -15,8 +17,8 @@ import pandas as pd
 
 HERE = Path(__file__).resolve().parent
 BASKETS = {"majors": ["BTC", "ETH", "SOL"], "ai": ["NEAR", "GRT", "RENDER", "TAO", "WLD"]}
-# Per 8 hours, shorts paying: about 33% a year, as in a crowded short. 0 is neutral.
-FUNDING = {"neutral": 0.0, "shorts pay": 0.0003}
+# Funding sources in order of preference: the venue the candles come from, then a proxy for the same swap.
+FUNDING_VENUES = ("okx", "kucoin")
 FEE = 0.001  # Per side: okx's 0.05% taker from ccxt plus a 0.05% slippage guess.
 START, DROP, WALLET = "20200101", 0.25, 1000
 
@@ -61,26 +63,57 @@ def freqtrade(*args: str) -> None:
         sys.exit(done.stdout[-1500:] + done.stderr[-1500:])
 
 
-def backtest(user: Path, conf: Path) -> pd.DataFrame:
+def backtest(user: Path, conf: Path, strategy: str) -> pd.DataFrame:
     """Every trade over the whole history, one row each. Falls are cut from this, so each has its 200 days of warm-up."""
     from freqtrade.data.btanalysis import load_backtest_stats
 
     with tempfile.TemporaryDirectory() as d:
-        freqtrade("backtesting", "--userdir", str(user), "--config", str(conf), "--strategy", "BustShort",
+        freqtrade("backtesting", "--userdir", str(user), "--config", str(conf), "--strategy", strategy,
                   "--strategy-path", str(HERE), "--timerange", f"{START}-", "--fee", str(FEE), "--export", "trades",
                   "--backtest-directory", d, "--cache", "none")
-        trades = pd.DataFrame(load_backtest_stats(Path(d))["strategy"]["BustShort"]["trades"])
+        trades = pd.DataFrame(load_backtest_stats(Path(d))["strategy"][strategy]["trades"])
     for col in ("open_date", "close_date"):
         trades[col] = pd.to_datetime(trades[col], utc=True).dt.tz_localize(None)
     return trades
 
 
-def result(trades: pd.DataFrame, rate: float) -> tuple[float, int, float]:
-    """Return on the wallet with funding of `rate` per 8 hours paid on each stake, trades, and share won after funding."""
-    if trades.empty:
+def load_funding(conn, pairs: list[str]) -> pd.DataFrame:
+    """Every stored settlement for these swaps: exchange, pair, ts (naive UTC), rate."""
+    rows = conn.execute("SELECT exchange, pair, ts, rate FROM funding_rates WHERE pair = ANY(%s) ORDER BY ts",
+                        (pairs,)).fetchall()
+    out = pd.DataFrame(rows, columns=["exchange", "pair", "ts", "rate"])
+    out["ts"] = pd.to_datetime(out["ts"], utc=True).dt.tz_localize(None)
+    return out
+
+
+def measured(trades: pd.DataFrame, rates: pd.DataFrame) -> pd.DataFrame:
+    """Each trade with `funding`, what it received (positive) or paid on its stake, from the first venue in
+    FUNDING_VENUES whose series starts by the trade's open, and `funding_from`, that venue. A positive rate is
+    paid by longs to shorts. Both are NaN for a trade no venue covers. Freqtrade's own funding_fees, from
+    whatever funding candles it downloaded, are taken out of profit_abs into `gross`, so nothing is counted twice."""
+    out = trades.copy()
+    out["gross"] = out["profit_abs"] - out.get("funding_fees", 0.0)
+    out["funding"], out["funding_from"] = float("nan"), None
+    starts = rates.groupby(["exchange", "pair"])["ts"].min()
+    for i, t in out.iterrows():
+        for venue in FUNDING_VENUES:
+            first = starts.get((venue, t["pair"]))
+            if first is None or first > t["open_date"]:
+                continue
+            r = rates[(rates["exchange"] == venue) & (rates["pair"] == t["pair"])
+                      & (rates["ts"] > t["open_date"]) & (rates["ts"] <= t["close_date"])]["rate"].sum()
+            side = 1.0 if t.get("is_short", True) else -1.0
+            out.loc[i, ["funding", "funding_from"]] = side * t["stake_amount"] * r, venue
+            break
+    return out
+
+
+def result(trades: pd.DataFrame, funded: bool) -> tuple[float, int, float]:
+    """Return on the wallet, trades, and share won. Funded: only trades with measured funding, net of it."""
+    t = trades[trades["funding"].notna()] if funded else trades
+    if t.empty:
         return 0.0, 0, 0.0
-    days = (trades["close_date"] - trades["open_date"]).dt.total_seconds() / 86400
-    net = trades["profit_abs"] - trades["stake_amount"] * rate * 3 * days
+    net = t["gross"] + (t["funding"] if funded else 0.0)
     return float(net.sum() / WALLET), len(net), float((net > 0).mean())
 
 
@@ -97,7 +130,9 @@ def main() -> None:
     from freqtrade.data.history import load_pair_history
     from freqtrade.enums import CandleType
 
-    user = Path(sys.argv[1]).resolve()
+    from lab.db import connect
+
+    user, strategy = Path(sys.argv[1]).resolve(), (sys.argv[2:] or ["BustShort"])[0]
     (user / "data").mkdir(parents=True, exist_ok=True)
     conf = user / "bust.json"
     if not (user / "data" / "okx" / "futures").exists():
@@ -108,15 +143,24 @@ def main() -> None:
     close = candles.set_index(candles["date"].dt.date)["close"]
     print(f"BTC swap candles {close.index[0]} to {close.index[-1]}\n")
     spans = [(a, b, close[b] / close[a] - 1) for a, b in falls(close)]
-    print("| Basket | Window | BTC | Short, no funding | Short, shorts pay | Trades | Won |\n|---|---|---|---|---|---|---|")
+    with connect() as conn:
+        rates = load_funding(conn, [pair(c) for coins in BASKETS.values() for c in coins])
+    print(f"{strategy}. Measured funding: " + "; ".join(
+        f"{v} {p} from {g.min():%Y-%m-%d}" for (v, p), g in rates.groupby(["exchange", "pair"])["ts"]) + "\n")
+    print("| Basket | Window | BTC | No funding | Trades | Won | Measured trades, no funding | Same, measured funding | Measured trades | Won |\n"
+          "|---|---|---|---|---|---|---|---|---|---|")
     for basket, coins in BASKETS.items():
         config(conf, coins)
-        trades = backtest(user, conf)
-        print(f"{basket}: first trade {trades['open_date'].min()}", file=sys.stderr)
+        trades = measured(backtest(user, conf, strategy), rates)
+        print(f"{basket}: first trade {trades['open_date'].min()}; funding from "
+              f"{trades['funding_from'].value_counts(dropna=False).to_dict()}", file=sys.stderr)
         for name, (btc, t) in windows(trades, spans).items():
-            flat, n, _ = result(t, FUNDING["neutral"])
-            paid, _, won = result(t, FUNDING["shorts pay"])
-            print(f"| {basket} | {name} | {'' if btc is None else f'{btc:+.0%}'} | {flat:+.1%} | {paid:+.1%} | {n} | {won:.0%} |", flush=True)
+            flat, n, won = result(t, False)
+            cover = t[t["funding"].notna()]
+            bare, _, _ = result(cover.assign(funding=0.0), True)
+            paid, m, mwon = result(t, True)
+            print(f"| {basket} | {name} | {'' if btc is None else f'{btc:+.0%}'} | {flat:+.1%} | {n} | {won:.0%} "
+                  f"| {bare:+.1%} | {paid:+.1%} | {m} | {mwon:.0%} |", flush=True)
 
 
 if __name__ == "__main__":
