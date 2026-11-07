@@ -453,8 +453,9 @@ def seed_markets(c):
     c.execute("INSERT INTO watch (bot, checked_at, seen_at, state, stopped_at) VALUES ('paper-longshot-abcdef01', now(), now(), 'stopped', now())")
     c.execute("INSERT INTO demo_orders (venue, ticker, client_id, price, count, placed_at, status, canceled_at) VALUES "
               "('kalshi', 'KXDEMO-1', 'c1', 0.01, 1, now(), 'canceled', now())")
-    c.execute("INSERT INTO broker_balances (broker, read_at, status, currency, equity, cash, buying_power, positions) VALUES "
-              "('alpaca_paper', now(), 'ACTIVE', 'USD', 100012.5, 99000, 199000, 2)")
+    c.execute("INSERT INTO broker_balances (broker, read_at, paper, status, currency, equity, cash, buying_power, positions) VALUES "
+              "('alpaca_paper', now(), true, 'ACTIVE', 'USD', 100012.5, 99000, 199000, 2), "
+              "('fidelity_individual_1234', now(), false, 'open', 'USD', 15363.23, NULL, NULL, NULL)")
 
 
 def test_markets_pages_render_with_data(conn, signed_in):
@@ -466,7 +467,8 @@ def test_markets_pages_render_with_data(conn, signed_in):
              "/links?status=rejected": ["No rejected links."],
              "/markets/book": ["longshot", "abcdef01", "1.23%", "-0.40% to 3.10%", "61%", "0.42", "paper-longshot-abcdef01",
                                "987.50", "-1.25%", "stopped", "San Antonio at Phoenix", "0.91", "KXDEMO-1", "canceled", "15%",
-                               "alpaca_paper", "100,012.50"]}
+                               "alpaca_paper", "100,012.50", "fidelity_individual_1234",
+                               "real, read only", "15,363.23"]}
     for path, needles in pages.items():
         r = client.get(path)
         assert r.status_code == 200, path

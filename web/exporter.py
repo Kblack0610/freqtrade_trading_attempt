@@ -54,7 +54,7 @@ FROM market_sweeps WHERE ok AND started_at > now() - interval '7 days' ORDER BY 
 """
 LINKS = "SELECT split_part(source, ':', 1) AS source, status, count(*) AS n FROM market_links GROUP BY 1, 2"
 PAPER = "SELECT account, capital, equity, open_positions, marked_at FROM paper_accounts WHERE marked_at IS NOT NULL"
-BROKERS = "SELECT DISTINCT ON (broker) broker, equity, read_at FROM broker_balances WHERE error IS NULL ORDER BY broker, read_at DESC"
+BROKERS = "SELECT DISTINCT ON (broker) broker, paper, equity, read_at FROM broker_balances WHERE error IS NULL ORDER BY broker, read_at DESC"
 
 
 def age(now: dt.datetime, t: dt.datetime | None) -> float | None:
@@ -204,8 +204,9 @@ def paper_metrics(now, paper):
 
 
 def broker_metrics(now, brokers):
+    # A real account's balance stays on the signed-in site, out of Prometheus; only its read age is exported.
     yield family("trader_broker_equity", "A broker paper account's equity at its last good read", ["broker"],
-                 (([b["broker"]], b["equity"]) for b in brokers))
+                 (([b["broker"]], b["equity"]) for b in brokers if b["paper"]))
     yield family("trader_broker_read_age_seconds", "Seconds since the last good read of a broker account", ["broker"],
                  (([b["broker"]], age(now, b["read_at"])) for b in brokers))
 

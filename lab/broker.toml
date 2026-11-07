@@ -1,4 +1,5 @@
-# Broker accounts read by lab/broker.py, paper only. Keys are not here: ALPACA_PAPER_KEY_ID and ALPACA_PAPER_SECRET_KEY.
+# Broker accounts read by lab/broker.py: Alpaca paper, and Robinhood Crypto and SnapTrade (Fidelity) read only.
+# Keys are not here: they come from env, named in lab/broker.py.
 
 [alpaca]
 base_url = "https://paper-api.alpaca.markets"   # the client refuses any other host
@@ -6,3 +7,12 @@ timeout_s = 30
 # The drill rests one share of this at this price, far under the market, so it cannot fill before it is cancelled.
 drill_symbol = "SPY"
 drill_price = 1.00
+
+[robinhood]
+base_url = "https://trading.robinhood.com"   # the client refuses any other host and sends only GET
+timeout_s = 30
+quote = "USD"   # holdings are valued at the <asset>-USD best bid/ask midpoint
+
+[snaptrade]
+base_url = "https://api.snaptrade.com"   # the client refuses any other host and sends only GET
+timeout_s = 30
