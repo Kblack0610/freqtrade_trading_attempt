@@ -180,6 +180,7 @@ Other US venues worth a record later: Bitstamp, Crypto.com. Not researched.
 - API:
   - `trezorctl get-public-node` returns the extended public key (xpub) for a watch-only wallet (doc).
   - With the xpub, balances, history and receive addresses can be read without the device, through Trezor Suite with auto-eject off (snippet) or a public explorer or our own node.
+  - Trezor's public Blockbook servers (btc1/btc2.trezor.io), which answer xpub queries through `/api/v2/xpub/{xpub}` (Blockbook openapi.yaml), return a Cloudflare 403 to any client but Suite (tested 2026-11-06). So we derive the addresses ourselves and read them from Esplora (see "Watch-only read" below).
   - Building an unsigned transaction (PSBT) from the xpub: Not verified on a Trezor page.
 - Agent machine: Trezor Suite on the mac-mini can do everything up to the confirmation: open the send screen, fill it, connect apps. Trezor Connect routes PIN and passphrase through a trezor.io popup (snippet).
 - The person: every signature. Safe 3 (buttons) and Safe 5 (touchscreen) confirm each transaction on the device (snippet). That press is the point of the device, so no automation goes around it.
@@ -188,7 +189,26 @@ Other US venues worth a record later: Bitstamp, Crypto.com. Not researched.
 - Risk controls: the press itself. Ours: none needed for reads.
 - Cost: no software fee seen (Not verified). Suite's buy, sell and swap route through partners (Invity: Banxa, MoonPay and others) at third-party-reported spreads of about 4.5 to 10% (snippet). Use an exchange instead.
 - Paper: not needed. Reads are risk-free, and a send is always the person's.
-- Verified: 2026-11-06. Sources: https://trezor.io/guides/trezorctl/using-trezorctl-commands, https://trezor.io/guides/trezor-suite/getting-to-know-trezor-suite, https://trezor.io/trezor-safe-3, https://trezor.io/trezor-safe-5, https://connect.trezor.io/9/.
+- Verified: 2026-11-06. Sources: https://trezor.io/guides/trezorctl/using-trezorctl-commands, https://trezor.io/guides/trezor-suite/getting-to-know-trezor-suite, https://trezor.io/trezor-safe-3, https://trezor.io/trezor-safe-5, https://connect.trezor.io/9/, https://github.com/trezor/blockbook/blob/master/openapi.yaml, https://github.com/Blockstream/esplora/blob/master/API.md.
+
+#### Watch-only read
+
+`python -m lab.wallet` writes one `wallet_balances` row per account per run: confirmed and unconfirmed satoshis and the count of used addresses. It needs only the account's public key, which cannot sign, so the job can never move coins.
+
+- Input: `WALLET_ACCOUNTS` (default `/etc/trader-wallet/accounts.tsv`), one `<name><TAB><key>` line per account. The key is the account public key Suite exports (its "Show public key" label is Not verified on a Trezor page): an xpub (legacy), ypub (SegWit), zpub (native SegWit), or a descriptor such as Suite's taproot `tr([fp/86'/0'/0']xpub.../<0;1>/*)`. Bitcoin mainnet only. The file is a Secret, because a public key reveals every address and balance of its account.
+- How: `embit` derives the receive and change chains, each until 20 unused addresses in a row (the BIP44 gap limit). Each address is read from the Esplora API in `lab/wallet.toml`. The tests check the derivation against the BIP44, 49, 84 and 86 test vectors.
+- Privacy: the Esplora host (blockstream.info by default) sees every address we ask about, the same exposure Suite's default backend has. To avoid it, point `base_url` at our own Esplora or mempool instance. The database holds the account name and never the key, and log lines and errors carry the HTTP status, never an address.
+- Live check (2026-11-06): the public BIP84 test-vector zpub read its 40 used addresses from blockstream.info in 84 s at a 1 s gap. mempool.space returned 429 at 0.5 s.
+- To run it, the person exports each account's public key from Suite (the device asks for a confirmation) and adds it to a SOPS Secret in home-config. A CronJob in `apps/freqtrade/` then runs the module hourly. Neither exists yet.
+
+#### Signing runbook (the agent prepares, the person presses)
+
+1. The agent writes down the send: why, the amount, and the destination. A destination that is one of our exchange deposit addresses is read from that exchange's API with its read key, never copied from chat or a clipboard. The fee rate comes from Esplora `/fee-estimates`.
+2. On the mac-mini (`agent-machine`), the agent opens Trezor Suite, selects the account and fills in the Send form (address, amount, fee). It stops at the review step.
+3. The person plugs the Trezor into the mac-mini and enters the PIN, and the passphrase if there is one, on the device. They check the full address and the amount shown on the device against step 1, then confirm on the device. If anything differs, they reject it on the device.
+4. After the broadcast, the agent checks the next `lab.wallet` read (a negative unconfirmed balance, then lower confirmed sats) and the txid on Esplora.
+
+The agent never types the PIN, the passphrase or the seed, never opens the recovery screens, and never starts a send that the person did not ask for. Trezor Suite is not installed on the mac-mini yet. Installing it is step 2's first run.
 
 ## API brokers
 
