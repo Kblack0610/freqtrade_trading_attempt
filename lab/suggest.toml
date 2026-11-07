@@ -79,6 +79,10 @@ expectancy_level = 0.95
 min_dsr = 0.95
 # Probability of backtest overfitting on the venue. 0.5 is the convention; this is tighter on purpose.
 max_pbo = 0.25
+# Minimum backtest length (Bailey et al 2014, theorem 3.1): the out-of-sample years must reach this multiple of
+# 2 ln(N) / SR^2, N the trial register's size and SR the annualized Sharpe of those out-of-sample days. 1 is the
+# paper's bound, a necessary condition only; N counts every trial, not independent ones, so it is the stricter side.
+min_btl_ratio = 1.0
 # Walk-forward months: at least this many, and this share of them with a positive expectancy.
 min_folds = 6
 min_folds_positive = 0.70
