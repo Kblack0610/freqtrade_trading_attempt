@@ -4,7 +4,8 @@ promote  a strategy and exchange that clears every gate in suggest.toml [promote
 watch    a lookahead-clean candidate that misses at most [watch] max_failed_gates of those gates
 demote   a league bot whose own dry run loses with enough trades, whose backtests lose confidently, or whose
          strategy has lookahead bias
-retire   a strategy with lookahead bias or one that fails to load
+retire   a strategy with lookahead bias or one that fails to load, or (from lab/confidence.py) a bot whose live
+         trades have decayed below the strategy's out-of-sample edge
 fix      a strategy whose recursive check failed or could not run for want of a startup_candle_count
 retune   a strategy whose walk-forward hyperopt parameters beat it as it is on months hyperopt never saw
 
@@ -27,6 +28,7 @@ from lab.db import connect
 from lab.util import finite
 
 CONFIG = Path(os.environ.get("SUGGEST_CONFIG", Path(__file__).resolve().parent / "suggest.toml"))
+DECAY = "kind = 'retire' AND exchange <> ''"  # the rows lab/confidence.py owns; the others are this module's
 ROSTER_STALE = dt.timedelta(days=1)  # a bot unseen this long no longer counts toward the league
 
 
@@ -270,8 +272,8 @@ def load_facts(conn, cfg: dict, now: dt.datetime | None = None) -> dict:
     return {"strategies": strategies, "series": series, "bots": bots, "walkforward": walkforward, "overfit": overfit}
 
 
-def store(conn, rows: list[dict]) -> dict:
-    """Upsert this run's suggestions, keeping first_seen, and delete the ones that no longer apply."""
+def store(conn, rows: list[dict], scope: str = "NOT (" + DECAY + ")") -> dict:
+    """Upsert this run's suggestions, keeping first_seen, and delete the ones in scope that no longer apply."""
     with conn.transaction():
         started = conn.execute("SELECT now()").fetchone()[0]
         for r in rows:
@@ -282,7 +284,7 @@ def store(conn, rows: list[dict]) -> dict:
                 "summary = EXCLUDED.summary, action = EXCLUDED.action, gates = EXCLUDED.gates, last_seen = now()",
                 {**r, "score": r["score"] if r["score"] is None or math.isfinite(r["score"]) else None,
                  "gates": Jsonb(r["gates"])})
-        gone = conn.execute("DELETE FROM suggestions WHERE last_seen < %s", (started,)).rowcount
+        gone = conn.execute(f"DELETE FROM suggestions WHERE last_seen < %s AND ({scope})", (started,)).rowcount
     counts: dict = {}
     for r in rows:
         counts[r["kind"]] = counts.get(r["kind"], 0) + 1

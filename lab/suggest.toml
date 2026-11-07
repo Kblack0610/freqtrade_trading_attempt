@@ -114,6 +114,9 @@ min_live_days = 90
 min_live_trades = 60
 min_live_btc_drop = 0.10
 min_live_stopouts = 1
+# Retire on decay, apart from the hard stop: a CUSUM over live trades against the out-of-sample low end alarms at
+# ln of this. If the edge is at least that low end, one false alarm takes this many live trades on average.
+decay_false_alarm_trades = 1000
 
 [book]
 # What a scored strategy might return, from lab/book.py. Paths resample runs of this many months.

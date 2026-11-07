@@ -110,7 +110,7 @@ WINDOWS = ["30d", "90d", "180d", "365d", "all"]
 SECTIONS = [
     ("promote", "Promote", "Clears every gate on an exchange where the league does not run it yet."),
     ("demote", "Demote", "A league bot whose own dry run loses, whose backtests lose confidently, or whose strategy is biased."),
-    ("retire", "Retire", "A strategy file whose results are void (lookahead bias) or that does not load."),
+    ("retire", "Retire", "A strategy file whose results are void (lookahead bias) or that does not load, or a bot whose live trades decayed below its out-of-sample edge."),
     ("fix", "Fix", "A strategy that runs but whose indicators may not match live: its recursive check failed or could not run."),
     ("retune", "Retune", "Walk-forward: hyperopt's parameters beat the strategy as it is on months hyperopt never saw."),
     ("watch", "Watch", "Lookahead-clean candidates one gate short of promotion, best Sharpe interval first."),

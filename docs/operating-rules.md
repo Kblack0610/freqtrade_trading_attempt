@@ -16,7 +16,7 @@ Three actions, nothing else:
 
 - **No manual trade.** No forced entry, no forced exit, no order placed or closed by hand in the exchange UI, and no position added to. A bot that is wrong is paused, not overruled.
 - **No parameter edit on a bot with open trades.** The strategy file, its params file, the pair list, the timeframe, the stoploss and the caps stay as they were at the last start until the bot is flat. Change them while it is flat, through a PR, and the change takes effect at the next start.
-- **No edit during a drawdown.** A bad week is not evidence. Retiring a strategy needs the stated decay test, not one drawdown.
+- **No edit during a drawdown.** A bad week is not evidence. Retiring a strategy needs the stated decay test (the "not decayed" gate and `retire` suggestion of `lab/confidence.py`, README "Decay test"), not one drawdown.
 - **No promotion off the news.** A strategy goes to a bot through the trial register and `confidence.ready` only. A coin in the headlines or a hot week is not a reason.
 
 ## Cadence
