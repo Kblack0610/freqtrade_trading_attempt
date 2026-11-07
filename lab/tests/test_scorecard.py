@@ -13,26 +13,26 @@ def market(days=400, step=0.004):
     index = pd.date_range("2023-01-01", periods=days, freq="D")
     close = pd.Series(100 * (1 + step) ** np.arange(days), index=index)
     vol = pd.Series(np.where(np.arange(days) % 2 == 0, "low", "high"), index=index, dtype=object)
-    return close, vol
+    trend = pd.Series(np.where(np.arange(days) >= 199, "up", None), index=index, dtype=object)
+    return pd.DataFrame({"btc_close": close, "trend": trend, "vol_bucket": vol})
 
 
 def test_a_label_uses_only_the_day_before():
-    close, vol = market()
-    label = scorecard.labels(close, vol, CFG["confidence"]["trend_band"])
-    full = label.copy()
-    cut = scorecard.labels(close.iloc[:300], vol.iloc[:300], CFG["confidence"]["trend_band"])
-    assert cut.equals(full.loc[cut.index])
-    assert set(label) == {"up/low", "up/high"} and label.index.min() > close.index[199]
+    reg = market()
+    label = scorecard.labels(reg)
+    cut = scorecard.labels(reg.iloc[:300])
+    assert cut.equals(label.loc[cut.index])
+    assert set(label) == {"up/low", "up/high"} and label.index.min() > reg.index[199]
 
 
 def test_a_steady_winner_clears_zero_where_it_trades_and_a_loser_does_not():
-    close, vol = market()
+    reg = market()
     start, end = dt.date(2023, 8, 1), dt.date(2024, 1, 31)
     days = pd.date_range(start, end - dt.timedelta(days=1), freq="D")
     rng = np.random.default_rng(1)
     win = pd.DataFrame({"ret": 0.002 + rng.normal(0, 0.0005, len(days)), "trades": 1}, index=days)
     lose = pd.DataFrame({"ret": -0.002 + rng.normal(0, 0.0005, len(days)), "trades": 1}, index=days)
-    out = scorecard.build(close, vol, {("W", "x"): (start, end), ("L", "x"): (start, end)},
+    out = scorecard.build(reg, {("W", "x"): (start, end), ("L", "x"): (start, end)},
                           {("W", "x", "base"): win, ("L", "x", "base"): lose}, CFG, 7)
     by = {(r["name"], r["cell"]): r for r in out}
     assert by["W", "up/low"]["lo"] > 0 and by["L", "up/low"]["hi"] < 0
@@ -41,19 +41,20 @@ def test_a_steady_winner_clears_zero_where_it_trades_and_a_loser_does_not():
 
 
 def test_a_thin_cell_gets_counts_but_no_interval():
-    close, vol = market()
+    reg = market()
     days = pd.date_range("2023-10-01", periods=10, freq="D")
     f = pd.DataFrame({"ret": 0.01, "trades": 2}, index=days)
-    out = scorecard.build(close, vol, {("S", "x"): (dt.date(2023, 10, 1), dt.date(2023, 10, 11))}, {("S", "x", "tuned"): f}, CFG, 1)
+    out = scorecard.build(reg, {("S", "x"): (dt.date(2023, 10, 1), dt.date(2023, 10, 11))}, {("S", "x", "tuned"): f}, CFG, 1)
     s = [r for r in out if r["name"] == "S"]
     assert sum(r["days"] for r in s) == 10 and sum(r["trades"] for r in s) == 20
     assert all(r["lo"] is None and r["hi"] is None for r in s)
 
 
 def test_run_stores_the_scorecard_from_walkforward_trades(conn):
-    close, vol = market()
-    for d, c, v in zip(close.index, close, vol):
-        conn.execute("INSERT INTO regimes (day, btc_close, vol_bucket) VALUES (%s, %s, %s)", (d.date(), float(c), v))
+    reg = market()
+    for d, r in reg.iterrows():
+        conn.execute("INSERT INTO regimes (day, btc_close, trend, vol_bucket) VALUES (%s, %s, %s, %s)",
+                     (d.date(), float(r["btc_close"]), r["trend"], r["vol_bucket"]))
     conn.execute("INSERT INTO strategies (name, file, file_hash) VALUES ('A', 'x', 'h')")
     conn.execute("INSERT INTO walkforward (strategy, exchange, fold_start, train_start, test_end, cache_key, ok) "
                  "VALUES ('A', 'x', '2023-09-01', '2023-01-01', '2023-10-01', 'k', true)")

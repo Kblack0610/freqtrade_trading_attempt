@@ -368,17 +368,17 @@ def reorder_drawdown(ret: np.ndarray, seed: int, level: float = 0.95, paths: int
     return float(np.quantile(_paths(ret, len(ret), seed, paths, 1)[1], level))
 
 
-def regimes(close: pd.Series) -> pd.DataFrame:
-    """Market regime per day from BTC daily closes (index: day). Trend is the close against its
-    200-day mean; volatility is 30-day realized volatility, cut into terciles of its own history.
-    The terciles use the whole history, so they describe the past, they do not forecast."""
+def regimes(close: pd.Series, band: float, vol_min_days: int) -> pd.DataFrame:
+    """Market regime per day from BTC daily closes (index: day), known at that day's close and never revised.
+    Trend is trend_buckets; volatility is 30-day realized volatility cut at the terciles of the volatility seen
+    so far (expanding window), so appending later days never changes an earlier label. A day gets no volatility
+    bucket until `vol_min_days` volatilities have been seen."""
     close = close.sort_index().astype(float)
-    sma = close.rolling(200).mean()
     vol = np.log(close).diff().rolling(30).std() * math.sqrt(YEAR)
-    trend = pd.Series(np.where(close > sma, "bull", "bear"), index=close.index).where(sma.notna())
-    lo, hi = vol.quantile([1 / 3, 2 / 3])
-    bucket = pd.Series(np.select([vol <= lo, vol <= hi], ["low", "mid"], "high"), index=close.index).where(vol.notna())
-    return pd.DataFrame({"day": close.index, "btc_close": close.to_numpy(), "trend": trend.to_numpy(),
+    seen = vol.expanding(min_periods=vol_min_days)
+    lo, hi = seen.quantile(1 / 3), seen.quantile(2 / 3)
+    bucket = pd.Series(np.select([vol <= lo, vol <= hi], ["low", "mid"], "high"), index=close.index).where(lo.notna())
+    return pd.DataFrame({"day": close.index, "btc_close": close.to_numpy(), "trend": trend_buckets(close, band).to_numpy(),
                          "vol_30d": vol.to_numpy(), "vol_bucket": bucket.to_numpy()})
 
 

@@ -39,6 +39,7 @@ def good_facts():
          "worst_open": -0.12, "fee_per_trade": 0.0014}
     return {"strategies": {"Good": {"lookahead": False, "recursive": False}},
             "series": {PAIR: {"windows": {"all": w}}}, "walkforward": wf, "daily": {PAIR: daily}, "close": close,
+            "trend": metrics.regimes(close, C["trend_band"], 90).set_index("day")["trend"],
             "overfit": {("binanceus", "all"): 0.1}, "pairs": {PAIR: [(100, 2.0), (100, 1.5), (100, 1.0)]}, "drift": {PAIR: {"gap": 0.0005, "trades": 40}},
             "live": {PAIR: {"since": dt.datetime(2025, 1, 1, tzinfo=dt.timezone.utc), "closed": 80, "stopouts": 3}}, "now": NOW}
 
@@ -114,7 +115,7 @@ def test_one_bad_gate_is_named_and_blocks_ready_whatever_the_score():
 
 def test_a_bull_only_strategy_fails_the_regime_spread():
     facts = good_facts()
-    up = metrics.trend_buckets(facts["close"], C["trend_band"]) == "up"
+    up = facts["trend"] == "up"
     facts["daily"][PAIR] = facts["daily"][PAIR].where(up.reindex(facts["daily"][PAIR].index, fill_value=False), 0.0)
     assert "regime spread" in failed(result(facts))
 

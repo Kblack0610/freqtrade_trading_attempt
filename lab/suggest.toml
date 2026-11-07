@@ -85,6 +85,8 @@ min_folds_positive = 0.70
 # BTC trend buckets: up or down when the close is this far from its 200-day mean, flat between. Each needs
 # enough days to count, at most this many may lose, and no bucket may earn over this share of the profit.
 trend_band = 0.05
+# Volatility terciles come from the volatility seen so far; a day has no bucket before this many days of it.
+vol_min_days = 90
 min_regime_days = 30
 max_negative_regimes = 1
 max_regime_share = 0.60
