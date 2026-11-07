@@ -44,6 +44,22 @@
 {% else %}
 <p class="muted">No set yet: it needs two scored pairs that do not move alike.</p>
 {% endif %}
+<h2>Forecasting volatility</h2>
+{% if vol %}
+<p class="muted">Each day's price variance forecast the day before, per pair, scored by QLIKE (lower is better) on every month before the lockbox. HAR is refit each month on the days before it; it has to beat the plain {{ vol_days }}-day mean and an EWMA. It wins on a venue only when the whole {{ vol_level | pct(0) }} interval of its daily difference is below zero against both. Until it does, nothing sizes by it.</p>
+<div class="scroll">
+<table>
+  <thead><tr><th>Exchange</th><th>Against</th><th class="n">HAR</th><th class="n">Baseline</th><th class="n">HAR minus baseline</th><th class="n">Pairs</th><th class="n">Days</th><th>HAR wins</th></tr></thead>
+  <tbody>
+  {% for v in vol %}
+  <tr><td>{{ v.exchange }}</td><td>{{ vol_days ~ "-day mean" if v.baseline == "mean" else "EWMA" }}</td><td class="n">{{ "%.3f" | format(v.har_qlike) }}</td><td class="n">{{ "%.3f" | format(v.baseline_qlike) }}</td><td class="n">{% if v.diff_lo is not none %}{{ "%.3f" | format(v.diff_lo) }} to {{ "%.3f" | format(v.diff_hi) }}{% else %}too few days{% endif %}</td><td class="n">{{ v.pairs }}</td><td class="n">{{ v.days }}</td><td>{{ "yes" if v.har_wins else "no" }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}
+<p class="muted">No forecast scores yet: they fill on the next analysis, once a venue's candles are fully backfilled.</p>
+{% endif %}
 <h2>Long term against short term</h2>
 {% if benchmarks %}
 <p class="muted">The plain alternatives over the same days, net of a fee each way. After tax uses guessed rates from <code>lab/suggest.toml</code>, so it shows how much trading costs in tax, not what you would owe. An active strategy has to beat these.</p>

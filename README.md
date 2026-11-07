@@ -30,6 +30,7 @@ Results go to the `trader` database in the cluster's shared Postgres, which the 
 | `lab/suggest.py`, `lab/suggest.toml` | After each analysis and walk-forward: promote, watch, demote, retire, fix and retune suggestions from the derived tables, with the thresholds as data (see Suggestions) |
 | `lab/confidence.py` | After each analysis and walk-forward: the score and gates that say whether a strategy has earned real money, and the trial register (see Confidence) |
 | `lab/families.toml` | By hand: each strategy class's method family (trend, mean-reversion, momentum and the rest) and data inputs, for `/coverage` |
+| `lab/volatility.py` | After the derived tables: HAR against a 30-day mean and an EWMA as daily variance forecasts, scored by QLIKE on months before the lockbox. |
 | `lab/book.py` | After the score: what each scored strategy might return beside holding BTC, and what each stage costs and can lose. |
 | `lab/live.py` | Live bot entry point: always refuses, nothing deploys it. See `docs/live.md` and the operator rules in `docs/operating-rules.md` |
 | `lab/ingest.py` | Job run every 5 minutes: every bot's trades (closed and open) and a snapshot (profit, balance, dry-run flag, each open pair's newest candle time) into Postgres |
@@ -183,6 +184,8 @@ Four gates in `lab/confidence.py` reuse trades already stored, so they add no tr
 
 Analysis also fills `benchmarks` from the regime venue's daily closes: holding BTC, holding BTC and ETH, monthly DCA into BTC, and BTC only above its 200-day mean, each over the last 1, 3 and 5 years and the whole shared history. Tax rates there are guesses, in config.
 
+Analysis also scores a volatility forecast (`lab/volatility.py`, knobs in `lab/suggest.toml` [volatility]): per analysis venue and whitelisted pair, daily realized variance from 5m candles, forecast the day before by HAR (log variance on its 1, 7 and 30-day means, refit each month on the days before it) and by two plain baselines, a 30-day mean and an EWMA. Each is scored by QLIKE on every month before the lockbox into `vol_scores`; `vol_verdict` says per venue whether HAR beats both, by a block-bootstrap interval on the daily QLIKE difference that has to sit below zero. `/book` shows the verdict. Sizing (inverse-vol weights, a vol-target stake variant) may use HAR only on a venue where it wins.
+
 ## Confidence
 
 `lab/confidence.py` runs after suggestions (alone: `python lab/confidence.py`) and rebuilds `confidence`, one row per strategy and exchange, shown on `/confidence`. Promote decides who enters the dry-run league; this decides who could touch money, so its gates are stricter. It is advice: nothing here touches a bot, and `lab/league.py` still refuses real money.
@@ -254,6 +257,7 @@ The first run fetches full history (5m since 2019 on binanceus is the long pole)
 - `023`: `paper_accounts` and `paper_orders` (the event-contract paper league, written by `lab/markets/paper.py`) and `demo_orders` (each drill order, written by `lab/markets/kalshi_trade.py`, `lab/markets/manifold_trade.py` and `lab/broker.py`).
 - `025`: `broker_balances`, each read of a broker paper account, written by `lab/broker.py`. Its drill writes to `demo_orders`.
 - `026`: `broker_balances.paper`, since the table now also holds read-only reads of real accounts.
+- `028`: `vol_scores` and `vol_verdict`, the volatility forecast's QLIKE per venue, pair, model and month, and whether HAR beats each baseline, rebuilt by `lab/volatility.py` on every analysis.
 
  A schema change is a new numbered file; never edit an applied one.
 

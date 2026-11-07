@@ -151,6 +151,23 @@ capital = 2000.0
 stake = 200.0
 max_open = 3
 
+[volatility]
+# From lab/volatility.py: a day's realized variance is the sum of its squared candle log returns at this timeframe,
+# kept when it has at least this share of its candles.
+timeframe = "5m"
+min_day_share = 0.9
+# HAR's terms: log mean variance over the last 1, 7 and 30 days (crypto trades every day, so a week is 7).
+har_days = [1, 7, 30]
+# What HAR has to beat: the mean of the last this-many days, and an EWMA with this decay (RiskMetrics' 0.94).
+baseline_days = 30
+ewma_lambda = 0.94
+# HAR is refit each month on every day before it, and a month is scored only with at least this many.
+min_train_days = 365
+# HAR wins on a venue when the high end of this block-bootstrap interval on the daily QLIKE difference, HAR minus
+# baseline, is below zero against each baseline. Blocks of days, since volatility clusters.
+level = 0.95
+block_days = 10
+
 [live]
 # What lab/live.py would run. Nothing deploys it, and its guard is on. Stake and slots come from this stage.
 stage = "Stage 1"
