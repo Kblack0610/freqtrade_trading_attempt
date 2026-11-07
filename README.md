@@ -140,6 +140,7 @@ A backtest of a strategy as it is says nothing about tuning it, and hyperopt's b
 - **Venues.** Every candidate runs on every venue in `WF_EXCHANGES`, one fold row per venue, once that venue's candles for its timeframe are fully backfilled (the same coverage guard as the analysis). A fold whose training span starts before the venue's first candle is skipped, and the run's `skipped` list says why.
 - **Memory.** Folds share `WF_MEMORY_GB` by their estimated size (training days plus a month of candles across the venue's pairs, at twice a backtest's load), so a 22-pair venue does not start ten hyperopts at once.
 - **Folds.** For each of the last `WF_FOLDS` whole calendar months, hyperopt tunes the strategy on the `WF_TRAIN_DAYS` before it (`--spaces default`: ROI, stoploss, trailing, max open trades and any declared buy and sell parameters) with a random state seeded by strategy and month, so a rerun gives the same answer. Then the month is backtested as is and with the tuned parameters, and the training span is backtested with them too (in sample). Every per-trade profit ratio is kept.
+- **Purge and embargo.** Training stops `WF_EMBARGO_DAYS` short of the test month, so no training trade is still open when the test begins. A trade the backtest force-closes at the end of a span (the training span or the month) straddles a fold boundary and is dropped from that span's trades and return. Changing the embargo reruns every fold.
 - **Isolation.** Hyperopt works on a copy of the strategy's folder in a temporary userdir, because it writes its params file next to the strategy, where every nightly backtest would load it.
 - **Cache.** A fold is keyed by the strategy file, both configs, the freqtrade version, its dates and the hyperopt settings, so a normal week runs only the newest month, and a changed file reruns all of that strategy's months. Failures retry like analysis chunks; a month with no candles is stored once. A fold where no epoch reached `WF_MIN_TRADES` training trades is kept, untuned, with that as its note.
 - **Reading it.** The Walk-forward page pools each strategy's months: how many the tuned parameters beat, the per-trade profit as is and tuned with 90% bootstrap intervals, and walk-forward efficiency, the tuned return per day out of sample over the same in sample. Near 1 the tuning carries over; near 0 or below, hyperopt fitted noise. The strategy page has the months one by one.
@@ -149,6 +150,7 @@ A backtest of a strategy as it is says nothing about tuning it, and hyperopt's b
 | `WF_EXCHANGES` | `binanceus` | Space-separated venues folds run on |
 | `WF_FOLDS` | `6` | Test months, the newest whole ones |
 | `WF_TRAIN_DAYS` | `180` | Training span before each test month |
+| `WF_EMBARGO_DAYS` | `7` | Days between the end of training and the test month; longer than any trade's hold |
 | `WF_EPOCHS` | `150` | Hyperopt epochs per fold |
 | `WF_LOSS` | `SharpeHyperOptLossDaily` | Hyperopt loss |
 | `WF_MIN_TRADES` | `10` | Training trades an epoch needs to count |

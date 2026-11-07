@@ -2,8 +2,8 @@
 the prediction clears 1% and FreqAI marks the candle in-distribution (do_predict == 1).
 
 Staged: it needs the ML image (the trader image built from freqtrade's _freqai tag) and the FreqAI
-settings in lab/families/ml/freqai.json. It stays off until walk-forward purges trades across fold
-boundaries, since a 24-candle label spills into the next fold. The label's shift(-24) is FreqAI's
+settings in lab/families/ml/freqai.json. Walk-forward now purges trades across fold boundaries and
+embargoes the days before each test month (WF_EMBARGO_DAYS), since a 24-candle label spills into the next fold. The label's shift(-24) is FreqAI's
 target, used only to train; predictions come from models fit on earlier windows.
 """
 

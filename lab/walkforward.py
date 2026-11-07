@@ -4,9 +4,11 @@
 Candidates, lookahead-clean and loadable, up to WF_LIMIT: the league's strategies, then the open promote and
 watch suggestions, then the best 365-day expectancy low end on each venue in turn. Each runs on every venue in
 WF_EXCHANGES whose candles for its timeframe are fully backfilled (coinbase is left out: its 2.4% round trip
-leaves nothing to tune). For each of the last WF_FOLDS whole calendar months:
+leaves nothing to tune). For each of the last WF_FOLDS whole calendar months (a trade the backtest force-closes at a span's end
+straddles the fold boundary, so `stats` purges it from every span's result):
 - the month is backtested with the strategy as it is (base);
-- hyperopt tunes it on the WF_TRAIN_DAYS before the month, with a seeded random state;
+- hyperopt tunes it on the WF_TRAIN_DAYS before the month, with a seeded random state, stopping WF_EMBARGO_DAYS
+  short of the month so no training trade is still open when the test begins (embargo);
 - the month is backtested again with the tuned parameters, and so is the training span (in sample).
 A fold is cached by strategy file, configs, Freqtrade version, dates and hyperopt settings, so a weekly
 run adds the newest month and whatever a changed file or a new candidate needs. Folds share a memory budget
@@ -46,6 +48,7 @@ LIMIT = int(os.environ.get("WF_LIMIT", "16"))
 WORKERS = int(os.environ.get("WF_WORKERS", "6"))
 TIMEOUT = int(os.environ.get("WF_TIMEOUT", "10800"))
 MEMORY_GB = float(os.environ.get("WF_MEMORY_GB", "10"))
+EMBARGO_DAYS = int(os.environ.get("WF_EMBARGO_DAYS", "7"))  # a gap longer than any trade's hold, before each test month
 HYPEROPT_LOAD = 2  # hyperopt keeps the analysed frame and each epoch's backtest copy
 ONLY = set(os.environ.get("WF_STRATEGIES", "").split())
 MAX_ATTEMPTS = analyze.MAX_ATTEMPTS
@@ -64,10 +67,15 @@ def folds(today: dt.date, n: int | None = None, train_days: int | None = None,
     return out[::-1]
 
 
+def train_end(test_start: dt.date) -> dt.date:
+    """Where the training span stops: the embargo before the test month."""
+    return test_start - dt.timedelta(days=EMBARGO_DAYS)
+
+
 def fold_key(file_hash: str, exchange: str, fold: tuple, ft_version: str) -> str:
     cfg = "".join(analyze.sha256(p.read_bytes()) for p in analyze.config_files(exchange))
     return analyze.sha256(json.dumps([file_hash, cfg, ft_version, exchange, [str(d) for d in fold],
-                                      EPOCHS, LOSS, MIN_TRADES]).encode())
+                                      EPOCHS, LOSS, MIN_TRADES, EMBARGO_DAYS]).encode())
 
 
 class Runner(Protocol):
@@ -76,10 +84,14 @@ class Runner(Protocol):
 
 
 def stats(res: dict) -> dict:
-    """A backtest result as the trades, total return and per-trade profit ratios a fold row keeps."""
+    """A backtest result as the trades, total return and per-trade profit ratios a fold row keeps. Trades the
+    backtest force-closed at the span's end are dropped: they straddle the fold boundary."""
     t = res["trades"]
+    if len(t) and "exit_reason" in t:
+        t = t[t["exit_reason"] != "force_exit"]
     ret = [float(x) for x in t["profit_ratio"]] if len(t) else []
-    return {"trades": len(ret), "profit": res["final_balance"] / res["start_balance"] - 1.0,
+    profit = float(t["profit_abs"].sum()) / res["start_balance"] if len(t) else 0.0
+    return {"trades": len(ret), "profit": profit,
             "expectancy": sum(ret) / len(ret) if ret else None, "returns": ret}
 
 
@@ -108,7 +120,7 @@ class Cli:
             cmd = ["freqtrade", "hyperopt", "--userdir", d,
                    *[a for p in analyze.config_files(exchange) for a in ("-c", str(p))],
                    "--datadir", str(analyze.RESULTS / "data" / exchange), "--strategy", strategy,
-                   "--strategy-path", str(strat), "--timerange", f"{train_start:%Y%m%d}-{test_start:%Y%m%d}",
+                   "--strategy-path", str(strat), "--timerange", f"{train_start:%Y%m%d}-{train_end(test_start):%Y%m%d}",
                    "--hyperopt-loss", LOSS, "--spaces", "default", "--ignore-missing-spaces", "-e", str(EPOCHS),
                    "-j", "1", "--random-state", str(seed), "--min-trades", str(MIN_TRADES)]
             try:
@@ -121,7 +133,7 @@ class Cli:
             if not params_file.exists() or params_file.stat().st_mtime_ns == before:
                 return took({**out, "error": f"no hyperopt epoch reached {MIN_TRADES} training trades"})
             out["params"] = json.loads(params_file.read_text())["params"]
-            for side, (a, b) in (("tuned", (test_start, test_end)), ("is", (train_start, test_start))):
+            for side, (a, b) in (("tuned", (test_start, test_end)), ("is", (train_start, train_end(test_start)))):
                 r = self.bt.backtest(strategy, exchange, a, b, strat)
                 if not r["ok"]:
                     return took({"ok": False, "error": f"{side}: {r['error']}"})

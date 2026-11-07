@@ -190,3 +190,26 @@ def test_retune_rows_come_from_stored_folds(wlab, monkeypatch):
     assert "in each of the newest 2 unseen months" in summary
     params = json.loads(action.split(":\n", 1)[1])
     assert params == {"strategy_name": "Live", "params": {"roi": {"0": 0.03}, "stoploss": -0.08}, "ft_stratparam_v": 1}
+
+
+def test_stats_purge_trades_force_closed_at_the_span_end():
+    import pandas as pd
+    t = pd.DataFrame({"profit_ratio": [0.01, -0.5, 0.02], "profit_abs": [1.0, -50.0, 2.0],
+                      "exit_reason": ["roi", "force_exit", "roi"]})
+    got = wf.stats({"trades": t, "start_balance": 100.0, "final_balance": 53.0})
+    assert got["trades"] == 2 and got["returns"] == [0.01, 0.02]
+    assert got["profit"] == pytest.approx(0.03)  # the straddling trade's -50% is gone
+
+
+def test_training_stops_an_embargo_before_the_test_month(monkeypatch):
+    monkeypatch.setattr(wf, "EMBARGO_DAYS", 7)
+    assert wf.train_end(dt.date(2026, 9, 1)) == dt.date(2026, 8, 25)
+
+
+def test_the_embargo_is_part_of_the_cache_key(monkeypatch):
+    fold = wf.folds(TODAY, 1, 180)[0]
+    monkeypatch.setattr(analyze, "config_files", lambda ex: [])
+    monkeypatch.setattr(wf, "EMBARGO_DAYS", 7)
+    a = wf.fold_key("h", "binanceus", fold, "v")
+    monkeypatch.setattr(wf, "EMBARGO_DAYS", 3)
+    assert a != wf.fold_key("h", "binanceus", fold, "v")
