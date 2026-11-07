@@ -15,6 +15,7 @@
 4. Derived, rebuilt in one transaction from the stored trades: daily returns, metrics over 30d, 90d,
    180d, 365d and all (with bootstrap intervals and the deflated Sharpe across every strategy x
    exchange), Monte Carlo estimates, BTC regimes, and correlation with the strategies the league runs.
+   Then lab/volatility.py scores HAR against plain variance forecasts per venue and pair (`vol_scores`, `vol_verdict`).
 5. Drift: each league bot's strategy backtested on its exchange over the time the bot has run, set
    against the bot's dry-run trades in `drift`.
 6. Suggestions: lab/suggest.py turns those tables into promote, watch, demote, retire and fix rows,
@@ -48,7 +49,7 @@ from typing import Protocol
 import pandas as pd
 from psycopg.types.json import Jsonb
 
-from lab import metrics, book, confidence, scorecard, suggest
+from lab import metrics, book, confidence, scorecard, suggest, volatility
 from lab.db import connect
 from lab.util import finite, utc
 
@@ -595,6 +596,14 @@ def daily_close(coin: str) -> pd.Series:
     return pd.Series(df["close"].to_numpy(), index=pd.to_datetime(df["date"], utc=True).dt.date)
 
 
+def vol_files(first: dict, timeframe: str) -> dict[str, dict[str, Path]]:
+    """Each analysis venue's candle file per whitelisted pair at `timeframe`, once the venue is fully backfilled there."""
+    from freqtrade.misc import pair_to_filename
+
+    return {ex: {p: RESULTS / "data" / ex / f"{pair_to_filename(p)}-{timeframe}.feather" for p in sorted(whitelist(ex))}
+            for ex in EXCHANGES if (ex, timeframe) in first}
+
+
 def regime_rows(close: pd.Series) -> list[dict]:
     if close.empty:
         return []
@@ -715,6 +724,8 @@ def main(runner: Runner | None = None, today: dt.date | None = None) -> int:
             summary.update(chunks_failed=failed, chunks_empty=empty, failures=failures, bias_failed=conn.execute(
                 "SELECT count(*) FROM bias_checks WHERE has_bias IS NULL").fetchone()[0])
             summary.update(derive(conn))
+            cfg = suggest.load_config()
+            summary.update(volatility.run(conn, vol_files(first, cfg["volatility"]["timeframe"]), cfg))
             summary.update(suggest.run(conn))
             summary.update(confidence.run(conn))
             summary.update(book.run(conn))
