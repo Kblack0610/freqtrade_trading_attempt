@@ -28,8 +28,8 @@ Tier is the highest rung we can use: **API** (an official API covers the job), *
 | Polymarket global | data only | prediction market | API | never (US is close-only) | n/a | none |
 | PredictIt | data only | prediction market | API (one feed) | person | none | none |
 | Manifold | data, order drill built | play money | API | API, bots allowed | the venue is play money | key (tr-118) |
-| DraftKings, FanDuel | candidate | sportsbook | Odds API | person | none | P7 |
-| Novig, ProphetX | candidate | exchange-style sportsbook | API | API, to verify | ProphetX sandbox | P7 |
+| DraftKings, FanDuel | candidate | sportsbook | Odds API | person | backtest engine only | Odds API key (sheet row) |
+| ProphetX, Novig | candidate | exchange-style sports venue (CFTC) | API | API (ProphetX terms allow bots) | ProphetX sandbox | when a strategy needs it |
 
 ## Shared rails
 
@@ -451,38 +451,79 @@ Data facts, fees as backtested, and adapter notes are in [markets.md](markets.md
 
 ## Sportsbooks
 
-We read sportsbook odds through The Odds API ([markets.md](markets.md)): free for 500 credits/month; $30, $59, $119 and $249 tiers (doc, https://the-odds-api.com/). Buying a tier is the person's call.
+We read sportsbook odds through The Odds API ([markets.md](markets.md), adapter `lab/markets/odds.py`). We never place a bet at a sportsbook by any automated means. Every bet is the person's, on their own device, inside a legal state.
 
 ### DraftKings and FanDuel
 
 - Status: candidate.
-- Strategy fit: implied odds as a signal; any bet placed by hand.
-- API: no public retail API.
+- Strategy fit: implied odds as a signal and a fair-price reference for Kalshi and Polymarket US sports markets (the `gap` family in [markets.md](markets.md)); any bet placed by hand.
+- API: no public retail API for either (snippet). Their odds reach us only through The Odds API.
 - Agent machine: no.
-  - FanDuel's terms bar any "robot, spider, scraper, sniping software or other automated means" without written permission (doc, Faceoff terms).
-  - Its sportsbook terms reportedly bar bots and programs that place bets automatically (snippet).
-  - DraftKings reportedly bars bots, scrapers and browser scripts (snippet; page returned 403).
-  - Automating either would risk the account, as the seahorse plan already decided.
-- The person: every bet.
-- Sign-in and 2FA: Not researched.
-- Risk controls: each book's deposit limits and self-exclusion. Not researched.
-- Cost: the Odds API tier, if a strategy needs more than the free tier.
-- Paper: none from the books. Our backtest engine against recorded odds is the paper path.
-- Verified: 2026-11-06. Sources: https://www.fanduel.com/faceoff-terms, https://the-odds-api.com/.
+  - FanDuel's fantasy (DFS) and Faceoff terms bar any "robot, spider, scraper, sniping software or other automated means" without written permission (doc). Its sportsbook terms were not found; they reportedly bar bots too (snippet).
+  - DraftKings' Fair Play page bars browser scripts and bots for fantasy (snippet). Its sportsbook terms returned 403: Not verified.
+  - Even where a clause is unread, a bot risks the account, and the location check below ties every bet to a real device in a legal state. The seahorse plan already excludes both.
+- The person: account, deposits, every bet, every withdrawal.
+- Sign-in and 2FA:
+  - DraftKings requires 2FA at login in legal states (snippet). Methods: Not verified (sources conflict on SMS only versus SMS or an authenticator app).
+  - FanDuel offers an authenticator app or SMS (snippet); regulation requires it in CT, IL, NJ, OH, PA, TN, VT and WY (snippet).
+  - Both check location before a bet. DraftKings uses GeoComply, the "Player Location Check" plugin on desktop or precise location on mobile (secondary). FanDuel's vendor: Not verified.
+  - No rbw entry. 2FA and location are the person's, since no bet is automated.
+- Risk controls (native):
+  - DraftKings: deposit limits (daily, weekly, monthly), wager and max-per-bet limits, time limits, cool-off, self-exclusion for 1 or 5 years across all DraftKings products (snippet). Cool-off length: Not verified.
+  - FanDuel: deposit, loss, wager, per-slip and time limits, a timeout, and self-exclusion from one year or indefinite. A lowered limit applies at once, a raised one after a cooldown (snippet).
+  - Ours: none needed, since no code bets. A person who bets should set a deposit limit first.
+- Cost: none to read beyond the Odds API tier.
+- Paper: none from the books. Our backtest engine (`lab/markets/backtest.py`) against recorded odds is the paper path.
+- Event contracts: both now sell CFTC-route prediction products beside the sportsbook.
+  - FanDuel Predicts, with CME Group, launched 2025-12-22 in AL, AK, SC, ND and SD, rolling out through 2026. Sports contracts are offered only where online sports betting is not legal (doc, Flutter press release). Public API: none found.
+  - DraftKings Predictions launched 2025-12-19 in 38 states on CME markets, moving to Railbird, the CFTC exchange DraftKings bought in 2025-10 (snippet). Public API: none found.
+  - Both are person only, like Robinhood's event contracts.
+- Verified: 2026-11-06. Sources: https://www.fanduel.com/terms, https://www.fanduel.com/faceoff-terms, https://www.draftkings.com/fantasy-fair-play-commitment, https://help.draftkings.com/hc/en-us/articles/4405232295827-How-do-I-limit-my-access-to-DraftKings-US, https://support.fanduel.com/s/article/How-do-I-set-account-limits, https://flutter.com/news-media/press-releases/fanduel-and-cme-group-launch-fanduel-predicts/.
 
-### Novig and ProphetX
+#### Odds read
 
-- Status: candidate. Exchange-style US sports venues with APIs.
-- Strategy fit: sports contracts with an order book, an alternative to Kalshi sports.
-- API:
-  - Novig: a signed API (Ed25519 or P-256). A management key funds subaccounts but cannot place orders; each subaccount has its own trading key (doc).
-  - ProphetX: Trading, Market Data and other APIs, with a sandbox at `api.sandbox.prophetx.dev` (doc). Whether a plain retail account gets the Trading API: Not verified.
-- Agent machine: ToS Not verified.
-- The person: accounts, funding, keys.
+The read is built and tested on fixtures; it is not running, because no key exists (sheet row "get a free The Odds API key, rbw add trading/odds-api").
+
+- Pricing (doc, https://the-odds-api.com, 2026-11-06): free for 500 credits/month ("most bookmakers"); $30 for 20K, $59 for 100K, $119 for 5M, $249 for 15M, all bookmakers.
+- Credits (doc, v4 guide): `/odds` costs 1 per market per region; `/scores` with `daysFrom` costs 2. One sweep of `[venues.odds_api]` as configured (one sport, h2h, region `us`) is 3 credits.
+- Cadence by tier: the free tier covers one sport every 6 hours (4 runs a day, about 360 credits a month). Hourly needs the $30 tier (about 2,200 a month); every 5 min is about 26,000 a month, past the $30 tier.
+- The default 5-min recorder must not run it: `odds_api` stays out of `[recorder] default_venues`. It is live once the person adds the key to rbw (`trading/odds-api`) and a SOPS Secret as `ODDS_API_KEY`, a home-config CronJob runs `python -m lab.markets.recorder odds_api` every 6 hours, and `SELECT started_at, seen, ok FROM market_sweeps WHERE venue = 'odds_api' ORDER BY id DESC LIMIT 3;` shows an ok sweep. A paid tier and a faster cadence are the person's money call.
+- The key rides in the query string (doc), so the adapter re-raises HTTP errors without the URL.
+
+### Exchange-style sports venues
+
+Peer-to-peer sports venues with an order book and an official trading API. Each became a CFTC exchange in 2026, so they sit closer to Kalshi than to a sportsbook. The Odds API's `us_ex` region already reads Novig and ProphetX prices (doc: betopenly, kalshi, limitless, novig, polymarket, polymarket_us, prophetx).
+
+#### ProphetX
+
+- Status: candidate.
+- Strategy fit: sports contracts with a book, an alternative to Kalshi sports; a second venue for the `gap` family.
+- API: any KYC-approved account can make Trading API keys in account settings, with no application. Higher rate limits and RFQ or parlay quoting need entity onboarding. The Market Data API is separate, by request (doc). Sandbox: `api.sandbox.prophetx.dev/partner` (snippet).
+- Agent machine: not needed. Terms 3.5 bar software-assisted play "with the exception of programmatic trading via the ProphetX API, which is available to all Users", and ProphetX may revoke API access at any time (doc). Bots go through the API only.
+- The person: account, KYC, funding, keys.
 - Sign-in and 2FA: Not verified.
-- Risk controls: Novig's subaccount split is itself a limit, since a management key cannot trade.
-- Cost: Not verified.
-- Paper: the ProphetX sandbox.
-- Verified: 2026-11-06. Sources: https://docs.novig.com, https://docs.prophetx.co/docs/getting-started.
+- Regulation: CFTC DCM and DCO since 2026-06, no longer sweepstakes (secondary). State list: Not verified.
+- Risk controls: key generation is refused while the account is self-excluded (doc). Cancel-all and dead-man switch: Not verified.
+- Cost: fees are on a page not read: Not verified.
+- Paper: the sandbox.
+- Verified: 2026-11-06. Sources: https://docs.prophetx.co/docs/requesting-api-access, https://www.prophetx.co/lobby/t-c/terms, https://docs.prophetx.co/docs/getting-started.
 
-Not offered to retail by API today: Sporttrade (closed, waitlist), Robinhood and Crypto.com event contracts (no public API found).
+#### Novig
+
+- Status: candidate.
+- Strategy fit: as ProphetX; pre-game straight trades carry no fee.
+- API: a signed API (Ed25519 or P-256), with `POST /v3/echo` to check a signature. A management key, made in the profile, opens and funds subaccounts but cannot place orders; each subaccount has its own trading key (doc). No application is mentioned. Parlays are not in the API (snippet).
+- Agent machine: not needed; bot terms Not verified.
+- The person: account, funding, the management key.
+- Sign-in and 2FA: Not verified.
+- Regulation: Ludlow Exchange became a CFTC DCM on 2026-06-16, clearing through Bitnomial, and replaced the sweepstakes product around 2026-08. Offered in 47 states and DC (not NV, AZ, MI), age 21 and up (secondary).
+- Risk controls: the subaccount split is itself a limit, since the management key cannot trade, and a subaccount holds only what it is funded with.
+- Cost: no fee pre-game; a live taker fee of c x p x (1-p), with c reported as 0.03, 0.06 or 0.10 (snippet, conflicting), and makers credited half. Not verified until read on Novig's own page.
+- Paper: none confirmed; a sandbox is Not verified. Until then, our backtest engine.
+- Verified: 2026-11-06. Sources: https://docs.novig.com, https://predictionscout.com/reviews/novig-review/.
+
+#### Not available by API
+
+- Sporttrade: stopped US wagering 2026-05-25 and closed accounts 2026-06-26; a CFTC application is pending with no relaunch date (secondary, https://www.rotowire.com/news/sporttrade-stops-us-wagering-as-it-exits-market-116232).
+- Robinhood event contracts run on Kalshi, with no API for them (snippet). Underdog's sports markets are backed by Kalshi and Crypto.com (snippet). Crypto.com event contracts: no API found. Trade the underlying Kalshi market instead ([Kalshi](#kalshi)).
+- Kalshi and Polymarket US sports contracts are in their own records above.

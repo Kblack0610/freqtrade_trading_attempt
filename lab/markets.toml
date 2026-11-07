@@ -110,7 +110,7 @@ timeout_s = 60
 
 [venues.odds_api]
 # Sportsbook implied odds, read-only; the key comes from ODDS_API_KEY. Credits a run: per sport, 1 per region for the
-# odds plus 2 for /scores. One sport every 5 min is about 8,600 a month against the free tier's 500, so the cadence
+# odds plus 2 for /scores, 3 a run for one sport. Every 5 min is about 26,000 a month against the free tier's 500, so the cadence
 # and the sports list wait on the plan the human buys (docs/markets.md, The Odds API).
 title = "The Odds API"
 kind = "sportsbook"
