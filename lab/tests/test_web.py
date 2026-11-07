@@ -332,10 +332,14 @@ def test_book_sets_a_strategy_beside_hold(conn, signed_in):
                          "0.25, 0.3, 5000, 12)", (basis, months, mid))
     body = signed_in[1].get("/book").text
     assert "Alpha" in body and "31%" in body and "12%" in body and "Not enough evidence" not in body
-    for needle in ("24% / 9%", "T-bills at 4.4%", "USDT", "No set yet"):
+    for needle in ("24% / 9%", "T-bills at 4.4%", "USDT", "No mixture yet"):
         assert needle in body, needle
-    conn.execute("INSERT INTO portfolio VALUES ('Alpha', 'binanceus', 0.21, 0.4, 0.25, 900)")
-    assert "0.21" in signed_in[1].get("/book").text
+    conn.execute("INSERT INTO mixtures (variant, name, spec, weighting, gated, baseline, sleeves, months, days, annual, lo, hi, "
+                 "sharpe, max_drawdown, dsr, trials, pbo, weights) VALUES ('v1', '1/N: Alpha binanceus, Beta okx', '{}', "
+                 "'equal', false, true, 2, 4, 120, 0.2, -0.1, 0.5, 1.1, 0.07, 0.31, 96, 0.42, %s)",
+                 (Jsonb({"Alpha binanceus": 0.5, "Beta okx": 0.5}),))
+    body = signed_in[1].get("/book").text.split("Running bots")[1]
+    assert "(baseline)" in body and "Alpha binanceus 50%" in body and "96 in the register" in body and "0.42" in body
 
 
 def test_book_shows_whether_har_beats_the_plain_forecasts(conn, signed_in):

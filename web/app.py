@@ -603,6 +603,7 @@ def confidence(request: Request):
 
 
 CLIMATES = "SELECT * FROM climate_scorecard ORDER BY cell, kind, name, exchange, variant"
+MIXTURES = "SELECT * FROM mixtures ORDER BY baseline DESC, lo DESC NULLS LAST, name LIMIT %s"
 CLIMATE_ORDER = [f"{t}/{v}" for t in ("up", "flat", "down") for v in ("low", "mid", "high")]
 
 
@@ -630,7 +631,7 @@ def book(request: Request):
     board = rows(BOOK)
     return page(request, "book.html", board=board, bands=bands, pop=None if board else population(cfg["confidence"]), budget=book_lab.budget(cfg),
                 hurdle=book_lab.hurdle(cfg), yield_=cfg["book"]["tbill_yield"], tax=cfg["book"]["tax_short"],
-                portfolio=rows("SELECT * FROM portfolio ORDER BY worst_corr"), climates=climate_table(rows(CLIMATES)),
+                mixtures=rows(MIXTURES, (cfg["mixtures"]["show"] + 1,)), climates=climate_table(rows(CLIMATES)),
                 vol=rows("SELECT * FROM vol_verdict ORDER BY exchange, baseline"),
                 vol_days=cfg["volatility"]["baseline_days"], vol_level=cfg["volatility"]["level"],
                 horizon=rows("SELECT * FROM horizon_verdict ORDER BY strategy, exchange, variant, plan"), trend_days=cfg["book"]["trend_days"],

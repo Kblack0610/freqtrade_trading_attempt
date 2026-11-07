@@ -49,7 +49,7 @@ from typing import Protocol
 import pandas as pd
 from psycopg.types.json import Jsonb
 
-from lab import metrics, book, confidence, scorecard, suggest, volatility, horizon
+from lab import metrics, book, confidence, mixtures, scorecard, suggest, volatility, horizon
 from lab.db import connect
 from lab.util import finite, utc
 
@@ -729,6 +729,7 @@ def main(runner: Runner | None = None, today: dt.date | None = None) -> int:
             summary.update(suggest.run(conn))
             summary.update(confidence.run(conn))
             summary.update(book.run(conn))
+            summary.update(mixtures.run(conn))
             summary.update(scorecard.run(conn))
             summary.update(horizon.run(conn))
             ok = failed <= FAIL_SHARE * max(len(todo), 1)
