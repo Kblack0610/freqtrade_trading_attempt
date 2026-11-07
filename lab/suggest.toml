@@ -128,9 +128,6 @@ tax_long = 0.15
 # What cash earns, the hurdle under everything on /book: the 1-year Treasury near 4.4% on 2026-11-04, read from
 # secondary sources. Refresh it by hand; a projection holds it flat, which no real rate does.
 tbill_yield = 0.044
-# Stage 2's set: at most this many bots, and none correlated above this with one already in. Judgment calls.
-portfolio_bots = 3
-portfolio_max_corr = 0.5
 
 # Proposed in the plan, set by the human. Paper only: lab/league.py refuses real money whatever this says.
 [[book.stages]]
@@ -179,3 +176,25 @@ day_loss = 0.03
 level = 0.90
 min_days = 30
 block = 10
+
+[mixtures]
+# lab/mixtures.py: strategies run together, fit on past walk-forward months and scored on the next. Every spec
+# scored is a `trials` row, so a bigger search raises the deflated Sharpe bar. Judgment calls, not evidence.
+# Which walk-forward return a sleeve is: tuned (hyperopt's parameters on months it never saw) or base.
+variant = "tuned"
+# The pool: the best-scored pairs on /confidence, then the rest by name, with more months than training needs.
+pool = 8
+max_sleeves = 3
+weightings = ["equal", "inverse_vol", "hrp"]
+gates = [false, true]
+# Most specs scored a run, the 1/N baseline first. The order is fixed, so a run with the same pool adds no trials.
+budget = 120
+# Months of a sleeve's out-of-sample returns before its first sized month.
+min_train_months = 2
+# The regime gate turns a sleeve on in a climate where its training mean was positive over at least this many days.
+gate_min_days = 10
+level = 0.90
+block = 10
+pbo_blocks = 8
+# Mixtures listed on /book, best interval low end first, after the baseline.
+show = 10

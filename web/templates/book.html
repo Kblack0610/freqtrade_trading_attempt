@@ -30,7 +30,7 @@
 <p>The hurdle is cash: T-bills at {{ yield_ | pct(1) }} a year{% for h in hurdle %}, {{ h.total | pct(0) }} over {{ h.months // 12 }} year{{ "s" if h.months > 12 }} ({{ h.after_tax | pct(0) }} after tax){% endfor %}, with no chance of a loss if held to maturity. The rate is held flat, which no real rate does. After tax uses a guessed {{ tax | pct(0) }} rate: a strategy pays it every year, and hold once, on selling.</p>
 <h2>By market climate</h2>
 {% if climates %}
-<p class="muted">What each strategy earned out of sample on the days of each climate: BTC against its 200-day mean (up, flat, down) and its 30-day volatility tercile, both read the day before. A strategy is listed where the low end of its 90% interval of annual return is above zero, from at least {{ min_days }} days there. Returns are trade profit ratios summed per close day, not scaled to a wallet. The intervals are per cell and not corrected for the number of cells; the {{ climates[0].trials }} trials in the register are the bar the deflated Sharpe applies on <a href="/confidence">confidence</a>, so read a lone pass as a lead, not a result.</p>
+<p class="muted">What each strategy and mixture earned out of sample on the days of each climate: BTC against its 200-day mean (up, flat, down) and its 30-day volatility tercile, both read the day before. A strategy is listed where the low end of its 90% interval of annual return is above zero, from at least {{ min_days }} days there. Returns are trade profit ratios summed per close day, not scaled to a wallet. The intervals are per cell and not corrected for the number of cells; the {{ climates[0].trials }} trials in the register are the bar the deflated Sharpe applies on <a href="/confidence">confidence</a>, so read a lone pass as a lead, not a result.</p>
 <div class="scroll">
 <table>
   <thead><tr><th>Climate</th><th class="n">Hold BTC, a year (interval)</th><th class="n">Days</th><th class="n">Strategies tested</th><th>Clearing zero (low end of annual return, days)</th></tr></thead>
@@ -39,7 +39,7 @@
   <tr><td>{{ c.cell }}</td>
     <td class="n">{% if c.hold %}{{ c.hold.annual | pct(0) }} <span class="muted">{{ c.hold.lo | pct(0) if c.hold.lo is not none else "-" }} to {{ c.hold.hi | pct(0) if c.hold.hi is not none else "-" }}</span>{% else %}-{% endif %}</td>
     <td class="n">{{ c.hold.days if c.hold else "-" }}</td><td class="n">{{ c.tested }}</td>
-    <td>{% for r in c.passing %}<a href="/strategies/{{ r.name }}?exchange={{ r.exchange }}">{{ r.name }}</a> {{ r.exchange }}{% if r.variant != "base" %} ({{ r.variant }}){% endif %} <span class="muted">{{ r.lo | pct(0) }}, {{ r.days }} d</span>{% if not loop.last %}; {% endif %}{% else %}<span class="muted">none</span>{% endfor %}</td></tr>
+    <td>{% for r in c.passing %}{% if r.kind == "mixture" %}{{ r.name }}{% else %}<a href="/strategies/{{ r.name }}?exchange={{ r.exchange }}">{{ r.name }}</a> {{ r.exchange }}{% if r.variant != "base" %} ({{ r.variant }}){% endif %}{% endif %} <span class="muted">{{ r.lo | pct(0) }}, {{ r.days }} d</span>{% if not loop.last %}; {% endif %}{% else %}<span class="muted">none</span>{% endfor %}</td></tr>
   {% endfor %}
   </tbody>
 </table>
@@ -48,20 +48,24 @@
 <p class="muted">No climate table yet: it needs walk-forward trades and the regimes, and fills on the next run.</p>
 {% endif %}
 <h2>Running bots together</h2>
-{% if portfolio %}
-<p class="muted">The best scored pairs that do not move alike, in equal shares, up to the Stage 2 limit. These use each strategy's whole backtest before the lockbox, not its tuned months, so treat the falls as a comparison, not an estimate.</p>
+{% if mixtures %}
+{% set m0 = mixtures[0] %}
+<p class="muted">Strategies run together, each weighted 1/N, by inverse volatility or by hierarchical risk parity, and optionally switched off in climates where it lost in training. Weights and switches are fit on the walk-forward months before each month and scored on that month, so every return here is out of sample. Each mixture tried is a trial: {{ m0.trials }} in the register. Overfit probability across the set: {{ "%.2f" | format(m0.pbo) if m0.pbo is not none else "not enough shared days" }}. The 1/N mixture of the best-scored pairs is the baseline; read the others against it, not against zero.</p>
 <div class="scroll">
 <table>
-  <thead><tr><th>Strategy</th><th>Exchange</th><th class="n">Highest correlation with another bot</th><th class="n">Worst fall alone</th><th class="n">Worst fall together</th><th class="n">Days</th></tr></thead>
+  <thead><tr><th>Mixture</th><th class="n">Months scored</th><th class="n">A year (90% interval)</th><th class="n">Worst fall</th><th class="n">Deflated Sharpe</th><th>Last month's weights</th></tr></thead>
   <tbody>
-  {% for p in portfolio %}
-  <tr><td>{{ p.strategy }}</td><td>{{ p.exchange }}</td><td class="n">{{ "%.2f" | format(p.worst_corr) }}</td><td class="n">{{ p.alone_drawdown | pct(0) }}</td><td class="n">{{ p.combined_drawdown | pct(0) }}</td><td class="n">{{ p.days }}</td></tr>
+  {% for m in mixtures %}
+  <tr><td>{{ m.name }}{% if m.baseline %} <span class="muted">(baseline)</span>{% endif %}</td><td class="n">{{ m.months }}</td>
+    <td class="n">{% if m.annual is not none %}<span class="{{ m.annual | tone }}">{{ m.annual | pct(0) }}</span> <span class="muted">{{ m.lo | pct(0) if m.lo is not none else "-" }} to {{ m.hi | pct(0) if m.hi is not none else "-" }}</span>{% else %}-{% endif %}</td>
+    <td class="n">{{ m.max_drawdown | pct(0) if m.max_drawdown is not none else "-" }}</td><td class="n">{{ "%.2f" | format(m.dsr) if m.dsr is not none else "-" }}</td>
+    <td>{% for k, w in m.weights.items() %}{{ k }} {{ w | pct(0) }}{% if not loop.last %}, {% endif %}{% endfor %}</td></tr>
   {% endfor %}
   </tbody>
 </table>
 </div>
 {% else %}
-<p class="muted">No set yet: it needs two scored pairs that do not move alike.</p>
+<p class="muted">No mixture yet: it needs two strategies with more walk-forward months than training takes.</p>
 {% endif %}
 <h2>Long term against short term</h2>
 {% if benchmarks %}

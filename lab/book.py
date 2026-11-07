@@ -24,7 +24,6 @@ WHERE c.score IS NOT NULL AND w.ok AND w.params IS NOT NULL AND w.test_end <= %s
 """
 COLS = ["strategy", "exchange", "basis", "horizon_months", "p5", "p50", "p95", "prob_loss", "exp_max_drawdown", "paths",
         "basis_months"]
-PORTFOLIO_COLS = ["strategy", "exchange", "worst_corr", "alone_drawdown", "combined_drawdown", "days"]
 
 
 def hold_months(folds: list[tuple], close: pd.Series) -> list[float]:
@@ -155,26 +154,6 @@ def benchmark_rows(btc: pd.Series, eth: pd.Series, cfg: dict) -> list[dict]:
     return out
 
 
-def portfolio(daily: pd.DataFrame, order: list[tuple], cfg: dict) -> list[dict]:
-    """Stage 2's set: walk order, best first, keeping a pair only if it is not too like one already kept.
-
-    daily: daily returns, one column per (strategy, exchange), with no trade on a day read as zero. These are the
-    backtests of each file, not tuned months, since walk-forward stores one return a month. Under two members, no set.
-    """
-    c = cfg["book"]
-    corr = daily.corr()
-    picks: list[tuple] = []
-    for pair in order:
-        if len(picks) < c["portfolio_bots"] and pair in daily and all(corr.loc[pair, p] <= c["portfolio_max_corr"] for p in picks):
-            picks.append(pair)
-    if len(picks) < 2:
-        return []
-    combined = drawdown((1.0 + daily[picks].mean(axis=1)).cumprod())
-    return [{"strategy": p[0], "exchange": p[1], "worst_corr": float(max(corr.loc[p, q] for q in picks if q != p)),
-             "alone_drawdown": drawdown((1.0 + daily[p]).cumprod()), "combined_drawdown": combined, "days": len(daily)}
-            for p in picks]
-
-
 def budget(cfg: dict) -> dict:
     """Each stage's capital and what it can lose at each limit, and the yearly cost of running at all."""
     c = cfg["book"]
@@ -192,22 +171,11 @@ def run(conn, cfg: dict | None = None) -> dict:
     days = conn.execute("SELECT day, btc_close FROM regimes ORDER BY day").fetchall()
     close = pd.Series([c for _, c in days], index=pd.to_datetime([d for d, _ in days]), dtype=float)
     out = rows(folds, close, cfg)
-    booked = {(r["strategy"], r["exchange"]) for r in out}
-    order = [p for p in conn.execute("SELECT strategy, exchange FROM confidence ORDER BY ready DESC, score DESC NULLS LAST")
-             if tuple(p) in booked]
-    daily = conn.execute("SELECT strategy, exchange, day, ret FROM strategy_daily WHERE day < %s",
-                         (cfg["lockbox"]["start"],)).fetchall()
-    frame = pd.DataFrame([r for r in daily if (r[0], r[1]) in booked], columns=["strategy", "exchange", "day", "ret"])
-    frame = frame.pivot(index="day", columns=["strategy", "exchange"], values="ret").fillna(0.0).sort_index()
-    set_ = portfolio(frame, [tuple(p) for p in order], cfg)
     with conn.transaction():
         conn.execute("DELETE FROM book")
-        conn.execute("DELETE FROM portfolio")
         with conn.cursor() as cur:
             cur.executemany(f"INSERT INTO book ({', '.join(COLS)}) VALUES ({', '.join(f'%({k})s' for k in COLS)})", out)
-            cur.executemany(f"INSERT INTO portfolio ({', '.join(PORTFOLIO_COLS)}) "
-                            f"VALUES ({', '.join(f'%({k})s' for k in PORTFOLIO_COLS)})", set_)
-    return {"book": len(booked), "portfolio": len(set_)}
+    return {"book": len({(r["strategy"], r["exchange"]) for r in out})}
 
 
 if __name__ == "__main__":

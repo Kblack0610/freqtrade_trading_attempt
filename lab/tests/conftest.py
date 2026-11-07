@@ -2,8 +2,8 @@ import os
 
 import pytest
 
-TABLES = ("climate_scorecard, market_category_results, broker_balances, wallet_balances, demo_orders, paper_orders, paper_accounts, market_backtests, market_backfill, market_link_asks, market_links, market_sweeps, resolutions, outcomes, markets, venues, benchmarks, book, watch, confidence, walkforward_trades, walkforward, overfit, strategies, backtest_trades, backtest_chunks, strategy_daily, strategy_windows, estimates, regimes, "
-          "correlations, bias_checks, suggestions, data_coverage, funding_rates, open_interest, runs, bot_snapshots, bot_trades, bots, portfolio")
+TABLES = ("mixture_daily, mixtures, climate_scorecard, market_category_results, broker_balances, wallet_balances, demo_orders, paper_orders, paper_accounts, market_backtests, market_backfill, market_link_asks, market_links, market_sweeps, resolutions, outcomes, markets, venues, benchmarks, book, watch, confidence, walkforward_trades, walkforward, overfit, strategies, backtest_trades, backtest_chunks, strategy_daily, strategy_windows, estimates, regimes, "
+          "correlations, bias_checks, suggestions, data_coverage, funding_rates, open_interest, runs, bot_snapshots, bot_trades, bots")
 
 
 @pytest.fixture

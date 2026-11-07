@@ -5,16 +5,16 @@ A climate is the BTC trend bucket (up, down, flat; lab/metrics.trend_buckets) an
 `regimes`, both read at the close of the day before, so a day's label never uses that day's return. A strategy's
 days are the calendar days of its walk-forward test months, zero where it did not trade, from `walkforward_daily`
 (trade profit ratios summed per close day; lab/walkforward.py writes them, trades across fold ends already purged).
+A mixture's days are the months lab/mixtures.py scored it on, from `mixture_daily`.
 annual is the mean daily value x 365; lo and hi are its block-bootstrap interval. A cell clears when lo is above zero.
 The interval is per cell and not corrected for how many cells and strategies were looked at: `trials` is the
 register's size, the bar that the deflated Sharpe on /confidence applies. Advice for a human; nothing here trades.
 
-Run alone with `python -m lab.scorecard`; lab/analyze.py and lab/walkforward.py run it after the book.
+Run alone with `python -m lab.scorecard`; lab/analyze.py and lab/walkforward.py run it after the mixtures.
 """
 
 import sys
 
-import numpy as np
 import pandas as pd
 
 from lab import metrics, suggest
@@ -46,9 +46,10 @@ def cells(daily: pd.Series, trades: pd.Series, label: pd.Series, key: tuple, cfg
     return out
 
 
-def build(close: pd.Series, vol_bucket: pd.Series, spans: dict, daily: dict, cfg: dict, trials: int) -> list[dict]:
+def build(close: pd.Series, vol_bucket: pd.Series, spans: dict, daily: dict, cfg: dict, trials: int,
+          mixtures: dict | None = None) -> list[dict]:
     """spans: (strategy, exchange) -> (first day, last day exclusive); daily: (strategy, exchange, variant) -> frame
-    of ret and trades by day."""
+    of ret and trades by day; mixtures: (name, variant) -> daily return Series over the days it was scored."""
     label = labels(close, vol_bucket, cfg["confidence"]["trend_band"])
     out = []
     ret = close.sort_index().pct_change().dropna()
@@ -60,23 +61,34 @@ def build(close: pd.Series, vol_bucket: pd.Series, spans: dict, daily: dict, cfg
         days = pd.date_range(pd.Timestamp(start), pd.Timestamp(end) - pd.Timedelta(days=1), freq="D")
         f = frame.reindex(days).fillna(0.0)
         out += cells(f["ret"], f["trades"], label, ("strategy", s, e, v), cfg, trials)
+    for (name, v), ret in sorted((mixtures or {}).items()):
+        out += cells(ret, pd.Series(0, index=ret.index), label, ("mixture", name, "", v), cfg, trials)
     return out
+
+
+def regimes(conn) -> tuple[pd.Series, pd.Series]:
+    """BTC's daily close and volatility tercile from `regimes`, indexed by day."""
+    rows = conn.execute("SELECT day, btc_close, vol_bucket FROM regimes ORDER BY day").fetchall()
+    index = pd.to_datetime([r[0] for r in rows])
+    return (pd.Series([r[1] for r in rows], index=index, dtype=float),
+            pd.Series([r[2] for r in rows], index=index, dtype=object))
 
 
 def run(conn, cfg: dict | None = None) -> dict:
     cfg = cfg or suggest.load_config()
-    regimes = conn.execute("SELECT day, btc_close, vol_bucket FROM regimes ORDER BY day").fetchall()
-    index = pd.to_datetime([r[0] for r in regimes])
-    close = pd.Series([r[1] for r in regimes], index=index, dtype=float)
-    vol = pd.Series([r[2] for r in regimes], index=index, dtype=object)
+    close, vol = regimes(conn)
     spans = {(s, e): (a, b) for s, e, a, b in conn.execute(SPANS)}
     daily: dict = {}
     for s, e, v, day, ret, n in conn.execute("SELECT strategy, exchange, variant, day, ret, trades FROM walkforward_daily "
                                              "ORDER BY 1, 2, 3, 4"):
         daily.setdefault((s, e, v), []).append((pd.Timestamp(day), ret, n))
     frames = {k: pd.DataFrame(v, columns=["day", "ret", "trades"]).set_index("day") for k, v in daily.items()}
+    mixed: dict = {}
+    for name, v, day, ret in conn.execute("SELECT m.name, m.variant, d.day, d.ret FROM mixtures m JOIN mixture_daily d "
+                                          "USING (variant) ORDER BY 2, 3"):
+        mixed.setdefault((name, v), {})[pd.Timestamp(day)] = ret
     trials = conn.execute("SELECT count(*) FROM trials").fetchone()[0]
-    out = build(close, vol, spans, frames, cfg, trials)
+    out = build(close, vol, spans, frames, cfg, trials, {k: pd.Series(v, dtype=float) for k, v in mixed.items()})
     with conn.transaction():
         conn.execute("DELETE FROM climate_scorecard")
         with conn.cursor() as cur:
