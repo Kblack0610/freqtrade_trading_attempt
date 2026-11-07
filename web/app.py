@@ -210,6 +210,7 @@ LEFT JOIN markets m ON m.venue = a.venue AND m.market_id = o.market_id
 WHERE o.contracts > 0 ORDER BY o.sent_at DESC, o.id DESC LIMIT 50
 """
 DEMO_ORDERS = "SELECT * FROM demo_orders ORDER BY placed_at DESC, id DESC LIMIT 20"
+BROKERS = "SELECT DISTINCT ON (broker) * FROM broker_balances ORDER BY broker, read_at DESC"
 
 cfg = auth.Config()
 _pool: ConnectionPool | None = None
@@ -706,4 +707,4 @@ def markets_book(request: Request):
     for a in accounts:
         a["ret"] = None if a["equity"] is None else a["equity"] / a["capital"] - 1
     return page(request, "markets_book.html", backtests=rows(MARKET_BACKTESTS), accounts=accounts,
-                fills=rows(PAPER_FILLS), demo=rows(DEMO_ORDERS), hard_stop=hard_stop)
+                fills=rows(PAPER_FILLS), demo=rows(DEMO_ORDERS), brokers=rows(BROKERS), hard_stop=hard_stop)

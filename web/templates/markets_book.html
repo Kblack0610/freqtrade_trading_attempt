@@ -62,7 +62,7 @@
 {% endif %}
 
 <h2>Demo orders</h2>
-<p class="muted">The order path on the Kalshi demo exchange, mock funds only: the drill rests one contract at 1c and cancels it.</p>
+<p class="muted">Each order path on mock funds, the Kalshi demo exchange and the Alpaca paper API: the drill rests one order far from the market and cancels it.</p>
 {% if demo %}
 <table>
   <thead><tr><th>Placed</th><th>Venue</th><th>Ticker</th><th class="n">Price</th><th class="n">Count</th><th>Status</th><th>Canceled</th><th>Error</th></tr></thead>
@@ -74,4 +74,18 @@
   </tbody>
 </table>
 {% else %}<p class="muted">No demo order yet.</p>{% endif %}
+
+<h2>Broker paper accounts</h2>
+<p class="muted">The newest read of each broker's paper account. Paper money only.</p>
+{% if brokers %}
+<table>
+  <thead><tr><th>Broker</th><th>Read</th><th>Status</th><th class="n">Equity</th><th class="n">Cash</th><th class="n">Positions</th><th>Error</th></tr></thead>
+  <tbody>
+  {% for b in brokers %}
+  <tr><td>{{ b.broker }}</td><td>{{ b.read_at | local }}</td><td>{{ b.status or "-" }}</td><td class="n">{{ b.equity | num(2) }}</td><td class="n">{{ b.cash | num(2) }}</td>
+    <td class="n">{{ b.positions if b.positions is not none else "-" }}</td><td>{% if b.error %}<code class="down">{{ b.error }}</code>{% endif %}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}<p class="muted">No broker read yet.</p>{% endif %}
 {% endblock %}

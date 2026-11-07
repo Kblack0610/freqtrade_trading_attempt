@@ -17,10 +17,10 @@ Tier is the highest rung we can use: **API** (an official API covers the job), *
 | Coinbase | candidate | crypto exchange | API | API, manual only | dry-run league | P2 |
 | Gemini | candidate | crypto exchange | API | API | Gemini sandbox | P2 |
 | Trezor | held | self-custody | API (xpub) | person (press on device) | none needed | P3 |
-| Alpaca | candidate | API broker | API | API | Alpaca paper account | P4 |
-| Interactive Brokers | candidate | API broker | API | API | IBKR paper account | P4 |
-| Schwab | candidate | API broker | API | API | Not verified | P4 |
-| Tastytrade | candidate | API broker | API | API | cert sandbox | P4 |
+| Alpaca | candidate | API broker | API | API | Alpaca paper account | code landed, needs paper keys |
+| Interactive Brokers | candidate | API broker | API | API | IBKR paper account, needs a funded account | when a strategy needs it |
+| Schwab | candidate | API broker | API | API | none found | not connected: no paper API |
+| Tastytrade | candidate | API broker | API | API | cert sandbox | when a strategy needs it |
 | Fidelity | held | broker, no API | aggregator only | person | none | P5 |
 | Robinhood | candidate | broker | API (crypto only) | API (crypto), person (rest) | none | P5 |
 | Kalshi | candidate (tr-50) | prediction market | API | API | demo exchange | P6, account tr-50, live tr-48 |
@@ -68,12 +68,14 @@ Pod keys live in SOPS in home-config, as in [live.md](live.md). The person creat
 |---|---|---|
 | Kraken | `POST /0/private/CancelAllOrdersAfter` dead-man timer: re-arm every 15 to 30 s with a 60 s timeout, `timeout` 0 disables it, max 86399. Needs the Create & Modify Orders or Cancel/Close Orders permission. Futures has `/cancelallordersafter` | doc (spot) |
 | Gemini | `require-heartbeat` flag on the key: a missed heartbeat cancels open orders. Timeout and how the flag is set: Not verified. Also Cancel All Active Orders and Cancel All Session Orders (POST) | doc (heartbeat), listing only (cancel-all) |
-| Alpaca | `DELETE /v2/orders` cancels all orders. `DELETE /v2/positions?cancel_orders=true` closes everything | snippet |
+| Alpaca | `DELETE /v2/orders` cancels all open orders. `DELETE /v2/positions?cancel_orders=true` cancels them and closes every position at market. Both answer 207 with a status per order or position, so the watcher checks each entry. No dead-man switch found | doc |
 | Kalshi | Order groups auto-cancel when a 15 s fill cap is hit. Self-exclusion and funding caps cannot be lifted early | doc |
 | Polymarket global | `DELETE /cancel-all` | doc |
 | Binance.US | No dead-man switch and no account-wide cancel-all found: `DELETE /api/v3/openOrders` needs a `symbol`, so the watcher loops over the pairs. Last resort: delete the key | doc (first 200k chars of the page) |
 | Coinbase | No dead-man switch on Spot. `POST /orders/batch_cancel` cancels listed order ids. Cancel-on-disconnect exists only on Global Derivatives | doc |
-| IBKR, Schwab, Tastytrade, Polymarket US | Not verified | |
+| IBKR | `reqGlobalCancel` cancels all open orders, including those placed in TWS. Precautionary size and value limits in TWS Presets. No account-wide kill switch found | doc (cancel), snippet (limits) |
+| Tastytrade | No cancel-all found: `DELETE /accounts/{n}/orders/{id}` per order, so the watcher loops. `GET /accounts/{n}/trading-status` reads the account's state | doc (API index) |
+| Schwab, Polymarket US | Not verified | |
 
 **2FA as a decision.** A TOTP secret in rbw lets the agent machine pass 2FA unattended. On a money account that widens what an agent can do. The person decides per account whether to store the secret, or to approve each 2FA prompt instead.
 
@@ -214,6 +216,8 @@ The agent never types the PIN, the passphrase or the seed, never opens the recov
 
 None of these has a strategy in the repo yet. Freqtrade trades crypto only. A broker would carry equity or ETF strategies, or crypto at Alpaca or Robinhood, once written and walked forward.
 
+Only Alpaca and the Tastytrade sandbox can be practised on without money: IBKR paper needs a funded account and Schwab has no paper API. Alpaca is the one connected. No broker here needs a mac-mini re-auth today: Alpaca keys and Tastytrade refresh tokens do not expire, and the IBKR and Schwab logins stay the person's until their terms are read.
+
 ### Alpaca
 
 - Status: candidate. The cheapest end-to-end paper target.
@@ -221,33 +225,43 @@ None of these has a strategy in the repo yet. Freqtrade trades crypto only. A br
 - API:
   - Key ID and secret in headers; keys do not expire (doc). OAuth is not yet available for the Trading API (doc).
   - Live at `api.alpaca.markets`, paper at `paper-api.alpaca.markets`, with separate keys (doc).
-  - Trading API 200 requests/min per account (snippet). Free data is IEX real-time, with SIP delayed 15 minutes.
+  - Trading API 200 requests/min per account, paper and live counted apart (secondary: Alpaca support). Free data is IEX real-time, with SIP delayed 15 minutes.
   - Alpaca says it dropped the pattern-day-trader designation after FINRA's 2026-06-04 rule change (snippet).
-  - Key scopes: Not verified.
-- Agent machine: not needed.
+  - Key scopes: no read-only Trading API key found, so a key pair can trade its account (Not verified). A paper key can only reach paper.
+- Agent machine: not needed. Keys do not expire, so there is no re-auth.
 - The person: opens the paper account (email only), creates the paper keys, and later opens and funds a live account.
-- Sign-in and 2FA: MFA available. Method: Not verified.
+- Sign-in and 2FA: TOTP. Required for live keys and live trading (secondary: Alpaca blog). For paper, sources conflict.
 - Risk controls: cancel-all and close-all endpoints (see Kill switches).
-- Cost: free paper and free IEX data. Algo Trader Plus data is $99/month (snippet). Commissions: Not verified.
-- Paper: a free paper account with $100k, its own keys, and about 10% of orders randomly partly filled. Dividends and borrow fees are not simulated (doc).
-- Verified: 2026-11-06. Sources: https://docs.alpaca.markets/docs/authentication, https://docs.alpaca.markets/docs/paper-trading.
+- Cost: free paper and free IEX data. Algo Trader Plus data is $99/month (snippet). US stocks are commission-free, regulatory fees apply. Crypto starts at 0.15% maker, 0.25% taker (doc).
+- Paper: a free paper account with $100k, its own keys, and about 10% of eligible fills partial. It fills only marketable orders and does not model dividends, queue position or regulatory fees (doc).
+- Verified: 2026-11-06. Sources: https://docs.alpaca.markets/us/docs/authentication.md, https://docs.alpaca.markets/us/docs/paper-trading, https://docs.alpaca.markets/us/docs/orders-at-alpaca.md, https://docs.alpaca.markets/us/reference/postorder.md, https://docs.alpaca.markets/us/reference/deleteorderbyorderid-1.md, https://docs.alpaca.markets/us/reference/deleteallorders-1.md, https://docs.alpaca.markets/us/reference/deleteallopenpositions-1.md, https://docs.alpaca.markets/us/docs/crypto-fees, https://alpaca.markets/support/usage-limit-api-calls, https://alpaca.markets/learn/guide-to-multi-factor-authentication-mfa-account-security-for-alpaca-builders.
+
+#### Paper connection
+
+`lab/broker.py` is the path, and `AlpacaPaper` refuses any host but `paper-api.alpaca.markets`, so no config can reach a live account.
+
+- `python -m lab.broker read` writes one `broker_balances` row: account status, equity, cash, buying power and the position count, or the error. Holdings themselves are not stored. `/markets/book` shows the newest row and `trader_broker_equity` and `trader_broker_read_age_seconds` export it.
+- `python -m lab.broker drill` rests one SPY share at $1.00 (`lab/broker.toml`), reads it back, cancels it and reads it back, writing to `demo_orders`. Outside market hours the order sits in `accepted`, which counts as resting. Whether a limit that far from the market is accepted is Not verified; the first drill settles it.
+- Input: `ALPACA_PAPER_KEY_ID` and `ALPACA_PAPER_SECRET_KEY`. With none set, `read` exits 0 and writes nothing.
+- Not yet run against Alpaca: tested only against a fake API, because no paper keys exist. It is live once the person adds `trading/alpaca-paper` to rbw and a SOPS Secret, a CronJob in home-config `apps/freqtrade/` runs `read` hourly, and a balance appears on `/markets/book`.
 
 ### Interactive Brokers
 
 - Status: candidate.
 - Strategy fit: everything (equities, options, futures, crypto) and the best real paper account. Heavier to run.
 - API:
-  - The TWS API needs TWS or IB Gateway running. The Client Portal Web API runs through a local gateway. Self-service OAuth 1.0a lets an individual upload an RSA key, and a session lasts about 24 hours (snippet).
-  - A gateway session idles out after 5 minutes without `/tickle`, and resets at midnight.
+  - The TWS API needs TWS or IB Gateway running. The Client Portal Web API runs through a local gateway.
+  - OAuth 1.0a for individuals: sources conflict. One IBKR page describes self-service RSA key upload with a session of about 24 hours; another says retail clients get only the gateway and OAuth 1.0a stays institutional (both snippet, pages returned 403).
+  - A gateway session idles out without `/tickle`, sent about every 60 s, and resets at midnight (snippet).
   - Rate limit: 10/s or 50/s per username (sources conflict).
   - The API is not available on IBKR Lite (snippet).
-- Agent machine: a gateway login needs 2FA each day, which is a machine candidate. Prefer OAuth 1.0a, which avoids the daily login. IBKR terms on automating its login: Not verified, so until checked the daily login is the person's.
-- The person: account, OAuth key upload, and the daily gateway login if OAuth is not used.
+- Agent machine: a gateway login needs 2FA each day, which is a machine candidate. IBKR says individuals log in by hand and automation needs a token scheme such as OAuth (snippet). Its terms on automating the login: Not verified, so the daily login stays the person's.
+- The person: account, funding, and the daily gateway login, unless OAuth turns out to be open to individuals.
 - Sign-in and 2FA: IB Key (mobile), a generic TOTP app, or a DSC+ device (accounts over $1M). SMS and email codes are temporary only (doc). TOTP therefore fits rbw.
-- Risk controls: Not verified.
+- Risk controls: see Kill switches. API orders pass the same precautionary checks and can be rejected (snippet). Orders priced too far from the market are rejected, 10% for stocks (snippet).
 - Cost: IBKR Pro, $0 minimum. Fixed pricing is $0.005/share with a $1 minimum. Real-time data is billed per exchange; delayed data is free (snippet).
-- Paper: a paper account with API access from activation (snippet).
-- Verified: 2026-11-06. Sources: https://ibkrguides.com/securelogin/sls/twofactorauth.htm, https://www.interactivebrokers.com/campus/ibkr-api-page/oauth-1-0a-extended/, https://www.interactivebrokers.com/docs/web-api/trading/usage-and-availability/pacing-limitations, https://www.interactivebrokers.com/en/pricing/commissions-home.php.
+- Paper: not free of money. "A paper trading account will not be opened until your account has been funded" (doc), so this path needs a funded live account, or possibly the free trial (snippet). It starts at $1,000,000 with its own login (doc).
+- Verified: 2026-11-06. Sources: https://www.ibkrguides.com/clientportal/aboutpapertradingaccounts.htm, https://interactivebrokers.github.io/tws-api/classIBApi_1_1EClient.html, https://www.interactivebrokers.com/campus/glossary-terms/precautionary-settings/, https://ibkrguides.com/securelogin/sls/twofactorauth.htm, https://www.interactivebrokers.com/campus/ibkr-api-page/oauth-1-0a-extended/, https://www.interactivebrokers.com/docs/web-api/trading/usage-and-availability/pacing-limitations, https://www.interactivebrokers.com/en/pricing/commissions-home.php.
 
 ### Schwab
 
@@ -255,16 +269,16 @@ None of these has a strategy in the repo yet. Freqtrade trades crypto only. A br
 - Strategy fit: equities and options, if the person wants a large US broker with an API.
 - API:
   - Trader API at developer.schwab.com; individual apps are approved by hand in a few days.
-  - OAuth: access token 30 minutes, refresh token 7 days, then a browser re-login (snippet; Schwab's page returned 403).
+  - OAuth: access token 30 minutes, refresh token 7 days and not extendable, then a browser re-login. The callback must be `127.0.0.1` on a port above 1024 (secondary: schwab-py; Schwab's pages returned 403).
   - 120 non-order calls/min, and an order rate set at registration (snippet).
-  - Scopes and a paper API: Not verified. paperMoney is only in thinkorswim.
+  - Scopes: Not verified. No paper mode: orders hit a live account (snippet). paperMoney is only in thinkorswim.
 - Agent machine: no, until checked. The online services terms bar software that logs on to Schwab or automates fetching data, except browsers and apps Schwab approves (snippet). The weekly OAuth re-login is the person's until Schwab's terms are read in full.
 - The person: the weekly re-login, the account, the app registration.
 - Sign-in and 2FA: Symantec VIP, mobile push, SMS (snippet). A plain TOTP app: Not verified.
 - Risk controls: Not verified.
 - Cost: API appears free (secondary). Commissions: Not verified.
-- Paper: Not verified for the API.
-- Verified: 2026-11-06. Sources: https://www.schwab.com/legal/terms (snippet, page errored), https://developer.schwab.com (403).
+- Paper: none found for the API, so connecting Schwab would mean a real account. Not connected until the person wants that.
+- Verified: 2026-11-06. Sources: https://schwab-py.readthedocs.io/en/latest/auth.html (secondary), https://schwab-py.readthedocs.io/en/latest/getting-started.html (secondary), https://www.schwab.com/legal/terms (snippet, page errored), https://developer.schwab.com (403).
 
 ### Tastytrade
 
@@ -272,15 +286,15 @@ None of these has a strategy in the repo yet. Freqtrade trades crypto only. A br
 - Strategy fit: options and futures.
 - API:
   - Open API, 96 operations, covering equities, options, futures and crypto (doc).
-  - OAuth2. The access token lasts 15 minutes; the refresh token does not expire. Scopes are `read`, `trade` and `openid`. A personal app is limited to your own account (doc).
-  - REST is throttled "by reasonable thresholds", with no published numbers (doc).
+  - OAuth2. The access token lasts 15 minutes; the refresh token does not expire. Scopes are `read`, `trade` and `openid`, so a read-only grant is possible. A personal app is limited to your own account (doc).
+  - REST is throttled "by reasonable thresholds", with no published numbers. Repeated failed logins block the IP for about 8 hours (doc).
 - Agent machine: not needed, because the refresh token does not expire.
 - The person: account, the OAuth app, sandbox signup.
-- Sign-in and 2FA: required for other users of an app (doc). Methods: Not verified.
-- Risk controls: Not verified.
-- Cost: Not verified.
-- Paper: the cert sandbox at `api.cert.tastyworks.com`, with separate credentials (doc). How well it simulates fills: Not verified.
-- Verified: 2026-11-06. Sources: https://developer.tastytrade.com/, https://developer.tastytrade.com/docs/authentication/oauth2/, https://developer.tastytrade.com/docs/guides/rate-limits-and-backoff, https://developer.tastytrade.com/docs/faq/.
+- Sign-in and 2FA: granting `read` or `trade` needs 2FA on the account, by authenticator app or SMS (doc). TOTP therefore fits rbw.
+- Risk controls: see Kill switches.
+- Cost: stocks and ETFs $0. Options $1 per contract to open, capped at $10 per leg, $0 to close. Futures $0.75 to $1.25 per contract. Crypto 1%, or 0.75% for BTC and ETH (doc). Sandbox price: Not verified.
+- Paper: the cert sandbox at `api.cert.tastyworks.com`, signed up in the browser, with separate credentials. Unscripted symbols fill at the quote mid whatever the limit, and trades and positions clear every 24 hours, so it can prove an order path and little more. Market data returns 502 there (doc).
+- Verified: 2026-11-06. Sources: https://developer.tastytrade.com/docs/sandbox, https://tastytrade.com/pricing/, https://developer.tastytrade.com/llms.txt, https://developer.tastytrade.com/, https://developer.tastytrade.com/docs/authentication/oauth2/, https://developer.tastytrade.com/docs/guides/rate-limits-and-backoff, https://developer.tastytrade.com/docs/faq/.
 
 Also seen, to record later: Tradier (personal tokens that never expire, 60 trading calls/min, sandbox; snippet) and Webull OpenAPI (needs an approved US account with $100 and has a sandbox; snippet).
 

@@ -12,19 +12,16 @@ without the query), RSA-PSS SHA-256 with a digest-length salt, or Ed25519. Order
 routes: POST /portfolio/events/orders (side bid buys yes; count and price are fixed-point strings, price in
 dollars) and DELETE /portfolio/events/orders/{id}; GET /portfolio/orders/{id} reads one back.
 
-The drill is the proof that the order path works end to end. It picks an open demo market with an ask above
-`drill_price` (or takes --ticker), rests one yes contract at `drill_price`, post only, then cancels it, and writes
-each step to demo_orders (migration 023). It exits 1 unless the order was seen resting and then canceled. A POST is
-never retried: a timeout could have placed it, and a second one would double it.
+The drill (lab/markets/drill.py) picks an open demo market with an ask above `drill_price` (or takes --ticker), rests
+one yes contract at `drill_price`, post only, then cancels it. It exits 1 unless the order was seen resting and then
+canceled.
 """
 
 import argparse
 import base64
-import datetime as dt
 import os
 import sys
 import time
-import uuid
 from urllib.parse import urlparse
 
 import requests
@@ -33,10 +30,10 @@ from cryptography.hazmat.primitives.asymmetric import ed25519, padding, rsa
 
 from lab.db import connect
 from lab.markets.api import num
+from lab.markets.drill import rest_and_cancel
 from lab.markets.recorder import load_config
 
 DEMO_HOSTS = frozenset({"external-api.demo.kalshi.co", "demo-api.kalshi.co"})
-UTC = dt.timezone.utc
 
 
 class NotDemo(ValueError):
@@ -56,6 +53,7 @@ def signer(pem: bytes):
 
 class KalshiDemo:
     venue = "kalshi_demo"
+    resting = frozenset({"resting"})
 
     def __init__(self, cfg: dict, key_id: str, pem: bytes, session=None, clock=None):
         url = urlparse(cfg["base_url"])
@@ -109,34 +107,11 @@ def pick(markets: list[dict], price: float) -> str | None:
 
 
 def drill(conn, client: KalshiDemo, price: float, ticker: str | None = None, now=None) -> dict:
-    """Rest, read, cancel, read (module docstring). Returns the demo_orders row; its error is None on success."""
-    now = now or (lambda: dt.datetime.now(UTC))
+    """lab/markets/drill.py on a market that lets a post-only bid at `price` rest. Returns the demo_orders row."""
     ticker = ticker or pick(client.open_markets(), price)
     if ticker is None:
         raise RuntimeError(f"no open demo market with an ask above {price}")
-    cid = str(uuid.uuid4())
-    rid = conn.execute("INSERT INTO demo_orders (venue, ticker, client_id, price, count, placed_at) "
-                       "VALUES (%s, %s, %s, %s, 1, %s) RETURNING id", (client.venue, ticker, cid, price, now())).fetchone()[0]
-
-    def note(**kv):
-        conn.execute(f"UPDATE demo_orders SET {', '.join(f'{k} = %s' for k in kv)} WHERE id = %s", (*kv.values(), rid))
-
-    try:
-        oid = client.place(ticker, price, 1, cid)["order_id"]
-        note(order_id=oid)
-        status = client.order(oid)["status"]
-        note(status=status)
-        if status != "resting":
-            raise RuntimeError(f"order {oid} is {status}, not resting")
-        client.cancel(oid, ticker)
-        status = client.order(oid)["status"]
-        note(status=status, canceled_at=now() if status == "canceled" else None)
-        if status != "canceled":
-            raise RuntimeError(f"order {oid} is {status} after the cancel")
-    except Exception as e:  # noqa: BLE001 - the row carries what went wrong, and the exit code says it failed
-        note(error=f"{type(e).__name__}: {e}"[:1000])
-    return dict(zip(("id", "ticker", "order_id", "status", "canceled_at", "error"), conn.execute(
-        "SELECT id, ticker, order_id, status, canceled_at, error FROM demo_orders WHERE id = %s", (rid,)).fetchone()))
+    return rest_and_cancel(conn, client, ticker, price, now)
 
 
 def from_env(cfg: dict) -> KalshiDemo:

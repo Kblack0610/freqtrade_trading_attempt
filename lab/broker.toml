@@ -1,0 +1,8 @@
+# Broker accounts read by lab/broker.py, paper only. Keys are not here: ALPACA_PAPER_KEY_ID and ALPACA_PAPER_SECRET_KEY.
+
+[alpaca]
+base_url = "https://paper-api.alpaca.markets"   # the client refuses any other host
+timeout_s = 30
+# The drill rests one share of this at this price, far under the market, so it cannot fill before it is cancelled.
+drill_symbol = "SPY"
+drill_price = 1.00
