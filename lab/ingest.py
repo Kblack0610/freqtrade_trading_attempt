@@ -6,7 +6,7 @@ Per bot: closed trades (/trades, paged) and open trades (/status) are upserted b
 /show_config, with the newest candle time of each open trade's pair (/pair_candles) for /live.
 Re-running adds no duplicates. An open trade the bot no longer reports (an entry that timed out
 unfilled) is deleted. One unreachable bot gets a snapshot with its error and the
-others carry on.
+others carry on. Each run then thins old snapshots, see prune_snapshots.
 
 Exits 1 if any bot says it is not dry run, so the CronJob fails loudly.
 """
@@ -31,6 +31,9 @@ ROSTER = Path(os.environ.get("LEAGUE_ROSTER", "/etc/freqtrade-league/roster.tsv"
 # Pod N of the StatefulSet answers at <set>-N.<service>; both names default to freqtrade-league.
 HOST_FMT = os.environ.get("LEAGUE_HOST_FMT", "freqtrade-league-{i}.freqtrade-league:8080")
 PAGE = 500  # the most /trades returns per call
+# bot_snapshots keeps every row this long, then the last of each hour, then the last of each day for good.
+SNAPSHOT_FULL_DAYS = 7
+SNAPSHOT_HOURLY_DAYS = 90
 
 Fetch = Callable[..., object]
 
@@ -123,6 +126,25 @@ UPSERT_BOT = """INSERT INTO bots (name, exchange, strategy, first_seen, last_see
                 ON CONFLICT (name) DO UPDATE SET exchange = EXCLUDED.exchange, strategy = EXCLUDED.strategy,
                 last_seen = GREATEST(bots.last_seen, EXCLUDED.last_seen),
                 first_seen = LEAST(bots.first_seen, EXCLUDED.first_seen)"""
+# A bucket keeps its newest row with a profit figure, since the bot chart skips rows without one. Rows showing a bot
+# was not dry run are the record of a safety breach: they are never candidates, so they stay.
+PRUNE_SNAPSHOTS = """
+DELETE FROM bot_snapshots WHERE (bot, ts) IN (
+    SELECT bot, ts FROM (
+        SELECT bot, ts, row_number() OVER (
+            PARTITION BY bot, date_trunc(CASE WHEN ts < %(daily_before)s THEN 'day' ELSE 'hour' END, ts, 'UTC')
+            ORDER BY profit_all_pct IS NULL, ts DESC) AS n
+        FROM bot_snapshots
+        WHERE ts < %(hourly_before)s AND dry_run IS DISTINCT FROM false AND error IS DISTINCT FROM 'NOT DRY RUN'
+    ) ranked WHERE n > 1)
+"""
+
+
+def prune_snapshots(conn, now: dt.datetime) -> int:
+    """Thin old snapshots to their tier. The cutoffs sit on UTC bucket starts, so no bucket is thinned half way."""
+    hourly_before = (now - dt.timedelta(days=SNAPSHOT_FULL_DAYS)).replace(minute=0, second=0, microsecond=0)
+    daily_before = (now - dt.timedelta(days=SNAPSHOT_HOURLY_DAYS)).replace(hour=0, minute=0, second=0, microsecond=0)
+    return conn.execute(PRUNE_SNAPSHOTS, {"hourly_before": hourly_before, "daily_before": daily_before}).rowcount
 
 
 def ingest_bot(conn, fetch: Fetch, i: int, name: str, exchange: str, strategy: str, now: dt.datetime) -> dict:
@@ -160,6 +182,7 @@ def main(fetch: Fetch = http_fetch) -> int:
             if snap["error"] == "NOT DRY RUN":
                 unsafe.append(name)
             print(f"ingest: {name}: {snap['trade_rows']} trades, error={snap['error']}")
+        print(f"ingest: pruned {prune_snapshots(conn, now)} snapshots")
     if unsafe:
         print(f"ingest: NOT DRY RUN: {unsafe}", file=sys.stderr)
         return 1
