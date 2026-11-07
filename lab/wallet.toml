@@ -1,0 +1,15 @@
+# Watch-only Trezor balances, read by lab/wallet.py. Accounts (name and public key) are not here: they come
+# from WALLET_ACCOUNTS (default /etc/trader-wallet/accounts.tsv), a Secret, because a public key reveals
+# every address and balance of its account.
+
+[esplora]
+# Any Esplora API (blockstream.info, mempool.space, or our own). Each address of a watched account is sent to it.
+# blockstream.info at a 1 s gap read the 40 used addresses of the BIP84 test-vector zpub in 84 s, no 429
+# (2026-11-06); mempool.space returned 429 at a 0.5 s gap.
+base_url = "https://blockstream.info/api"
+page_gap_s = 1.0   # pause between address reads
+retries = 6
+timeout_s = 30
+
+[scan]
+gap = 20           # stop a chain after this many unused addresses in a row (BIP44 gap limit, as Suite uses)

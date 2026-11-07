@@ -46,7 +46,8 @@ class Api:
         self.http = session or requests.Session()
         self.sleep = sleep or time.sleep
 
-    def get(self, path: str, params: dict | None = None):
+    def get(self, path: str, params: dict | None = None, label: str | None = None):
+        """label stands in for path in the retry log line when the path itself is private."""
         for attempt in range(self.retries + 1):
             r = self.http.get(f"{self.base}{path}", params=params or {}, timeout=self.timeout)
             if r.status_code != 429 and r.status_code < 500:
@@ -55,6 +56,6 @@ class Api:
             if attempt == self.retries:
                 r.raise_for_status()
             wait = min(60.0, max(self.gap, 0.5) * 2 ** (attempt + 1))
-            print(f"markets: {self.name}: HTTP {r.status_code} on {path}, retry in {wait:g}s", flush=True)
+            print(f"markets: {self.name}: HTTP {r.status_code} on {label or path}, retry in {wait:g}s", flush=True)
             self.sleep(wait)
         raise AssertionError("unreachable")
