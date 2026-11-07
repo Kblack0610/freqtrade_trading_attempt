@@ -6,9 +6,16 @@ import urllib.parse
 import pytest
 from psycopg.types.json import Jsonb
 
-NOW = dt.datetime.now(dt.timezone.utc)
+NOW = dt.datetime.now(dt.timezone.utc)  # reset per test by fresh_now
 ENV = {"TRADER_WEB_BASE_URL": "http://testserver", "FORGEJO_URL": "https://git.example", "OAUTH_CLIENT_ID": "cid",
        "OAUTH_CLIENT_SECRET": "csecret", "SESSION_KEY": "k" * 32, "ALLOWED_USERS": "alice"}
+
+
+@pytest.fixture(autouse=True)
+def fresh_now():
+    """Re-read NOW per test: the pages render "3m ago" against the real clock, so an import-time NOW drifts on a slow run."""
+    global NOW
+    NOW = dt.datetime.now(dt.timezone.utc)
 
 
 @pytest.fixture
