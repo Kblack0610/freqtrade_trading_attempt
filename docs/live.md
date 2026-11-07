@@ -62,7 +62,7 @@ This needs the read key, so it gets built in the Accounts and keys phase. The wa
 P1 chose not to back up bot sqlite, because a loss only restarted a dry run. For a live bot it is the record of which position belongs to which trade.
 
 - Bot sqlite gets an online `.backup` every hour and on each stop, copied off the node, because a local-path PVC lives on one disk.
-- `freqtrade-ingest` already copies each trade with its raw JSON to Postgres every hour. Whether the shared Postgres backup covers `trader` is not verified: confirm it before Stage 1.
+- `freqtrade-ingest` already copies each trade with its raw JSON to Postgres every 5 minutes. Whether the shared Postgres backup covers `trader` is not verified: confirm it before Stage 1.
 - Orders, fills and fees are exported from the exchange monthly. That ledger is the tax record, and it survives losing everything else.
 - Keys stay in SOPS in home-config. No backup holds them.
 

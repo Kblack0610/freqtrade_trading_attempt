@@ -2,7 +2,7 @@
 {% block title %}{{ bot.name }}{% endblock %}
 {% block body %}
 <h1>{{ bot.name }}</h1>
-<p class="muted">{{ bot.strategy }} on {{ bot.exchange }}, {{ "dry run" if bot.dry_run else "NOT DRY RUN" }}{% if bot.error %}, unreachable at the last hourly update: {{ bot.error }}{% endif %}</p>
+<p class="muted">{{ bot.strategy }} on {{ bot.exchange }}, {{ "dry run" if bot.dry_run else "NOT DRY RUN" }}{% if bot.error %}, unreachable at the last update: {{ bot.error }}{% endif %}</p>
 
 <section class="tiles">
   <div class="tile"><span class="label">Profit</span><span class="value {{ 'up' if (bot.profit_all_pct or 0) >= 0 else 'down' }}">{{ bot.profit_all_pct | num(2, "%") }}</span></div>
@@ -49,5 +49,5 @@
   </tbody>
 </table>
 </div>
-{% else %}<p class="muted">No trades yet: the hourly update adds them once this bot opens one.</p>{% endif %}
+{% else %}<p class="muted">No trades yet: the next update adds them once this bot opens one.</p>{% endif %}
 {% endblock %}

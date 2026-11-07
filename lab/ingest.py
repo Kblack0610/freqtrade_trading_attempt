@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Hourly ingest: every league bot's REST API, plus the lab files, into the trader database.
+"""Ingest, run every 5 minutes: every league bot's REST API, plus the lab files, into the trader database.
 
 Per bot: closed trades (/trades, paged) and open trades (/status) are upserted by
 (bot, trade_id, open_date), and one bot_snapshots row is written from /profit, /balance and

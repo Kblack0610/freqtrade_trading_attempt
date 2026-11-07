@@ -31,7 +31,7 @@ Results go to the `trader` database in the cluster's shared Postgres, which the 
 | `lab/families.toml` | By hand: each strategy class's method family (trend, mean-reversion, momentum and the rest) and data inputs, for `/coverage` |
 | `lab/book.py` | After the score: what each scored strategy might return beside holding BTC, and what each stage costs and can lose. |
 | `lab/live.py` | Live bot entry point: always refuses, nothing deploys it. See `docs/live.md` and the operator rules in `docs/operating-rules.md` |
-| `lab/ingest.py` | Hourly job: every bot's trades (closed and open) and a snapshot (profit, balance, dry-run flag, each open pair's newest candle time) into Postgres |
+| `lab/ingest.py` | Job run every 5 minutes: every bot's trades (closed and open) and a snapshot (profit, balance, dry-run flag, each open pair's newest candle time) into Postgres |
 | `lab/watcher.py` | Daily loss watch: each bot's marked-to-market equity every 60 s into `watch`, and the kill drill. See Watcher |
 | `lab/migrate.py`, `lab/migrations/` | Schema: numbered SQL files applied once each, in order, under an advisory lock; runs as the init container of every job |
 | `lab/db.py` | The one Postgres connection: `DATABASE_URL` |
@@ -298,7 +298,7 @@ The event-contract paper league's accounts (`paper-<family>-<variant>`) get watc
 
 ### Metrics
 
-`web/exporter.py` reads the database on each scrape, so the numbers are as fresh as the tables: bot state is as old as the newest hourly ingest. home-config alerts on these:
+`web/exporter.py` reads the database on each scrape, so the numbers are as fresh as the tables: bot state is as old as the newest ingest (every 5 minutes). home-config alerts on these:
 
 | Metric | Labels | Meaning |
 |---|---|---|
