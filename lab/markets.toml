@@ -11,6 +11,11 @@ resolutions_lookback_h = 1
 # fits that cadence alongside Kalshi's 3 to 4.5 min; the others run by name (python -m lab.markets.recorder manifold).
 default_venues = ["kalshi"]
 
+[compact]
+# python -m lab.markets.compact (lab/markets/compact.py) folds a venue-day's parts into <prefix>/venue=<v>/date=<d>/day.parquet
+# once the day ended this long ago; a sweep runs under 15 min (the CronJob's deadline), so 1 h leaves no writer behind.
+grace_h = 1
+
 [history]
 # python -m lab.markets.history (lab/markets/history.py). Objects: <recorder bucket>/<prefix>/<job>/venue=<v>/date=<d>.parquet
 prefix = "history"

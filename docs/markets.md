@@ -25,6 +25,8 @@ Kalshi's `min_updated_ts` filter cannot be combined with `status=open`, so the v
 
 Reading the parquet: a row is a quote as first seen at `ts`. If the database commit fails after the object is written, the next run writes the same changes again with a later `ts`, so keep the first row of a run of equal quotes.
 
+`python -m lab.markets.compact [venue ...]` (same cwd; no names means every `venue=` directory in the bucket) runs nightly and folds each settled day's parts into one object, `quotes/venue=<v>/date=<d>/day.parquet`, then deletes the parts. A day is settled once its end plus `[compact] grace_h` (1 h) is past, so no sweep still writes into it. It streams one part at a time, so memory stays near one part's size. The day object lists the parts it holds in its parquet metadata (`parts`), which is how a run that died after the write deletes them next time, and how a part that lands late is folded in the next night. `market_sweeps.object_key` keeps the part's name; after compaction its rows are in that day's `day.parquet`. In the window between the write and the deletes a reader sees those rows twice; `load_quotes` drops them as a run of equal quotes, and `read_quotes` (raw rows) does not.
+
 ## Links
 
 `python -m lab.markets.links [--no-llm]` (same cwd as the recorder) maps the same event across venues into `market_links` (migration 020). A link says outcome_a of market a pays exactly when outcome_b of market b pays; the outcome word drops any quoter prefix, so it is `yes` for a binary market and the team for an `odds_api` game. A strategy uses a link only once it is `confirmed`.
