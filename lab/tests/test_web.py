@@ -514,3 +514,13 @@ def test_book_lists_the_strategies_clearing_zero_in_each_climate(conn, signed_in
     assert "By market climate" in body and "up/low" in body and "12%" in body and "94 trials" in body
     table = body.split("By market climate")[1].split("Running bots")[0]
     assert "Beta" not in table and "Alpha" in table and "<td>down/high</td>" in table
+
+
+def test_book_sets_each_strategy_against_holding(conn, signed_in):
+    assert "No strategy comparison yet" in signed_in[1].get("/book").text
+    conn.execute("INSERT INTO horizon_verdict (strategy, exchange, variant, plan, days, strat_annual, plan_annual, diff_lo, diff_hi, verdict) VALUES "
+                 "('Alpha', 'binanceus', 'tuned', 'hold', 200, 0.50, 0.20, 0.10, 0.50, 'beats'), "
+                 "('Alpha', 'binanceus', 'tuned', 'trend', 200, 0.50, 0.30, -0.10, 0.50, 'open')")
+    body = signed_in[1].get("/book").text
+    assert "Each strategy against holding" in body and "1 of 2 comparisons beat a passive plan" in body
+    assert "200-day filter" in body and ">beats<" in body

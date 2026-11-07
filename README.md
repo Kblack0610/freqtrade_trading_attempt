@@ -262,7 +262,7 @@ The first run fetches full history (5m since 2019 on binanceus is the long pole)
 - `025`: `broker_balances`, each read of a broker paper account, written by `lab/broker.py`. Its drill writes to `demo_orders`.
 - `026`: `broker_balances.paper`, since the table now also holds read-only reads of real accounts.
 - `029`: `vol_scores` and `vol_verdict`, the volatility forecast's QLIKE per venue, pair, model and month, and whether HAR beats each baseline, rebuilt by `lab/volatility.py` on every analysis.
-- `030`: `mixtures` and `mixture_daily`, written by `lab/mixtures.py`; drops `portfolio` (016), the equal-weight pick on in-sample backtest returns it replaces.
+- `031`: `mixtures` and `mixture_daily`, written by `lab/mixtures.py`; drops `portfolio` (016), the equal-weight pick on in-sample backtest returns it replaces.
 
  A schema change is a new numbered file; never edit an applied one.
 

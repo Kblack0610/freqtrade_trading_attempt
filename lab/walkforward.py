@@ -35,7 +35,7 @@ from typing import Protocol
 
 from psycopg.types.json import Jsonb
 
-from lab import analyze, book, confidence, metrics, mixtures, scorecard, suggest
+from lab import analyze, book, confidence, horizon, metrics, mixtures, scorecard, suggest
 from lab.db import connect
 
 EXCHANGES = os.environ.get("WF_EXCHANGES", "binanceus").split()
@@ -279,6 +279,7 @@ def main(runner: Runner | None = None, today: dt.date | None = None) -> int:
             report.update(book.run(conn))
             report.update(mixtures.run(conn))
             report.update(scorecard.run(conn))
+            report.update(horizon.run(conn))
             ok = failed <= FAIL_SHARE * max(len(todo), 1)
             print(f"walkforward: done: {json.dumps({k: v for k, v in report.items() if k not in ('failures', 'skipped')})}",
                   flush=True)

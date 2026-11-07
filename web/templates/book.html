@@ -99,6 +99,23 @@
 {% else %}
 <p class="muted">No comparison yet: it fills on the next analysis.</p>
 {% endif %}
+<h3>Each strategy against holding</h3>
+{% if horizon %}
+{% set beating = horizon | selectattr("verdict", "equalto", "beats") | list | length %}
+<p class="muted">Each strategy's out-of-sample days against hold BTC and BTC above its {{ trend_days }}-day mean on the same days. Beats means the low end of the 90% interval of the yearly difference is above zero. {{ beating }} of {{ horizon | length }} comparisons beat a passive plan; where a strategy does not, the passive plan is the default. Buying a core hold is your own call: the lab only recommends.</p>
+<div class="scroll">
+<table>
+  <thead><tr><th>Strategy</th><th>Exchange</th><th>Variant</th><th>Against</th><th class="n">Days</th><th class="n">Strategy a year</th><th class="n">Plan a year</th><th class="n">Difference</th><th>Result</th></tr></thead>
+  <tbody>
+  {% for h in horizon %}
+  <tr><td>{{ h.strategy }}</td><td>{{ h.exchange }}</td><td>{{ h.variant }}</td><td>{{ "hold BTC" if h.plan == "hold" else trend_days ~ "-day filter" }}</td><td class="n">{{ h.days }}</td><td class="n">{{ h.strat_annual | pct(0) }}</td><td class="n">{{ h.plan_annual | pct(0) }}</td><td class="n">{% if h.diff_lo is not none %}{{ h.diff_lo | pct(0) }} to {{ h.diff_hi | pct(0) }}{% else %}too few days{% endif %}</td><td>{{ h.verdict }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}
+<p class="muted">No strategy comparison yet: it fills once walk-forward has stored dated trades.</p>
+{% endif %}
 <h2>Budget</h2>
 <p class="muted">Proposed amounts, from <code>lab/suggest.toml</code> [book]. No money is in use. The server and accountant figures are guesses until there is a quote.</p>
 <div class="scroll">
