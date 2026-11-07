@@ -80,4 +80,5 @@ GodStraNew = { family = "biased-control", inputs = ["ohlcv"] }
 wtc = { family = "biased-control", inputs = ["ohlcv"] }
 
 # lab/research/
-BustShort = { family = "short", inputs = ["ohlcv", "funding"], note = "Funding is an assumed constant per variant, not measured history (docs/short-bust.md)." }
+BustShort = { family = "short", inputs = ["ohlcv", "funding"], note = "Funding is measured (funding_rates); trades before its history are counted apart (docs/short-bust.md)." }
+DonchianLongShort = { family = "trend", inputs = ["ohlcv", "funding"], note = "The staged trend family's Donchian ensemble both ways, on futures candles; research only (docs/short-bust.md)." }

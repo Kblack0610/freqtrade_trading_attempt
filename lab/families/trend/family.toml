@@ -1,0 +1,29 @@
+# The trend family: a long-flat Donchian ensemble, every lookback voting long or flat, with the stake cut
+# to a volatility target. Long only, so it runs on spot; the long-short version is research on futures
+# candles only (lab/research/DonchianLongShort.py). Signals are lab/channels.py.
+# lab/families/generate.py writes the strategy files from this file: edit here, then rerun it.
+kind = "trend"
+prefix = "Trend"
+timeframe = "1d"
+# Covers the longest lookback below plus the volatility window.
+startup_candle_count = 200
+
+[exit]
+# No take-profit: the ensemble's own exit closes the trade. The stoploss is for a crash between candles.
+minimal_roi = { "0" = 100 }
+stoploss = -0.3
+
+[sizing]
+vol_target = 0.4      # annual volatility one sleeve aims for
+vol_window = 30       # candles of realized volatility
+bars_per_year = 365
+
+[strategies.Donchian]
+lookbacks = [20, 40, 80, 160]
+enter_at = 0.5        # share of lookbacks long to enter
+exit_at = 0.0         # share at or under which it leaves
+
+[strategies.DonchianFast]
+lookbacks = [5, 10, 20, 40]
+enter_at = 0.5
+exit_at = 0.0
