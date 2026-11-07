@@ -103,8 +103,9 @@ def test_market_metrics(conn):
     conn.execute("INSERT INTO paper_accounts (account, family, venue, variant, params, capital, started_at, equity, open_positions, marked_at) "
                  "VALUES ('paper-a', 'longshot', 'kalshi', 'v', '{}', 1000, %s, 900, 4, %s), "
                  "('paper-new', 'longshot', 'kalshi', 'w', '{}', 1000, %s, NULL, NULL, NULL)", (now, now - dt.timedelta(minutes=5), now))
-    conn.execute("INSERT INTO broker_balances (broker, read_at, equity, error) VALUES ('alpaca_paper', %s, 100000, NULL), "
-                 "('alpaca_paper', %s, NULL, 'HTTP 503')", (now - dt.timedelta(minutes=10), now))
+    conn.execute("INSERT INTO broker_balances (broker, read_at, paper, equity, error) VALUES ('alpaca_paper', %s, true, 100000, NULL), "
+                 "('alpaca_paper', %s, true, NULL, 'HTTP 503'), ('robinhood_crypto', %s, false, 5000, NULL)",
+                 (now - dt.timedelta(minutes=10), now, now - dt.timedelta(minutes=10)))
     m = scrape(TraderCollector(db.connect))
     assert 1600 < m['trader_markets_sweep_age_seconds{venue="kalshi"}'] < 1700
     assert m['trader_markets_sweep_ok{venue="kalshi"}'] == 0 and m['trader_markets_sweep_ok{venue="manifold"}'] == 1
@@ -120,3 +121,6 @@ def test_market_metrics(conn):
     assert not any('account="paper-new"' in k for k in m)  # never marked: no equity to alert on yet
     assert m['trader_broker_equity{broker="alpaca_paper"}'] == 100000  # the good read, not the failed newer one
     assert 590 < m['trader_broker_read_age_seconds{broker="alpaca_paper"}'] < 620
+    # a real account exports its read age, never its balance
+    assert 'trader_broker_equity{broker="robinhood_crypto"}' not in m
+    assert 590 < m['trader_broker_read_age_seconds{broker="robinhood_crypto"}'] < 620

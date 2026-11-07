@@ -21,8 +21,8 @@ Tier is the highest rung we can use: **API** (an official API covers the job), *
 | Interactive Brokers | candidate | API broker | API | API | IBKR paper account, needs a funded account | when a strategy needs it |
 | Schwab | candidate | API broker | API | API | none found | not connected: no paper API |
 | Tastytrade | candidate | API broker | API | API | cert sandbox | when a strategy needs it |
-| Fidelity | held | broker, no API | aggregator only | person | none | P5 |
-| Robinhood | candidate | broker | API (crypto only) | API (crypto), person (rest) | none | P5 |
+| Fidelity | held | broker, no API | aggregator (SnapTrade, read connection) | person | SnapTrade sandbox for the read path | code landed, needs a SnapTrade key and the connection |
+| Robinhood | candidate | broker | API (crypto only) | API (crypto), person (rest) | none | code landed, needs a read-only key |
 | Kalshi | candidate (tr-50) | prediction market | API | API | demo exchange | P6, account tr-50, live tr-48 |
 | Polymarket US | candidate | prediction market | API | API | backtest engine only | P6 |
 | Polymarket global | data only | prediction market | API | never (US is close-only) | n/a | none |
@@ -304,34 +304,57 @@ Also seen, to record later: Tradier (personal tokens that never expire, 60 tradi
 
 - Status: held.
 - Strategy fit: where the person's existing investments are. We read holdings into the book. We do not trade there.
-- API: no public retail trading API (secondary). The read paths that respect Fidelity's terms are consented aggregators:
-  - Akoya, Fidelity's FDX data network, OAuth and read-only, with sales-gated pricing (snippet).
-  - SnapTrade, which lists Fidelity (snippet; read-only or trading there: Not verified).
-  - CSV export from the site, done by the person: Not verified.
+- API: no public retail trading API (secondary). The read paths that respect Fidelity's terms are consented aggregators. We use SnapTrade:
+  - SnapTrade's Fidelity integration is read only ("this integration does not support placing trades") and connects by OAuth: the person signs in on Fidelity's own site, and SnapTrade never sees the password (doc).
+  - A Personal API key (client ID and consumer key) reads the person's own connections with no user registration. The default `read` connection type "supports data access only" (doc).
+  - `GET /accounts` returns every connected account with `balance.total` (amount, currency), `status` and `is_paper`. Its data is cached and refreshed once a day (doc).
+  - Rate limits: 250 requests/min per client ID, and 10 requests/min per account for Personal users where rolled out (doc).
+  - Not chosen: Akoya (Fidelity's FDX network, sales-gated pricing, snippet) and CSV export by the person (works, but a person every time and nothing for the agent to schedule).
 - Agent machine: no. Fidelity's terms bar software "designed to provide high-speed, automated, or repeated access" and any tool that would "automate or otherwise assist the process of obtaining, downloading, transferring, or transmitting any information", unless Fidelity approves it in writing (doc). Fidelity has blocked third-party screen scraping since 2023 (snippet). Driving fidelity.com from the mac-mini would break the terms on an account the person holds.
-- The person: every order, any export, and approving an aggregator connection.
-- Sign-in and 2FA: Symantec VIP, possibly moving to generic TOTP apps (sources conflict).
-- Risk controls: n/a, since we do not trade there.
-- Cost: SnapTrade's Build tier is $0 for up to 5 connections. Launch is $100/month plus $1 to $2 per connected user (doc). Akoya: sales-gated.
-- Paper: none. Read-only only.
-- Verified: 2026-11-06. Sources: https://prime.fidelity.com/Terms-of-Use, https://snaptrade.com/pricing, https://snaptrade.com/faq.
+- The person: every order, creating the SnapTrade Personal key (the SnapTrade Dashboard requires 2FA first), and connecting Fidelity in SnapTrade's Connection Portal with a read connection.
+- Sign-in and 2FA: Symantec VIP, possibly moving to generic TOTP apps (sources conflict). The OAuth sign-in supports 2FA (doc, SnapTrade).
+- Risk controls: n/a, since we do not trade there. The read connection and our GET-only client (below) both stop an order.
+- Cost: SnapTrade Personal users are "currently completely free", limited to one Personal client ID and consumer key (doc). Commercial plans are billed per connected user and are not needed.
+- Paper: none at Fidelity. The SnapTrade sandbox (on Personal keys, enabled by default, at the bottom of the institution list) returns deterministic accounts, balances and positions, so the read path can be proved before Fidelity is connected (doc).
+- Verified: 2026-11-06. Sources: https://prime.fidelity.com/Terms-of-Use, https://snaptrade.com/brokerage-integrations/fidelity-api, https://docs.snaptrade.com/docs/getting-started, https://docs.snaptrade.com/docs/personal-vs-commercial.md, https://docs.snaptrade.com/docs/request-signatures, https://docs.snaptrade.com/docs/sandbox.md, https://docs.snaptrade.com/reference/Account%20Information/AccountInformation_listUserAccounts.md.
+
+#### Read connection
+
+`SnapTrade` in `lab/broker.py` is the path. It sends only GET, refuses any host but `api.snaptrade.com`, and has no order method.
+
+- `python -m lab.broker read` writes one `broker_balances` row per connected account, named institution, account name and the last four of the number (`fidelity_individual_1234`), with `paper` from SnapTrade's `is_paper`. It stores the total value and status; holdings stay at SnapTrade. An account with no total is a row with an error.
+- Input: `SNAPTRADE_CLIENT_ID` and `SNAPTRADE_CONSUMER_KEY`. With none set, the source is skipped.
+- Cadence: once a day is enough, since SnapTrade refreshes once a day.
+- Not yet run against SnapTrade: tested only against a fake API. It is live once the person creates the Personal key, adds it to rbw as `trading/snaptrade` and a SOPS Secret, connects the sandbox and then Fidelity, a home-config CronJob runs `read` daily, and a Fidelity row appears on `/markets/book`.
 
 ### Robinhood
 
 - Status: candidate.
 - Strategy fit: crypto through its official Crypto Trading API. Equities stay with the person.
 - API:
-  - Crypto Trading API: an API key plus an Ed25519 signature; you register the public key in the credentials portal.
-  - 100 requests/min, with bursts to 300 (snippet; the docs page is an empty app shell).
+  - Crypto Trading API at `trading.robinhood.com`, for Robinhood Crypto customers in the United States (doc).
+  - Auth: an API key plus an Ed25519 signature over api key, timestamp, path (with query), method and body, in the `x-api-key`, `x-timestamp` and `x-signature` headers. A timestamp is valid for 30 s. The person makes the keypair and registers the public key in crypto account settings on web classic (doc).
+  - Key scopes: the person picks the API actions a key may use. Accounts, holdings, orders, products and quotes are read actions, on v1 and v2 (doc). P5 asks for a key with only accounts, holdings and quotes.
+  - 100 requests/min per account, bursts to 300, token bucket (doc).
+  - Reads used: `GET /api/v1/crypto/trading/accounts/` (status, buying power), `/holdings/` (paged by `next`), and `/api/v1/crypto/marketdata/best_bid_ask/` (midpoint `price` per pair) (doc).
   - No equities API found.
   - Robinhood may revoke API authorization at any time (snippet).
-- Agent machine: Not verified; treat it as no.
-- The person: keys, funding, equities orders.
-- Sign-in and 2FA: authenticator app, SMS and passkeys (snippet, UK pages).
-- Risk controls: Not verified.
-- Cost: Not verified.
-- Paper: none found.
-- Verified: 2026-11-06. Sources: https://docs.robinhood.com/crypto/trading/ (snippet), https://robinhood.com/gb/en/support/articles/twofactor-authentication.
+- Agent machine: Not verified; treat it as no. The API covers the reads.
+- The person: the keypair and key, funding, every order, equities.
+- Sign-in and 2FA: authenticator app, SMS and passkeys (snippet, UK pages). The API key itself has no 2FA step.
+- Risk controls: per-key action scopes (doc). IP allowlist and key expiry: Not verified. Ours: the read-only key plus a GET-only client.
+- Cost: the API has no listed fee. Trading fees come from fee tiers on 30-day volume, counted only for v2 orders (doc). Reads cost nothing.
+- Paper: none found. Read-only only.
+- Verified: 2026-11-06. Sources: https://docs.robinhood.com/crypto/trading/ (the page's own OpenAPI bundle), https://robinhood.com/us/en/support/articles/crypto-api, https://robinhood.com/gb/en/support/articles/twofactor-authentication.
+
+#### Read-only connection
+
+`RobinhoodCrypto` in `lab/broker.py` sends only GET, refuses any host but `trading.robinhood.com` (a holdings `next` page too), and has no order method, so even a key with trade actions could not trade from here.
+
+- `python -m lab.broker read` writes one `robinhood_crypto` row with `paper` false: status, buying power as cash, the count of non-zero holdings, and equity as cash plus each holding at its `<asset>-USD` midpoint. A holding with no price leaves equity empty and says which.
+- Input: `ROBINHOOD_API_KEY` and `ROBINHOOD_PRIVATE_KEY` (the base64 32-byte Ed25519 seed). With none set, the source is skipped.
+- A real account's balance stays on `/markets/book`, behind sign-in. The exporter sends only its read age, never its equity.
+- Not yet run against Robinhood: tested only against a fake API, with the signature checked against the docs' recipe. It is live once the person creates a read-only key, adds it to rbw as `trading/robinhood` and a SOPS Secret, a home-config CronJob runs `read`, and a Robinhood row appears on `/markets/book`.
 
 ## Prediction markets
 
