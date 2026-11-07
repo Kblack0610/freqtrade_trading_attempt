@@ -246,3 +246,14 @@ base_url = "https://external-api.demo.kalshi.co/trade-api/v2"
 timeout_s = 30
 # The drill rests one contract this far below the ask, post only, so it cannot fill before it is cancelled.
 drill_price = 0.01
+
+[demo.manifold]
+# lab/markets/manifold_trade.py, play money: the client refuses any host but api.manifold.markets. Key: MANIFOLD_API_KEY.
+base_url = "https://api.manifold.markets"
+timeout_s = 30
+# The drill rests a 1-mana YES limit bet (the minimum bet) at 1%, the lowest limit, on a market priced at min_prob or
+# more, so it cannot fill before it is cancelled. Manifold cancels it on its own after expires_s if the drill dies.
+drill_price = 0.01
+drill_mana = 1
+min_prob = 0.10
+expires_s = 600

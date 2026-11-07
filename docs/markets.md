@@ -94,6 +94,8 @@ The league runs `longshot` only (8 accounts). `calibration` needs a bars fit eac
 - The drill picks an open demo market with an ask above `drill_price` (1c), or takes `--ticker`. It rests one yes contract at 1c, post only, reads it back, cancels it and reads it back again, writing each step to `demo_orders`. It exits 1 unless the order was seen resting and then canceled. A POST is never retried, because a timeout may already have placed it.
 - Not yet run against the demo exchange: there is no demo account key in SOPS.
 
+`python -m lab.markets.manifold_trade {balance,drill [--ticker ID]}` is the same drill on Manifold, in play money: a 1-mana YES limit bet at 1% on a market priced at 10% or more, expiring on its own after 10 minutes, then canceled and read back. Account, terms and routes: [platforms.md](platforms.md), Manifold. Not yet run: no key exists (sheet row tr-118).
+
 ## Site and telemetry
 
 The site's Markets pages read the same tables, behind the same sign-in. `/markets` is each venue's newest recorder sweep (red once the last good one is over `[paper] max_book_age_min` old, the moment the paper league stops entries), the failed sweeps of the last week with their errors, and the history backfill per venue and job. `/links` counts links by source and status, lists the newest 200 (filter with `?status=`) and the LLM asks. `/markets/book` is every `market_backtests` row, the paper accounts with their watch state, the newest paper fills and the demo orders. Counts come from `market_sweeps`, never `count(*)` over `markets`, which holds the settled archive too.
@@ -137,7 +139,7 @@ Legality (secondary and snippet, 2026-11-05; https://www.dlapiper.com/en/insight
 The CFTC-designated exchange (QCX LLC, amended order 2025-11-25; snippet), separate from global, with its own keys.
 
 - Public data without a key: `https://gateway.polymarket.us`, including `GET /v1/markets`, book, BBO, settlement and `GET /v1/price-history` (doc, https://docs.polymarket.us/api-reference/introduction). Price history is built from quotes (best ask, 1 - best bid) rather than trades. It is 1 min for the last 1h/6h, 5 min for 1D and 3 h beyond.
-- Limits: 20 requests/s per IP on the public gateway with a 30 s cache. Authenticated retail keys are 20 or 25 requests/s; the rate-limits page and the 2026-04-10 changelog disagree (doc).
+- Limits: 20 requests/s per IP on the public gateway with a 30 s cache. The authenticated Retail API is 25 requests/s per IP (doc, rate-limits page, 2026-11-06).
 - Fees from 2026-10-28 (doc, https://docs.polymarket.us/fees): `Theta * C * p * (1 - p)`, taker Theta 0.0695 (table tennis 0.10), banker's rounding to the cent; maker rebates and taker rebates by 30-day volume tier. Third-party fee guides quote old rates.
 - Retention (doc, changelog 2026-07-13): market data 45 days, orders 90 days, executions 7 days. The venue cannot be the history source, so the recorder is.
 - Sandbox: Preprod exists for the institutional API only, by contact (doc, environments.md). No retail demo, so Polymarket US is never in P7.

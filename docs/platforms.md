@@ -23,11 +23,11 @@ Tier is the highest rung we can use: **API** (an official API covers the job), *
 | Tastytrade | candidate | API broker | API | API | cert sandbox | when a strategy needs it |
 | Fidelity | held | broker, no API | aggregator (SnapTrade, read connection) | person | SnapTrade sandbox for the read path | code landed, needs a SnapTrade key and the connection |
 | Robinhood | candidate | broker | API (crypto only) | API (crypto), person (rest) | none | code landed, needs a read-only key |
-| Kalshi | candidate (tr-50) | prediction market | API | API | demo exchange | P6, account tr-50, live tr-48 |
-| Polymarket US | candidate | prediction market | API | API | backtest engine only | P6 |
+| Kalshi | candidate (tr-50) | prediction market | API | API | demo exchange | demo key (ask ybXZIM), account tr-50, live tr-48 |
+| Polymarket US | candidate | prediction market | API | API | backtest engine only | none until an account is opened |
 | Polymarket global | data only | prediction market | API | never (US is close-only) | n/a | none |
-| PredictIt | data only | prediction market | API (one feed) | person | none | P6 |
-| Manifold | data | play money | API | API, bots allowed | the venue is play money | P6 |
+| PredictIt | data only | prediction market | API (one feed) | person | none | none |
+| Manifold | data, order drill built | play money | API | API, bots allowed | the venue is play money | key (tr-118) |
 | DraftKings, FanDuel | candidate | sportsbook | Odds API | person | none | P7 |
 | Novig, ProphetX | candidate | exchange-style sportsbook | API | API, to verify | ProphetX sandbox | P7 |
 
@@ -70,12 +70,14 @@ Pod keys live in SOPS in home-config, as in [live.md](live.md). The person creat
 | Gemini | `require-heartbeat` flag on the key: a missed heartbeat cancels open orders. Timeout and how the flag is set: Not verified. Also Cancel All Active Orders and Cancel All Session Orders (POST) | doc (heartbeat), listing only (cancel-all) |
 | Alpaca | `DELETE /v2/orders` cancels all open orders. `DELETE /v2/positions?cancel_orders=true` cancels them and closes every position at market. Both answer 207 with a status per order or position, so the watcher checks each entry. No dead-man switch found | doc |
 | Kalshi | Order groups auto-cancel when a 15 s fill cap is hit. Self-exclusion and funding caps cannot be lifted early | doc |
+| Polymarket US | `POST /v1/orders/open/cancel` cancels every open order, optionally by market slug. A standalone cancel is never rejected by the 5 s latency stopgap. No dead-man switch found | doc |
+| Manifold | `expiresMillisAfter` on each limit bet: Manifold cancels it on its own. `POST /v0/bet/cancel/{id}` for one bet. No cancel-all | doc |
 | Polymarket global | `DELETE /cancel-all` | doc |
 | Binance.US | No dead-man switch and no account-wide cancel-all found: `DELETE /api/v3/openOrders` needs a `symbol`, so the watcher loops over the pairs. Last resort: delete the key | doc (first 200k chars of the page) |
 | Coinbase | No dead-man switch on Spot. `POST /orders/batch_cancel` cancels listed order ids. Cancel-on-disconnect exists only on Global Derivatives | doc |
 | IBKR | `reqGlobalCancel` cancels all open orders, including those placed in TWS. Precautionary size and value limits in TWS Presets. No account-wide kill switch found | doc (cancel), snippet (limits) |
 | Tastytrade | No cancel-all found: `DELETE /accounts/{n}/orders/{id}` per order, so the watcher loops. `GET /accounts/{n}/trading-status` reads the account's state | doc (API index) |
-| Schwab, Polymarket US | Not verified | |
+| Schwab | Not verified | |
 
 **2FA as a decision.** A TOTP secret in rbw lets the agent machine pass 2FA unattended. On a money account that widens what an agent can do. The person decides per account whether to store the secret, or to approve each 2FA prompt instead.
 
@@ -374,26 +376,26 @@ Data facts, fees as backtested, and adapter notes are in [markets.md](markets.md
 - Sign-in and 2FA: SMS or an authenticator app (TOTP), asked about every 30 days (snippet). TOTP fits rbw.
 - Risk controls: order groups with a 15 s fill cap; self-exclusion and funding caps that cannot be lifted early (doc).
 - Cost: no API fee found. Trading fees are in [markets.md](markets.md).
-- Paper: the demo exchange.
+- Paper: the demo exchange. The drill is built (`lab/markets/kalshi_trade.py`, [markets.md](markets.md), Demo orders) and waits on a demo account key, ask ybXZIM: the person opens a demo account at demo.kalshi.co, makes a key, and adds it to rbw as `trading/kalshi-demo` and to a SOPS Secret.
 - Verified: 2026-11-06. Sources: https://kalshi-public-docs.s3.amazonaws.com/Kalshi-Developer-Agreement.pdf, https://docs.kalshi.com/getting_started/api_keys, https://docs.kalshi.com/getting_started/rate_limits, https://docs.kalshi.com/getting_started/demo_env, https://help.kalshi.com/en/articles/13823787-how-do-i-use-2fa-two-factor-authentication-verification-codes.
 
 ### Polymarket US
 
-- Status: candidate.
+- Status: candidate. API status checked 2026-11-06 (P6): the Retail API trades today; no account is open.
 - Strategy fit: a second regulated US prediction market for cross-venue links (`market_links` in [markets.md](markets.md)).
 - API:
-  - A retail trading API exists: verify identity in the iOS app, then create a key at polymarket.us/developer (doc).
-  - Signed headers, with timestamps within 30 s of the server (doc).
-  - Trading at `api.polymarket.us`; public data at `gateway.polymarket.us`.
-  - 25 requests/s per IP (doc; a secondary source says 20).
-  - No sandbox documented.
-- Agent machine: Not verified. The Polymarket terms page bars scraping robots and VPNs (doc), but it names a different entity than the US exchange (QCX LLC), so it may not be the US terms.
+  - A retail trading API exists: verify identity in the iOS app, then create a Key ID and Secret Key at polymarket.us/developer (doc). An invite code may be needed for the app (doc: "need an invite code ... email support@polymarket.us").
+  - Signed headers `X-PM-Access-Key`, `X-PM-Timestamp` (ms) and `X-PM-Signature`, an Ed25519 signature of timestamp + method + path, within 30 s of the server (doc). Official Python and TypeScript SDKs (`polymarket_us`, `polymarket-us`).
+  - Trading at `api.polymarket.us`: `POST /v1/orders` (limit and market), `POST /v1/order/preview` (validates an order and shows expected fills without placing it), `GET /v1/order/{id}`, `POST /v1/order/{id}/cancel`, cancel-all, batches of 20, and a private websocket for order, position and balance events (doc). Public data at `gateway.polymarket.us`.
+  - 25 requests/s per IP and Cloudflare location on the Retail API, shared across keys (doc, rate-limits page; this settles the earlier 20 vs 25). Orders not processed within 5 s are rejected as `Order Processing Max Delay Exceeded`, which is safe to resubmit (doc).
+  - No retail sandbox. Preprod (`api.preprod.polymarketexchange.com`, Auth0 tokens) is the Institutional API only (doc, trader-guide/environments).
+- Agent machine: not needed; the API covers orders. Whether the US terms allow bots: Not verified. The Polymarket terms page bars scraping robots and VPNs (doc), but it names a different entity than the US exchange (QCX LLC), so it may not be the US terms.
 - The person: identity check in the iOS app, keys, funding.
-- Sign-in and 2FA: Apple, Google or email sign-in. 2FA: Not verified.
-- Risk controls: deposit limits and self-exclusion (snippet).
-- Cost: a taker fee formula is reported (secondary). Not verified.
-- Paper: none from the venue. Our backtest engine is the paper path.
-- Verified: 2026-11-06. Sources: https://docs.polymarket.us/api-reference/authentication, https://docs.polymarket.us/api-reference/introduction, https://docs.polymarket.us/api-reference/rate-limits.
+- Sign-in and 2FA: Apple, Google or email sign-in, with the same method each time or the API key can break (doc). 2FA belongs to the Apple or Google account; Polymarket sends verification codes (doc, learn/account/protect). No TOTP of its own found, so nothing for rbw but the key.
+- Risk controls: cancel-all (kill-switch map above), deposit limits and self-exclusion (snippet).
+- Cost: no API fee found. Trading fees are in [markets.md](markets.md).
+- Paper: none from the venue, and `preview` is not a paper fill. Our backtest engine and the paper league are the paper path. An order client waits until the person opens an account, and then it is real money, so it comes in behind `lab/live.py` (docs/live.md), never as a drill.
+- Verified: 2026-11-06. Sources: https://docs.polymarket.us/api-reference/authentication, https://docs.polymarket.us/api-reference/orders/overview, https://docs.polymarket.us/api-reference/rate-limits, https://docs.polymarket.us/trader-guide/environments, https://docs.polymarket.us/learn/account/protect.
 
 ### Polymarket global
 
@@ -423,19 +425,29 @@ Data facts, fees as backtested, and adapter notes are in [markets.md](markets.md
 
 ### Manifold
 
-- Status: data today, with an order adapter planned.
+- Status: data, and the order drill is built (P6); it runs once the account key exists (sheet row tr-118).
 - Strategy fit: a free practice venue an agent can trade end to end.
 - API:
-  - `POST /v0/bet` places market and limit bets in mana (play money), with an `Authorization: Key` header; one key per account (doc).
+  - `POST /v0/bet` places market and limit bets in mana (play money), with an `Authorization: Key` header; one key per account (doc). `limitProb` (0.01 to 0.99, whole percents) makes it a limit order, and `expiresMillisAfter` has Manifold cancel it on its own (doc). The minimum bet is 1 mana (source, `common/src/economy.ts`).
+  - `POST /v0/bet/cancel/{id}` cancels a limit bet; `GET /v0/bets?userId=&contractId=` reads it back, since there is no one-bet route; `GET /v0/me` is the account and its balance (doc).
   - 500 requests/min per IP (doc).
   - `dryRun` checks a bet without placing it.
 - Agent machine: not needed. Bots are allowed: "Building bots, automated trading systems, algorithmic tools, and integrations that interact with Manifold" (doc). Scraping outside the API is not allowed.
 - The person: creates the account and its API key.
 - Sign-in and 2FA: Not verified.
-- Risk controls: n/a (play money).
+- Risk controls: play money; each drill bet expires on its own (kill-switch map above).
 - Cost: free.
 - Paper: the venue itself.
-- Verified: 2026-11-06. Sources: https://docs.manifold.markets/api.
+- Verified: 2026-11-06. Sources: https://docs.manifold.markets/api, https://github.com/manifoldmarkets/manifold/blob/main/common/src/api/schema.ts.
+
+#### Order drill
+
+`lab/markets/manifold_trade.py` is the path, and `ManifoldBets` refuses any host but `api.manifold.markets`, so the key goes nowhere else.
+
+- `python -m lab.markets.manifold_trade balance` prints the account's mana.
+- `python -m lab.markets.manifold_trade drill [--ticker MARKET_ID]` picks an open binary mana market priced at `min_prob` (10%) or more, rests a 1-mana YES limit bet at 1% with a 10-minute expiry (`[demo.manifold]` in `lab/markets.toml`), reads it back, cancels it and reads it back, writing each step to `demo_orders` as venue `manifold`. It exits 1 unless the bet was seen open with nothing filled and then canceled. `/markets/book` shows the row.
+- Input: `MANIFOLD_API_KEY`.
+- Not yet run against Manifold: tested only against a fake API, because no key exists. It is live once the person makes the key, adds it to rbw as `trading/manifold` and a SOPS Secret, the drill runs from home-config `apps/freqtrade/`, and a canceled `manifold` row appears on `/markets/book`.
 
 ## Sportsbooks
 
