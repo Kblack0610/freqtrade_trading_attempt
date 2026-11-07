@@ -64,6 +64,14 @@ def test_intervals_and_monte_carlo_repeat_for_a_seed():
     assert metrics.mean_ci(np.array([1.0]), 1) == (None, None)
 
 
+def test_minimum_backtest_years_follows_the_bailey_bound():
+    assert math.isclose(metrics.min_backtest_years(1.0, 10), 2 * math.log(10))
+    assert math.isclose(metrics.min_backtest_years(0.5, 10), 4 * metrics.min_backtest_years(1.0, 10))
+    assert metrics.min_backtest_years(1.0, 1) == 0.0
+    assert metrics.min_backtest_years(0.0, 10) is None and metrics.min_backtest_years(-1.0, 10) is None
+    assert metrics.min_backtest_years(None, 10) is None
+
+
 def test_deflated_sharpe_falls_as_trials_grow():
     sr, n = 0.08, 365
     alone = metrics.deflated_sharpe(sr, n, 0.0, 3.0, 1)

@@ -12,8 +12,9 @@ PAIR = ("Good", "binanceus")
 
 
 def folds(returns, months=6):
-    return [{"tuned_returns": list(part), "tuned_trades": len(part), "tuned_expectancy": float(np.mean(part))}
-            for part in np.array_split(returns, months)]
+    return [{"tuned_returns": list(part), "tuned_trades": len(part), "tuned_expectancy": float(np.mean(part)),
+             "fold_start": dt.date(2023 + i // 12, i % 12 + 1, 1), "test_end": dt.date(2023 + (i + 1) // 12, (i + 1) % 12 + 1, 1),
+             "params": {"x": 1}} for i, part in enumerate(np.array_split(returns, months))]
 
 
 def population(rng, noise, planted=0, edge=0.2, trades=400):
@@ -32,12 +33,13 @@ def good_facts():
     d = days()
     close = pd.Series(100 * np.exp(0.12 * np.sin(np.arange(len(d)) / 60)) + 100, index=d)
     daily = pd.Series(rng.normal(0.004, 0.01, len(d)), index=d)
-    wf = {PAIR: folds(rng.normal(0.02, 0.03, 300))}
+    wf = {PAIR: folds(rng.normal(0.02, 0.03, 300), months=24)}
     wf[("Good", "okx")] = folds(rng.normal(0.02, 0.03, 300))
     wf.update({(f"o{i}", "binanceus"): folds(rng.normal(0.001, 0.03, 300)) for i in range(24)})
     w = {"trials": 10.0, "trials_raw": 20, "start_day": d[0], "end_day": d[-1], "hold_excess_lo": 0.05,
          "worst_open": -0.12, "fee_per_trade": 0.0014}
-    return {"strategies": {"Good": {"lookahead": False, "recursive": False}},
+    oos = pd.Series(rng.normal(0.004, 0.01, len(d)), index=pd.to_datetime(d))
+    return {"oos": {PAIR: oos}, "strategies": {"Good": {"lookahead": False, "recursive": False}},
             "series": {PAIR: {"windows": {"all": w}}}, "walkforward": wf, "daily": {PAIR: daily}, "close": close,
             "trend": metrics.regimes(close, C["trend_band"], 90).set_index("day")["trend"],
             "overfit": {("binanceus", "all"): 0.1}, "pairs": {PAIR: [(100, 2.0), (100, 1.5), (100, 1.0)]}, "drift": {PAIR: {"gap": 0.0005, "trades": 40}},
@@ -84,7 +86,7 @@ def test_no_score_without_a_population():
 
 def test_every_gate_passing_is_ready():
     row = result(good_facts())
-    assert failed(row) == [] and row["ready"] and row["passed"] == len(row["gates"].obj) == 18
+    assert failed(row) == [] and row["ready"] and row["passed"] == len(row["gates"].obj) == 19
     assert row["oos_trades"] == 300
 
 
@@ -102,13 +104,15 @@ def spoil(facts, name):
         w["worst_open"] = -0.75
     elif name == "drift":
         facts["drift"][PAIR]["gap"] = -0.05
+    elif name == "minimum backtest length":
+        facts["oos"][PAIR] = pd.Series(np.random.default_rng(3).normal(0.0003, 0.01, 1500), index=facts["oos"][PAIR].index)
     elif name == "dry run":
         facts["live"][PAIR]["closed"] = 59
     return facts
 
 
 def test_one_bad_gate_is_named_and_blocks_ready_whatever_the_score():
-    for name in ("bias", "costs", "overfit probability", "excess over hold, low", "worst open loss", "drift", "dry run"):
+    for name in ("bias", "costs", "overfit probability", "minimum backtest length", "excess over hold, low", "worst open loss", "drift", "dry run"):
         row = result(spoil(good_facts(), name))
         assert failed(row) == [name] and not row["ready"] and row["score"] >= C["ready_score"]
 
@@ -154,6 +158,15 @@ def test_more_trials_raise_the_bar():
     facts["daily"][PAIR] = facts["daily"][PAIR] * 0.0 + np.random.default_rng(2).normal(0.0006, 0.01, 1500)
     thin = [next(g for g in result(facts, trials=n)["gates"].obj if g["gate"].startswith("deflated")) for n in (30, 3000)]
     assert low["pass"] and thin[0]["value"] > thin[1]["value"]
+
+
+def test_the_backtest_must_be_longer_than_the_trial_count_asks():
+    f = good_facts()
+    years, need, ok = confidence.backtest_length(f["walkforward"][PAIR], f["oos"][PAIR], 30, C)
+    assert 2.0 <= years < 2.01 and need < years and ok
+    assert not confidence.backtest_length(f["walkforward"][PAIR][:1], f["oos"][PAIR], 30, C)[2]
+    assert confidence.backtest_length(f["walkforward"][PAIR], f["oos"][PAIR], 3000, C)[1] > need
+    assert not confidence.backtest_length(f["walkforward"][PAIR], -f["oos"][PAIR], 30, C)[2]
 
 
 def test_a_dry_run_needs_a_real_btc_fall():

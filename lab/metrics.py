@@ -263,6 +263,15 @@ def deflated_sharpe(sr: float, n: int, skew: float, kurt: float, trials: int) ->
     return float(norm.cdf((sr - sr0) * math.sqrt(n - 1) / math.sqrt(denom)))
 
 
+def min_backtest_years(sharpe: float | None, trials: int) -> float | None:
+    """Bailey, Borwein, Lopez de Prado and Zhu (2014), Theorem 3.1, the bound 2 ln(N) / SR^2 on the minimum backtest
+    length in years: with fewer years than this, the best of N skill-less strategies shows this annualized Sharpe by
+    luck. None when the Sharpe is missing or not above zero, since no length is enough then."""
+    if sharpe is None or not math.isfinite(sharpe) or sharpe <= 0:
+        return None
+    return 2 * math.log(trials) / sharpe ** 2 if trials >= 2 else 0.0
+
+
 def effective_trials(returns: pd.DataFrame, min_overlap: int = 30) -> float:
     """How many independent trials a set of return series is worth: the participation ratio of the
     eigenvalues of their correlation matrix, (sum l)^2 / sum l^2. Independent series count once each,

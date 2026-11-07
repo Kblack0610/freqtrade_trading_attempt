@@ -77,6 +77,11 @@ def load(conn, cfg: dict, now: dt.datetime | None = None) -> dict:
     reg = pd.DataFrame(conn.execute("SELECT day, btc_close, trend FROM regimes ORDER BY day").fetchall(),
                        columns=["day", "btc_close", "trend"]).set_index("day")
     facts["close"], facts["trend"] = reg["btc_close"].astype(float), reg["trend"]
+    oos: dict = {}
+    for s, e, day, ret in conn.execute("SELECT strategy, exchange, day, ret FROM walkforward_daily WHERE variant = 'tuned' "
+                                       "AND day < %s ORDER BY 1, 2, 3", (lockbox,)):
+        oos.setdefault((s, e), {})[pd.Timestamp(day)] = ret
+    facts["oos"] = {k: pd.Series(v, dtype=float) for k, v in oos.items()}
     facts["drift"] = {}
     for s, e, gap, n in conn.execute("SELECT strategy, exchange, gap, gap_trades FROM drift WHERE gap IS NOT NULL "
                                      "ORDER BY gap_trades"):
@@ -128,6 +133,19 @@ def deflated(daily: pd.Series | None, w: dict, trials: int) -> tuple[float | Non
         return None, None
     n = max(trials, w["trials_raw"]) * w["trials"] / w["trials_raw"]
     return metrics.deflated_sharpe(float(r.mean() / sd), len(r), float(r.skew()), float(r.kurt()) + 3.0, n), n
+
+
+def backtest_length(folds: list[dict], oos: pd.Series | None, trials: int, c: dict) -> tuple[float, float | None, bool]:
+    """The tuned out-of-sample years (calendar days of the test months, zero where nothing closed), the years
+    metrics.min_backtest_years asks for at the register's size, and whether the first reaches min_btl_ratio times
+    the second."""
+    days = [d for f in folds if f.get("params") for d in pd.date_range(f["fold_start"], f["test_end"], inclusive="left")]
+    years = len(days) / metrics.YEAR
+    r = (oos if oos is not None else pd.Series(dtype=float)).reindex(pd.DatetimeIndex(days)).fillna(0.0)
+    sd = r.std(ddof=1) if len(r) > 1 else 0.0
+    sharpe = float(r.mean() / sd * np.sqrt(metrics.YEAR)) if sd and np.isfinite(sd) else None
+    need = metrics.min_backtest_years(sharpe, trials)
+    return years, need, need is not None and years >= c["min_btl_ratio"] * need
 
 
 def regime_spread(daily: pd.Series | None, trend: pd.Series, cfg: dict) -> tuple[str | None, bool]:
@@ -183,6 +201,7 @@ def gates(pair: tuple, facts: dict, ev: dict | None, score: float | None, trials
     dsr, n = deflated(daily, w, trials)
     months = ev["months"]
     share = sum(m > 0 for m in months) / len(months) if months else None
+    years, need_years, btl_ok = backtest_length(facts["walkforward"].get(pair, []), facts["oos"].get(pair), trials, c)
     regime, regime_ok = regime_spread(daily, facts["trend"], c)
     hold, worst, paid = w.get("hold_excess_lo"), w.get("worst_open"), w.get("fee_per_trade")
     fee = venue_fee(exchange)
@@ -203,6 +222,8 @@ def gates(pair: tuple, facts: dict, ev: dict | None, score: float | None, trials
         gate(f"deflated Sharpe, {n:.0f} trials" if n else "deflated Sharpe", dsr, f">= {c['min_dsr']}",
              dsr is not None and dsr >= c["min_dsr"]),
         gate("overfit probability", pbo, f"<= {c['max_pbo']}", pbo is not None and pbo <= c["max_pbo"]),
+        gate("minimum backtest length", None if need_years is None else f"{years:.1f} y of {need_years:.1f} y",
+             f"out-of-sample years >= {c['min_btl_ratio']:g} x 2 ln({trials}) / SR^2", btl_ok),
         gate("months positive", None if share is None else f"{sum(m > 0 for m in months)} of {len(months)}",
              f">= {c['min_folds_positive']:.0%} of >= {c['min_folds']}",
              len(months) >= c["min_folds"] and share >= c["min_folds_positive"]),
