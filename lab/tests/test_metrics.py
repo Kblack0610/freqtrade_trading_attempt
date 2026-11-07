@@ -137,9 +137,24 @@ def test_window_metrics_on_a_known_series():
 
 def test_regimes_need_200_days_for_a_trend():
     close = pd.Series(np.linspace(100, 300, 260), index=pd.date_range("2025-01-01", periods=260).date)
-    r = metrics.regimes(close)
-    assert r["trend"].iloc[:199].isna().all() and (r["trend"].iloc[199:] == "bull").all()
+    r = metrics.regimes(close, 0.05, 30)
+    assert r["trend"].iloc[:199].isna().all() and (r["trend"].iloc[199:] == "up").all()
     assert set(r["vol_bucket"].dropna()) <= {"low", "mid", "high"}
+    assert r["vol_bucket"].iloc[:59].isna().all() and r["vol_bucket"].iloc[59:].notna().all()
+
+
+def test_a_regime_label_never_changes_when_later_days_arrive():
+    rng = np.random.default_rng(3)
+    close = pd.Series(100 * np.exp(np.cumsum(rng.normal(0, 0.02, 700))), index=pd.date_range("2022-01-01", periods=700))
+    full = metrics.regimes(close, 0.05, 90).set_index("day")
+    for n in (300, 450, 600):
+        cut = metrics.regimes(close.iloc[:n], 0.05, 90).set_index("day")
+        pd.testing.assert_frame_equal(cut[["trend", "vol_bucket"]], full.loc[cut.index, ["trend", "vol_bucket"]])
+    # the whole-history terciles this replaced do change: the first label moves once a calm year is appended
+    calm = pd.concat([close, pd.Series(close.iloc[-1] * np.exp(np.cumsum(rng.normal(0, 0.001, 700))),
+                                       index=pd.date_range(close.index[-1] + pd.Timedelta(days=1), periods=700))])
+    vol = lambda c: np.log(c).diff().rolling(30).std()
+    assert vol(close).quantile(2 / 3) != vol(calm).quantile(2 / 3)
 
 
 def test_drift_matches_entries_within_a_candle():

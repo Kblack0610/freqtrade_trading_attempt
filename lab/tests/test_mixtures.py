@@ -87,9 +87,9 @@ def test_more_trials_raise_the_bar():
 def test_scorecard_splits_a_mixture_by_climate():
     days = pd.date_range("2023-01-01", periods=400, freq="D")
     close = pd.Series(100 * 1.004 ** np.arange(400), index=days)
-    vol = pd.Series("low", index=days, dtype=object)
+    reg = pd.DataFrame({"btc_close": close, "trend": np.where(np.arange(400) >= 199, "up", None), "vol_bucket": "low"})
     ret = pd.Series(0.001, index=days[250:])
-    out = scorecard.build(close, vol, {}, {}, CFG, 3, {("1/N: A x, B x", "v"): ret})
+    out = scorecard.build(reg, {}, {}, CFG, 3, {("1/N: A x, B x", "v"): ret})
     mix = [r for r in out if r["kind"] == "mixture"]
     assert [(r["name"], r["cell"], r["days"]) for r in mix] == [("1/N: A x, B x", "up/low", 150)]
 
@@ -106,7 +106,7 @@ def test_run_counts_each_mixture_as_a_trial_once(conn):
                          "profit_ratio) VALUES (%s, %s, 'tuned', %s, 'BTC/USD', %s, %s, %s)",
                          (s, e, day.date().replace(day=1), day, day + pd.Timedelta(hours=12), float(x)))
     for d in pd.date_range("2023-01-01", "2024-07-31", freq="D"):
-        conn.execute("INSERT INTO regimes (day, btc_close, vol_bucket) VALUES (%s, 100, 'low')", (d.date(),))
+        conn.execute("INSERT INTO regimes (day, btc_close, trend, vol_bucket) VALUES (%s, 100, 'up', 'low')", (d.date(),))
     conn.execute("DELETE FROM trials WHERE strategy = 'mixture'")  # the register is not truncated between tests
     before = conn.execute("SELECT count(*) FROM trials").fetchone()[0]
     out = mixtures.run(conn, CFG)

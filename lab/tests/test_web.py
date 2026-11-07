@@ -67,7 +67,7 @@ def seed(c):
               "VALUES (1, 'ETH/USD', '2026-03-01 10:00+00', '2026-03-01 18:00+00', 0.032, 32, 'roi')")
     for day, ret in (("2026-03-01", 0.032), ("2026-03-02", -0.01), ("2026-03-03", 0.005)):
         c.execute("INSERT INTO strategy_daily VALUES ('Strategy001', 'binanceus', %s, %s, 0, 1)", (day, ret))
-        c.execute("INSERT INTO regimes VALUES (%s, 80000, 'bull', 0.5, 'mid')", (day,))
+        c.execute("INSERT INTO regimes VALUES (%s, 80000, 'up', 0.5, 'mid')", (day,))
     for name, trades, sharpe_lo in (("Strategy001", 40, 0.4), ("Planted", 90, 3.0)):
         c.execute("INSERT INTO strategy_windows (strategy, exchange, win, days, start_day, trades, total_return, sharpe, "
                   "sharpe_lo, sharpe_hi, dsr, trials, trials_raw, trades_needed, max_drawdown, expectancy, gross_expectancy, "
@@ -199,7 +199,7 @@ def test_every_page_renders_with_data(conn, signed_in):
                              "binanceus: no 1m candles: Scalp", 'okx: 5m not fully backfilled: <span title="S0, S1, S2, S3">4 strategies</span>', "Fees by venue", "0.25%", "1.45%", "worth 1.7 independent",
                              "4321", '<td class="n down" title="2 strategies">64%</td>'],
              "/strategies?win=all": ["No results for this window yet"],
-             "/strategies/Strategy001": ["binanceus", "<svg", "3.2%", "Strategy002: 0.83", "bull", "ETH/USD",
+             "/strategies/Strategy001": ["binanceus", "<svg", "3.2%", "Strategy002: 0.83", "up", "ETH/USD",
                                          "exit 2: boom", "not checked", "clean", "31%", "1.45%", "0.25%", "20%", "12.3%",
                                          "-5.0%", "-27.1%", "4321"],
              "/data": ["BTC/USD", "700,000", "2019-09-01", "Open interest", "<td>okx</td>", "2026-08-03"],

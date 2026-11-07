@@ -213,8 +213,7 @@ def run(conn, cfg: dict | None = None) -> dict:
     for s, e, day, ret in conn.execute(DAILY, q):
         daily.setdefault((s, e), {})[pd.Timestamp(day)] = ret
     daily = {k: pd.Series(v, dtype=float) for k, v in daily.items()}
-    close, vol = scorecard.regimes(conn)
-    label = scorecard.labels(close, vol, cfg["confidence"]["trend_band"])
+    label = scorecard.labels(scorecard.regimes(conn))
     built = build(months, daily, [tuple(p) for p in conn.execute(ORDER)], label, cfg)
     with conn.transaction():
         with conn.cursor() as cur:

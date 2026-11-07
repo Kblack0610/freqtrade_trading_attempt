@@ -74,8 +74,9 @@ def load(conn, cfg: dict, now: dt.datetime | None = None) -> dict:
                                        "ORDER BY 1, 2, 3", (lockbox,)):
         daily.setdefault((s, e), []).append((day, ret))
     facts["daily"] = {k: pd.Series(dict(v), dtype=float) for k, v in daily.items()}
-    close = dict(conn.execute("SELECT day, btc_close FROM regimes ORDER BY day").fetchall())
-    facts["close"] = pd.Series(close, dtype=float)
+    reg = pd.DataFrame(conn.execute("SELECT day, btc_close, trend FROM regimes ORDER BY day").fetchall(),
+                       columns=["day", "btc_close", "trend"]).set_index("day")
+    facts["close"], facts["trend"] = reg["btc_close"].astype(float), reg["trend"]
     facts["drift"] = {}
     for s, e, gap, n in conn.execute("SELECT strategy, exchange, gap, gap_trades FROM drift WHERE gap IS NOT NULL "
                                      "ORDER BY gap_trades"):
@@ -129,10 +130,10 @@ def deflated(daily: pd.Series | None, w: dict, trials: int) -> tuple[float | Non
     return metrics.deflated_sharpe(float(r.mean() / sd), len(r), float(r.skew()), float(r.kurt()) + 3.0, n), n
 
 
-def regime_spread(daily: pd.Series | None, close: pd.Series, cfg: dict) -> tuple[str | None, bool]:
-    if daily is None or close.empty:
+def regime_spread(daily: pd.Series | None, trend: pd.Series, cfg: dict) -> tuple[str | None, bool]:
+    if daily is None or trend.empty:
         return None, False
-    bucket = metrics.trend_buckets(close, cfg["trend_band"]).reindex(daily.index)
+    bucket = trend.reindex(daily.index)
     by = daily.groupby(bucket).agg(["sum", "count"])
     by = by[by["count"] >= cfg["min_regime_days"]]["sum"]
     gain = by[by > 0].sum()
@@ -182,7 +183,7 @@ def gates(pair: tuple, facts: dict, ev: dict | None, score: float | None, trials
     dsr, n = deflated(daily, w, trials)
     months = ev["months"]
     share = sum(m > 0 for m in months) / len(months) if months else None
-    regime, regime_ok = regime_spread(daily, facts["close"], c)
+    regime, regime_ok = regime_spread(daily, facts["trend"], c)
     hold, worst, paid = w.get("hold_excess_lo"), w.get("worst_open"), w.get("fee_per_trade")
     fee = venue_fee(exchange)
     stressed = None if ev["mean"] is None or paid is None else (ev["mean"] + paid) * c["stress_gross_share"] - paid

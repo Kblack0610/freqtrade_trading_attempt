@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The out-of-sample result per market climate: what each strategy, and BTC held, earned on the days of each climate.
 
-A climate is the BTC trend bucket (up, down, flat; lab/metrics.trend_buckets) and the volatility tercile of
+A climate is the BTC trend bucket (up, down, flat) and the volatility tercile (both from lab/metrics.regimes) of
 `regimes`, both read at the close of the day before, so a day's label never uses that day's return. A strategy's
 days are the calendar days of its walk-forward test months, zero where it did not trade, from `walkforward_daily`
 (trade profit ratios summed per close day; lab/walkforward.py writes them, trades across fold ends already purged).
@@ -24,11 +24,10 @@ COLS = ["kind", "name", "exchange", "variant", "cell", "days", "trades", "annual
 SPANS = "SELECT strategy, exchange, min(fold_start), max(test_end) FROM walkforward WHERE ok GROUP BY 1, 2"
 
 
-def labels(close: pd.Series, vol_bucket: pd.Series, band: float) -> pd.Series:
-    """trend/vol per day, each from the day before; a day without both has no label."""
-    trend = metrics.trend_buckets(close, band)
-    both = pd.concat([trend.astype(object), vol_bucket.reindex(trend.index).astype(object)], axis=1).dropna()
-    return (both.iloc[:, 0] + "/" + both.iloc[:, 1]).reindex(trend.index).shift(1).dropna()
+def labels(reg: pd.DataFrame) -> pd.Series:
+    """trend/vol per day from `regimes` (index: day), each read at the day before; a day without both has no label."""
+    both = reg[["trend", "vol_bucket"]].astype(object).dropna()
+    return (both["trend"] + "/" + both["vol_bucket"]).reindex(reg.index).shift(1).dropna()
 
 
 def cells(daily: pd.Series, trades: pd.Series, label: pd.Series, key: tuple, cfg: dict, trials: int) -> list[dict]:
@@ -46,13 +45,13 @@ def cells(daily: pd.Series, trades: pd.Series, label: pd.Series, key: tuple, cfg
     return out
 
 
-def build(close: pd.Series, vol_bucket: pd.Series, spans: dict, daily: dict, cfg: dict, trials: int,
+def build(reg: pd.DataFrame, spans: dict, daily: dict, cfg: dict, trials: int,
           mixtures: dict | None = None) -> list[dict]:
     """spans: (strategy, exchange) -> (first day, last day exclusive); daily: (strategy, exchange, variant) -> frame
     of ret and trades by day; mixtures: (name, variant) -> daily return Series over the days it was scored."""
-    label = labels(close, vol_bucket, cfg["confidence"]["trend_band"])
+    label = labels(reg)
     out = []
-    ret = close.sort_index().pct_change().dropna()
+    ret = reg["btc_close"].pct_change().dropna()
     out += cells(ret, pd.Series(0, index=ret.index), label, ("benchmark", "hold BTC", "", ""), cfg, trials)
     for (s, e, v), frame in sorted(daily.items()):
         if (s, e) not in spans:
@@ -66,17 +65,16 @@ def build(close: pd.Series, vol_bucket: pd.Series, spans: dict, daily: dict, cfg
     return out
 
 
-def regimes(conn) -> tuple[pd.Series, pd.Series]:
-    """BTC's daily close and volatility tercile from `regimes`, indexed by day."""
-    rows = conn.execute("SELECT day, btc_close, vol_bucket FROM regimes ORDER BY day").fetchall()
-    index = pd.to_datetime([r[0] for r in rows])
-    return (pd.Series([r[1] for r in rows], index=index, dtype=float),
-            pd.Series([r[2] for r in rows], index=index, dtype=object))
+def regimes(conn) -> pd.DataFrame:
+    """The `regimes` table as a frame indexed by day: btc_close, trend, vol_bucket."""
+    rows = conn.execute("SELECT day, btc_close, trend, vol_bucket FROM regimes ORDER BY day").fetchall()
+    return pd.DataFrame([r[1:] for r in rows], index=pd.to_datetime([r[0] for r in rows]),
+                        columns=["btc_close", "trend", "vol_bucket"]).astype({"btc_close": float})
 
 
 def run(conn, cfg: dict | None = None) -> dict:
     cfg = cfg or suggest.load_config()
-    close, vol = regimes(conn)
+    reg = regimes(conn)
     spans = {(s, e): (a, b) for s, e, a, b in conn.execute(SPANS)}
     daily: dict = {}
     for s, e, v, day, ret, n in conn.execute("SELECT strategy, exchange, variant, day, ret, trades FROM walkforward_daily "
@@ -88,7 +86,7 @@ def run(conn, cfg: dict | None = None) -> dict:
                                           "USING (variant) ORDER BY 2, 3"):
         mixed.setdefault((name, v), {})[pd.Timestamp(day)] = ret
     trials = conn.execute("SELECT count(*) FROM trials").fetchone()[0]
-    out = build(close, vol, spans, frames, cfg, trials, {k: pd.Series(v, dtype=float) for k, v in mixed.items()})
+    out = build(reg, spans, frames, cfg, trials, {k: pd.Series(v, dtype=float) for k, v in mixed.items()})
     with conn.transaction():
         conn.execute("DELETE FROM climate_scorecard")
         with conn.cursor() as cur:

@@ -123,7 +123,7 @@ def test_full_history_in_yearly_chunks_then_cached(lab):
     assert one(lab, "SELECT bool_and(hold_excess_lo < hold_excess AND hold_excess < hold_excess_hi) FROM strategy_windows")
     assert one(lab, "SELECT bool_and(abs(worst_open + 0.05) < 1e-9) FROM strategy_windows WHERE trades > 0")
     assert one(lab, "SELECT count(*) FROM estimates") == 12
-    assert one(lab, "SELECT count(*) FROM regimes WHERE trend = 'bull'") > 0
+    assert one(lab, "SELECT count(*) FROM regimes WHERE trend = 'up'") > 0
     assert one(lab, "SELECT count(*) FROM correlations WHERE other = 'Good' AND exchange = 'binanceus'") == 2
     assert one(lab, "SELECT has_bias FROM bias_checks WHERE strategy = 'Planted' AND kind = 'lookahead'") is True
     days = one(lab, "SELECT count(*) FROM strategy_daily WHERE strategy = 'Good' AND exchange = 'binanceus'")

@@ -604,12 +604,11 @@ def vol_files(first: dict, timeframe: str) -> dict[str, dict[str, Path]]:
             for ex in EXCHANGES if (ex, timeframe) in first}
 
 
-def regime_rows(close: pd.Series) -> list[dict]:
+def regime_rows(close: pd.Series, cfg: dict) -> list[dict]:
     if close.empty:
         return []
-    r = metrics.regimes(close)
-    return [finite(row)
-            for row in r.to_dict("records")]
+    c = cfg["confidence"]
+    return [finite(row) for row in metrics.regimes(close, c["trend_band"], c["vol_min_days"]).to_dict("records")]
 
 
 def insert_many(conn, table: str, rows: list[dict], cols: list[str]) -> None:
@@ -639,7 +638,7 @@ def derive(conn) -> dict:
     close = daily_close("BTC")
     bench = book.benchmark_rows(close, daily_close("ETH"), suggest.load_config())
     hold_columns(windows, series, close)
-    corr, reg, overfit = correlation_rows(series, league), regime_rows(close), overfit_rows(series)
+    corr, reg, overfit = correlation_rows(series, league), regime_rows(close, suggest.load_config()), overfit_rows(series)
     with conn.transaction():
         conn.execute("TRUNCATE strategy_daily, strategy_windows, estimates, correlations, regimes, overfit, benchmarks")
         insert_many(conn, "strategy_daily", daily, ["strategy", "exchange", "day", "ret", "pnl", "trades"])
