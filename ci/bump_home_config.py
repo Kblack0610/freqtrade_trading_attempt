@@ -7,7 +7,7 @@ API (no clone), pushes it as branch trader-sha-<7>, opens the PR, and closes
 any older open trader-sha-* PR it supersedes. Merging the PR is the deploy.
 
 Env: DIGEST (sha256:...), GITHUB_SHA, SUBJECT (commit message),
-FORGEJO_TOKEN (write:repository on home-config), DRY_RUN=1 to print only.
+FORGEJO_TOKEN (write:repository on home-config; no issue scope needed), DRY_RUN=1 to print only.
 """
 import base64
 import json
@@ -108,12 +108,20 @@ def main():
         })
     print(f"PR #{mine['number']}: {mine.get('html_url', '')}")
 
+    close_superseded(open_prs, branch, mine["number"], tag)
+
+
+def close_superseded(open_prs, branch, number, tag):
+    """Close every other open trader-sha-* PR, noting its successor in the body.
+
+    The note goes in the closing PATCH, not a comment: comments need the
+    write:issue scope and FORGEJO_DEPLOY_TOKEN carries write:repository only.
+    """
     for p in open_prs:
         ref = p["head"]["ref"]
         if ref.startswith(PREFIX) and ref != branch:
-            call("POST", f"/repos/{REPO}/issues/{p['number']}/comments",
-                 {"body": f"Superseded by #{mine['number']} ({tag})."})
-            call("PATCH", f"/repos/{REPO}/pulls/{p['number']}", {"state": "closed"})
+            body = ((p.get("body") or "").rstrip() + f"\n\nSuperseded by #{number} ({tag}).").lstrip()
+            call("PATCH", f"/repos/{REPO}/pulls/{p['number']}", {"state": "closed", "body": body})
             call("DELETE", f"/repos/{REPO}/branches/{ref}", ok_404=True)
             print(f"closed #{p['number']} ({ref})")
 

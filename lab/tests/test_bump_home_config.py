@@ -44,3 +44,15 @@ def test_bump_refuses_a_bad_digest_or_a_missing_entry():
         bump(KUSTOMIZATION, "latest", "sha-2222222")
     with pytest.raises(ValueError):
         bump(KUSTOMIZATION.replace("name: trader", "name: trader-ml"), NEW, "sha-2222222")
+
+
+def test_superseded_prs_close_with_a_note_and_no_issue_comment(monkeypatch):
+    calls = []
+    monkeypatch.setattr(bump_home_config, "call", lambda method, path, body=None, ok_404=False: calls.append((method, path, body)))
+    open_prs = [{"number": 644, "head": {"ref": "trader-sha-1111111"}, "body": "Pins it."},
+                {"number": 645, "head": {"ref": "trader-sha-2222222"}, "body": "Pins it."},
+                {"number": 9, "head": {"ref": "someone-else"}, "body": None}]
+    bump_home_config.close_superseded(open_prs, "trader-sha-2222222", 645, "sha-2222222")
+    assert calls == [("PATCH", "/repos/kblack0610/home-config/pulls/644",
+                      {"state": "closed", "body": "Pins it.\n\nSuperseded by #645 (sha-2222222)."}),
+                     ("DELETE", "/repos/kblack0610/home-config/branches/trader-sha-1111111", None)]
