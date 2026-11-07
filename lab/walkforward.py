@@ -17,7 +17,7 @@ run adds the newest month and whatever a changed file or a new candidate needs. 
 Hyperopt runs on a copy of the strategy's folder in a temporary userdir, so its params file never lands
 next to the real strategy, where every nightly backtest would load it.
 
-Rows go to `walkforward`; lab/suggest.py turns them into retune suggestions and runs at the end.
+Rows go to `walkforward`, and each test-month trade, dated, to `walkforward_trades`; lab/suggest.py turns them into retune suggestions and runs at the end.
 Exits 1 when more than a tenth of the folds run this time failed, or on a crash.
 """
 
@@ -91,8 +91,10 @@ def stats(res: dict) -> dict:
         t = t[t["exit_reason"] != "force_exit"]
     ret = [float(x) for x in t["profit_ratio"]] if len(t) else []
     profit = float(t["profit_abs"].sum()) / res["start_balance"] if len(t) else 0.0
+    dated = [(str(r.pair), r.open_date.to_pydatetime(), r.close_date.to_pydatetime(), float(r.profit_ratio))
+             for r in t.itertuples()] if len(t) and "pair" in t else []
     return {"trades": len(ret), "profit": profit,
-            "expectancy": sum(ret) / len(ret) if ret else None, "returns": ret}
+            "expectancy": sum(ret) / len(ret) if ret else None, "returns": ret, "dated": dated}
 
 
 class Cli:
@@ -219,6 +221,13 @@ def store(conn, task: dict, res: dict) -> None:
          side("base").get("trades"), side("base").get("profit"), side("base").get("expectancy"), side("base").get("returns"),
          side("tuned").get("trades"), side("tuned").get("profit"), side("tuned").get("expectancy"),
          side("tuned").get("returns"), res.get("duration_s")))
+    conn.execute("DELETE FROM walkforward_trades WHERE strategy = %s AND exchange = %s AND fold_start = %s",
+                 (task["name"], task["exchange"], fold_start))
+    rows = [(task["name"], task["exchange"], v, fold_start, *t) for v in ("base", "tuned") for t in side(v).get("dated", [])]
+    if rows:
+        with conn.cursor() as cur:
+            cur.executemany("INSERT INTO walkforward_trades (strategy, exchange, variant, fold_start, pair, open_date, "
+                            "close_date, profit_ratio) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)", rows)
 
 
 def main(runner: Runner | None = None, today: dt.date | None = None) -> int:

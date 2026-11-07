@@ -26,7 +26,10 @@ class FakeRunner:
             return {"ok": False, "error": "hyperopt exit 2: boom", "duration_s": 1.0}
         if strategy in self.hole:
             return {"ok": False, "no_data": True, "error": f"base: {analyze.NO_DATA}", "duration_s": 1.0}
-        side = lambda p, n: {"trades": n, "profit": p, "expectancy": p / n, "returns": [p / n] * n}  # noqa: E731
+        def side(p, n):
+            d = dt.datetime(fold[1].year, fold[1].month, 1, tzinfo=dt.timezone.utc)
+            dated = [("BTC/USDT", d + dt.timedelta(days=i), d + dt.timedelta(days=i, hours=2), p / n) for i in range(n)]
+            return {"trades": n, "profit": p, "expectancy": p / n, "returns": [p / n] * n, "dated": dated}
         out = {"ok": True, "error": None, "duration_s": 2.0, "base": side(0.01, 10), "params": None}
         if strategy in self.untuned:
             return {**out, "error": "no hyperopt epoch reached 10 training trades"}
@@ -213,3 +216,27 @@ def test_the_embargo_is_part_of_the_cache_key(monkeypatch):
     a = wf.fold_key("h", "binanceus", fold, "v")
     monkeypatch.setattr(wf, "EMBARGO_DAYS", 3)
     assert a != wf.fold_key("h", "binanceus", fold, "v")
+
+
+def test_dated_test_month_trades_are_stored_per_variant_and_replaced_on_rerun(wlab):
+    wf.main(FakeRunner(), TODAY)
+    q = ("SELECT variant, count(*), sum(profit_ratio) FROM walkforward_trades "
+         "WHERE strategy = 'Live' AND fold_start = '2026-10-01' GROUP BY variant ORDER BY variant")
+    got = wlab.execute(q).fetchall()
+    assert [(v, n) for v, n, _ in got] == [("base", 10), ("tuned", 12)]
+    assert got[1][2] == pytest.approx(0.04)
+    wlab.execute("UPDATE walkforward SET cache_key = 'stale' WHERE strategy = 'Live'")
+    wf.main(FakeRunner(), TODAY)
+    assert wlab.execute(q).fetchall()[1][1] == 12, "a rerun replaces the fold's trades, never doubles them"
+    day = wlab.execute("SELECT trades FROM walkforward_daily WHERE strategy = 'Live' AND variant = 'tuned' "
+                       "AND day = '2026-10-01'").fetchone()
+    assert day == (1,)
+
+
+def test_stats_keep_the_dates_of_the_trades_that_survive_the_purge():
+    import pandas as pd
+    o = pd.to_datetime(["2026-10-02", "2026-10-30"], utc=True)
+    t = pd.DataFrame({"pair": ["A/USDT", "B/USDT"], "open_date": o, "close_date": o + pd.Timedelta(hours=3),
+                      "profit_ratio": [0.01, -0.5], "profit_abs": [1.0, -50.0], "exit_reason": ["roi", "force_exit"]})
+    got = wf.stats({"trades": t, "start_balance": 100.0})
+    assert [d[0] for d in got["dated"]] == ["A/USDT"] and got["dated"][0][3] == 0.01
