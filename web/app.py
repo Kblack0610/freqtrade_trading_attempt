@@ -633,6 +633,7 @@ def book(request: Request):
                 portfolio=rows("SELECT * FROM portfolio ORDER BY worst_corr"), climates=climate_table(rows(CLIMATES)),
                 vol=rows("SELECT * FROM vol_verdict ORDER BY exchange, baseline"),
                 vol_days=cfg["volatility"]["baseline_days"], vol_level=cfg["volatility"]["level"],
+                horizon=rows("SELECT * FROM horizon_verdict ORDER BY strategy, exchange, variant, plan"), trend_days=cfg["book"]["trend_days"],
                 benchmarks=rows("SELECT * FROM benchmarks ORDER BY end_day - start_day, name"),
                 short=cfg["book"]["horizon_months"][0], long=cfg["book"]["horizon_months"][-1],
                 stake=cfg["book"]["stages"][0]["stake"], min_days=cfg["scorecard"]["min_days"])
