@@ -31,6 +31,7 @@ Results go to the `trader` database in the cluster's shared Postgres, which the 
 | `lab/confidence.py` | After each analysis and walk-forward: the score and gates that say whether a strategy has earned real money, and the trial register (see Confidence) |
 | `lab/families.toml` | By hand: each strategy class's method family (trend, mean-reversion, momentum and the rest) and data inputs, for `/coverage` |
 | `lab/volatility.py` | After the derived tables: HAR against a 30-day mean and an EWMA as daily variance forecasts, scored by QLIKE on months before the lockbox. |
+| `lab/scorecard.py` | After the book: each strategy's and BTC hold's out-of-sample annual return per market climate (BTC trend x volatility tercile) with a 90% interval, from `walkforward_daily`; the "By market climate" table on `/book`. Markets backtests are split by contract category (`lab/markets.toml` [categories]) into `market_category_results`, shown on `/markets/book`. |
 | `lab/book.py` | After the score: what each scored strategy might return beside holding BTC, and what each stage costs and can lose. |
 | `lab/live.py` | Live bot entry point: always refuses, nothing deploys it. See `docs/live.md` and the operator rules in `docs/operating-rules.md` |
 | `lab/ingest.py` | Job run every 5 minutes: every bot's trades (closed and open) and a snapshot (profit, balance, dry-run flag, each open pair's newest candle time) into Postgres |
@@ -257,7 +258,7 @@ The first run fetches full history (5m since 2019 on binanceus is the long pole)
 - `023`: `paper_accounts` and `paper_orders` (the event-contract paper league, written by `lab/markets/paper.py`) and `demo_orders` (each drill order, written by `lab/markets/kalshi_trade.py`, `lab/markets/manifold_trade.py` and `lab/broker.py`).
 - `025`: `broker_balances`, each read of a broker paper account, written by `lab/broker.py`. Its drill writes to `demo_orders`.
 - `026`: `broker_balances.paper`, since the table now also holds read-only reads of real accounts.
-- `028`: `vol_scores` and `vol_verdict`, the volatility forecast's QLIKE per venue, pair, model and month, and whether HAR beats each baseline, rebuilt by `lab/volatility.py` on every analysis.
+- `029`: `vol_scores` and `vol_verdict`, the volatility forecast's QLIKE per venue, pair, model and month, and whether HAR beats each baseline, rebuilt by `lab/volatility.py` on every analysis.
 
  A schema change is a new numbered file; never edit an applied one.
 

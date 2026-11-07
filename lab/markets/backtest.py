@@ -258,6 +258,24 @@ def evaluate(trades: pd.DataFrame, start: dt.datetime, end: dt.datetime, wallet:
     return {"metrics": m, "interval": ev, "dsr": dsr}
 
 
+def category_of(series_id: str | None, categories: dict) -> str:
+    """The contract category of a series by the prefixes in markets.toml [categories]; "other" when none matches."""
+    s = (series_id or "").lower()
+    return next((c for c, prefixes in categories.items() if any(s.startswith(p.lower()) for p in prefixes)), "other")
+
+
+def by_category(trades: pd.DataFrame, markets: dict, categories: dict, seed: int, ccfg: dict) -> list[tuple]:
+    """(category, trades, mean, lo, hi) of the net return per trade, one row per category with a trade."""
+    if not len(trades):
+        return []
+    cat = trades["market_id"].map(lambda m: category_of(markets[m].series_id if m in markets else None, categories))
+    out = []
+    for c in sorted(cat.unique()):
+        e = confidence.interval(trades.loc[cat == c, "profit_ratio"], metrics.seed_of(seed, c), ccfg)
+        out.append((c, e["trades"], e["mean"], e["lo"], e["hi"]))
+    return out
+
+
 def rescore(conn, ccfg: dict) -> int:
     """confidence.scores over every stored backtest; a row outside the population gets no score."""
     ev = {(f, v, var): confidence.interval(r, metrics.seed_of(f, v, var, "confidence"), ccfg)
@@ -298,6 +316,13 @@ def run(conn, strategy: Strategy, venue: str, book: pd.DataFrame, start: dt.date
         (strategy.name, venue, variant, Jsonb(strategy.params), start, end, sent, len(fills), len(trades),
          len(fills) - len(trades), Jsonb(e["metrics"]),
          ev["returns"].tolist(), ev["mean"], ev["lo"], ev["hi"], e["dsr"], trials))
+    conn.execute("DELETE FROM market_category_results WHERE family = %s AND venue = %s AND variant = %s",
+                 (strategy.name, venue, variant))
+    with conn.cursor() as cur:
+        cur.executemany("INSERT INTO market_category_results (family, venue, variant, category, trades, mean, lo, hi) "
+                        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+                        [(strategy.name, venue, variant, *r) for r in by_category(
+                            trades, markets, cfg.get("categories", {}), metrics.seed_of(strategy.name, venue, variant), ccfg)])
     scored = rescore(conn, ccfg)
     return {"orders": sent, "fills": len(fills), "trades": len(trades), "expectancy": ev["mean"], "lo": ev["lo"],
             "hi": ev["hi"], "dsr": e["dsr"], "trials": trials, "scored": scored}

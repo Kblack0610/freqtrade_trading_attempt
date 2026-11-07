@@ -7,6 +7,7 @@ import pyarrow.parquet as pq
 import pytest
 from pyarrow import fs as pafs
 
+from lab import suggest
 from lab.markets import backtest, fees
 from lab.markets.backtest import Lookahead, Market, Order
 from lab.markets.recorder import SCHEMA, load_config
@@ -261,7 +262,9 @@ def test_run_registers_the_trial_stores_the_result_and_replaces_it(conn):
     row = conn.execute("SELECT trades, fills, open_fills, cardinality(returns), metrics->>'trades', expectancy "
                        "FROM market_backtests").fetchone()
     assert row[:5] == (30, 30, 0, 30, "30") and row[5] == pytest.approx(out["expectancy"])
+    assert conn.execute("SELECT category, trades FROM market_category_results").fetchall() == [("other", 30)]
     backtest.run(conn, Once(), "kalshi", b, T0, end, CFG)
+    assert conn.execute("SELECT count(*) FROM market_category_results").fetchone()[0] == 1
     assert conn.execute("SELECT count(*) FROM market_backtests").fetchone()[0] == 1
     assert conn.execute("SELECT count(*) FROM trials WHERE exchange = 'kalshi'").fetchone()[0] == before + 1
 
@@ -288,3 +291,20 @@ def test_scores_come_once_the_population_is_large_enough(conn):
     out = backtest.run(conn, Once(stake=12.0), "kalshi", b, T0, T0 + dt.timedelta(days=1), CFG, ccfg)
     assert out["scored"] == 3
     assert conn.execute("SELECT count(*) FROM market_backtests WHERE score BETWEEN 0 AND 100").fetchone()[0] == 3
+
+
+def test_a_series_falls_in_the_category_its_prefix_names():
+    cats = CFG["categories"]
+    assert [backtest.category_of(s, cats) for s in ("KXNBAGAME", "kxpres-2028", "KXFEDDECISION", "basketball_nba", "KXWEATHER", None)] \
+        == ["sports", "politics", "economics", "sports", "other", "other"]
+
+
+def test_results_split_by_the_category_of_each_trade(conn):
+    ids = [f"M{i}" for i in range(80)]
+    series = {m: ("KXNBAGAME" if i % 2 else "KXFEDRATE") for i, m in enumerate(ids)}
+    markets = {m: Market(m, "EV", series[m], "t", None, "binary", T0 - dt.timedelta(days=1), at(86400)) for m in ids}
+    trades = pd.DataFrame({"market_id": ids, "profit_ratio": [0.1 if series[m] == "KXNBAGAME" else -0.1 for m in ids]})
+    out = {r[0]: r for r in backtest.by_category(trades, markets, CFG["categories"], 1, suggest.load_config()["confidence"])}
+    assert set(out) == {"sports", "economics"} and out["sports"][1] == out["economics"][1] == 40
+    assert out["sports"][2] > 0 > out["economics"][2] and out["sports"][3] > 0 > out["economics"][4]
+    assert backtest.by_category(trades.iloc[:0], markets, CFG["categories"], 1, {}) == []

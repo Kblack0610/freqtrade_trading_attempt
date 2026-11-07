@@ -179,6 +179,13 @@ kind = "profit"
 share = 0.10
 rounding = "none"
 
+[categories]
+# Contract category by series_id prefix, case-blind; no match is "other". Kalshi series, then Polymarket slugs and
+# Odds API sport keys. A guess at the venue's own category, which the markets table does not hold; extend as series appear.
+sports = ["KXNFL", "KXNBA", "KXNHL", "KXMLB", "KXNCAA", "KXMLS", "KXUFC", "KXATP", "KXWTA", "KXEPL", "KXPGA", "KXF1", "KXSOCCER", "basketball_", "americanfootball_", "icehockey_", "baseball_", "soccer_", "mma_", "tennis_"]
+politics = ["KXPRES", "KXSEN", "KXHOUSE", "KXGOV", "KXTRUMP", "KXELECT", "KXPOL", "KXMAYOR", "KXVOTE"]
+economics = ["KXFED", "KXCPI", "KXGDP", "KXPAYROLL", "KXJOBS", "KXUNRATE", "KXINFL", "KXRATE", "KXRECSS", "KXU3"]
+
 [families]
 # python -m lab.markets.families <family> (lab/markets/families.py). Each family below is a grid: a list is an axis, a
 # list of tables merges each table into the variant, anything else is fixed. Every variant is a trial, and the

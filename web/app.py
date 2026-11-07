@@ -196,6 +196,7 @@ ORDER BY l.proposed_at DESC, l.id DESC LIMIT 200
 """
 LINK_ASKS = "SELECT model, venue_b, count(*) AS asked, sum(proposed) AS proposed, max(asked_at) AS last FROM market_link_asks GROUP BY model, venue_b ORDER BY model, venue_b"
 MARKET_BACKTESTS = "SELECT * FROM market_backtests ORDER BY score DESC NULLS LAST, expectancy_lo DESC NULLS LAST, family, venue, variant"
+MARKET_CATEGORIES = "SELECT * FROM market_category_results ORDER BY category, lo DESC NULLS LAST, family, venue, variant"
 PAPER_ACCOUNTS = """
 SELECT a.*, w.state, w.breached_at, w.stopped_at,
        (SELECT count(*) FROM paper_orders o WHERE o.account = a.account AND o.contracts > 0) AS fills,
@@ -601,6 +602,25 @@ def confidence(request: Request):
     return page(request, "confidence.html", board=board, pop=pop)
 
 
+CLIMATES = "SELECT * FROM climate_scorecard ORDER BY cell, kind, name, exchange, variant"
+CLIMATE_ORDER = [f"{t}/{v}" for t in ("up", "flat", "down") for v in ("low", "mid", "high")]
+
+
+def climate_table(scores: list[dict]) -> list[dict]:
+    """One row per climate: the BTC hold beside the strategies whose interval low end clears zero there."""
+    out = []
+    for cell in CLIMATE_ORDER:
+        mine = [r for r in scores if r["cell"] == cell]
+        if not mine:
+            continue
+        hold = next((r for r in mine if r["kind"] == "benchmark"), None)
+        strategies = [r for r in mine if r["kind"] != "benchmark"]
+        out.append({"cell": cell, "hold": hold, "tested": sum(r["lo"] is not None for r in strategies),
+                    "passing": sorted((r for r in strategies if r["lo"] is not None and r["lo"] > 0), key=lambda r: -r["lo"]),
+                    "trials": max(r["trials"] for r in mine)})
+    return out
+
+
 @app.get("/book", response_class=HTMLResponse)
 def book(request: Request):
     user_of(request)
@@ -610,12 +630,12 @@ def book(request: Request):
     board = rows(BOOK)
     return page(request, "book.html", board=board, bands=bands, pop=None if board else population(cfg["confidence"]), budget=book_lab.budget(cfg),
                 hurdle=book_lab.hurdle(cfg), yield_=cfg["book"]["tbill_yield"], tax=cfg["book"]["tax_short"],
-                portfolio=rows("SELECT * FROM portfolio ORDER BY worst_corr"),
+                portfolio=rows("SELECT * FROM portfolio ORDER BY worst_corr"), climates=climate_table(rows(CLIMATES)),
                 vol=rows("SELECT * FROM vol_verdict ORDER BY exchange, baseline"),
                 vol_days=cfg["volatility"]["baseline_days"], vol_level=cfg["volatility"]["level"],
                 benchmarks=rows("SELECT * FROM benchmarks ORDER BY end_day - start_day, name"),
                 short=cfg["book"]["horizon_months"][0], long=cfg["book"]["horizon_months"][-1],
-                stake=cfg["book"]["stages"][0]["stake"])
+                stake=cfg["book"]["stages"][0]["stake"], min_days=cfg["scorecard"]["min_days"])
 
 
 def strategy_classes() -> set[str]:
@@ -708,5 +728,5 @@ def markets_book(request: Request):
     accounts = rows(PAPER_ACCOUNTS)
     for a in accounts:
         a["ret"] = None if a["equity"] is None else a["equity"] / a["capital"] - 1
-    return page(request, "markets_book.html", backtests=rows(MARKET_BACKTESTS), accounts=accounts,
+    return page(request, "markets_book.html", backtests=rows(MARKET_BACKTESTS), categories=rows(MARKET_CATEGORIES), accounts=accounts,
                 fills=rows(PAPER_FILLS), demo=rows(DEMO_ORDERS), brokers=rows(BROKERS), hard_stop=hard_stop)

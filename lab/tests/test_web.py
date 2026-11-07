@@ -461,6 +461,8 @@ def seed_markets(c):
               "returns, expectancy, expectancy_lo, expectancy_hi, dsr, trials) VALUES ('longshot', 'kalshi', 'abcdef0123456789', %s, "
               "'2025-01-01', '2026-01-01', 900, 812, 800, 12, %s, '{0.1,-0.05}', 0.0123, -0.004, 0.031, 0.42, 16)",
               (Jsonb({"edge": 0.06}), Jsonb({"winrate": 0.61})))
+    c.execute("INSERT INTO market_category_results (family, venue, variant, category, trades, mean, lo, hi) VALUES "
+              "('longshot', 'kalshi', 'abcdef0123456789', 'sports', 450, 0.0211, 0.0043, 0.0377)")
     c.execute("INSERT INTO paper_accounts (account, family, venue, variant, params, capital, started_at, equity, realized, open_positions, marked_at) "
               "VALUES ('paper-longshot-abcdef01', 'longshot', 'kalshi', 'abcdef0123456789', %s, 1000, now(), 987.5, -4.25, 3, now())",
               (Jsonb({"edge": 0.06}),))
@@ -481,7 +483,7 @@ def test_markets_pages_render_with_data(conn, signed_in):
                           "The Odds API", "1 of 2", "2026-01-02 to 2026-01-03", "4,321", "never swept"],
              "/links": ["rule:kalshi_game", "San Antonio at Phoenix", "Spurs at Suns", "by rule", "claude-haiku"],
              "/links?status=rejected": ["No rejected links."],
-             "/markets/book": ["longshot", "abcdef01", "1.23%", "-0.40% to 3.10%", "61%", "0.42", "paper-longshot-abcdef01",
+             "/markets/book": ["longshot", "abcdef01", "1.23%", "-0.40% to 3.10%", "61%", "0.42", "By contract category", "2.11%", "0.43% to 3.77%", "paper-longshot-abcdef01",
                                "987.50", "-1.25%", "stopped", "San Antonio at Phoenix", "0.91", "KXDEMO-1", "canceled", "15%",
                                "alpaca_paper", "100,012.50", "fidelity_individual_1234",
                                "real, read only", "15,363.23"]}
@@ -494,3 +496,17 @@ def test_markets_pages_render_with_data(conn, signed_in):
     assert '<td class="">3m ago</td>' in client.get("/markets").text
     assert "Spurs at Suns" not in client.get("/links?status=rejected").text
     assert client.get("/links?status=bogus").status_code == 404
+
+
+def test_book_lists_the_strategies_clearing_zero_in_each_climate(conn, signed_in):
+    body = signed_in[1].get("/book").text
+    assert "No climate table yet" in body
+    conn.execute("INSERT INTO climate_scorecard (kind, name, exchange, variant, cell, days, trades, annual, lo, hi, trials) VALUES "
+                 "('benchmark', 'hold BTC', '', '', 'up/low', 120, 0, 0.80, 0.30, 1.40, 94), "
+                 "('strategy', 'Alpha', 'binanceus', 'tuned', 'up/low', 90, 40, 0.50, 0.12, 0.90, 94), "
+                 "('strategy', 'Beta', 'binanceus', 'tuned', 'up/low', 90, 40, 0.10, -0.20, 0.40, 94), "
+                 "('strategy', 'Beta', 'binanceus', 'tuned', 'down/high', 10, 3, 0.10, NULL, NULL, 94)")
+    body = signed_in[1].get("/book").text
+    assert "By market climate" in body and "up/low" in body and "12%" in body and "94 trials" in body
+    table = body.split("By market climate")[1].split("Running bots")[0]
+    assert "Beta" not in table and "Alpha" in table and "<td>down/high</td>" in table
