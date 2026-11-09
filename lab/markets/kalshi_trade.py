@@ -10,7 +10,9 @@ Requests are signed as docs.kalshi.com getting_started/api_keys states: KALSHI-A
 (epoch ms) and KALSHI-ACCESS-SIGNATURE, the base64 signature of timestamp + method + path (with /trade-api/v2,
 without the query), RSA-PSS SHA-256 with a digest-length salt, or Ed25519. Orders go through the V2 event-order
 routes: POST /portfolio/events/orders (side bid buys yes; count and price are fixed-point strings, price in
-dollars) and DELETE /portfolio/events/orders/{id}; GET /portfolio/orders/{id} reads one back.
+dollars) and DELETE /portfolio/events/orders/{id}; GET /portfolio/orders/{id} reads one back. Reads lag writes on the
+demo: a 404 right after the place, the old status right after the cancel (docs/markets.md, Demo orders), so both wait
+within `read_polls` x `read_poll_s`.
 
 The drill (lab/markets/drill.py) picks an open demo market with an ask above `drill_price` (or takes --ticker), rests
 one yes contract at `drill_price`, post only, then cancels it. It exits 1 unless the order was seen resting and then
@@ -40,6 +42,10 @@ class NotDemo(ValueError):
     """A Kalshi trading client pointed anywhere but the demo exchange."""
 
 
+class NotFound(RuntimeError):
+    """HTTP 404 from the demo exchange."""
+
+
 def signer(pem: bytes):
     """sign(message) -> signature for a Kalshi API key's private key, RSA or Ed25519."""
     key = serialization.load_pem_private_key(pem, password=None)
@@ -55,7 +61,7 @@ class KalshiDemo:
     venue = "kalshi_demo"
     resting = frozenset({"resting"})
 
-    def __init__(self, cfg: dict, key_id: str, pem: bytes, session=None, clock=None):
+    def __init__(self, cfg: dict, key_id: str, pem: bytes, session=None, clock=None, sleep=None):
         url = urlparse(cfg["base_url"])
         if url.scheme != "https" or url.hostname not in DEMO_HOSTS:
             raise NotDemo(f"refusing {cfg['base_url']}: the order path runs on the Kalshi demo exchange only")
@@ -64,6 +70,8 @@ class KalshiDemo:
         self.timeout = float(cfg.get("timeout_s", 30))
         self.http = session or requests.Session()
         self.clock = clock or time.time
+        self.sleep = sleep or time.sleep
+        self.read_polls, self.read_poll_s = int(cfg["read_polls"]), float(cfg["read_poll_s"])
 
     def headers(self, method: str, path: str) -> dict:
         ts = str(int(self.clock() * 1000))
@@ -75,7 +83,8 @@ class KalshiDemo:
         r = self.http.request(method, f"{self.base}{path}", params=params, json=body, timeout=self.timeout,
                               headers=self.headers(method, path))
         if r.status_code >= 400:
-            raise RuntimeError(f"kalshi demo {method} {path}: HTTP {r.status_code}: {str(r.text)[:300]}")
+            kind = NotFound if r.status_code == 404 else RuntimeError
+            raise kind(f"kalshi demo {method} {path}: HTTP {r.status_code}: {str(r.text)[:300]}")
         return r.json()
 
     def balance(self) -> dict:
@@ -91,10 +100,20 @@ class KalshiDemo:
             "post_only": True})
 
     def order(self, order_id: str) -> dict:
+        for _ in range(self.read_polls):
+            try:
+                return self.call("GET", f"/portfolio/orders/{order_id}")["order"]
+            except NotFound:
+                self.sleep(self.read_poll_s)
         return self.call("GET", f"/portfolio/orders/{order_id}")["order"]
 
     def cancel(self, order_id: str, ticker: str) -> dict:
-        return self.call("DELETE", f"/portfolio/events/orders/{order_id}", {"market_ticker": ticker})
+        done = self.call("DELETE", f"/portfolio/events/orders/{order_id}", {"market_ticker": ticker})
+        for _ in range(self.read_polls):
+            if self.order(order_id)["status"] not in self.resting:
+                break
+            self.sleep(self.read_poll_s)
+        return done
 
 
 def pick(markets: list[dict], price: float) -> str | None:

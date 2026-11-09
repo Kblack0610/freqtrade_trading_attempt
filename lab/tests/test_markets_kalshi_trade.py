@@ -7,7 +7,7 @@ from cryptography.hazmat.primitives.asymmetric import ed25519, padding, rsa
 from lab.markets import kalshi_trade
 from lab.markets.kalshi_trade import KalshiDemo, NotDemo
 
-DEMO = {"base_url": "https://external-api.demo.kalshi.co/trade-api/v2", "timeout_s": 5}
+DEMO = {"base_url": "https://external-api.demo.kalshi.co/trade-api/v2", "timeout_s": 5, "read_polls": 3, "read_poll_s": 0.25}
 
 
 def pem(key) -> bytes:
@@ -29,8 +29,9 @@ class Resp:
 class Demo:
     """A demo exchange: one resting order, cancellable; records every request."""
 
-    def __init__(self, cancel_works=True):
+    def __init__(self, cancel_works=True, unseen=0, stale=0):
         self.calls, self.status, self.cancel_works = [], None, cancel_works
+        self.unseen, self.stale = unseen, stale  # reads that lag the place (404) and the cancel (still resting)
 
     def request(self, method, url, params, json, timeout, headers):
         path = url.split("/trade-api/v2", 1)[1].split("?")[0]
@@ -42,6 +43,12 @@ class Demo:
             self.status = "resting"
             return Resp(201, {"order_id": "o1", "fill_count": "0.00", "remaining_count": "1.00", "ts_ms": 1})
         if method == "GET" and path == "/portfolio/orders/o1":
+            if self.unseen:
+                self.unseen -= 1
+                return Resp(404, {"error": {"code": "not_found"}})
+            if self.status == "canceled" and self.stale:
+                self.stale -= 1
+                return Resp(200, {"order": {"order_id": "o1", "status": "resting"}})
             return Resp(200, {"order": {"order_id": "o1", "status": self.status}})
         if method == "DELETE" and path == "/portfolio/events/orders/o1":
             if not self.cancel_works:
@@ -89,7 +96,8 @@ def test_the_drill_rests_one_contract_then_cancels_it(conn):
     assert {k: body[k] for k in ("ticker", "side", "count", "price", "post_only")} == \
         {"ticker": "T-OK", "side": "bid", "count": "1.00", "price": "0.0100", "post_only": True}
     assert [c[:2] for c in s.calls[1:]] == [("POST", "/portfolio/events/orders"), ("GET", "/portfolio/orders/o1"),
-                                           ("DELETE", "/portfolio/events/orders/o1"), ("GET", "/portfolio/orders/o1")]
+                                           ("DELETE", "/portfolio/events/orders/o1"), ("GET", "/portfolio/orders/o1"),
+                                           ("GET", "/portfolio/orders/o1")]
     assert s.calls[3][2] == {"market_ticker": "T-OK"}
 
 
@@ -98,6 +106,29 @@ def test_a_failed_cancel_is_recorded_and_fails_the_drill(conn):
     row = kalshi_trade.drill(conn, KalshiDemo(DEMO, "k", pem(RSA), session=s), 0.01, ticker="T-OK")
     assert row["status"] == "resting" and row["canceled_at"] is None and "HTTP 503" in row["error"]
     assert [c[0] for c in s.calls].count("POST") == 1  # never retried
+
+
+def test_reads_that_lag_the_place_and_the_cancel_still_pass_the_drill(conn):
+    s, slept = Demo(unseen=2, stale=2), []
+    row = kalshi_trade.drill(conn, KalshiDemo(DEMO, "k", pem(RSA), session=s, sleep=slept.append), 0.01, ticker="T-OK")
+    assert (row["status"], row["error"]) == ("canceled", None)
+    assert slept == [0.25] * 4
+    assert [c[0] for c in s.calls].count("POST") == 1
+
+
+def test_an_order_never_seen_is_canceled_and_fails_the_drill(conn):
+    s, slept = Demo(unseen=99), []
+    row = kalshi_trade.drill(conn, KalshiDemo(DEMO, "k", pem(RSA), session=s, sleep=slept.append), 0.01, ticker="T-OK")
+    assert row["order_id"] == "o1" and row["canceled_at"] is None and "HTTP 404" in row["error"]
+    assert s.status == "canceled"  # not left on the book
+    assert [c[0] for c in s.calls].count("POST") == 1
+
+
+def test_a_cancel_stuck_resting_fails_the_drill_within_its_bound(conn):
+    s, slept = Demo(stale=99), []
+    row = kalshi_trade.drill(conn, KalshiDemo(DEMO, "k", pem(RSA), session=s, sleep=slept.append), 0.01, ticker="T-OK")
+    assert row["status"] == "resting" and "after the cancel" in row["error"]
+    assert slept == [0.25] * 3
 
 
 def test_the_demo_config_points_at_the_demo():
