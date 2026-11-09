@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
 """Pick the roster rows of a dry-run cohort from the analysis tables (lab/cohorts.toml).
 
-`python -m lab.cohorts pick aggressive` prints a JSON list of roster lines: the top strategies by the low end of the
-Sharpe interval in the cohort's window, each with the setup overlay that scored best for it, one row per venue.
-The promote gates are not applied (the cohort forward-tests near-misses), but lookahead-biased or unloadable
-strategies are left out, since their backtests are void. Nothing here edits the roster: ci/cohort_roster.py turns the
-rows into a home-config PR that a person merges.
+`python -m lab.cohorts pick <cohort>` prints a JSON list of roster lines. A strategy cohort (aggressive) is the top
+strategies by the low end of the Sharpe interval in the cohort's window, each with the setup overlay that scored best
+for it, one row per venue; lookahead-biased or unloadable strategies are left out, since their backtests are void. A
+mixture cohort (`kind = "mixture"`) is the sleeves of the best mixture lab/mixtures.py scored that bots can run as
+specified, one row per sleeve on its own exchange. The promote gates are not applied: a cohort forward-tests
+near-misses. Nothing here edits the roster: ci/cohort_roster.py turns the rows into a home-config PR that a person
+merges.
 """
 
 import json
+import math
 import os
 import statistics
 import sys
@@ -60,6 +63,23 @@ def pick(rows: list[tuple], cfg: dict, known: set[str]) -> list[str]:
             for s in order for v in cfg["venues"]]
 
 
+def mixture_rows(conn, weighting: str, gated: bool, min_days: int) -> list[tuple]:
+    """(variant, sleeves, lo, sharpe) of every mixture of that weighting and gate with an interval over min_days."""
+    return list(conn.execute(
+        "SELECT variant, spec->'sleeves', lo, sharpe FROM mixtures "
+        "WHERE weighting = %s AND gated = %s AND days >= %s AND lo IS NOT NULL",
+        (weighting, gated, min_days)))
+
+
+def pick_mixture(rows: list[tuple], cfg: dict) -> list[str]:
+    """Pure: roster lines for the best mixture by the low end of its interval (then Sharpe, then variant), one per
+    sleeve on the sleeve's own exchange, each under the base overlay: sleeves are walk-forward returns, not overlays."""
+    if not rows:
+        return []
+    _, sleeves, _, _ = min(rows, key=lambda r: (-r[2], -(r[3] if r[3] is not None else -math.inf), r[0]))
+    return [f"{cfg['prefix']}-{e}-{s.lower()} {e} {s} {cfg['cohort']} {BASE}" for s, e in sleeves]
+
+
 def main(argv: list[str]) -> int:
     if len(argv) != 2 or argv[0] != "pick":
         print("usage: python -m lab.cohorts pick <cohort>", file=sys.stderr)
@@ -70,9 +90,12 @@ def main(argv: list[str]) -> int:
         return 2
     cfg = {"prefix": argv[1][:3], "cohort": argv[1], **cfg}
     with connect() as conn:
-        rows = score_rows(conn, cfg["window"], cfg["rank_venues"], cfg["min_trades"])
-    known, _ = variants.load()
-    print(json.dumps(pick(rows, cfg, set(known))))
+        if cfg.get("kind") == "mixture":
+            lines = pick_mixture(mixture_rows(conn, cfg["weighting"], cfg["gated"], cfg["min_days"]), cfg)
+        else:
+            known, _ = variants.load()
+            lines = pick(score_rows(conn, cfg["window"], cfg["rank_venues"], cfg["min_trades"]), cfg, set(known))
+    print(json.dumps(lines))
     return 0
 
 

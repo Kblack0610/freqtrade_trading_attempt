@@ -42,6 +42,7 @@ CACHE_MAX = 512  # entries; the oldest goes first
 TF_ORDER = ["1m", "5m", "15m", "30m", "1h", "4h", "1d"]
 FAMILIES = HERE.parent / "lab" / "families.toml"
 MARKETS = HERE.parent / "lab" / "markets.toml"
+PAPER_COHORT = "markets"  # the paper league's row among the cohorts (lab/markets/paper.py)
 STRATEGY_DIR = HERE.parent / "user_data" / "strategies"
 # Direct IStrategy subclasses, read from source so the toml check needs neither freqtrade nor a database.
 STRATEGY_CLASS = re.compile(r"^class (\w+)\(IStrategy\)", re.M)
@@ -431,15 +432,38 @@ def cohorts(bots: list[dict]) -> list[dict]:
     return sorted(out.values(), key=lambda c: (c["cohort"] != "league", c["cohort"]))
 
 
+def paper_cohort(accounts: list[dict]) -> dict | None:
+    """The markets paper league (lab/markets/paper.py) as a cohort row: its accounts, the marked ones, and their
+    summed profit and equity, settled and open fills, and mean return, the way cohorts() sums bots."""
+    if not accounts:
+        return None
+    marked = sorted(({**a, "name": a["account"], "href": "/markets/book",
+                      "profit_all_pct": (a["equity"] / a["capital"] - 1) * 100}
+                     for a in accounts if a["marked_at"] and a["equity"] is not None),
+                    key=lambda a: a["profit_all_pct"])
+    return {"cohort": PAPER_COHORT, "bots": len(accounts), "reporting": len(marked),
+            "profit_abs": sum(a["equity"] - a["capital"] for a in marked), "balance": sum(a["equity"] for a in marked),
+            "open_trades": sum(a["open_positions"] or 0 for a in marked),
+            "closed_trades": sum(a["settled"] for a in marked),
+            "mean_pct": sum(a["profit_all_pct"] for a in marked) / len(marked) if marked else None,
+            "worst": marked[0] if marked else None, "best": marked[-1] if marked else None}
+
+
+def all_cohorts(bots: list[dict], accounts: list[dict]) -> list[dict]:
+    """The bot cohorts, then the markets paper league."""
+    paper = paper_cohort(accounts)
+    return cohorts(bots) + ([paper] if paper else [])
+
+
 @app.get("/", response_class=HTMLResponse)
 def overview(request: Request):
     user_of(request)
     bots = rows(BOTS)
     snaps = [b for b in bots if b["ts"]]
     last_ingest = rows("SELECT max(ts) AS ts FROM bot_snapshots WHERE source = 'ingest'")[0]["ts"]
-    return page(request, "overview.html", bots=bots, last_ingest=last_ingest, cohorts=cohorts(bots),
-                total_abs=sum(b["profit_all_abs"] or 0 for b in snaps),
-                total_balance=sum(b["balance_total"] or 0 for b in snaps),
+    groups = all_cohorts(bots, rows(PAPER_ACCOUNTS))
+    return page(request, "overview.html", bots=bots, last_ingest=last_ingest, cohorts=groups,
+                total_abs=sum(c["profit_abs"] for c in groups), total_balance=sum(c["balance"] for c in groups),
                 live_bots=[b["name"] for b in snaps if b["dry_run"] is False],
                 coverage=rows(COVERAGE_BY_EXCHANGE), last_run=(rows(RUNS) or [None])[0],
                 top=[r for r in rows(LEADERBOARD, ("365d",)) if not r["biased"] and r["trades"] >= MIN_TRADES][:5],
@@ -479,7 +503,9 @@ def live_view() -> dict:
 def cohorts_page(request: Request):
     user_of(request)
     bots = rows(BOTS)
-    return page(request, "cohorts.html", cohorts=cohorts(bots), bots=bots)
+    accounts = rows(PAPER_ACCOUNTS)
+    return page(request, "cohorts.html", cohorts=all_cohorts(bots, accounts), bots=bots, accounts=accounts,
+                paper=PAPER_COHORT)
 
 
 @app.get("/live", response_class=HTMLResponse)

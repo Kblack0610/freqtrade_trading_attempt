@@ -77,9 +77,9 @@ def main(argv: list[str]) -> int:
     pr = call("POST", f"/repos/{REPO}/pulls", {
         "base": BASE, "head": branch, "title": title,
         "body": (f"Appends {len(lines)} rows of the `{cohort}` cohort to `{ROSTER}` and raises replicas to the row "
-                 "count. The rows are the top strategies by the low end of the Sharpe interval, each with its best "
-                 "setup overlay (lab/cohorts.toml); the promote gates are ignored, the backtests behind them are "
-                 "counted trials. Dry run only: lab/league.py refuses anything else. Opened by "
+                 f"count. The rows are what `[{cohort}]` in lab/cohorts.toml picks from the analysis tables (README, "
+                 "Cohorts); the promote gates are ignored, the backtests and mixtures behind them are counted "
+                 "trials. Dry run only: lab/league.py refuses anything else. Opened by "
                  "Kblack0610/freqtrade_trading_attempt ci/cohort_roster.py; a person merges it.\n\n"
                  + "\n".join(f"    {line}" for line in lines))})
     print(pr["html_url"])

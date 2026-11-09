@@ -2,11 +2,33 @@
 {% block title %}Cohorts{% endblock %}
 {% block body %}
 <h1>Cohorts</h1>
-<p class="muted">Each roster row in home-config names the cohort its bot reports in and the setup overlay it runs under (an id from <code>lab/variants.toml</code>; base is the strategy's own settings). Every cohort is dry run: this compares ways of picking and setting up bots on live prices, and a few weeks of them is too short to judge one by.</p>
+<p class="muted">Each roster row in home-config names the cohort its bot reports in and the setup overlay it runs under (an id from <code>lab/variants.toml</code>; base is the strategy's own settings). Every cohort is dry run: this compares ways of picking and setting up bots on live prices, and a few weeks of them is too short to judge one by. The {{ paper }} cohort is the event-contract paper league: one paper account per variant of each family in <code>lab/markets.toml</code> [paper], filled against the recorded books; its trades are settled and open fills.</p>
 {% include "_cohorts.html" %}
 
 {% for c in cohorts %}
 <h2 id="{{ c.cohort }}">{{ c.cohort }}</h2>
+{% if c.cohort == paper %}
+<div class="scroll">
+<table>
+  <thead><tr><th>Account</th><th>Family</th><th>Venue</th><th>Params</th><th class="n">Return</th><th class="n">Equity</th><th class="n">Settled fills</th><th class="n">Open positions</th><th>Marked</th></tr></thead>
+  <tbody>
+  {% for a in accounts %}
+  <tr>
+    <td><a href="/markets/book">{{ a.account }}</a></td>
+    <td>{{ a.family }}</td>
+    <td>{{ a.venue }}</td>
+    <td class="muted">{% for k, v in a.params | dictsort %}{{ k }} {{ v }}{% if not loop.last %}, {% endif %}{% endfor %}</td>
+    <td class="n {{ 'up' if (a.equity if a.equity is not none else a.capital) >= a.capital else 'down' }}">{{ (((a.equity / a.capital - 1) * 100) if a.equity is not none else none) | num(2, "%") }}</td>
+    <td class="n">{{ a.equity | num(2) }}</td>
+    <td class="n">{{ a.settled }}</td>
+    <td class="n">{{ a.open_positions if a.open_positions is not none else "-" }}</td>
+    <td class="{{ 'down' if stale(a.marked_at) }}">{{ a.marked_at | ago }}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}
 <div class="scroll">
 <table>
   <thead><tr><th>Bot</th><th>Exchange</th><th>Strategy</th><th>Overlay</th><th class="n">Profit</th><th class="n">USD</th><th class="n">Closed trades</th><th class="n">Open trades</th><th>Updated</th></tr></thead>
@@ -27,5 +49,6 @@
   </tbody>
 </table>
 </div>
+{% endif %}
 {% endfor %}
 {% endblock %}
