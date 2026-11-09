@@ -1,0 +1,16 @@
+# Dry-run cohorts the lab picks the roster rows of (lab/cohorts.py). A cohort is a league label on the overview;
+# a roster row carries it (README, Cohorts). Everything here is paper: lab/league.py refuses anything else.
+
+[aggressive]
+# The top `top` strategies by the low end of the Sharpe interval in `window`, each run under its best setup overlay
+# (lab/variants.toml) on every venue in `venues`. The promote gates are ignored on purpose: this cohort forward-tests
+# near-misses. Every backtest it picks from is a counted trial in the register, so the search it came from still
+# raises the deflated-Sharpe bar for everything.
+top = 4
+window = "365d"
+# The score is the mean low end over these venues, and a strategy needs trades on every one. Cheap venues only:
+# coinbase fees end almost every backtest in ruin, and kraken has no backtest history (README, Troubleshooting).
+rank_venues = ["binanceus"]
+min_trades = 30
+# Where the bots run. Grow this or `top` only by a human decision: a wrong row costs a PVC.
+venues = ["binanceus", "coinbase", "kraken"]
