@@ -88,7 +88,7 @@ WHERE bot = %s AND profit_all_pct IS NOT NULL ORDER BY date_trunc('hour', ts), t
 STRATEGY_TRADES = """
 SELECT t.* FROM backtest_chunks c
 CROSS JOIN LATERAL (SELECT * FROM backtest_trades WHERE chunk_id = c.id ORDER BY close_date DESC LIMIT 100) t
-WHERE c.strategy = %s AND c.exchange = %s ORDER BY t.close_date DESC LIMIT 100
+WHERE c.strategy = %s AND c.exchange = %s AND c.overlay = '' ORDER BY t.close_date DESC LIMIT 100
 """
 COVERAGE_BY_EXCHANGE = """
 SELECT exchange, count(*) AS series, count(*) FILTER (WHERE oldest_reached) AS at_oldest,
@@ -533,7 +533,8 @@ def strategy(request: Request, name: str, exchange: str = ""):
         wf=[(pooled(f), f) for f in walkforward_by_pair("WHERE strategy = %s", (name,)).values()],
         suggestions=rows("SELECT * FROM suggestions WHERE strategy = %s ORDER BY kind, exchange, bot", (name,)),
         correlations=rows("SELECT * FROM correlations WHERE strategy = %s AND exchange = %s ORDER BY abs(rho) DESC", key),
-        chunks=rows("SELECT * FROM backtest_chunks WHERE strategy = %s AND exchange = %s ORDER BY chunk_start DESC", key),
+        chunks=rows("SELECT * FROM backtest_chunks WHERE strategy = %s AND exchange = %s AND overlay = '' "
+                    "ORDER BY chunk_start DESC", key),
         trades=rows(STRATEGY_TRADES, key))
 
 
@@ -710,7 +711,7 @@ def run(request: Request, run_id: int):
     found = [r for r in rows(RUNS) if r["id"] == run_id]
     if not found:
         raise HTTPException(404, f"No run {run_id}")
-    failed = rows("SELECT strategy, exchange, chunk_start, attempts, error FROM backtest_chunks "
+    failed = rows("SELECT strategy, exchange, overlay, chunk_start, attempts, error FROM backtest_chunks "
                   "WHERE run_id = %s AND NOT ok ORDER BY strategy, exchange, chunk_start", (run_id,))
     return page(request, "run.html", run=found[0], failed=failed)
 

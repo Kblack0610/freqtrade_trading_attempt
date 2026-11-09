@@ -6,6 +6,7 @@ import pyarrow.parquet as pq
 import pytest
 from pyarrow import fs as pafs
 
+from lab import grid
 from lab.markets import backtest, families
 from lab.markets.backtest import Lookahead, Market
 from lab.markets.families import Calibration, Forecaster, Gap, Longshot, RefBook
@@ -41,11 +42,11 @@ def sides(orders):
 
 
 def test_variants_take_every_list_as_an_axis_and_merge_a_list_of_tables():
-    v = families.variants(CFG["families"]["longshot"])
+    v = grid.variants(CFG["families"]["longshot"])
     assert len(v) == 8 and len({backtest.variant_of(p) for p in v}) == 8
     assert v[0] == {"stake": 10, "max_spread": 0.05, "hours": 24, "buy": "no", "lo": 0.01, "hi": 0.10}
-    assert len(families.variants(CFG["families"]["calibration"])) == 4
-    assert families.variants({"a": 1}) == [{"a": 1}]
+    assert len(grid.variants(CFG["families"]["calibration"])) == 4
+    assert grid.variants({"a": 1}) == [{"a": 1}]
 
 
 def test_longshot_buys_its_side_in_the_band_inside_the_window_once_per_market():
@@ -220,7 +221,7 @@ def test_the_command_backtests_and_registers_every_variant(conn, tmp_path):
     write_bars(fs, root, at(40).date(), [(m, 30, 0.05, 0.07) for m in ids])
     end = at(40).date() + dt.timedelta(days=1)
     assert families.main(["longshot", "--start", str(T0.date()), "--end", str(end)], fs=fs) == 0
-    n = len(families.variants(CFG["families"]["longshot"]))
+    n = len(grid.variants(CFG["families"]["longshot"]))
     assert conn.execute("SELECT count(*) FROM trials WHERE strategy = 'longshot' AND exchange = 'kalshi'"
                         ).fetchone()[0] == n
     rows = conn.execute("SELECT params->>'buy', params->>'lo', (params->>'hours')::int, trades FROM market_backtests "

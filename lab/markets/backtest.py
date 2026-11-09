@@ -30,8 +30,6 @@ and variant (migration 022), and rescores them all. The deflated Sharpe counts e
 """
 
 import datetime as dt
-import hashlib
-import json
 import math
 from dataclasses import dataclass
 from typing import Iterable, Protocol
@@ -43,6 +41,7 @@ from psycopg.types.json import Jsonb
 from pyarrow import fs as pafs
 
 from lab import confidence, metrics, suggest
+from lab.grid import variant_of
 from lab.markets import fees
 from lab.markets.recorder import load_config
 from lab.markets.venue import Resolution
@@ -84,10 +83,6 @@ class Strategy(Protocol):
     def on_book(self, row, market: Market) -> Iterable[Order]:
         """One book row (market_id, ts, bid, ask, depth_yes, depth_no) and its market; the orders to send."""
         ...
-
-
-def variant_of(params: dict) -> str:
-    return hashlib.md5(json.dumps(params, sort_keys=True, default=str).encode()).hexdigest()
 
 
 def _days(start: dt.date, end: dt.date) -> list[str]:

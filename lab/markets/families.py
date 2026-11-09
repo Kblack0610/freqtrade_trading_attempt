@@ -5,9 +5,8 @@ in its grid through backtest.run(), which registers the trial before it reads th
   python -m lab.markets.families {longshot,calibration,gap} [--venue V] [--start D] [--end D] [--book bars|quotes]
 
 The book is the history backfill's bars of the markets that settled start to end (end exclusive), or the
-recorder's quotes of those days. Knobs and grids are [families.<name>] in lab/markets.toml: a list is a grid
-axis, a list of tables merges each table into the variant, anything else is fixed. Every family enters a market
-at most once, on its first row that qualifies, and holds to resolution, and it skips a row whose spread is wider
+recorder's quotes of those days. Knobs and grids are [families.<name>] in lab/markets.toml, expanded by
+lab/grid.py. Every family enters a market at most once, on its first row that qualifies, and holds to resolution, and it skips a row whose spread is wider
 than `max_spread`.
 
 - longshot (favourite-longshot bias): within `hours` of close, buy `buy` (no fades longshots, yes backs
@@ -30,7 +29,6 @@ than `max_spread`.
 
 import argparse
 import datetime as dt
-import itertools
 import json
 import math
 import re
@@ -42,6 +40,7 @@ import numpy as np
 import pandas as pd
 
 from lab.db import connect
+from lab.grid import variants
 from lab.markets import backtest
 from lab.markets.backtest import Market, Order
 from lab.markets.history import _midnight
@@ -50,21 +49,6 @@ from lab.markets.recorder import load_config, s3_from_env
 
 UTC = dt.timezone.utc
 COMMANDS = ("longshot", "calibration", "gap")
-
-
-def variants(fcfg: dict) -> list[dict]:
-    """Every params dict of a family's grid, in the order the grid lists them."""
-    axes = [[(k, x) for x in v] if isinstance(v, list) else [(k, v)] for k, v in fcfg.items()]
-    out = []
-    for combo in itertools.product(*axes):
-        p = {}
-        for k, v in combo:
-            if isinstance(v, dict):
-                p.update(v)
-            else:
-                p[k] = v
-        out.append(p)
-    return out
 
 
 def quote(row) -> tuple[float, float] | None:

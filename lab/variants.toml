@@ -1,0 +1,30 @@
+# Setup overlays: account settings lab/analyze.py backtests every strategy x venue under, beside the strategy as it
+# stands. Each [overlays.<group>] table is a grid (lab/grid.py: a list is an axis, a list of tables merges each table
+# in), and every params dict it expands to is one overlay, named by its content (lab/variants.py), so renaming a group
+# or moving an overlay between groups changes nothing. Every strategy x venue x overlay with a window is one row in the
+# trial register, so each overlay added raises the deflated-Sharpe bar for everything (README, Setup overlays).
+#
+# Keys an overlay may set, each overriding the config or the strategy's own attribute:
+#   max_open_trades  open trades at once (config.base.json: 3)
+#   stake_amount     USD per trade, or "unlimited" (the base: the wallet split across open trades)
+#   stoploss         a negative ratio, for example -0.10
+#   minimal_roi      a table of minutes -> ratio, for example { "0" = 0.05 }
+#   pairs            trade only the first N pairs of the venue's whitelist, in its file order
+# Anything else, dry_run and exchange keys included, is refused (lab/variants.py ALLOWED).
+
+[sweep]
+# Overlay chunks run per night, after every as-is chunk, best prior score first (the strategy x venue's 365-day
+# Sharpe low end); the rest wait for the next night. The memory budget (ANALYZE_MEMORY_GB) applies as for any chunk.
+max_chunks = 100
+
+[overlays.slots]
+max_open_trades = [1, 5]
+
+[overlays.stake]
+stake_amount = [100]
+
+[overlays.stop]
+stoploss = [-0.05, -0.15]
+
+[overlays.majors]
+pairs = [3]

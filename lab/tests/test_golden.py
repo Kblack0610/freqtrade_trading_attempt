@@ -56,7 +56,7 @@ def golden(tmp_path, monkeypatch):
 
 
 def backtest(strategies) -> dict:
-    res = analyze.Cli().backtest("GoldenCross", EX, START, END, strategies)
+    res = analyze.Cli().backtest("GoldenCross", EX, START, END, strategy_path=strategies)
     assert res["ok"], res["error"]
     return res
 
@@ -103,8 +103,8 @@ def test_reproduce_reports_the_changed_candle_as_a_mismatch(golden, conn):
     feather, strategies = golden
 
     class Runner(analyze.Cli):
-        def backtest(self, strategy, exchange, start, end, strategy_path=None):
-            return super().backtest(strategy, exchange, start, end, strategies)
+        def backtest(self, strategy, exchange, start, end, overlay=None, strategy_path=None):
+            return super().backtest(strategy, exchange, start, end, overlay, strategy_path=strategies)
 
     task = {"strategy": "GoldenCross", "exchange": EX, "start": START, "end": END, "key": "k", "attempts": 0, "candles": "c"}
     analyze.store_chunk(conn, task, backtest(strategies), None)
@@ -113,3 +113,15 @@ def test_reproduce_reports_the_changed_candle_as_a_mismatch(golden, conn):
     assert reproduce.check_chunk(conn, Runner(), chunk) == {"diff": []}
     nudge_first_entry(feather, strategies)
     assert reproduce.check_chunk(conn, Runner(), chunk)["diff"][0].startswith("trades:")
+
+
+def test_an_overlay_reaches_freqtrade_and_changes_the_backtest(golden):
+    _, strategies = golden
+    base = backtest(strategies)
+    tight = analyze.overlay_config(EX, {"minimal_roi": {"0": 0.004}, "stoploss": -0.006, "pairs": 1})
+    assert tight["exchange"]["pair_whitelist"] == ["BTC/USD"]
+    res = analyze.Cli().backtest("GoldenCross", EX, START, END, tight, strategy_path=strategies)
+    assert res["ok"], res["error"]
+    assert len(res["trades"]) and as_bytes(res) != as_bytes(base)
+    # the overlay's roi and stop, not the strategy's 2% and 3%, close every trade
+    assert res["trades"]["profit_ratio"].between(-0.02, 0.01).all()
