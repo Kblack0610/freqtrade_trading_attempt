@@ -115,7 +115,7 @@ class Cli:
             for f in [*src.parent.glob("*.py"), *src.parent.glob("*.json")]:  # siblings it may import, its params
                 shutil.copy2(f, strat / f.name)
             params_file = strat / f"{src.stem}.json"
-            base = self.bt.backtest(strategy, exchange, test_start, test_end, strat)
+            base = self.bt.backtest(strategy, exchange, test_start, test_end, strategy_path=strat)
             if not base["ok"]:
                 return took({"ok": False, "no_data": base.get("no_data", False), "error": f"base: {base['error']}"})
             before = params_file.stat().st_mtime_ns if params_file.exists() else None
@@ -136,7 +136,7 @@ class Cli:
                 return took({**out, "error": f"no hyperopt epoch reached {MIN_TRADES} training trades"})
             out["params"] = json.loads(params_file.read_text())["params"]
             for side, (a, b) in (("tuned", (test_start, test_end)), ("is", (train_start, train_end(test_start)))):
-                r = self.bt.backtest(strategy, exchange, a, b, strat)
+                r = self.bt.backtest(strategy, exchange, a, b, strategy_path=strat)
                 if not r["ok"]:
                     return took({"ok": False, "error": f"{side}: {r['error']}"})
                 out[side] = stats(r)

@@ -42,23 +42,24 @@ def trade_rows(rows) -> list[tuple]:
 
 
 def chunk_sample(conn, rng: random.Random, n: int, ft_version: str) -> list[dict]:
-    """Up to n stored, ok chunks whose cache key their inputs still give."""
+    """Up to n stored, ok chunks, as-is or under a setup overlay, whose cache key their inputs still give."""
     rows = conn.execute("""
         SELECT c.id, c.strategy, c.exchange, c.chunk_start, c.chunk_end, c.cache_key, c.final_balance,
-               s.file_hash, s.timeframe
-        FROM backtest_chunks c JOIN strategies s ON s.name = c.strategy
+               s.file_hash, s.timeframe, c.overlay, o.params
+        FROM backtest_chunks c JOIN strategies s ON s.name = c.strategy LEFT JOIN overlays o ON o.id = c.overlay
         WHERE c.ok AND s.load_error IS NULL ORDER BY c.id""").fetchall()
     rng.shuffle(rows)
     digests: dict[tuple[str, str], dict] = {}
     out = []
-    for cid, strategy, ex, start, end, key, final, file_hash, tf in rows:
+    for cid, strategy, ex, start, end, key, final, file_hash, tf, oid, overlay in rows:
         if len(out) >= n:
             break
         if (ex, tf) not in digests:
             digests[ex, tf] = analyze.candle_digests(ex, tf)
-        if analyze.chunk_key(file_hash, ex, start, end, ft_version, digests[ex, tf].get(start.year, "")) == key:
+        cfg = analyze.overlay_config(ex, overlay)
+        if analyze.chunk_key(file_hash, ex, start, end, ft_version, digests[ex, tf].get(start.year, ""), cfg) == key:
             out.append({"id": cid, "strategy": strategy, "exchange": ex, "start": start, "end": end,
-                        "final_balance": final})
+                        "final_balance": final, "overlay": oid, "config": cfg})
     return out
 
 
@@ -92,7 +93,7 @@ def fold_result(params, is_trades, base_trades, base_returns, tuned_trades, tune
 
 
 def check_chunk(conn, runner, c: dict) -> dict:
-    res = runner.backtest(c["strategy"], c["exchange"], c["start"], c["end"])
+    res = runner.backtest(c["strategy"], c["exchange"], c["start"], c["end"], c.get("config"))
     if not res["ok"]:
         return {"failed": res.get("error") or "failed"}
     stored = trade_rows(conn.execute(f"SELECT {', '.join(analyze.TRADE_COLS)} FROM backtest_trades WHERE chunk_id = %s",
@@ -133,7 +134,7 @@ def main(chunk_runner=None, fold_runner=None, rng: random.Random | None = None) 
         try:
             chunks = chunk_sample(conn, rng, CHUNKS, chunk_runner.version())
             folds = fold_sample(conn, rng, FOLDS, fold_runner.version())
-            tasks = [("chunk", f"{c['strategy']} {c['exchange']} {c['start']}..{c['end']}", lambda c=c: check_chunk(conn, chunk_runner, c))
+            tasks = [("chunk", f"{c['strategy']} {c['exchange']}{' ' + c['overlay'] if c['overlay'] else ''} {c['start']}..{c['end']}", lambda c=c: check_chunk(conn, chunk_runner, c))
                      for c in chunks]
             tasks += [("fold", f"{f['strategy']} {f['exchange']} {f['fold'][1]:%Y-%m}", lambda f=f: check_fold(fold_runner, f))
                       for f in folds]

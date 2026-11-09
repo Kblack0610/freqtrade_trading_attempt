@@ -17,9 +17,7 @@ in suggest.toml [mixtures]. Advice for a human; nothing here trades.
 Run alone with `python -m lab.mixtures`; lab/analyze.py and lab/walkforward.py run it after the book.
 """
 
-import hashlib
 import itertools
-import json
 import sys
 
 import numpy as np
@@ -30,6 +28,7 @@ from scipy.spatial.distance import squareform
 
 from lab import metrics, scorecard, suggest
 from lab.db import connect
+from lab.grid import variant_of
 
 COLS = ["variant", "name", "spec", "weighting", "gated", "baseline", "sleeves", "months", "days", "annual", "lo", "hi",
         "sharpe", "max_drawdown", "dsr", "trials", "pbo", "weights"]
@@ -40,10 +39,6 @@ WHERE ok AND (params IS NOT NULL OR %(variant)s = 'base') AND test_end <= %(lock
 DAILY = "SELECT strategy, exchange, day, ret FROM walkforward_daily WHERE variant = %(variant)s AND day < %(lockbox)s"
 ORDER = "SELECT strategy, exchange FROM confidence ORDER BY ready DESC, score DESC NULLS LAST, strategy, exchange"
 LABELS = {"equal": "1/N", "inverse_vol": "inverse vol", "hrp": "HRP"}
-
-
-def variant_of(spec: dict) -> str:
-    return hashlib.md5(json.dumps(spec, sort_keys=True).encode()).hexdigest()
 
 
 def name_of(spec: dict) -> str:

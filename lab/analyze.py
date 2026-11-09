@@ -11,10 +11,14 @@
    year ends), and the current year reruns each night.
    Its trades go to `backtest_trades`. A chunk starts from the config's wallet, so a long history is
    many short compounding runs chained by their daily returns, not one run that compounds for years.
+   Then setup overlays (lab/variants.toml): each strategy x exchange again under every overlay, the overlay's
+   config in its cache key, up to [sweep] max_chunks a night, best 365-day Sharpe low end first.
 3. Bias: lookahead-analysis and recursive-analysis per strategy, rerun when its file hash changes.
 4. Derived, rebuilt in one transaction from the stored trades: daily returns, metrics over 30d, 90d,
    180d, 365d and all (with bootstrap intervals and the deflated Sharpe across every strategy x
    exchange), Monte Carlo estimates, BTC regimes, and correlation with the strategies the league runs.
+   Each strategy x exchange x overlay gets the same windows in `overlay_windows`, and its series counts in
+   the deflated Sharpe of every window; the other derived tables are as-is only.
    Then lab/volatility.py scores HAR against plain variance forecasts per venue and pair (`vol_scores`, `vol_verdict`).
 5. Drift: each league bot's strategy backtested on its exchange over the time the bot has run, set
    against the bot's dry-run trades in `drift`.
@@ -49,7 +53,7 @@ from typing import Protocol
 import pandas as pd
 from psycopg.types.json import Jsonb
 
-from lab import metrics, book, confidence, loop, mixtures, scorecard, suggest, universe, volatility, horizon
+from lab import metrics, book, confidence, loop, mixtures, scorecard, suggest, universe, variants, volatility, horizon
 from lab.db import connect
 from lab.util import finite, utc
 
@@ -97,8 +101,18 @@ def wallet() -> float:
 
 
 @cache
+def pair_list(exchange: str) -> tuple[str, ...]:
+    """The venue's whitelist in its file order."""
+    return tuple(json.loads((USER_DATA / "exchanges" / f"{exchange}.json").read_text())["exchange"]["pair_whitelist"])
+
+
 def whitelist(exchange: str) -> frozenset[str]:
-    return frozenset(json.loads((USER_DATA / "exchanges" / f"{exchange}.json").read_text())["exchange"]["pair_whitelist"])
+    return frozenset(pair_list(exchange))
+
+
+def overlay_config(exchange: str, params: dict | None) -> dict | None:
+    """The freqtrade config an overlay layers over this venue's two files; None for the strategy as it stands."""
+    return variants.config(params, list(pair_list(exchange))) if params else None
 
 
 def pair_count(exchange: str) -> int:
@@ -142,9 +156,11 @@ def config_digest(exchange: str) -> str:
     return "".join(sha256(p.read_bytes()) for p in config_files(exchange))
 
 
-def chunk_key(file_hash: str, exchange: str, start: dt.date, end: dt.date, ft_version: str, candles: str) -> str:
-    return sha256(json.dumps([file_hash, config_digest(exchange), ft_version, exchange, str(start), str(end),
-                              candles]).encode())
+def chunk_key(file_hash: str, exchange: str, start: dt.date, end: dt.date, ft_version: str, candles: str,
+              overlay: dict | None = None) -> str:
+    """overlay is overlay_config()'s; an as-is chunk leaves it out, so its key is the one stored before overlays."""
+    parts = [file_hash, config_digest(exchange), ft_version, exchange, str(start), str(end), candles]
+    return sha256(json.dumps(parts + [overlay] if overlay else parts, sort_keys=True).encode())
 
 
 def candle_digests(exchange: str, timeframe: str, by: str = "year") -> dict:
@@ -182,7 +198,7 @@ def chunks(first: dt.date, today: dt.date) -> list[tuple[dt.date, dt.date]]:
 class Runner(Protocol):
     def version(self) -> str: ...
     def discover(self) -> list[dict]: ...
-    def backtest(self, strategy: str, exchange: str, start: dt.date, end: dt.date) -> dict: ...
+    def backtest(self, strategy: str, exchange: str, start: dt.date, end: dt.date, overlay: dict | None = None) -> dict: ...
     def bias(self, kind: str, strategy: str) -> dict: ...
 
 
@@ -223,9 +239,10 @@ class Cli:
                         "load_error": load_error(loc.read_text(encoding="utf-8"), name) if cls else "failed to import"})
         return out
 
-    def backtest(self, strategy: str, exchange: str, start: dt.date, end: dt.date,
+    def backtest(self, strategy: str, exchange: str, start: dt.date, end: dt.date, overlay: dict | None = None,
                  strategy_path: Path | None = None) -> dict:
-        """strategy_path puts a folder ahead of the repo's, so its copy of the strategy (and params file) loads."""
+        """overlay (overlay_config()'s) is layered last, over both config files. strategy_path puts a folder ahead of
+        the repo's, so its copy of the strategy (and params file) loads."""
         from freqtrade.data.btanalysis import load_backtest_data, load_backtest_stats
 
         t0 = time.monotonic()
@@ -235,6 +252,9 @@ class Cli:
                    "--datadir", str(RESULTS / "data" / exchange), "--strategy", strategy,
                    "--timerange", f"{start:%Y%m%d}-{end:%Y%m%d}", "--export", "trades",
                    "--backtest-directory", d, "--cache", "none"]
+            if overlay:
+                (Path(d) / "overlay.json").write_text(json.dumps(overlay))
+                cmd += ["-c", str(Path(d) / "overlay.json")]
             if strategy_path:
                 cmd += ["--strategy-path", str(strategy_path)]
             try:
@@ -319,15 +339,16 @@ TRADE_COLS = ["pair", "open_date", "close_date", "open_rate", "close_rate", "min
 def store_chunk(conn, task: dict, res: dict, run_id: int) -> None:
     attempts = MAX_ATTEMPTS if res.get("no_data") else task["attempts"] + 1 if not res["ok"] else 1
     with conn.transaction():
-        conn.execute("DELETE FROM backtest_chunks WHERE strategy = %s AND exchange = %s AND chunk_start = %s",
-                     (task["strategy"], task["exchange"], task["start"]))
+        overlay = task.get("overlay", "")
+        conn.execute("DELETE FROM backtest_chunks WHERE strategy = %s AND exchange = %s AND overlay = %s"
+                     " AND chunk_start = %s", (task["strategy"], task["exchange"], overlay, task["start"]))
         trades = res.get("trades")
         chunk_id = conn.execute(
-            "INSERT INTO backtest_chunks (strategy, exchange, chunk_start, chunk_end, cache_key, ok, attempts, error,"
-            " bt_start, bt_end, trades, start_balance, final_balance, max_drawdown, duration_s, run_id,"
+            "INSERT INTO backtest_chunks (strategy, exchange, overlay, chunk_start, chunk_end, cache_key, ok, attempts,"
+            " error, bt_start, bt_end, trades, start_balance, final_balance, max_drawdown, duration_s, run_id,"
             " revision, config_digest, candles)"
-            " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
-            (task["strategy"], task["exchange"], task["start"], task["end"], task["key"], res["ok"], attempts,
+            " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
+            (task["strategy"], task["exchange"], overlay, task["start"], task["end"], task["key"], res["ok"], attempts,
              res.get("error"), res.get("bt_start"), res.get("bt_end"), None if trades is None else len(trades),
              res.get("start_balance"), res.get("final_balance"), res.get("max_drawdown"), res.get("duration_s"),
              run_id, REVISION, config_digest(task["exchange"]), task.get("candles"))).fetchone()[0]
@@ -345,6 +366,15 @@ def store_bias(conn, strategy: str, kind: str, file_hash: str, res: dict) -> Non
         " detail = EXCLUDED.detail, error = EXCLUDED.error, checked_at = now()",
         (strategy, kind, file_hash, res.get("has_bias"), res.get("biased_indicators"),
          Jsonb(finite(res["detail"])) if res.get("detail") is not None else None, res.get("error")))
+
+
+def sync_overlays(conn, overlays: dict[str, dict]) -> None:
+    """Record each overlay's params by id; an overlay gone from the toml takes its chunks with it (its trials stay)."""
+    with conn.transaction():
+        for oid, o in overlays.items():
+            conn.execute("INSERT INTO overlays (id, grp, params) VALUES (%s, %s, %s) ON CONFLICT (id) DO UPDATE"
+                         " SET grp = EXCLUDED.grp", (oid, o["group"], Jsonb(o["params"])))
+        conn.execute("DELETE FROM backtest_chunks WHERE overlay <> '' AND NOT (overlay = ANY(%s))", (list(overlays),))
 
 
 def sync_strategies(conn, found: list[dict]) -> None:
@@ -373,11 +403,18 @@ def coverage(conn) -> dict[tuple[str, str], dt.datetime]:
         "WHERE first_ts IS NOT NULL AND oldest_reached GROUP BY 1, 2") if whitelist(ex) <= set(pairs)}
 
 
-def plan(conn, found: list[dict], first: dict, today: dt.date, ft_version: str) -> tuple[list[dict], int, list[str]]:
-    """The chunks to run this time, how many are cached, and why some strategy x exchange is skipped."""
-    done = {(s, e, c): (k, ok, n) for s, e, c, k, ok, n in conn.execute(
-        "SELECT strategy, exchange, chunk_start, cache_key, ok, attempts FROM backtest_chunks")}
-    todo, cached, skipped = [], 0, []
+def plan(conn, found: list[dict], first: dict, today: dt.date, ft_version: str, overlays: dict[str, dict] | None = None,
+         max_overlay: int = 0) -> tuple[list[dict], int, list[str], int]:
+    """The chunks to run this time, how many are cached, why some strategy x exchange is skipped, and how many
+    overlay chunks wait for a later night. As-is chunks come first; then up to max_overlay overlay chunks: those
+    never run, best prior score (the as-is 365-day Sharpe low end) first and each series' newest year first, then
+    stored ones whose key moved, the one stored longest ago first, so refreshing the current year rotates through
+    every series instead of holding the cap on the best few."""
+    done = {(s, e, o, c): (k, ok, n, at) for s, e, o, c, k, ok, n, at in conn.execute(
+        "SELECT strategy, exchange, overlay, chunk_start, cache_key, ok, attempts, chunk_end FROM backtest_chunks")}
+    score = {(s, e): lo for s, e, lo in conn.execute(
+        "SELECT strategy, exchange, sharpe_lo FROM strategy_windows WHERE win = '365d' AND sharpe_lo IS NOT NULL")}
+    todo, over, cached, skipped = [], [], 0, []
     digests: dict[tuple[str, str], dict[int, str]] = {}
     for s in found:
         if s["load_error"] or (ONLY and s["name"] not in ONLY):
@@ -389,19 +426,26 @@ def plan(conn, found: list[dict], first: dict, today: dt.date, ft_version: str) 
                 continue
             if (ex, s["timeframe"]) not in digests:
                 digests[ex, s["timeframe"]] = candle_digests(ex, s["timeframe"])
-            for start, end in chunks(since.date(), today):
-                candles = digests[ex, s["timeframe"]].get(start.year, "")
-                key = chunk_key(s["file_hash"], ex, start, end, ft_version, candles)
-                prior = done.get((s["name"], ex, start))
-                if prior and prior[0] == key and (prior[1] or prior[2] >= MAX_ATTEMPTS):
-                    cached += 1
-                    continue
-                attempts = prior[2] if prior and prior[0] == key and not prior[1] else 0
-                todo.append({"strategy": s["name"], "exchange": ex, "start": start, "end": end, "key": key,
-                             "attempts": attempts, "candles": candles})
+            for oid, o in [("", None), *(overlays or {}).items()]:
+                cfg = overlay_config(ex, o and o["params"])
+                for start, end in chunks(since.date(), today):
+                    candles = digests[ex, s["timeframe"]].get(start.year, "")
+                    key = chunk_key(s["file_hash"], ex, start, end, ft_version, candles, cfg)
+                    prior = done.get((s["name"], ex, oid, start))
+                    if prior and prior[0] == key and (prior[1] or prior[2] >= MAX_ATTEMPTS):
+                        cached += 1
+                        continue
+                    attempts = prior[2] if prior and prior[0] == key and not prior[1] else 0
+                    (over if oid else todo).append(
+                        {"strategy": s["name"], "exchange": ex, "start": start, "end": end, "key": key,
+                         "attempts": attempts, "candles": candles, "overlay": oid, "config": cfg,
+                         "stored": prior and prior[3]})
     # the newest years first: they feed every window, so a run cut short still updates the page
     todo.sort(key=lambda t: (-t["start"].year, t["strategy"], t["exchange"]))
-    return todo, cached, skipped
+    over.sort(key=lambda t: (t["stored"] is not None, t["stored"] or dt.date.min,
+                             -score.get((t["strategy"], t["exchange"]), -math.inf), t["strategy"], t["exchange"],
+                             t["overlay"], -t["start"].year))
+    return todo + over[:max_overlay], cached, skipped, max(len(over) - max_overlay, 0)
 
 
 def bias_todo(conn, found: list[dict], first: dict) -> list[tuple[str, str, str]]:
@@ -478,17 +522,18 @@ def series_trades(conn, chunk_ids: list[int]) -> pd.DataFrame:
     return t.astype({c: float for c in SERIES_COLS[2:]})
 
 
-def load_series(conn) -> dict[tuple[str, str], tuple[pd.DataFrame, pd.DataFrame]]:
-    """Daily returns and closed trades of every strategy x exchange, from its successful chunks.
-    Trades load one strategy x exchange at a time, so memory peaks at one series' rows, not the whole table."""
+def load_series(conn, overlays: bool = False):
+    """Daily returns and closed trades of every strategy x exchange as it stands (keyed (strategy, exchange)), or with
+    overlays=True of every strategy x exchange x overlay (keyed (strategy, exchange, overlay)), from its successful
+    chunks. It yields one series at a time, its trades loaded alone, so memory peaks at one series' rows."""
     chunk_rows = conn.execute(
-        "SELECT c.id, c.strategy, c.exchange, c.bt_start, c.bt_end, c.start_balance FROM backtest_chunks c"
+        "SELECT c.id, c.strategy, c.exchange, c.overlay, c.bt_start, c.bt_end, c.start_balance FROM backtest_chunks c"
         " JOIN strategies s ON s.name = c.strategy AND s.load_error IS NULL"
-        " WHERE c.ok AND c.exchange = ANY(%s) ORDER BY c.strategy, c.exchange, c.chunk_start", (EXCHANGES,)).fetchall()
-    keys: dict[tuple[str, str], list] = {}
-    for cid, s, e, t0, t1, bal in chunk_rows:
-        keys.setdefault((s, e), []).append((cid, t0, t1, bal or wallet()))
-    out = {}
+        f" WHERE c.ok AND c.exchange = ANY(%s) AND c.overlay {'<>' if overlays else '='} ''"
+        " ORDER BY c.strategy, c.exchange, c.overlay, c.chunk_start", (EXCHANGES,)).fetchall()
+    keys: dict[tuple, list] = {}
+    for cid, s, e, o, t0, t1, bal in chunk_rows:
+        keys.setdefault((s, e, o) if overlays else (s, e), []).append((cid, t0, t1, bal or wallet()))
     with conn.transaction():  # a server-side cursor lives inside one transaction
         for k, chunks in keys.items():
             trades = series_trades(conn, [c[0] for c in chunks])
@@ -500,39 +545,39 @@ def load_series(conn) -> dict[tuple[str, str], tuple[pd.DataFrame, pd.DataFrame]
                 t = t.assign(share=t["stake_amount"] / bal)
                 ps.append((metrics.daily_returns(t, t0, t1, bal), t))
             daily = pd.concat([d for d, _ in ps], ignore_index=True).drop_duplicates("day", keep="last")
-            out[k] = (daily.sort_values("day").reset_index(drop=True), pd.concat([t for _, t in ps], ignore_index=True))
-    return out
+            yield k, (daily.sort_values("day").reset_index(drop=True), pd.concat([t for _, t in ps], ignore_index=True))
 
 
-def window_rows(series: dict) -> list[dict]:
+def series_windows(key: tuple, daily: pd.DataFrame, trades: pd.DataFrame) -> list[dict]:
+    """One series' window rows, each with its window's daily returns as _ret for deflate(). An overlay series
+    (key (strategy, exchange, overlay)) seeds by its overlay too; an as-is one keeps the seeds it always had."""
     rows = []
-    for (s, e), (daily, trades) in series.items():
-        if daily.empty:
-            continue
-        end = daily["day"].iloc[-1]
-        for win, n in WINDOWS.items():
-            if n is not None and daily["day"].iloc[0] > end - dt.timedelta(days=n - 1):
-                continue  # not that much history
-            d = daily if n is None else daily[daily["day"] > end - dt.timedelta(days=n)]
-            lo = pd.Timestamp(d["day"].iloc[0], tz="UTC")
-            t = trades[trades["close_date"] >= lo]
-            m = metrics.window_metrics(d.reset_index(drop=True), t, metrics.seed_of(s, e, win))
-            rows.append({"strategy": s, "exchange": e, "win": win, **m})
+    if daily.empty:
+        return rows
+    s, e, *o = key
+    end = daily["day"].iloc[-1]
+    for win, n in WINDOWS.items():
+        if n is not None and daily["day"].iloc[0] > end - dt.timedelta(days=n - 1):
+            continue  # not that much history
+        d = daily if n is None else daily[daily["day"] > end - dt.timedelta(days=n)]
+        lo = pd.Timestamp(d["day"].iloc[0], tz="UTC")
+        t = trades[trades["close_date"] >= lo]
+        m = metrics.window_metrics(d.reset_index(drop=True), t, metrics.seed_of(s, e, win, *o))
+        rows.append({"strategy": s, "exchange": e, **({"overlay": o[0]} if o else {}), "win": win, **m,
+                     "_ret": pd.Series(d["ret"].to_numpy(dtype=float), index=d["day"])})
+    return rows
+
+
+def deflate(rows: list[dict]) -> None:
+    """The deflated Sharpe of every row against every series tried in its window, as-is and overlays alike."""
     for win in WINDOWS:
         trial = [r for r in rows if r["win"] == win]
-        rets = pd.DataFrame({(r["strategy"], r["exchange"]): window_returns(series, r) for r in trial
+        rets = pd.DataFrame({(r["strategy"], r["exchange"], r.get("overlay", "")): r["_ret"] for r in trial
                              if r["_sr_daily"] is not None})
         trials = metrics.effective_trials(rets)
         for r in trial:
             r["dsr"] = metrics.deflated_sharpe(r["_sr_daily"], r["days"], r["_skew"], r["_kurt"], trials)
             r["trials"], r["trials_raw"] = trials, len(trial)
-    return rows
-
-
-def window_returns(series: dict, r: dict) -> pd.Series:
-    daily = series[(r["strategy"], r["exchange"])][0]
-    d = daily[(daily["day"] >= r["start_day"]) & (daily["day"] <= r["end_day"])]
-    return pd.Series(d["ret"].to_numpy(dtype=float), index=d["day"])
 
 
 def overfit_rows(series: dict) -> list[dict]:
@@ -562,14 +607,27 @@ def overfit_rows(series: dict) -> list[dict]:
 def hold_columns(rows: list[dict], series: dict, close: pd.Series) -> None:
     """Add each window's share of capital in the market and its return over holding that share of BTC."""
     for r in rows:
-        daily, trades = series[(r["strategy"], r["exchange"])]
-        start = pd.Timestamp(r["start_day"], tz="UTC")
-        end = pd.Timestamp(r["end_day"], tz="UTC") + pd.Timedelta(days=1)
-        t = trades[trades["close_date"] >= start]
-        capital = metrics.capital_exposure(t, start, end)
-        excess = metrics.hold_excess(daily[daily["day"] >= r["start_day"]], close, capital,
-                                     metrics.seed_of(r["strategy"], r["exchange"], r["win"], "hold"))
-        r.update(zip(("hold_excess", "hold_excess_lo", "hold_excess_hi"), excess), capital_exposure=capital)
+        hold(r, *series[(r["strategy"], r["exchange"])], close)
+
+
+def hold(r: dict, daily: pd.DataFrame, trades: pd.DataFrame, close: pd.Series) -> None:
+    start = pd.Timestamp(r["start_day"], tz="UTC")
+    end = pd.Timestamp(r["end_day"], tz="UTC") + pd.Timedelta(days=1)
+    t = trades[trades["close_date"] >= start]
+    capital = metrics.capital_exposure(t, start, end)
+    seed = metrics.seed_of(r["strategy"], r["exchange"], r["win"], "hold", *([r["overlay"]] if "overlay" in r else []))
+    excess = metrics.hold_excess(daily[daily["day"] >= r["start_day"]], close, capital, seed)
+    r.update(zip(("hold_excess", "hold_excess_lo", "hold_excess_hi"), excess), capital_exposure=capital)
+
+
+def overlay_rows(conn, close: pd.Series) -> list[dict]:
+    """The windows of every overlay series, measured as they load, so only their daily returns stay in memory."""
+    rows = []
+    for k, (daily, trades) in load_series(conn, overlays=True):
+        for r in series_windows(k, daily, trades):
+            hold(r, daily, trades, close)
+            rows.append(r)
+    return rows
 
 
 def estimate_rows(series: dict) -> list[dict]:
@@ -644,25 +702,32 @@ BENCHMARK_COLS = ["name", "win", "start_day", "end_day", "total_return", "cagr",
 
 
 def derive(conn) -> dict:
-    series = load_series(conn)
+    series = dict(load_series(conn))
     league = {r[0] for r in conn.execute("SELECT DISTINCT strategy FROM bots")}
     daily = [{"strategy": s, "exchange": e, **r} for (s, e), (d, _) in series.items() for r in d.to_dict("records")]
-    windows, estimates = window_rows(series), estimate_rows(series)
     close = daily_close("BTC")
+    windows = [r for k, (d, t) in series.items() for r in series_windows(k, d, t)]
+    overlaid = overlay_rows(conn, close)
+    deflate(windows + overlaid)
+    estimates = estimate_rows(series)
     bench = book.benchmark_rows(close, daily_close("ETH"), suggest.load_config())
     hold_columns(windows, series, close)
     corr, reg, overfit = correlation_rows(series, league), regime_rows(close, suggest.load_config()), overfit_rows(series)
     with conn.transaction():
-        conn.execute("TRUNCATE strategy_daily, strategy_windows, estimates, correlations, regimes, overfit, benchmarks")
+        conn.execute("TRUNCATE strategy_daily, strategy_windows, overlay_windows, estimates, correlations, regimes, overfit,"
+                     " benchmarks")
         insert_many(conn, "strategy_daily", daily, ["strategy", "exchange", "day", "ret", "pnl", "trades"])
         insert_many(conn, "strategy_windows", windows, WINDOW_COLS)
+        insert_many(conn, "overlay_windows", overlaid, ["overlay", *WINDOW_COLS])
         insert_many(conn, "estimates", estimates, ESTIMATE_COLS)
         insert_many(conn, "correlations", corr, ["strategy", "exchange", "other", "rho", "days"])
         insert_many(conn, "regimes", reg, ["day", "btc_close", "trend", "vol_30d", "vol_bucket"])
         insert_many(conn, "overfit", overfit, ["exchange", "win", "strategies", "days", "blocks", "splits", "pbo",
                                                "logit_median"])
         insert_many(conn, "benchmarks", bench, BENCHMARK_COLS)
-    return {"series": len(series), "daily_rows": len(daily), "windows": len(windows), "estimates": len(estimates),
+    return {"series": len(series), "daily_rows": len(daily), "windows": len(windows),
+            "overlay_series": len({(r["strategy"], r["exchange"], r["overlay"]) for r in overlaid}),
+            "overlay_windows": len(overlaid), "estimates": len(estimates),
             "correlations": len(corr), "regime_days": len(reg), "overfit": len(overfit), "benchmarks": len(bench)}
 
 
@@ -678,15 +743,18 @@ def main(runner: Runner | None = None, today: dt.date | None = None) -> int:
         try:
             found = runner.discover()
             sync_strategies(conn, found)
+            overlays, sweep = variants.load()
+            sync_overlays(conn, overlays)
             version = runner.version()
             first = coverage(conn)
-            todo, cached, skipped = plan(conn, found, first, today, version)
+            todo, cached, skipped, waiting = plan(conn, found, first, today, version, overlays, sweep.get("max_chunks", 0))
             bias = bias_todo(conn, found, first)
             drifts = drift_todo(conn, found, today)
             hashes = {s["name"]: s["file_hash"] for s in found}
             summary.update(freqtrade=version, strategies=len(found), load_failed=sum(bool(s["load_error"]) for s in found),
                            chunks_cached=cached, chunks_run=len(todo), skipped=skipped, bias_run=len(bias),
-                           drift_run=len(drifts))
+                           drift_run=len(drifts), overlays=len(overlays), overlay_chunks_run=sum(bool(t["overlay"]) for t in todo),
+                           overlay_chunks_waiting=waiting)
             print(f"analyze: {len(found)} strategies, {len(todo)} chunks to run, {cached} cached, "
                   f"{len(bias)} bias checks, {WORKERS} workers", flush=True)
             failed, empty, done, failures = 0, 0, 0, []
@@ -698,7 +766,7 @@ def main(runner: Runner | None = None, today: dt.date | None = None) -> int:
 
             def bt(t):
                 gb = task_gb(t["exchange"], tf.get(t["strategy"]), (t["end"] - t["start"]).days)
-                return held, gb, runner.backtest, t["strategy"], t["exchange"], t["start"], t["end"]
+                return held, gb, runner.backtest, t["strategy"], t["exchange"], t["start"], t["end"], t.get("config")
 
             with ThreadPoolExecutor(max_workers=WORKERS) as pool:
                 futs = {pool.submit(held, task_gb(BIAS_EXCHANGE, tf.get(s), LOOKAHEAD_DAYS if kind == "lookahead"
@@ -726,7 +794,8 @@ def main(runner: Runner | None = None, today: dt.date | None = None) -> int:
                         elif not res["ok"]:
                             failed += 1
                             if len(failures) < 100:
-                                failures.append(f"{task['strategy']} {task['exchange']} {task['start'].year}: {res['error']}")
+                                failures.append(f"{task['strategy']} {task['exchange']}{' ' + task['overlay'] if task.get('overlay') else ''}"
+                                                f" {task['start'].year}: {res['error']}")
                         if done % 25 == 0 or done == len(todo):
                             print(f"analyze: {done}/{len(todo)} chunks, {failed} failed, {empty} with no candles", flush=True)
                 except BaseException:

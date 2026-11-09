@@ -18,10 +18,10 @@
 {% if failed %}
 <div class="scroll">
 <table>
-  <thead><tr><th>Strategy</th><th>Exchange</th><th>Year</th><th class="n">Attempts</th><th>Error</th></tr></thead>
+  <thead><tr><th>Strategy</th><th>Exchange</th><th>Overlay</th><th>Year</th><th class="n">Attempts</th><th>Error</th></tr></thead>
   <tbody>
   {% for f in failed %}
-  <tr><td><a href="/strategies/{{ f.strategy }}?exchange={{ f.exchange }}">{{ f.strategy }}</a></td><td>{{ f.exchange }}</td><td>{{ f.chunk_start.year }}</td><td class="n">{{ f.attempts }}</td><td title="{{ f.error or '' }}">{{ f.error | truncate(90) }}</td></tr>
+  <tr><td><a href="/strategies/{{ f.strategy }}?exchange={{ f.exchange }}">{{ f.strategy }}</a></td><td>{{ f.exchange }}</td><td>{{ f.overlay or "as-is" }}</td><td>{{ f.chunk_start.year }}</td><td class="n">{{ f.attempts }}</td><td title="{{ f.error or '' }}">{{ f.error | truncate(90) }}</td></tr>
   {% endfor %}
   </tbody>
 </table>

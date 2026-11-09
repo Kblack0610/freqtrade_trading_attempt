@@ -19,8 +19,8 @@ def last_run(conn) -> tuple[bool, dict]:
 class Drifted(FakeRunner):
     """The same backtests with one trade's profit nudged: what a nondeterministic run would hand back."""
 
-    def backtest(self, strategy, exchange, start, end):
-        res = super().backtest(strategy, exchange, start, end)
+    def backtest(self, strategy, exchange, start, end, overlay=None):
+        res = super().backtest(strategy, exchange, start, end, overlay)
         if res["ok"] and len(res["trades"]):
             res["trades"].loc[0, "profit_ratio"] += 1e-12
         return res

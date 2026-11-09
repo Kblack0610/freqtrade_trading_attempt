@@ -31,9 +31,10 @@ import pandas as pd
 from psycopg.types.json import Jsonb
 
 from lab.db import connect
+from lab.grid import variants
 from lab.markets import backtest, fees
 from lab.markets.backtest import Market
-from lab.markets.families import Longshot, variants
+from lab.markets.families import Longshot
 from lab.markets.recorder import load_config
 
 UTC = dt.timezone.utc

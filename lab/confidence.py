@@ -15,7 +15,8 @@ a sequential probability ratio test restarted at zero) over a bot's closed dry-r
 the strategy's out-of-sample interval. A crossing is the "not decayed" gate failing and a retire suggestion for each
 bot running it. One bad week cannot cross the bar; a sustained run of trades below the out-of-sample edge does.
 
-Every run first adds what was tried to the trial register, `trials`, which keeps a row when its strategy goes.
+Every run first adds what was tried to the trial register, `trials`, which keeps a row when its strategy goes:
+each strategy x exchange as it stands, under each setup overlay (lab/variants.toml) and with each tuned parameter set.
 The effective trial count is the register's size at the window's effective share (metrics.effective_trials).
 
 Run alone with `python lab/confidence.py`; lab/analyze.py and lab/walkforward.py run it after suggest.
@@ -40,6 +41,8 @@ USER_DATA = Path(os.environ.get("FT_USER_DATA", Path(__file__).resolve().parents
 REGISTER = [
     "INSERT INTO trials (strategy, exchange, variant) SELECT DISTINCT strategy, exchange, 'as-is' "
     "FROM strategy_windows ON CONFLICT DO NOTHING",
+    "INSERT INTO trials (strategy, exchange, variant) SELECT DISTINCT strategy, exchange, 'overlay:' || overlay "
+    "FROM overlay_windows ON CONFLICT DO NOTHING",
     "INSERT INTO trials (strategy, exchange, variant) SELECT DISTINCT strategy, exchange, md5(params::text) "
     "FROM walkforward WHERE params IS NOT NULL ON CONFLICT DO NOTHING",
     "INSERT INTO trials (strategy, exchange, variant) SELECT name, '', 'load-failed' "
@@ -60,7 +63,7 @@ ROSTER = "SELECT strategy, exchange, name FROM bots WHERE last_seen >= %s ORDER 
 
 PAIRS = """
 SELECT c.strategy, c.exchange, count(*), sum(t.profit_ratio)
-FROM backtest_trades t JOIN backtest_chunks c ON c.id = t.chunk_id WHERE t.close_date < %s
+FROM backtest_trades t JOIN backtest_chunks c ON c.id = t.chunk_id WHERE c.overlay = '' AND t.close_date < %s
 GROUP BY c.strategy, c.exchange, t.pair
 """
 
