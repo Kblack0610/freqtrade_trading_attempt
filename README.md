@@ -48,6 +48,8 @@ Results go to the `trader` database in the cluster's shared Postgres, which the 
 | `Dockerfile`, `lab/requirements.txt` | The `trader` image |
 | `.github/workflows/image.yml` | CI: build, migrate twice, tests, every strategy loads; on master also push to GHCR and open and merge the home-config digest-bump PR. See CI |
 | `ci/bump_home_config.py` | Opens and merges the home-config digest-bump PR after each master build (the deploy). See CI |
+| `lab/cohorts.py`, `lab/cohorts.toml` | Picks a dry-run cohort's roster rows from the analysis tables (see Cohorts) |
+| `ci/cohort_roster.py` | Run on the fleet machine: opens the home-config PR that seeds a cohort's roster rows (see Cohorts) |
 | `ci/research_sync.py` | Run on the fleet machine each morning: files the loop's changes on the agent board and opens a paper roster PR for a promotion. See Nightly research loop |
 | `docs/README.md` | Index of the pages in `docs/` |
 
@@ -58,6 +60,8 @@ Results go to the `trader` database in the cluster's shared Postgres, which the 
 ## Cohorts
 
 A roster row is `name exchange strategy [cohort overlay]`. The cohort is the league the bot reports in; the overlay is an id from `lab/variants.toml` (`base` for the strategy's own settings), and `lab/league.py` layers its config over the venue's file exactly as the backtest does, so a bot runs the setup it was tested under. A 3-column row is cohort `league`, overlay `base`. An overlay id missing from the toml stops the pod, and the guard reads the overlay file with the others, so an overlay can never turn off dry run or add a key. Ingest copies both columns to `bots` on every run, the overview shows one row per cohort plus the total, `/cohorts` lists each cohort's bots with their overlays, and `trader_bot_profit_pct` carries a `cohort` label.
+
+The `aggressive` cohort (`lab/cohorts.toml`) forward-tests near-misses. `python -m lab.cohorts pick aggressive` takes the top 4 strategies by the low end of the 365-day Sharpe interval on the rank venues (binanceus), counting a strategy only with at least 30 trades there, leaves out lookahead-biased or unloadable ones, gives each the setup overlay (or `base`) that scored best for it, and prints one roster row per strategy per venue (4 x 3 = 12 bots; kraken has no backtest history, so it runs the overlay chosen on binanceus). The promote gates are not applied; the backtests it picks from are counted trials, so the search still raises the deflated-Sharpe bar. `ci/cohort_roster.py aggressive` runs on the fleet machine, asks the deployed image for those rows (`kubectl exec deploy/trader-web -- python -m lab.cohorts pick aggressive`) and opens a home-config PR appending them with replicas raised to match. It never merges, and it seeds only a cohort with no roster row yet: growing or replacing a cohort is a person's edit, and grow it only after `TraderBotApiDown` has stayed quiet for a week. `DRY_RUN=1` prints the rows.
 
 ## Run locally
 
