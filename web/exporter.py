@@ -40,6 +40,7 @@ UNION ALL SELECT 'open_interest', exchange, max(ts) FROM open_interest GROUP BY 
 REPRO = ("SELECT (raw->>'checked')::int AS checked, (raw->>'mismatch')::int AS mismatch FROM runs "
          "WHERE kind = 'reproduce' AND finished_at IS NOT NULL ORDER BY finished_at DESC LIMIT 1")
 SUGGESTIONS = "SELECT kind, count(*) AS n FROM suggestions GROUP BY kind"
+CLIMATE = "SELECT cell, kind, count(*) FILTER (WHERE lo > 0) AS n FROM climate_scorecard WHERE kind <> 'benchmark' GROUP BY 1, 2"
 # Event-contract markets (lab/markets). A venue counts while it has a recorder sweep in the last week, so a venue
 # whose CronJob is removed stops reporting instead of alerting stale forever.
 SWEEPS = """
@@ -89,6 +90,7 @@ class TraderCollector:
                 candles = cur.execute(CANDLES).fetchall()
                 futures = cur.execute(FUTURES).fetchall()
                 suggestions = cur.execute(SUGGESTIONS).fetchall()
+                climate = cur.execute(CLIMATE).fetchall()
                 sweeps = cur.execute(SWEEPS).fetchall()
                 last_sweep = cur.execute(LAST_SWEEP).fetchall()
                 links = cur.execute(LINKS).fetchall()
@@ -111,6 +113,8 @@ class TraderCollector:
         yield family("trader_futures_age_seconds", "Seconds since the newest funding or open interest row of each exchange",
                      ["kind", "exchange"], (([f["kind"], f["exchange"]], age(now, f["newest"])) for f in futures))
         yield from suggestion_metrics(suggestions)
+        yield family("trader_climate_passing", "Strategies or mixtures whose out-of-sample interval in the market climate "
+                     "clears zero at its low end", ["regime", "kind"], (([c["cell"], c["kind"]], c["n"]) for c in climate))
         yield from market_metrics(now, sweeps, last_sweep, links)
         yield from paper_metrics(now, paper)
         yield from broker_metrics(now, brokers)
