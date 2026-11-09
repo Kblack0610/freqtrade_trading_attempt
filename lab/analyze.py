@@ -54,6 +54,7 @@ from lab.db import connect
 from lab.util import finite, utc
 
 REPO = Path(os.environ.get("REPO", "/repo"))
+REVISION = os.environ.get("TRADER_REVISION", "dev")  # the commit the image was built from; its GHCR tag is sha-<7 chars>
 RESULTS = Path(os.environ.get("LAB_RESULTS", "/lab"))
 USER_DATA = REPO / "user_data"
 EXCHANGES = os.environ.get("ANALYZE_EXCHANGES", "binanceus coinbase").split()
@@ -136,26 +137,36 @@ class Budget:
                 self.cv.notify_all()
 
 
+def config_digest(exchange: str) -> str:
+    """The digests of both config files a run on this exchange loads."""
+    return "".join(sha256(p.read_bytes()) for p in config_files(exchange))
+
+
 def chunk_key(file_hash: str, exchange: str, start: dt.date, end: dt.date, ft_version: str, candles: str) -> str:
-    cfg = "".join(sha256(p.read_bytes()) for p in config_files(exchange))
-    return sha256(json.dumps([file_hash, cfg, ft_version, exchange, str(start), str(end), candles]).encode())
+    return sha256(json.dumps([file_hash, config_digest(exchange), ft_version, exchange, str(start), str(end),
+                              candles]).encode())
 
 
-def candle_digests(exchange: str, timeframe: str) -> dict[int, str]:
-    """Per calendar year, a digest of the whitelisted pairs' candles at this timeframe. Informative
-    timeframes a strategy also loads are not covered."""
+def candle_digests(exchange: str, timeframe: str, by: str = "year") -> dict:
+    """Per calendar year (by="day": per UTC date), a digest of the whitelisted pairs' candles at this
+    timeframe. Informative timeframes a strategy also loads are not covered."""
     from freqtrade.misc import pair_to_filename
 
-    years = {}
+    out = {}
     for pair in sorted(whitelist(exchange)):
         path = RESULTS / "data" / exchange / f"{pair_to_filename(pair)}-{timeframe}.feather"
         if not path.exists():
             continue
         df = pd.read_feather(path)
-        for year, rows in df.groupby(df["date"].dt.year):
-            years.setdefault(int(year), hashlib.sha256()).update(
+        for k, rows in df.groupby(df["date"].dt.year if by == "year" else df["date"].dt.date):
+            out.setdefault(int(k) if by == "year" else k, hashlib.sha256()).update(
                 pair.encode() + pd.util.hash_pandas_object(rows, index=False).values.tobytes())
-    return {y: h.hexdigest() for y, h in years.items()}
+    return {k: h.hexdigest() for k, h in out.items()}
+
+
+def span_digest(days: dict[dt.date, str], start: dt.date, end: dt.date) -> str:
+    """One digest over candle_digests(by="day") from start up to, not including, end."""
+    return sha256("".join(f"{d}{h}" for d, h in sorted(days.items()) if start <= d < end).encode())
 
 
 def chunks(first: dt.date, today: dt.date) -> list[tuple[dt.date, dt.date]]:
@@ -313,12 +324,13 @@ def store_chunk(conn, task: dict, res: dict, run_id: int) -> None:
         trades = res.get("trades")
         chunk_id = conn.execute(
             "INSERT INTO backtest_chunks (strategy, exchange, chunk_start, chunk_end, cache_key, ok, attempts, error,"
-            " bt_start, bt_end, trades, start_balance, final_balance, max_drawdown, duration_s, run_id)"
-            " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
+            " bt_start, bt_end, trades, start_balance, final_balance, max_drawdown, duration_s, run_id,"
+            " revision, config_digest, candles)"
+            " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
             (task["strategy"], task["exchange"], task["start"], task["end"], task["key"], res["ok"], attempts,
              res.get("error"), res.get("bt_start"), res.get("bt_end"), None if trades is None else len(trades),
              res.get("start_balance"), res.get("final_balance"), res.get("max_drawdown"), res.get("duration_s"),
-             run_id)).fetchone()[0]
+             run_id, REVISION, config_digest(task["exchange"]), task.get("candles"))).fetchone()[0]
         if trades is not None and len(trades):
             with conn.cursor().copy(f"COPY backtest_trades (chunk_id, {', '.join(TRADE_COLS)}) FROM STDIN") as cp:
                 for row in trades[TRADE_COLS].itertuples(index=False):
@@ -378,14 +390,15 @@ def plan(conn, found: list[dict], first: dict, today: dt.date, ft_version: str) 
             if (ex, s["timeframe"]) not in digests:
                 digests[ex, s["timeframe"]] = candle_digests(ex, s["timeframe"])
             for start, end in chunks(since.date(), today):
-                key = chunk_key(s["file_hash"], ex, start, end, ft_version, digests[ex, s["timeframe"]].get(start.year, ""))
+                candles = digests[ex, s["timeframe"]].get(start.year, "")
+                key = chunk_key(s["file_hash"], ex, start, end, ft_version, candles)
                 prior = done.get((s["name"], ex, start))
                 if prior and prior[0] == key and (prior[1] or prior[2] >= MAX_ATTEMPTS):
                     cached += 1
                     continue
                 attempts = prior[2] if prior and prior[0] == key and not prior[1] else 0
                 todo.append({"strategy": s["name"], "exchange": ex, "start": start, "end": end, "key": key,
-                             "attempts": attempts})
+                             "attempts": attempts, "candles": candles})
     # the newest years first: they feed every window, so a run cut short still updates the page
     todo.sort(key=lambda t: (-t["start"].year, t["strategy"], t["exchange"]))
     return todo, cached, skipped
@@ -749,4 +762,7 @@ if __name__ == "__main__":
         path = sys.argv[sys.argv.index("--strategy-path") + 1] if "--strategy-path" in sys.argv else None
         print("BIAS_RESULT " + json.dumps(bias_one(sys.argv[2], sys.argv[3], path), default=str), flush=True)
         sys.exit(0)
-    sys.exit(main())
+    from lab import reproduce  # the nightly reproduce step, after the night's own results are stored
+
+    code = main()
+    sys.exit(max(code, reproduce.main()))

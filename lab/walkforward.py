@@ -10,8 +10,9 @@ straddles the fold boundary, so `stats` purges it from every span's result):
 - hyperopt tunes it on the WF_TRAIN_DAYS before the month, with a seeded random state, stopping WF_EMBARGO_DAYS
   short of the month so no training trade is still open when the test begins (embargo);
 - the month is backtested again with the tuned parameters, and so is the training span (in sample).
-A fold is cached by strategy file, configs, Freqtrade version, dates and hyperopt settings, so a weekly
-run adds the newest month and whatever a changed file or a new candidate needs. Folds share a memory budget
+A fold is cached by strategy file, configs, Freqtrade version, dates, hyperopt settings and a digest of the
+candles from its training start to its test end, so a weekly run adds the newest month and whatever a changed
+file, a changed candle or a new candidate needs. Folds share a memory budget
 (WF_MEMORY_GB) by their estimated size, like analyze's chunks, so wide venues do not all hyperopt at once.
 
 Hyperopt runs on a copy of the strategy's folder in a temporary userdir, so its params file never lands
@@ -72,10 +73,9 @@ def train_end(test_start: dt.date) -> dt.date:
     return test_start - dt.timedelta(days=EMBARGO_DAYS)
 
 
-def fold_key(file_hash: str, exchange: str, fold: tuple, ft_version: str) -> str:
-    cfg = "".join(analyze.sha256(p.read_bytes()) for p in analyze.config_files(exchange))
-    return analyze.sha256(json.dumps([file_hash, cfg, ft_version, exchange, [str(d) for d in fold],
-                                      EPOCHS, LOSS, MIN_TRADES, EMBARGO_DAYS]).encode())
+def fold_key(file_hash: str, exchange: str, fold: tuple, ft_version: str, candles: str) -> str:
+    return analyze.sha256(json.dumps([file_hash, analyze.config_digest(exchange), ft_version, exchange,
+                                      [str(d) for d in fold], EPOCHS, LOSS, MIN_TRADES, EMBARGO_DAYS, candles]).encode())
 
 
 class Runner(Protocol):
@@ -177,6 +177,7 @@ def plan(conn, found: list[dict], first: dict, today: dt.date, ft_version: str) 
         "SELECT strategy, exchange, fold_start, cache_key, ok, attempts FROM walkforward")}
     todo, cached, skipped = [], 0, []
     lockbox = suggest.load_config()["lockbox"]["start"]
+    days: dict[tuple[str, str], dict] = {}
     for s in found:
         for ex in EXCHANGES:
             since = first.get((ex, s["timeframe"]))
@@ -187,12 +188,16 @@ def plan(conn, found: list[dict], first: dict, today: dt.date, ft_version: str) 
                 if fold[0] < since.date():
                     skipped.append(f"{s['name']} on {ex} {fold[1]:%Y-%m}: training starts before its first candle")
                     continue
-                key = fold_key(s["file_hash"], ex, fold, ft_version)
+                if (ex, s["timeframe"]) not in days:
+                    days[ex, s["timeframe"]] = analyze.candle_digests(ex, s["timeframe"], by="day")
+                candles = analyze.span_digest(days[ex, s["timeframe"]], fold[0], fold[2])
+                key = fold_key(s["file_hash"], ex, fold, ft_version, candles)
                 prior = done.get((s["name"], ex, fold[1]))
                 if prior and prior[0] == key and (prior[1] or prior[2] >= MAX_ATTEMPTS):
                     cached += 1
                     continue
-                todo.append({**s, "exchange": ex, "fold": fold, "key": key,
+                todo.append({**s, "exchange": ex, "fold": fold, "key": key, "candles": candles,
+                             "seed": metrics.seed_of(s["name"], ex, fold[1]),
                              "attempts": prior[2] if prior and prior[0] == key and not prior[1] else 0})
     todo.sort(key=lambda t: (-t["fold"][1].toordinal(), t["name"], t["exchange"]))  # the newest month first
     return todo, cached, skipped
@@ -205,8 +210,10 @@ def store(conn, task: dict, res: dict) -> None:
     conn.execute("""
         INSERT INTO walkforward (strategy, exchange, fold_start, train_start, test_end, cache_key, ok, attempts, error,
             epochs, loss, params, is_trades, is_profit, base_trades, base_profit, base_expectancy, base_returns,
-            tuned_trades, tuned_profit, tuned_expectancy, tuned_returns, duration_s, computed_at)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
+            tuned_trades, tuned_profit, tuned_expectancy, tuned_returns, duration_s, revision, config_digest, candles, seed,
+            computed_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+            %s, now())
         ON CONFLICT (strategy, exchange, fold_start) DO UPDATE SET train_start = EXCLUDED.train_start,
             test_end = EXCLUDED.test_end, cache_key = EXCLUDED.cache_key, ok = EXCLUDED.ok, attempts = EXCLUDED.attempts,
             error = EXCLUDED.error, epochs = EXCLUDED.epochs, loss = EXCLUDED.loss, params = EXCLUDED.params,
@@ -214,13 +221,15 @@ def store(conn, task: dict, res: dict) -> None:
             base_profit = EXCLUDED.base_profit, base_expectancy = EXCLUDED.base_expectancy,
             base_returns = EXCLUDED.base_returns, tuned_trades = EXCLUDED.tuned_trades,
             tuned_profit = EXCLUDED.tuned_profit, tuned_expectancy = EXCLUDED.tuned_expectancy,
-            tuned_returns = EXCLUDED.tuned_returns, duration_s = EXCLUDED.duration_s, computed_at = now()""",
+            tuned_returns = EXCLUDED.tuned_returns, duration_s = EXCLUDED.duration_s, revision = EXCLUDED.revision,
+            config_digest = EXCLUDED.config_digest, candles = EXCLUDED.candles, seed = EXCLUDED.seed, computed_at = now()""",
         (task["name"], task["exchange"], fold_start, train_start, test_end, task["key"], res["ok"], attempts, res.get("error"),
          EPOCHS, LOSS, Jsonb(res["params"]) if res.get("params") else None,
          side("is").get("trades"), side("is").get("profit"),
          side("base").get("trades"), side("base").get("profit"), side("base").get("expectancy"), side("base").get("returns"),
          side("tuned").get("trades"), side("tuned").get("profit"), side("tuned").get("expectancy"),
-         side("tuned").get("returns"), res.get("duration_s")))
+         side("tuned").get("returns"), res.get("duration_s"), analyze.REVISION, analyze.config_digest(task["exchange"]),
+         task["candles"], task["seed"]))
     conn.execute("DELETE FROM walkforward_trades WHERE strategy = %s AND exchange = %s AND fold_start = %s",
                  (task["name"], task["exchange"], fold_start))
     rows = [(task["name"], task["exchange"], v, fold_start, *t) for v in ("base", "tuned") for t in side(v).get("dated", [])]
@@ -253,8 +262,7 @@ def main(runner: Runner | None = None, today: dt.date | None = None) -> int:
             def run(t):
                 gb = analyze.task_gb(t["exchange"], t["timeframe"], TRAIN_DAYS + 31, HYPEROPT_LOAD)
                 with budget.hold(gb):
-                    return runner.fold(t["name"], t["file"], t["exchange"], t["fold"],
-                                       metrics.seed_of(t["name"], t["exchange"], t["fold"][1]))
+                    return runner.fold(t["name"], t["file"], t["exchange"], t["fold"], t["seed"])
 
             with ThreadPoolExecutor(max_workers=WORKERS) as pool:
                 futs = {pool.submit(run, t): t for t in todo}

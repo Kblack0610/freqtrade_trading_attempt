@@ -8,6 +8,10 @@ on:
 permissions:
   contents: read
 
+env:
+  # The ML image's base, pinned by digest like the Dockerfile's default (README, CI).
+  ML_BASE: freqtradeorg/freqtrade:2026.9_freqai@sha256:a98dc1ca26d47a3fb01b916dfdee97b087bf9924cd6ce325bebb35a2722af746
+
 jobs:
   # gitleaks over the commits this push or PR adds. History before 2026-11 holds freqtrade API
   # JWTs in old committed logs and a retired jwt_secret_key, none of it in HEAD (README, CI), so
@@ -60,7 +64,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Build the ML image (freqtrade's _freqai base, for lightgbm)
-        run: docker build --build-arg FREQTRADE_TAG=2026.9_freqai -t trader-ml:ci .
+        run: docker build --build-arg FREQTRADE_IMAGE=$ML_BASE -t trader-ml:ci .
       - name: FreqAI trains and predicts; the families still load and shadow nothing
         timeout-minutes: 10
         run: >-
@@ -96,6 +100,7 @@ jobs:
         with:
           context: .
           push: true
+          build-args: REVISION=${{ github.sha }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
@@ -111,7 +116,9 @@ jobs:
         with:
           context: .
           push: true
-          build-args: FREQTRADE_TAG=2026.9_freqai
+          build-args: |
+            FREQTRADE_IMAGE=${{ env.ML_BASE }}
+            REVISION=${{ github.sha }}
           tags: ${{ steps.meta-ml.outputs.tags }}
           labels: ${{ steps.meta-ml.outputs.labels }}
           cache-from: type=gha,scope=ml

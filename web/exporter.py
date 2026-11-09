@@ -13,7 +13,7 @@ from psycopg.rows import dict_row
 
 from lab.db import connect
 
-RUN_KINDS = ("analysis", "walkforward")
+RUN_KINDS = ("analysis", "walkforward", "reproduce")
 
 BOTS = """
 SELECT DISTINCT ON (bot) bot, ts, dry_run, error, open_trades, closed_trades, profit_all_pct, balance_total
@@ -36,6 +36,9 @@ FUTURES = """
 SELECT 'funding' AS kind, exchange, max(ts) AS newest FROM funding_rates GROUP BY exchange
 UNION ALL SELECT 'open_interest', exchange, max(ts) FROM open_interest GROUP BY exchange
 """
+# lab/reproduce.py: the newest finished reproduce run's counts.
+REPRO = ("SELECT (raw->>'checked')::int AS checked, (raw->>'mismatch')::int AS mismatch FROM runs "
+         "WHERE kind = 'reproduce' AND finished_at IS NOT NULL ORDER BY finished_at DESC LIMIT 1")
 SUGGESTIONS = "SELECT kind, count(*) AS n FROM suggestions GROUP BY kind"
 CLIMATE = "SELECT cell, kind, count(*) FILTER (WHERE lo > 0) AS n FROM climate_scorecard WHERE kind <> 'benchmark' GROUP BY 1, 2"
 # Event-contract markets (lab/markets). A venue counts while it has a recorder sweep in the last week, so a venue
@@ -83,6 +86,7 @@ class TraderCollector:
                 bots = cur.execute(BOTS).fetchall()
                 watch = cur.execute(WATCH).fetchall()
                 runs = cur.execute(RUNS, (list(RUN_KINDS),)).fetchall()
+                repro = cur.execute(REPRO).fetchall()
                 candles = cur.execute(CANDLES).fetchall()
                 futures = cur.execute(FUTURES).fetchall()
                 suggestions = cur.execute(SUGGESTIONS).fetchall()
@@ -101,6 +105,10 @@ class TraderCollector:
         yield from bot_metrics(now, bots)
         yield from watch_metrics(now, watch)
         yield from run_metrics(runs)
+        yield family("trader_repro_checked", "Cached chunks and folds the newest reproduce run ran again and compared",
+                     [], (([], r["checked"]) for r in repro))
+        yield family("trader_repro_mismatch", "Of those, how many came out different from the stored result",
+                     [], (([], r["mismatch"]) for r in repro))
         yield from candle_metrics(now, candles)
         yield family("trader_futures_age_seconds", "Seconds since the newest funding or open interest row of each exchange",
                      ["kind", "exchange"], (([f["kind"], f["exchange"]], age(now, f["newest"])) for f in futures))

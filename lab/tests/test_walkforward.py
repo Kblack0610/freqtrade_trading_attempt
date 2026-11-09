@@ -214,9 +214,32 @@ def test_the_embargo_is_part_of_the_cache_key(monkeypatch):
     fold = wf.folds(TODAY, 1, 180)[0]
     monkeypatch.setattr(analyze, "config_files", lambda ex: [])
     monkeypatch.setattr(wf, "EMBARGO_DAYS", 7)
-    a = wf.fold_key("h", "binanceus", fold, "v")
+    a = wf.fold_key("h", "binanceus", fold, "v", "candles")
     monkeypatch.setattr(wf, "EMBARGO_DAYS", 3)
-    assert a != wf.fold_key("h", "binanceus", fold, "v")
+    assert a != wf.fold_key("h", "binanceus", fold, "v", "candles")
+
+
+def test_a_changed_candle_reruns_only_the_folds_whose_span_holds_it(wlab, monkeypatch, tmp_path):
+    from test_families import synthetic_candles
+
+    monkeypatch.setattr(analyze, "RESULTS", tmp_path)
+    feather = tmp_path / "data" / "binanceus" / "BTC_USD-5m.feather"
+    feather.parent.mkdir(parents=True)
+    utc = dt.timezone.utc
+    synthetic_candles(dt.datetime(2026, 1, 1, tzinfo=utc), dt.datetime(2026, 11, 3, tzinfo=utc), "5min").to_feather(feather)
+    wf.main(FakeRunner(), TODAY)
+
+    def touch(day):
+        df = wf.analyze.pd.read_feather(feather)
+        df.loc[df["date"] == wf.analyze.pd.Timestamp(day, tz="UTC"), "volume"] += 1
+        df.to_feather(feather)
+        runner = FakeRunner()
+        wf.main(runner, TODAY)
+        return sorted({(s, m) for s, m, _, _ in runner.calls})
+
+    assert touch("2026-01-15") == []  # before every fold's training span
+    # 2026-02-10 is only in the oldest fold's training span (Feb 2 to Aug 1); the others train from March
+    assert touch("2026-02-10") == [(s, dt.date(2026, 8, 1)) for s in ("Live", "Promising", "Watched")]
 
 
 def test_dated_test_month_trades_are_stored_per_variant_and_replaced_on_rerun(wlab):
