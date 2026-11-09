@@ -91,7 +91,7 @@ def test_healthz_needs_no_sign_in(site):
     assert site[1].get("/healthz").text == "ok"
 
 
-@pytest.mark.parametrize("path", ["/", "/live", "/live/rows", "/bots/x", "/strategies", "/strategies/x", "/suggestions", "/confidence", "/book", "/coverage", "/guide", "/data", "/runs", "/runs/1", "/markets", "/links", "/markets/book"])
+@pytest.mark.parametrize("path", ["/", "/live", "/live/rows", "/bots/x", "/strategies", "/strategies/x", "/suggestions", "/confidence", "/book", "/coverage", "/guide", "/data", "/runs", "/runs/1", "/markets", "/links", "/markets/book", "/accounts"])
 def test_signed_out_goes_to_login(site, path):
     r = site[1].get(path)
     assert r.status_code == 303 and r.headers["location"] == "/login"
@@ -242,7 +242,7 @@ def test_overview_warns_when_a_bot_is_not_dry_run(conn, signed_in):
 
 
 def test_pages_render_on_an_empty_database(conn, signed_in):
-    for path in ("/", "/data", "/runs", "/strategies", "/suggestions", "/walkforward", "/coverage", "/markets", "/links", "/markets/book"):
+    for path in ("/", "/data", "/runs", "/strategies", "/suggestions", "/walkforward", "/coverage", "/markets", "/links", "/markets/book", "/accounts"):
         assert signed_in[1].get(path).status_code == 200, path
 
 
@@ -318,7 +318,7 @@ def test_until_scored_both_pages_show_how_far_the_population_is(conn, signed_in)
 def test_guide_lists_every_page_in_reading_order(conn, signed_in):
     body = signed_in[1].get("/guide").text
     order = [body.index(f'<li><a href="{p}">') for p in ("/", "/data", "/strategies", "/walkforward", "/suggestions",
-                                                          "/confidence", "/book", "/coverage", "/markets", "/runs")]
+                                                          "/confidence", "/book", "/coverage", "/markets", "/accounts", "/runs")]
     assert order == sorted(order) and "needs 20 strategies with at least 30" in body and "trial register" in body
 
 
@@ -503,9 +503,7 @@ def test_markets_pages_render_with_data(conn, signed_in):
              "/links": ["rule:kalshi_game", "San Antonio at Phoenix", "Spurs at Suns", "by rule", "claude-haiku"],
              "/links?status=rejected": ["No rejected links."],
              "/markets/book": ["longshot", "abcdef01", "1.23%", "-0.40% to 3.10%", "61%", "0.42", "By contract category", "2.11%", "0.43% to 3.77%", "paper-longshot-abcdef01",
-                               "987.50", "-1.25%", "stopped", "San Antonio at Phoenix", "0.91", "KXDEMO-1", "canceled", "15%",
-                               "alpaca_paper", "100,012.50", "fidelity_individual_1234",
-                               "real, read only", "15,363.23"]}
+                               "987.50", "-1.25%", "stopped", "San Antonio at Phoenix", "0.91", "KXDEMO-1", "canceled", "15%"]}
     for path, needles in pages.items():
         r = client.get(path)
         assert r.status_code == 200, path
@@ -515,6 +513,24 @@ def test_markets_pages_render_with_data(conn, signed_in):
     assert '<td class="">3m ago</td>' in client.get("/markets").text
     assert "Spurs at Suns" not in client.get("/links?status=rejected").text
     assert client.get("/links?status=bogus").status_code == 404
+
+
+def test_accounts_shows_every_balance_and_kill_switch_read_only(conn, signed_in):
+    seed_markets(conn)
+    conn.execute("INSERT INTO wallet_balances (account, read_at, coin, confirmed_sat, unconfirmed_sat, used_addresses) VALUES "
+                 "('trezor-savings', now() - interval '1 hour', 'btc', 1, 0, 1), ('trezor-savings', now(), 'btc', 12345678, -2000, 7)")
+    conn.execute("INSERT INTO watch (bot, checked_at, seen_at, dry_run, state, equity, day_open, breached_at) VALUES "
+                 "('kraken-s001', now(), now(), true, 'running', 980.5, 1000, now())")
+    client = signed_in[1]
+    body = client.get("/accounts").text
+    for n in ("Real-money guard: <span class=\"up\">on</span>", "alpaca_paper", "100,012.50", "fidelity_individual_1234",
+              "real, read only", "15,363.23", "trezor-savings", "0.12345678", "-0.00002000", "kraken-s001", "980.50",
+              "paper-longshot-abcdef01"):
+        assert n in body, n
+    assert "0.00000001" not in body  # only the newest wallet read
+    assert body.index("paper-longshot-abcdef01") < body.index("kraken-s001")  # stopped before breached
+    assert "alpaca_paper" not in client.get("/markets/book").text  # moved, not copied
+    assert body.count("<form") == 1 and 'action="/logout"' in body  # no control: sign-out is the only form
 
 
 def test_book_lists_the_strategies_clearing_zero_in_each_climate(conn, signed_in):
