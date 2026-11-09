@@ -3,7 +3,8 @@
 Rests one order, reads it back, cancels it and reads it back, writing each step to demo_orders (migration 023). A
 client gives `venue`, `resting` (the statuses that mean the order is on the book), place(), order() and cancel(). The
 row's error is None only when the order was seen resting and then canceled. A place is never retried: a timeout could
-have placed it, and a second one would double it.
+have placed it, and a second one would double it. A read-back that fails says nothing about the order, so the drill
+cancels before it reports the failure; only a status it did read, and that is not resting, leaves the order alone.
 """
 
 import datetime as dt
@@ -24,7 +25,11 @@ def rest_and_cancel(conn, client, ticker: str, price: float, now=None) -> dict:
     try:
         oid = client.place(ticker, price, 1, cid)["order_id"]
         note(order_id=oid)
-        status = client.order(oid)["status"]
+        try:
+            status = client.order(oid)["status"]
+        except Exception:
+            client.cancel(oid, ticker)
+            raise
         note(status=status)
         if status not in client.resting:
             raise RuntimeError(f"order {oid} is {status}, not resting")

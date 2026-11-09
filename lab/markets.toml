@@ -253,6 +253,10 @@ base_url = "https://external-api.demo.kalshi.co/trade-api/v2"
 timeout_s = 30
 # The drill rests one contract this far below the ask, post only, so it cannot fill before it is cancelled.
 drill_price = 0.01
+# Reads lag writes (2026-11-09: a 404 right after a place, still resting 0.04 s after a cancel, canceled by 0.29 s),
+# and an order state read has no event short of the websocket, so reads wait up to 5 s.
+read_polls = 20
+read_poll_s = 0.25
 
 [demo.manifold]
 # lab/markets/manifold_trade.py, play money: the client refuses any host but api.manifold.markets. Key: MANIFOLD_API_KEY.
