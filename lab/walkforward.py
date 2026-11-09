@@ -19,6 +19,8 @@ Hyperopt runs on a copy of the strategy's folder in a temporary userdir, so its 
 next to the real strategy, where every nightly backtest would load it.
 
 Rows go to `walkforward`, and each test-month trade, dated, to `walkforward_trades`; lab/suggest.py turns them into retune suggestions and runs at the end.
+A run starts no fold after WF_BUDGET_S seconds (0: no limit), so a backlog longer than the job's deadline still ends in
+a recorded run with its post steps; the folds it left (`folds_left`) run next time, skipped by cache_key once stored.
 Exits 1 when more than a tenth of the folds run this time failed, or on a crash.
 """
 
@@ -49,6 +51,7 @@ LIMIT = int(os.environ.get("WF_LIMIT", "16"))
 WORKERS = int(os.environ.get("WF_WORKERS", "6"))
 TIMEOUT = int(os.environ.get("WF_TIMEOUT", "10800"))
 MEMORY_GB = float(os.environ.get("WF_MEMORY_GB", "10"))
+BUDGET_S = float(os.environ.get("WF_BUDGET_S", "0"))  # under the job's deadline by WF_TIMEOUT and the post steps
 EMBARGO_DAYS = int(os.environ.get("WF_EMBARGO_DAYS", "7"))  # a gap longer than any trade's hold, before each test month
 HYPEROPT_LOAD = 2  # hyperopt keeps the analysed frame and each epoch's backtest copy
 ONLY = set(os.environ.get("WF_STRATEGIES", "").split())
@@ -258,10 +261,14 @@ def main(runner: Runner | None = None, today: dt.date | None = None) -> int:
                   f"{cached} cached, {len(skipped)} skipped, {WORKERS} workers", flush=True)
             failed, done, failures = 0, 0, []
             budget = analyze.Budget(MEMORY_GB)
+            stop_at = time.monotonic() + BUDGET_S if BUDGET_S else None
+            left = 0
 
             def run(t):
                 gb = analyze.task_gb(t["exchange"], t["timeframe"], TRAIN_DAYS + 31, HYPEROPT_LOAD)
                 with budget.hold(gb):
+                    if stop_at is not None and time.monotonic() >= stop_at:
+                        return None  # out of time: left for the next run
                     return runner.fold(t["name"], t["file"], t["exchange"], t["fold"], t["seed"])
 
             with ThreadPoolExecutor(max_workers=WORKERS) as pool:
@@ -273,6 +280,9 @@ def main(runner: Runner | None = None, today: dt.date | None = None) -> int:
                             res = fut.result()
                         except Exception as e:  # one fold's runner bug must not lose the others
                             res = {"ok": False, "error": f"{type(e).__name__}: {e}"}
+                        if res is None:
+                            left += 1
+                            continue
                         store(conn, task, res)
                         done += 1
                         if not res["ok"] and not res.get("no_data"):
@@ -282,14 +292,16 @@ def main(runner: Runner | None = None, today: dt.date | None = None) -> int:
                 except BaseException:
                     pool.shutdown(cancel_futures=True)
                     raise
-            report.update(folds_failed=failed, failures=failures[:100])
+            if left:
+                print(f"walkforward: budget of {BUDGET_S:.0f}s spent, {left} folds left for the next run", flush=True)
+            report.update(folds_failed=failed, folds_left=left, failures=failures[:100])
             report.update(suggest.run(conn))
             report.update(confidence.run(conn))
             report.update(book.run(conn))
             report.update(mixtures.run(conn))
             report.update(scorecard.run(conn))
             report.update(horizon.run(conn))
-            ok = failed <= FAIL_SHARE * max(len(todo), 1)
+            ok = failed <= FAIL_SHARE * max(done, 1)
             print(f"walkforward: done: {json.dumps({k: v for k, v in report.items() if k not in ('failures', 'skipped')})}",
                   flush=True)
         except Exception as e:

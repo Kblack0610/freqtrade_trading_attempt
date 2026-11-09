@@ -1,5 +1,6 @@
 import datetime as dt
 import json
+import types
 
 import pytest
 
@@ -264,3 +265,18 @@ def test_stats_keep_the_dates_of_the_trades_that_survive_the_purge():
                       "profit_ratio": [0.01, -0.5], "profit_abs": [1.0, -50.0], "exit_reason": ["roi", "force_exit"]})
     got = wf.stats({"trades": t, "start_balance": 100.0})
     assert [d[0] for d in got["dated"]] == ["A/USDT"] and got["dated"][0][3] == 0.01
+
+
+def test_a_spent_budget_starts_no_more_folds_and_still_records_the_run(wlab, monkeypatch):
+    monkeypatch.setattr(wf, "WORKERS", 1)
+    monkeypatch.setattr(wf, "BUDGET_S", 60.0)
+    clock = iter([0.0, 1.0])  # the run starts at 0, the first fold at 1; every later fold starts past the budget
+    monkeypatch.setattr(wf, "time", types.SimpleNamespace(monotonic=lambda: next(clock, 61.0)))
+    runner = FakeRunner()
+    assert wf.main(runner, TODAY) == 0
+    assert len(runner.calls) == 1 and wlab.execute("SELECT count(*) FROM walkforward").fetchone()[0] == 1
+    raw, ok = wlab.execute("SELECT raw, ok FROM runs WHERE kind = 'walkforward'").fetchone()
+    assert ok and raw["folds_run"] == 9 and raw["folds_left"] == 8 and raw["folds_failed"] == 0
+    monkeypatch.setattr(wf, "BUDGET_S", 0.0)
+    rest = FakeRunner()
+    assert wf.main(rest, TODAY) == 0 and len(rest.calls) == 8, "the next run carries on where this one stopped"

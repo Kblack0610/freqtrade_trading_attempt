@@ -61,10 +61,10 @@ def run(conn, cfg: dict | None = None) -> dict:
     cfg = cfg or suggest.load_config()
     regimes = conn.execute("SELECT day, btc_close FROM regimes ORDER BY day").fetchall()
     close = pd.Series([r[1] for r in regimes], index=pd.to_datetime([r[0] for r in regimes]), dtype=float)
-    spans = {(s, e): (a, b) for s, e, a, b in conn.execute(scorecard.SPANS)}
+    box = (cfg["lockbox"]["start"],)
+    spans = {(s, e): (a, b) for s, e, a, b in conn.execute(scorecard.SPANS, box)}
     daily: dict = {}
-    for s, e, v, day, ret, n in conn.execute("SELECT strategy, exchange, variant, day, ret, trades FROM walkforward_daily "
-                                             "ORDER BY 1, 2, 3, 4"):
+    for s, e, v, day, ret, n in conn.execute(scorecard.DAILY, box):
         daily.setdefault((s, e, v), []).append((pd.Timestamp(day), ret, n))
     frames = {k: pd.DataFrame(v, columns=["day", "ret", "trades"]).set_index("day") for k, v in daily.items()}
     out = build(close, spans, frames, cfg)
