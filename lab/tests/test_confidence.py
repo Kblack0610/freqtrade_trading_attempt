@@ -332,3 +332,28 @@ def test_evidence_and_scores_are_unchanged_by_the_returns_input():
         e = ev[(k, "okx")]
         assert (e["mean"], e["lo"], e["hi"], s[(k, "okx")]) == (mean, lo, hi, score)
         assert e["trades"] == 70 and e["months"] == [0.001, -0.001]
+
+
+def test_no_reader_takes_a_stored_fold_whose_test_month_is_in_the_lockbox(conn):
+    # Rows stored before the box existed (binanceus held 36): walk-forward no longer makes them, so every reader drops them.
+    from lab import book, scorecard
+
+    cfg = {**suggest.load_config(), "lockbox": {"start": dt.date(2026, 5, 1)}}
+    box = (cfg["lockbox"]["start"],)
+    conn.execute("INSERT INTO strategies (name, file, file_hash) VALUES ('S', 'x', 'h')")
+    for start, end in ((dt.date(2026, 4, 1), dt.date(2026, 5, 1)), (dt.date(2026, 5, 1), dt.date(2026, 6, 1))):
+        conn.execute("INSERT INTO walkforward (strategy, exchange, fold_start, train_start, test_end, cache_key, ok, params, "
+                     "tuned_returns, tuned_profit) VALUES ('S', 'binanceus', %s, %s, %s, 'k', true, '{\"x\": 1}', "
+                     "'{0.01}', 0.01)", (start, start, end))
+        conn.execute("INSERT INTO walkforward_trades (strategy, exchange, variant, fold_start, pair, open_date, close_date, "
+                     "profit_ratio) VALUES ('S', 'binanceus', 'tuned', %s, 'BTC/USD', %s, %s, 0.01)",
+                     (start, start, start + dt.timedelta(days=2)))
+    conn.execute("INSERT INTO confidence (strategy, exchange, score, ready, passed, oos_trades, gates) "
+                 "VALUES ('S', 'binanceus', 50, false, 0, 1, '[]')")
+    key, before = ("S", "binanceus"), dt.date(2026, 4, 1)
+    facts = confidence.load(conn, cfg)  # the score and retune both read suggest.load_facts
+    assert [f["fold_start"] for f in facts["walkforward"][key]] == [before]
+    assert list(facts["oos"][key].index) == [pd.Timestamp("2026-04-03")]
+    assert [r[2] for r in conn.execute(book.FOLDS, box)] == [before]
+    assert conn.execute(scorecard.SPANS, box).fetchall() == [("S", "binanceus", before, dt.date(2026, 5, 1))]
+    assert [r[3] for r in conn.execute(scorecard.DAILY, box)] == [dt.date(2026, 4, 3)]
