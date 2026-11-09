@@ -2,6 +2,7 @@ import datetime as dt
 import pytest
 
 from lab import ingest
+from lab.league import Row
 
 T0 = dt.datetime(2026, 11, 4, 12, tzinfo=dt.timezone.utc)
 
@@ -60,25 +61,25 @@ def test_trade_row_uses_utc_timestamps():
 def test_rerun_adds_no_duplicates_and_tracks_closes(conn, monkeypatch):
     monkeypatch.setattr(ingest, "PAGE", 2)  # force paging through /trades
     bots = FakeBots({"closed": [trade(1, False), trade(2, False), trade(3, False)], "open": [trade(4, True)]})
-    ingest.ingest_bot(conn, bots, 0, "k-s", "kraken", "S", T0)
-    ingest.ingest_bot(conn, bots, 0, "k-s", "kraken", "S", T0 + dt.timedelta(hours=1))
+    ingest.ingest_bot(conn, bots, 0, Row("k-s", "kraken", "S"), T0)
+    ingest.ingest_bot(conn, bots, 0, Row("k-s", "kraken", "S"), T0 + dt.timedelta(hours=1))
     assert count(conn, "SELECT count(*) FROM bot_trades") == 4
     assert count(conn, "SELECT count(*) FROM bot_snapshots WHERE bot = 'k-s'") == 2
 
     bots.bots[0]["closed"].append(trade(4, False))
     bots.bots[0]["open"] = [trade(5, True)]
-    ingest.ingest_bot(conn, bots, 0, "k-s", "kraken", "S", T0 + dt.timedelta(hours=2))
+    ingest.ingest_bot(conn, bots, 0, Row("k-s", "kraken", "S"), T0 + dt.timedelta(hours=2))
     assert count(conn, "SELECT count(*) FROM bot_trades WHERE is_open") == 1
     assert count(conn, "SELECT count(*) FROM bot_trades WHERE trade_id = 4 AND NOT is_open") == 1
 
     bots.bots[0]["open"] = []  # trade 5 timed out unfilled and the bot dropped it
-    ingest.ingest_bot(conn, bots, 0, "k-s", "kraken", "S", T0 + dt.timedelta(hours=3))
+    ingest.ingest_bot(conn, bots, 0, Row("k-s", "kraken", "S"), T0 + dt.timedelta(hours=3))
     assert count(conn, "SELECT count(*) FROM bot_trades") == 4
 
 
 def test_snapshot_keeps_the_newest_candle_of_each_open_pair(conn):
     bots = FakeBots({"closed": [trade(1, False)], "open": [trade(2, True), trade(3, True)]})
-    ingest.ingest_bot(conn, bots, 0, "k-s", "kraken", "S", T0)
+    ingest.ingest_bot(conn, bots, 0, Row("k-s", "kraken", "S"), T0)
     raw = conn.execute("SELECT raw FROM bot_snapshots WHERE bot = 'k-s'").fetchone()[0]
     assert raw["timeframe"] == "5m" and raw["candles"] == {"BTC/USD": 1793794800000}
     assert bots.candle_paths == ["pair_candles?pair=BTC%2FUSD&timeframe=5m&limit=1"]  # one call per pair, not per trade
@@ -86,9 +87,9 @@ def test_snapshot_keeps_the_newest_candle_of_each_open_pair(conn):
 
 def test_down_bot_gets_an_error_snapshot_and_keeps_its_trades(conn):
     bots = FakeBots({"closed": [trade(1, False)], "open": [trade(2, True)]})
-    ingest.ingest_bot(conn, bots, 0, "k-s", "kraken", "S", T0)
+    ingest.ingest_bot(conn, bots, 0, Row("k-s", "kraken", "S"), T0)
     bots.bots[0]["down"] = True
-    snap = ingest.ingest_bot(conn, bots, 0, "k-s", "kraken", "S", T0 + dt.timedelta(hours=1))
+    snap = ingest.ingest_bot(conn, bots, 0, Row("k-s", "kraken", "S"), T0 + dt.timedelta(hours=1))
     assert snap["error"].startswith("ConnectionError")
     assert count(conn, "SELECT count(*) FROM bot_trades") == 2
 
@@ -106,7 +107,7 @@ NOW = dt.datetime(2026, 11, 6, 12, 30, tzinfo=dt.timezone.utc)
 
 def snapshots(conn, stamps: list[dt.datetime], bot: str = "k-s", profit: float | None = 1.0, dry_run: bool | None = True,
               error: str | None = None) -> None:
-    conn.execute(ingest.UPSERT_BOT, (bot, "kraken", "S", NOW, NOW))
+    conn.execute(ingest.UPSERT_BOT, (*Row(bot, "kraken", "S"), NOW, NOW))
     conn.cursor().executemany("INSERT INTO bot_snapshots (bot, ts, profit_all_pct, dry_run, error) VALUES (%s, %s, %s, %s, %s)",
                               [(bot, ts, profit, dry_run, error) for ts in stamps])
 

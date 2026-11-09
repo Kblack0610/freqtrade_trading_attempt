@@ -24,7 +24,7 @@ from typing import Callable
 from psycopg.types.json import Jsonb
 
 from lab.db import connect
-from lab.league import roster_rows
+from lab.league import Row, roster_rows
 from lab.util import utc
 
 ROSTER = Path(os.environ.get("LEAGUE_ROSTER", "/etc/freqtrade-league/roster.tsv"))
@@ -122,8 +122,10 @@ def insert_sql(table: str, cols: list[str], conflict: str) -> str:
 UPSERT_TRADE = insert_sql("bot_trades", TRADE_COLS, "(bot, trade_id, open_date) DO UPDATE SET " + ", ".join(
     f"{c} = EXCLUDED.{c}" for c in TRADE_COLS[3:]) + ", updated_at = now()")
 INSERT_SNAPSHOT = insert_sql("bot_snapshots", SNAPSHOT_COLS, "(bot, ts) DO NOTHING")
-UPSERT_BOT = """INSERT INTO bots (name, exchange, strategy, first_seen, last_seen) VALUES (%s, %s, %s, %s, %s)
+UPSERT_BOT = """INSERT INTO bots (name, exchange, strategy, cohort, overlay, first_seen, last_seen)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (name) DO UPDATE SET exchange = EXCLUDED.exchange, strategy = EXCLUDED.strategy,
+                cohort = EXCLUDED.cohort, overlay = EXCLUDED.overlay,
                 last_seen = GREATEST(bots.last_seen, EXCLUDED.last_seen),
                 first_seen = LEAST(bots.first_seen, EXCLUDED.first_seen)"""
 # A bucket keeps its newest row with a profit figure, since the bot chart skips rows without one. Rows showing a bot
@@ -147,8 +149,9 @@ def prune_snapshots(conn, now: dt.datetime) -> int:
     return conn.execute(PRUNE_SNAPSHOTS, {"hourly_before": hourly_before, "daily_before": daily_before}).rowcount
 
 
-def ingest_bot(conn, fetch: Fetch, i: int, name: str, exchange: str, strategy: str, now: dt.datetime) -> dict:
-    """One bot in one transaction. Returns the snapshot it wrote."""
+def ingest_bot(conn, fetch: Fetch, i: int, row: Row, now: dt.datetime) -> dict:
+    """Roster row i's bot in one transaction. Returns the snapshot it wrote."""
+    name = row.name
     snap: dict = {k: None for k in SNAPSHOT_COLS}
     trades: list[dict] = []
     try:
@@ -163,7 +166,7 @@ def ingest_bot(conn, fetch: Fetch, i: int, name: str, exchange: str, strategy: s
         trades = []
     snap.update(bot=name, ts=now, source="ingest")
     with conn.transaction():
-        conn.execute(UPSERT_BOT, (name, exchange, strategy, now, now))
+        conn.execute(UPSERT_BOT, (*row, now, now))
         conn.cursor().executemany(UPSERT_TRADE, [{**t, "bot": name} for t in trades])
         if snap["error"] in (None, "NOT DRY RUN"):  # the fetch completed, so the trade list is whole
             conn.execute("DELETE FROM bot_trades WHERE bot = %s AND is_open AND NOT (trade_id = ANY(%s))",
@@ -177,11 +180,11 @@ def main(fetch: Fetch = http_fetch) -> int:
     now = dt.datetime.now(dt.timezone.utc).replace(microsecond=0)
     unsafe = []
     with connect(autocommit=True) as conn:
-        for i, (name, exchange, strategy) in enumerate(roster_rows(ROSTER)):
-            snap = ingest_bot(conn, fetch, i, name, exchange, strategy, now)
+        for i, row in enumerate(roster_rows(ROSTER)):
+            snap = ingest_bot(conn, fetch, i, row, now)
             if snap["error"] == "NOT DRY RUN":
-                unsafe.append(name)
-            print(f"ingest: {name}: {snap['trade_rows']} trades, error={snap['error']}")
+                unsafe.append(row.name)
+            print(f"ingest: {row.name}: {snap['trade_rows']} trades, error={snap['error']}")
         print(f"ingest: pruned {prune_snapshots(conn, now)} snapshots")
     if unsafe:
         print(f"ingest: NOT DRY RUN: {unsafe}", file=sys.stderr)

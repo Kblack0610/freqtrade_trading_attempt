@@ -18,7 +18,7 @@ Results go to the `trader` database in the cluster's shared Postgres, which the 
 | `user_data/config.base.json` | Shared config: dry run, 1000 USD wallet, spot, static pair list |
 | `user_data/exchanges/<name>.json` | Per-exchange overlay: name, pair whitelist, pricing quirks; no keys |
 | `lab/healthcheck.py` | The image's Docker `HEALTHCHECK`: healthy when the bot API (:8080) or the site (:8000) answers; k8s ignores it and uses home-config's probes |
-| `lab/league.py` | Bot entrypoint: picks its roster row from the pod ordinal, refuses anything but key-less spot dry run, writes the API config, execs `freqtrade trade` |
+| `lab/league.py` | Bot entrypoint: picks its roster row from the pod ordinal, layers the row's setup overlay, refuses anything but key-less spot dry run, writes the API config, execs `freqtrade trade` (see Cohorts) |
 | `lab/pairs.py`, `lab/universe.py` | By hand: a research venue's whitelist, its most traded pairs with history since 2022 and a volume floor then and now; `user_data/universe.json` records where each list came from and analysis and walk-forward copy it onto their run |
 | `lab/futures.py` | Daily job: funding rates and open interest for the okx and kucoin swaps into `funding_rates` and `open_interest` (see Price data) |
 | `lab/markets/`, `lab/markets.toml` | Event contracts, kept out of the Freqtrade runtime: the venue adapter interface (`venue.py`), read-only adapters for Kalshi, Polymarket US and global, PredictIt, Manifold and The Odds API (sportsbook odds), the cross-venue linker (`links.py`: rules, LLM proposals, confirmation by resolution), the recorder, a 5-min job writing change-only quotes to MinIO parquet and market metadata to Postgres, its nightly compaction (`compact.py`: one object per venue and day), the history backfill (`history.py`: settled markets, price bars and Kalshi trades from before the recorder started), the backtester (`backtest.py`, `fees.py`: depth-limited taker fills, per-venue fees, settlement at resolution, scored through `metrics.py` and `confidence.py`), and the strategy families (`families.py`: favourite-longshot, base-rate calibration, cross-venue gaps, and a forward-only LLM forecaster), the paper league (`paper.py`: each family variant trades paper money against the recorder's live books, watched by `lab/watcher.py`) and the order drills on the Kalshi demo exchange (`kalshi_trade.py`, demo hosts only) and on Manifold play money (`manifold_trade.py`); see `docs/markets.md`, Recorder, History, Backtest, Families, Paper league and Demo orders |
@@ -54,6 +54,10 @@ Results go to the `trader` database in the cluster's shared Postgres, which the 
 ## The no-real-money guard
 
 `lab/league.py` exits 2 before freqtrade starts if any `FREQTRADE__` env var is set, if the merged config is not `dry_run: true`, if it is not spot, or if the exchange block carries a key, secret, password, uid, private key or wallet address. Public market data needs no keys, so the exchange files keep them empty. `lab/ingest.py` exits 1 if any bot's `show_config` says it is not dry run. `lab/live.py` is the entry point a live bot would use: it refuses while its own guard is on, and nothing deploys it (`docs/live.md`).
+
+## Cohorts
+
+A roster row is `name exchange strategy [cohort overlay]`. The cohort is the league the bot reports in; the overlay is an id from `lab/variants.toml` (`base` for the strategy's own settings), and `lab/league.py` layers its config over the venue's file exactly as the backtest does, so a bot runs the setup it was tested under. A 3-column row is cohort `league`, overlay `base`. An overlay id missing from the toml stops the pod, and the guard reads the overlay file with the others, so an overlay can never turn off dry run or add a key. Ingest copies both columns to `bots` on every run, the overview shows one row per cohort plus the total, `/cohorts` lists each cohort's bots with their overlays, and `trader_bot_profit_pct` carries a `cohort` label.
 
 ## Run locally
 
@@ -340,7 +344,8 @@ The event-contract paper league's accounts (`paper-<family>-<variant>`) get watc
 | `trader_db_up` | | 0 when the scrape could not read the database; every other metric is absent then |
 | `trader_bot_dry_run` | `bot` | 1 dry run, 0 trading real money, per the newest snapshot |
 | `trader_bot_snapshot_age_seconds`, `trader_bot_snapshot_error` | `bot` | Age of the newest snapshot, and 1 when ingest got an API error instead of numbers |
-| `trader_bot_open_trades`, `trader_bot_closed_trades`, `trader_bot_profit_pct` | `bot` | The newest snapshot's numbers |
+| `trader_bot_open_trades`, `trader_bot_closed_trades` | `bot` | The newest snapshot's numbers |
+| `trader_bot_profit_pct` | `bot`, `cohort` | The newest snapshot's profit of all trades, percent of starting balance |
 | `trader_ingest_age_seconds` | | Since any snapshot was written |
 | `trader_watch_age_seconds` | | Since the watcher last finished a pass |
 | `trader_watch_unseen_seconds`, `trader_watch_running`, `trader_watch_breached`, `trader_watch_day_loss_ratio` | `bot` | Since the last good read, 1 when taking entries, 1 after a daily loss breach, and the loss so far today as a share of capital |
@@ -393,3 +398,4 @@ The event-contract paper league's accounts (`paper-<family>-<variant>`) get watc
 | The analysis pod is `OOMKilled` within a minute | Too many 1m tasks at once: a year of 1m on 10 pairs peaks at 4 GB, a 5m year at 1.1 GB | The pool admits tasks by estimated memory (`ANALYZE_MEMORY_GB`); if a new venue or timeframe still overflows, re-measure and update `TASK_BASE_GB` and `GB_PER_MCANDLE` in `analyze.py` |
 | Every walk-forward fold fails with `Fatal exception! \| 1` | Hyperopt's `--random-state` must fit in 32 bits for numpy and optuna | Fixed in `metrics.seed_of`; the fold error now keeps the whole message |
 | `pod ordinal N has no roster row` | StatefulSet replicas exceed roster rows | Set replicas to the roster row count in home-config |
+| `overlay '<id>' is not in .../variants.toml` | A roster row names an overlay the deployed image's `lab/variants.toml` does not declare (taken out, or a newer image than the one running) | Put the overlay back in the toml, or set the row's overlay to `base`; the ids are in the `overlays` table |

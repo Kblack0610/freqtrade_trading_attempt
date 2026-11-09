@@ -1,0 +1,22 @@
+<div class="scroll">
+<table>
+  <thead><tr><th>Cohort</th><th class="n" title="Bots with a snapshot, of the bots in the cohort">Bots</th><th class="n">Profit USD</th><th class="n" title="Each bot's profit as a share of its own starting balance, averaged so every bot weighs the same">Mean profit</th><th class="n">Balance</th><th class="n">Closed trades</th><th class="n">Open trades</th><th>Best</th><th>Worst</th></tr></thead>
+  <tbody>
+  {% for c in cohorts %}
+  <tr>
+    <td><a href="/cohorts#{{ c.cohort }}">{{ c.cohort }}</a></td>
+    <td class="n">{{ c.reporting }} of {{ c.bots }}</td>
+    <td class="n {{ 'up' if c.profit_abs >= 0 else 'down' }}">{{ c.profit_abs | num(2) }}</td>
+    <td class="n {{ 'up' if (c.mean_pct or 0) >= 0 else 'down' }}">{{ c.mean_pct | num(2, "%") }}</td>
+    <td class="n">{{ c.balance | num(0) }}</td>
+    <td class="n">{{ c.closed_trades }}</td>
+    <td class="n">{{ c.open_trades }}</td>
+    <td>{% if c.best %}<a href="/bots/{{ c.best.name }}">{{ c.best.name }}</a> {{ c.best.profit_all_pct | num(2, "%") }}{% else %}-{% endif %}</td>
+    <td>{% if c.worst %}<a href="/bots/{{ c.worst.name }}">{{ c.worst.name }}</a> {{ c.worst.profit_all_pct | num(2, "%") }}{% else %}-{% endif %}</td>
+  </tr>
+  {% else %}
+  <tr><td colspan="9" class="muted">No bots yet.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>

@@ -6,21 +6,26 @@
 {% endif %}
 
 <section class="tiles">
-  <div class="tile"><span class="label">League profit</span><span class="value {{ 'up' if total_abs >= 0 else 'down' }}">{{ total_abs | num(2, " USD") }}</span></div>
+  <div class="tile"><span class="label">Total profit</span><span class="value {{ 'up' if total_abs >= 0 else 'down' }}">{{ total_abs | num(2, " USD") }}</span></div>
   <div class="tile"><span class="label">Combined balance</span><span class="value">{{ total_balance | num(0, " USD") }}</span></div>
   <div class="tile"><span class="label">Bots</span><span class="value">{{ bots | length }}</span></div>
   <a class="tile" href="/suggestions"><span class="label">Suggestions</span><span class="value">{% for k in suggested | sort(attribute="kind") %}{{ k.n }} {{ k.kind }}{% if not loop.last %}, {% endif %}{% else %}none{% endfor %}</span></a>
   <div class="tile"><span class="label">Bots last updated</span><span class="value {{ 'down' if stale(last_ingest) }}">{{ last_ingest | ago }}</span></div>
 </section>
 
-<h2>League</h2>
+<h2>Cohorts</h2>
+{% include "_cohorts.html" %}
+<p><a href="/cohorts">Each cohort's bots and overlays</a></p>
+
+<h2>Bots</h2>
 <div class="scroll">
 <table>
-  <thead><tr><th>Bot</th><th>Exchange</th><th>Strategy</th><th class="n">Profit</th><th class="n">USD</th><th class="n">Closed trades</th><th class="n">Open trades</th><th class="n">Win rate</th><th class="n">Max drawdown</th><th class="n" title="Live entries the backtest of the same period also took, within one candle">Backtest match</th><th>Updated</th></tr></thead>
+  <thead><tr><th>Bot</th><th>Cohort</th><th>Exchange</th><th>Strategy</th><th class="n">Profit</th><th class="n">USD</th><th class="n">Closed trades</th><th class="n">Open trades</th><th class="n">Win rate</th><th class="n">Max drawdown</th><th class="n" title="Live entries the backtest of the same period also took, within one candle">Backtest match</th><th>Updated</th></tr></thead>
   <tbody>
   {% for b in bots %}
   <tr>
     <td><a href="/bots/{{ b.name }}">{{ b.name }}</a></td>
+    <td>{{ b.cohort }}</td>
     <td>{{ b.exchange }}</td>
     <td>{{ b.strategy }}</td>
     <td class="n {{ 'up' if (b.profit_all_pct or 0) >= 0 else 'down' }}">{{ b.profit_all_pct | num(2, "%") }}</td>

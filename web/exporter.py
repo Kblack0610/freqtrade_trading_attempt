@@ -16,8 +16,9 @@ from lab.db import connect
 RUN_KINDS = ("analysis", "walkforward", "reproduce")
 
 BOTS = """
-SELECT DISTINCT ON (bot) bot, ts, dry_run, error, open_trades, closed_trades, profit_all_pct, balance_total
-FROM bot_snapshots ORDER BY bot, ts DESC
+SELECT DISTINCT ON (s.bot) s.bot, b.cohort, s.ts, s.dry_run, s.error, s.open_trades, s.closed_trades,
+       s.profit_all_pct, s.balance_total
+FROM bot_snapshots s JOIN bots b ON b.name = s.bot ORDER BY s.bot, s.ts DESC
 """
 WATCH = "SELECT bot, checked_at, seen_at, state, capital, equity, day_open, breached_at FROM watch"
 RUNS = """
@@ -140,7 +141,7 @@ def bot_metrics(now, bots):
     yield family("trader_bot_closed_trades", "Closed trades in the newest snapshot", ["bot"],
                  (([b["bot"]], b["closed_trades"]) for b in bots))
     yield family("trader_bot_profit_pct", "Profit of all trades, percent of starting balance, newest snapshot",
-                 ["bot"], (([b["bot"]], b["profit_all_pct"]) for b in bots))
+                 ["bot", "cohort"], (([b["bot"], b["cohort"]], b["profit_all_pct"]) for b in bots))
     newest = max((b["ts"] for b in bots), default=None)
     yield family("trader_ingest_age_seconds", "Seconds since any bot snapshot was written", [],
                  [([], age(now, newest))])

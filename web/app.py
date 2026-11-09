@@ -57,12 +57,13 @@ COVER = {
 }
 
 BOTS = """
-SELECT b.name, b.exchange, b.strategy, s.ts, s.dry_run, s.closed_trades, s.open_trades,
-       s.profit_all_pct, s.profit_all_abs, s.winrate_pct, s.max_drawdown_pct, s.balance_total, s.error,
-       d.matched, d.live_entries, d.bt_entries
+SELECT b.name, b.exchange, b.strategy, b.cohort, b.overlay, o.params AS overlay_params, s.ts, s.dry_run,
+       s.closed_trades, s.open_trades, s.profit_all_pct, s.profit_all_abs, s.winrate_pct, s.max_drawdown_pct,
+       s.balance_total, s.error, d.matched, d.live_entries, d.bt_entries
 FROM bots b
 LEFT JOIN LATERAL (SELECT * FROM bot_snapshots WHERE bot = b.name ORDER BY ts DESC LIMIT 1) s ON true
 LEFT JOIN drift d ON d.bot = b.name
+LEFT JOIN overlays o ON o.id = b.overlay
 """
 BOT = BOTS + "WHERE b.name = %s"
 BOTS += "ORDER BY s.profit_all_pct DESC NULLS LAST, b.name"
@@ -407,13 +408,36 @@ def logout():
     return resp
 
 
+def cohorts(bots: list[dict]) -> list[dict]:
+    """One row per cohort (lab/league.py), league first then by name: its bots, the ones with a snapshot, and their
+    summed profit, balance and trades, mean profit percent, and best and worst bot. Profit percents are each bot's own
+    starting balance, so the mean weighs every bot alike."""
+    out: dict[str, dict] = {}
+    for b in bots:
+        c = out.setdefault(b["cohort"], {"cohort": b["cohort"], "bots": 0, "reporting": [], "profit_abs": 0.0,
+                                         "balance": 0.0, "open_trades": 0, "closed_trades": 0})
+        c["bots"] += 1
+        if b["ts"] and b["profit_all_pct"] is not None:
+            c["reporting"].append(b)
+            c["profit_abs"] += b["profit_all_abs"] or 0
+            c["balance"] += b["balance_total"] or 0
+            c["open_trades"] += b["open_trades"] or 0
+            c["closed_trades"] += b["closed_trades"] or 0
+    for c in out.values():
+        ranked = sorted(c.pop("reporting"), key=lambda b: b["profit_all_pct"])
+        c["reporting"] = len(ranked)
+        c["mean_pct"] = sum(b["profit_all_pct"] for b in ranked) / len(ranked) if ranked else None
+        c["worst"], c["best"] = (ranked[0], ranked[-1]) if ranked else (None, None)
+    return sorted(out.values(), key=lambda c: (c["cohort"] != "league", c["cohort"]))
+
+
 @app.get("/", response_class=HTMLResponse)
 def overview(request: Request):
     user_of(request)
     bots = rows(BOTS)
     snaps = [b for b in bots if b["ts"]]
     last_ingest = rows("SELECT max(ts) AS ts FROM bot_snapshots WHERE source = 'ingest'")[0]["ts"]
-    return page(request, "overview.html", bots=bots, last_ingest=last_ingest,
+    return page(request, "overview.html", bots=bots, last_ingest=last_ingest, cohorts=cohorts(bots),
                 total_abs=sum(b["profit_all_abs"] or 0 for b in snaps),
                 total_balance=sum(b["balance_total"] or 0 for b in snaps),
                 live_bots=[b["name"] for b in snaps if b["dry_run"] is False],
@@ -449,6 +473,13 @@ def live_view() -> dict:
     return {"bots": found, "poll": LIVE_POLL, "positions": len(open_),
             "unrealized": sum(p["profit_abs"] or 0 for p in open_), "stake": sum(p["stake_amount"] or 0 for p in open_),
             "newest": max((b["ts"] for b in found if b["ts"]), default=None)}
+
+
+@app.get("/cohorts", response_class=HTMLResponse)
+def cohorts_page(request: Request):
+    user_of(request)
+    bots = rows(BOTS)
+    return page(request, "cohorts.html", cohorts=cohorts(bots), bots=bots)
 
 
 @app.get("/live", response_class=HTMLResponse)
