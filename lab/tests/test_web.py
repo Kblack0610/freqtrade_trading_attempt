@@ -259,6 +259,28 @@ def test_each_cohort_gets_a_row_and_the_overview_keeps_a_total(conn, signed_in):
     assert page.rindex("kraken-agg") > page.index('<h2 id="aggressive">') > page.rindex("kraken-s001")
 
 
+def test_the_markets_paper_league_is_a_cohort_beside_the_bots(conn, signed_in):
+    seed(conn)
+    conn.execute("INSERT INTO paper_accounts (account, family, venue, variant, params, capital, started_at, equity, "
+                 "realized, open_positions, marked_at) VALUES "
+                 "('paper-longshot-aaaa1111', 'longshot', 'kalshi', 'aaaa1111', '{\"edge\": 0.06}', 1000, now(), 1020, 20, 2, now()), "
+                 "('paper-longshot-bbbb2222', 'longshot', 'kalshi', 'bbbb2222', '{}', 1000, now(), 990, -10, 0, now()), "
+                 "('paper-longshot-cccc3333', 'longshot', 'kalshi', 'cccc3333', '{}', 1000, now(), NULL, 0, 0, NULL)")
+    conn.execute("INSERT INTO paper_orders (account, market_id, side, stake, sent_at, quoted_at, contracts, price, fee, "
+                 "settled_at, payout, profit) VALUES ('paper-longshot-aaaa1111', 'M1', 'no', 10, now(), now(), 10, 0.9, 0, "
+                 "now(), 1, 1)")
+    _, client = signed_in
+    top = client.get("/").text
+    assert top.index('href="/cohorts#league"') < top.index('href="/cohorts#markets"')
+    row = top[top.index('href="/cohorts#markets"'):].split("</tr>")[0]
+    assert "2 of 3" in row and "10.00" in row and "0.50%" in row and "2,010" in row
+    assert '<a href="/markets/book">paper-longshot-aaaa1111</a> 2.00%' in row
+    assert "35.00 USD" in top  # the total: the league's 25.00 plus the paper league's 10.00
+    page = client.get("/cohorts").text
+    section = page[page.index('<h2 id="markets">'):]
+    assert "paper-longshot-bbbb2222" in section and "-1.00%" in section and "edge 0.06" in section
+
+
 def test_pages_render_on_an_empty_database(conn, signed_in):
     for path in ("/", "/cohorts", "/data", "/runs", "/strategies", "/suggestions", "/walkforward", "/coverage", "/markets", "/links", "/markets/book", "/accounts"):
         assert signed_in[1].get(path).status_code == 200, path

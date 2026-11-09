@@ -45,6 +45,43 @@ def test_the_shipped_cohort_config_picks_rows_league_accepts(tmp_path):
     assert {r.cohort for r in parsed} == {"aggressive"} and {r.overlay for r in parsed} == {oid}
 
 
+MIX = {"prefix": "mix", "cohort": "mixture"}
+MIXES = [("v1", [["A", "binanceus"], ["B", "coinbase"]], 0.02, 1.1),
+         ("v2", [["C", "kraken"], ["A", "binanceus"], ["D", "binanceus"]], 0.05, 0.4),
+         ("v3", [["E", "binanceus"], ["F", "binanceus"]], 0.05, 0.9)]
+
+
+def test_a_mixture_cohort_is_the_best_mixtures_sleeves_each_on_its_own_exchange():
+    assert cohorts.pick_mixture(MIXES, MIX) == ["mix-binanceus-e binanceus E mixture base",
+                                                "mix-binanceus-f binanceus F mixture base"]
+    assert cohorts.pick_mixture(MIXES[:2], MIX)[0] == "mix-kraken-c kraken C mixture base"
+    assert cohorts.pick_mixture([("v4", [["G", "okx"]], 0.05, None)] + MIXES[:1], MIX) == ["mix-okx-g okx G mixture base"]
+    assert cohorts.pick_mixture([], MIX) == []
+
+
+def test_mixture_rows_are_only_the_runnable_weighting_and_gate_with_enough_days(conn):
+    from psycopg.types.json import Jsonb
+    for v, weighting, gated, days, lo in (("ok", "equal", False, 120, 0.01), ("hrp", "hrp", False, 120, 0.5),
+                                         ("gate", "equal", True, 120, 0.5), ("short", "equal", False, 30, 0.5),
+                                         ("nolo", "equal", False, 120, None)):
+        conn.execute("INSERT INTO mixtures (variant, name, spec, weighting, gated, baseline, sleeves, months, days, lo, "
+                     "trials, weights) VALUES (%s, %s, %s, %s, %s, false, 1, 4, %s, %s, 9, '{}')",
+                     (v, v, Jsonb({"sleeves": [["A", "binanceus"]]}), weighting, gated, days, lo))
+    cfg = {"prefix": "mix", "cohort": "mixture", **cohorts.load()["mixture"]}
+    got = cohorts.mixture_rows(conn, cfg["weighting"], cfg["gated"], cfg["min_days"])
+    assert got == [("ok", [["A", "binanceus"]], 0.01, None)]
+    lines = cohorts.pick_mixture(got, cfg)
+    assert lines == ["mix-binanceus-a binanceus A mixture base"]
+
+
+def test_the_shipped_mixture_cohort_picks_rows_league_accepts(tmp_path):
+    cfg = {"prefix": "mix", "cohort": "mixture", **cohorts.load()["mixture"]}
+    roster = tmp_path / "roster.tsv"
+    roster.write_text("\n".join(cohorts.pick_mixture(MIXES, cfg)))
+    parsed = league.roster_rows(roster)
+    assert {r.cohort for r in parsed} == {"mixture"} and {r.overlay for r in parsed} == {""}
+
+
 ROSTER = "# bots\nbinanceus-s1 binanceus S1\nkraken-s1 kraken S1\n"
 STS = "spec:\n  replicas: 2  # rows\n"
 LINES = ["agg-binanceus-a binanceus A aggressive ov1", "agg-kraken-a kraken A aggressive ov1"]

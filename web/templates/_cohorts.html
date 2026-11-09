@@ -11,8 +11,8 @@
     <td class="n">{{ c.balance | num(0) }}</td>
     <td class="n">{{ c.closed_trades }}</td>
     <td class="n">{{ c.open_trades }}</td>
-    <td>{% if c.best %}<a href="/bots/{{ c.best.name }}">{{ c.best.name }}</a> {{ c.best.profit_all_pct | num(2, "%") }}{% else %}-{% endif %}</td>
-    <td>{% if c.worst %}<a href="/bots/{{ c.worst.name }}">{{ c.worst.name }}</a> {{ c.worst.profit_all_pct | num(2, "%") }}{% else %}-{% endif %}</td>
+    <td>{% if c.best %}<a href="{{ c.best.href or "/bots/" ~ c.best.name }}">{{ c.best.name }}</a> {{ c.best.profit_all_pct | num(2, "%") }}{% else %}-{% endif %}</td>
+    <td>{% if c.worst %}<a href="{{ c.worst.href or "/bots/" ~ c.worst.name }}">{{ c.worst.name }}</a> {{ c.worst.profit_all_pct | num(2, "%") }}{% else %}-{% endif %}</td>
   </tr>
   {% else %}
   <tr><td colspan="9" class="muted">No bots yet.</td></tr>

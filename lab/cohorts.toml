@@ -14,3 +14,14 @@ rank_venues = ["binanceus"]
 min_trades = 30
 # Where the bots run. Grow this or `top` only by a human decision: a wrong row costs a PVC.
 venues = ["binanceus", "coinbase", "kraken"]
+
+[mixture]
+# The sleeves of the best mixture lab/mixtures.py scored out of sample (lab/suggest.toml [mixtures]), by the low end
+# of its interval, one bot per sleeve on its own exchange. Only a mixture the bots run as scored qualifies: every bot
+# gets the same wallet and trades every day, so the weighting is 1/N and there is no regime gate. Each sleeve runs
+# the strategy with its own parameters (base overlay); the tuned ones stay in the backtest. Every mixture is a trial.
+kind = "mixture"
+weighting = "equal"
+gated = false
+# Days of out-of-sample return a mixture needs before it can be picked: about three scored months.
+min_days = 90
