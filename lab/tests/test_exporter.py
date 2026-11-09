@@ -27,9 +27,12 @@ def test_metrics_read_the_newest_state(conn):
     conn.execute("UPDATE bot_snapshots SET error = 'connection refused' WHERE bot = 'b'")
     conn.execute("INSERT INTO runs (kind, name, raw, started_at, finished_at, ok) VALUES "
                  "('analysis', 'old', '{}', %s, %s, true), ('analysis', 'bad', '{}', %s, %s, false), "
-                 "('analysis', 'now', '{}', %s, NULL, NULL)",
+                 "('analysis', 'now', '{}', %s, NULL, NULL), "
+                 "('reproduce', 'old', '{\"checked\": 4, \"mismatch\": 0}', %s, %s, true), "
+                 "('reproduce', 'new', '{\"checked\": 3, \"mismatch\": 1}', %s, %s, true)",
                  (NOW - dt.timedelta(days=2), NOW - dt.timedelta(days=2) + dt.timedelta(hours=1),
-                  NOW - dt.timedelta(days=1), NOW - dt.timedelta(days=1) + dt.timedelta(hours=1), NOW))
+                  NOW - dt.timedelta(days=1), NOW - dt.timedelta(days=1) + dt.timedelta(hours=1), NOW,
+                  NOW - dt.timedelta(days=2), NOW - dt.timedelta(days=2), NOW - dt.timedelta(hours=2), NOW - dt.timedelta(hours=1)))
     conn.execute("INSERT INTO data_coverage (exchange, pair, timeframe, last_ts) VALUES "
                  "('kraken', 'BTC/USD', '5m', %s), ('kraken', 'ETH/USD', '5m', %s)",
                  (NOW - dt.timedelta(minutes=20), NOW - dt.timedelta(hours=5)))
@@ -49,6 +52,7 @@ def test_metrics_read_the_newest_state(conn):
     assert m['trader_run_started_timestamp_seconds{kind="analysis"}'] == NOW.timestamp()
     assert m['trader_run_last_ok_timestamp_seconds{kind="analysis"}'] == (NOW - dt.timedelta(days=2, hours=-1)).timestamp()
     assert 'trader_run_ok{kind="walkforward"}' not in m
+    assert m["trader_repro_checked"] == 3 and m["trader_repro_mismatch"] == 1 and m['trader_run_ok{kind="reproduce"}'] == 1
     assert 1100 < m['trader_candle_age_seconds{exchange="kraken"}'] < 1300
     assert m['trader_coverage_series{exchange="kraken"}'] == 2
     assert m['trader_suggestions{kind="promote"}'] == 2

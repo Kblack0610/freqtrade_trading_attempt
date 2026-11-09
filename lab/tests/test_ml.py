@@ -1,5 +1,5 @@
 """The staged FreqAI family in lab/families/ml/. The train-and-predict test needs lightgbm, so it runs
-only in the ML image (the trader image built with FREQTRADE_TAG=2026.9_freqai); the plain image
+only in the ML image (the trader image built on freqtrade 2026.9_freqai, FREQTRADE_IMAGE); the plain image
 skips it. The not-scanned check runs everywhere."""
 
 import datetime as dt

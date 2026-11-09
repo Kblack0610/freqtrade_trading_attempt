@@ -1,0 +1,115 @@
+"""The determinism proof under lab/reproduce.py: one strategy backtested twice on fixed candles gives the same
+trades byte for byte, and one changed candle changes both its candle digest and the trades, which the
+reproduce check reports as a mismatch. Runs real freqtrade backtests, so it needs the trader image."""
+
+import datetime as dt
+
+import pytest
+
+pytest.importorskip("freqtrade")
+
+from lab import analyze, reproduce  # noqa: E402
+from test_analyze import REPO  # noqa: E402
+from test_families import synthetic_candles  # noqa: E402
+
+EX = "binanceus"
+START, END = dt.date(2026, 1, 10), dt.date(2026, 2, 25)
+STRATEGY = '''
+from freqtrade.strategy import IStrategy
+
+
+class GoldenCross(IStrategy):
+    INTERFACE_VERSION = 3
+    timeframe = "1h"
+    minimal_roi = {"0": 0.02}
+    stoploss = -0.03
+    startup_candle_count = 30
+
+    def populate_indicators(self, df, metadata):
+        df["fast"] = df["close"].rolling(5).mean()
+        df["slow"] = df["close"].rolling(20).mean()
+        return df
+
+    def populate_entry_trend(self, df, metadata):
+        df.loc[(df["fast"] > df["slow"]) & (df["fast"].shift(1) <= df["slow"].shift(1)), "enter_long"] = 1
+        return df
+
+    def populate_exit_trend(self, df, metadata):
+        df.loc[(df["fast"] < df["slow"]) & (df["fast"].shift(1) >= df["slow"].shift(1)), "exit_long"] = 1
+        return df
+'''
+
+
+@pytest.fixture
+def golden(tmp_path, monkeypatch):
+    monkeypatch.setattr(analyze, "USER_DATA", REPO / "user_data")
+    monkeypatch.setattr(analyze, "RESULTS", tmp_path)
+    data = tmp_path / "data" / EX
+    data.mkdir(parents=True)
+    utc = dt.timezone.utc
+    candles = synthetic_candles(dt.datetime(2026, 1, 1, tzinfo=utc), dt.datetime(2026, 3, 1, tzinfo=utc), "h")
+    candles.to_feather(data / "BTC_USD-1h.feather")
+    strategies = tmp_path / "strategies"
+    strategies.mkdir()
+    (strategies / "GoldenCross.py").write_text(STRATEGY)
+    return data / "BTC_USD-1h.feather", strategies
+
+
+def backtest(strategies) -> dict:
+    res = analyze.Cli().backtest("GoldenCross", EX, START, END, strategies)
+    assert res["ok"], res["error"]
+    return res
+
+
+def as_bytes(res: dict) -> bytes:
+    return res["trades"][analyze.TRADE_COLS].to_csv(index=False, float_format="%.17g").encode()
+
+
+def nudge_first_entry(feather, strategies):
+    """Raise the open of the candle the first trade fills on: its signal is unchanged, its fill price is not."""
+    import pandas as pd
+
+    df = pd.read_feather(feather)
+    first = backtest(strategies)["trades"]["open_date"].min()
+    i = df.index[df["date"] == first][0]
+    df.loc[i, "open"] *= 1.001
+    df.loc[i, "high"] = max(df.loc[i, "high"], df.loc[i, "open"])
+    df.to_feather(feather)
+    return first.date()
+
+
+def test_the_same_backtest_twice_gives_the_same_trades_byte_for_byte(golden):
+    _, strategies = golden
+    a, b = backtest(strategies), backtest(strategies)
+    assert len(a["trades"]) >= 5
+    assert as_bytes(a) == as_bytes(b)
+    assert a["final_balance"] == b["final_balance"]
+    assert reproduce.trade_rows(a["trades"][analyze.TRADE_COLS].itertuples(index=False)) == \
+        reproduce.trade_rows(b["trades"][analyze.TRADE_COLS].itertuples(index=False))
+
+
+def test_one_changed_candle_changes_its_digest_and_the_trades(golden):
+    feather, strategies = golden
+    before, days = backtest(strategies), analyze.candle_digests(EX, "1h", by="day")
+    day = nudge_first_entry(feather, strategies)
+    after, days_after = backtest(strategies), analyze.candle_digests(EX, "1h", by="day")
+    assert [d for d in days if days[d] != days_after[d]] == [day]
+    assert analyze.span_digest(days, START, END) != analyze.span_digest(days_after, START, END)
+    assert analyze.span_digest(days, day + dt.timedelta(days=1), END) == analyze.span_digest(days_after, day + dt.timedelta(days=1), END)
+    assert as_bytes(before) != as_bytes(after)
+
+
+def test_reproduce_reports_the_changed_candle_as_a_mismatch(golden, conn):
+    feather, strategies = golden
+
+    class Runner(analyze.Cli):
+        def backtest(self, strategy, exchange, start, end, strategy_path=None):
+            return super().backtest(strategy, exchange, start, end, strategies)
+
+    task = {"strategy": "GoldenCross", "exchange": EX, "start": START, "end": END, "key": "k", "attempts": 0, "candles": "c"}
+    analyze.store_chunk(conn, task, backtest(strategies), None)
+    cid, final = conn.execute("SELECT id, final_balance FROM backtest_chunks").fetchone()
+    chunk = {"id": cid, "strategy": "GoldenCross", "exchange": EX, "start": START, "end": END, "final_balance": final}
+    assert reproduce.check_chunk(conn, Runner(), chunk) == {"diff": []}
+    nudge_first_entry(feather, strategies)
+    assert reproduce.check_chunk(conn, Runner(), chunk)["diff"][0].startswith("trades:")
