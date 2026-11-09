@@ -197,7 +197,7 @@ Other US venues worth a record later: Bitstamp, Crypto.com. Not researched.
 
 #### Watch-only read
 
-`python -m lab.wallet` writes one `wallet_balances` row per account per run: confirmed and unconfirmed satoshis and the count of used addresses. It needs only the account's public key, which cannot sign, so the job can never move coins.
+`python -m lab.wallet` writes one `wallet_balances` row per account per run: confirmed and unconfirmed satoshis and the count of used addresses. It needs only the account's public key, which cannot sign, so the job can never move coins. `/accounts` shows the newest read of each account.
 
 - Input: `WALLET_ACCOUNTS` (default `/etc/trader-wallet/accounts.tsv`), one `<name><TAB><key>` line per account. The key is the account public key Suite exports (its "Show public key" label is Not verified on a Trezor page): an xpub (legacy), ypub (SegWit), zpub (native SegWit), or a descriptor such as Suite's taproot `tr([fp/86'/0'/0']xpub.../<0;1>/*)`. Bitcoin mainnet only. The file is a Secret, because a public key reveals every address and balance of its account.
 - How: `embit` derives the receive and change chains, each until 20 unused addresses in a row (the BIP44 gap limit). Each address is read from the Esplora API in `lab/wallet.toml`. The tests check the derivation against the BIP44, 49, 84 and 86 test vectors.
@@ -242,10 +242,10 @@ Only Alpaca and the Tastytrade sandbox can be practised on without money: IBKR p
 
 `lab/broker.py` is the path, and `AlpacaPaper` refuses any host but `paper-api.alpaca.markets`, so no config can reach a live account.
 
-- `python -m lab.broker read` writes one `broker_balances` row: account status, equity, cash, buying power and the position count, or the error. Holdings themselves are not stored. `/markets/book` shows the newest row and `trader_broker_equity` and `trader_broker_read_age_seconds` export it.
+- `python -m lab.broker read` writes one `broker_balances` row: account status, equity, cash, buying power and the position count, or the error. Holdings themselves are not stored. `/accounts` shows the newest row and `trader_broker_equity` and `trader_broker_read_age_seconds` export it.
 - `python -m lab.broker drill` rests one SPY share at $1.00 (`lab/broker.toml`), reads it back, cancels it and reads it back, writing to `demo_orders`. Outside market hours the order sits in `accepted`, which counts as resting. Whether a limit that far from the market is accepted is Not verified; the first drill settles it.
 - Input: `ALPACA_PAPER_KEY_ID` and `ALPACA_PAPER_SECRET_KEY`. With none set, `read` exits 0 and writes nothing.
-- Not yet run against Alpaca: tested only against a fake API, because no paper keys exist. It is live once the person adds `trading/alpaca-paper` to rbw and a SOPS Secret, a CronJob in home-config `apps/freqtrade/` runs `read` hourly, and a balance appears on `/markets/book`.
+- Not yet run against Alpaca: tested only against a fake API, because no paper keys exist. It is live once the person adds `trading/alpaca-paper` to rbw and a SOPS Secret, a CronJob in home-config `apps/freqtrade/` runs `read` hourly, and a balance appears on `/accounts`.
 
 ### Interactive Brokers
 
@@ -327,7 +327,7 @@ Also seen, to record later: Tradier (personal tokens that never expire, 60 tradi
 - `python -m lab.broker read` writes one `broker_balances` row per connected account, named institution, account name and the last four of the number (`fidelity_individual_1234`), with `paper` from SnapTrade's `is_paper`. It stores the total value and status; holdings stay at SnapTrade. An account with no total is a row with an error.
 - Input: `SNAPTRADE_CLIENT_ID` and `SNAPTRADE_CONSUMER_KEY`. With none set, the source is skipped.
 - Cadence: once a day is enough, since SnapTrade refreshes once a day.
-- Not yet run against SnapTrade: tested only against a fake API. It is live once the person creates the Personal key, adds it to rbw as `trading/snaptrade` and a SOPS Secret, connects the sandbox and then Fidelity, a home-config CronJob runs `read` daily, and a Fidelity row appears on `/markets/book`.
+- Not yet run against SnapTrade: tested only against a fake API. It is live once the person creates the Personal key, adds it to rbw as `trading/snaptrade` and a SOPS Secret, connects the sandbox and then Fidelity, a home-config CronJob runs `read` daily, and a Fidelity row appears on `/accounts`.
 
 ### Robinhood
 
@@ -355,8 +355,8 @@ Also seen, to record later: Tradier (personal tokens that never expire, 60 tradi
 
 - `python -m lab.broker read` writes one `robinhood_crypto` row with `paper` false: status, buying power as cash, the count of non-zero holdings, and equity as cash plus each holding at its `<asset>-USD` midpoint. A holding with no price leaves equity empty and says which.
 - Input: `ROBINHOOD_API_KEY` and `ROBINHOOD_PRIVATE_KEY` (the base64 32-byte Ed25519 seed). With none set, the source is skipped.
-- A real account's balance stays on `/markets/book`, behind sign-in. The exporter sends only its read age, never its equity.
-- Not yet run against Robinhood: tested only against a fake API, with the signature checked against the docs' recipe. It is live once the person creates a read-only key, adds it to rbw as `trading/robinhood` and a SOPS Secret, a home-config CronJob runs `read`, and a Robinhood row appears on `/markets/book`.
+- A real account's balance stays on `/accounts`, behind sign-in. The exporter sends only its read age, never its equity.
+- Not yet run against Robinhood: tested only against a fake API, with the signature checked against the docs' recipe. It is live once the person creates a read-only key, adds it to rbw as `trading/robinhood` and a SOPS Secret, a home-config CronJob runs `read`, and a Robinhood row appears on `/accounts`.
 
 ## Prediction markets
 

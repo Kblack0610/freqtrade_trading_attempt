@@ -90,18 +90,4 @@
   </tbody>
 </table>
 {% else %}<p class="muted">No demo order yet.</p>{% endif %}
-
-<h2>Broker accounts</h2>
-<p class="muted">The newest read of each broker account: Alpaca paper money, and read-only reads of real accounts (Robinhood Crypto, Fidelity through SnapTrade). Nothing here can place a real order.</p>
-{% if brokers %}
-<table>
-  <thead><tr><th>Broker</th><th>Money</th><th>Read</th><th>Status</th><th class="n">Equity</th><th class="n">Cash</th><th class="n">Positions</th><th>Error</th></tr></thead>
-  <tbody>
-  {% for b in brokers %}
-  <tr><td>{{ b.broker }}</td><td>{{ "paper" if b.paper else "real, read only" }}</td><td>{{ b.read_at | local }}</td><td>{{ b.status or "-" }}</td><td class="n">{{ b.equity | num(2) }}</td><td class="n">{{ b.cash | num(2) }}</td>
-    <td class="n">{{ b.positions if b.positions is not none else "-" }}</td><td>{% if b.error %}<code class="down">{{ b.error }}</code>{% endif %}</td></tr>
-  {% endfor %}
-  </tbody>
-</table>
-{% else %}<p class="muted">No broker read yet.</p>{% endif %}
 {% endblock %}
