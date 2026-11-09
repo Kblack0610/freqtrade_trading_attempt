@@ -27,6 +27,7 @@ from psycopg_pool import ConnectionPool
 from starlette.concurrency import run_in_threadpool
 
 from lab import book as book_lab
+from lab import live as live_lab
 from lab import db, metrics, suggest, universe
 from web import auth, charts, exporter
 
@@ -213,6 +214,8 @@ WHERE o.contracts > 0 ORDER BY o.sent_at DESC, o.id DESC LIMIT 50
 """
 DEMO_ORDERS = "SELECT * FROM demo_orders ORDER BY placed_at DESC, id DESC LIMIT 20"
 BROKERS = "SELECT DISTINCT ON (broker) * FROM broker_balances ORDER BY broker, read_at DESC"
+WALLETS = "SELECT DISTINCT ON (account, coin) * FROM wallet_balances ORDER BY account, coin, read_at DESC"
+KILL_SWITCH = "SELECT * FROM watch ORDER BY stopped_at IS NULL, breached_at IS NULL, bot"
 
 cfg = auth.Config()
 _pool: ConnectionPool | None = None
@@ -738,4 +741,12 @@ def markets_book(request: Request):
     for a in accounts:
         a["ret"] = None if a["equity"] is None else a["equity"] / a["capital"] - 1
     return page(request, "markets_book.html", backtests=rows(MARKET_BACKTESTS), categories=rows(MARKET_CATEGORIES), accounts=accounts,
-                fills=rows(PAPER_FILLS), demo=rows(DEMO_ORDERS), brokers=rows(BROKERS), hard_stop=hard_stop)
+                fills=rows(PAPER_FILLS), demo=rows(DEMO_ORDERS), hard_stop=hard_stop)
+
+
+@app.get("/accounts", response_class=HTMLResponse)
+def accounts(request: Request):
+    """Every account we hold or paper-trade, read only: the newest read of each, and the watcher's kill-switch state."""
+    user_of(request)
+    return page(request, "accounts.html", guard_lifted=live_lab.GUARD_LIFTED, brokers=rows(BROKERS), wallets=rows(WALLETS),
+                watch=rows(KILL_SWITCH))
