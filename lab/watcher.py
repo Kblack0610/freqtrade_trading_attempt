@@ -147,7 +147,7 @@ def main() -> None:
     ap.add_argument("--drill", metavar="BOT")
     ap.add_argument("--drill-end", metavar="BOT")
     args = ap.parse_args()
-    bots = [name for name, _, _ in roster_rows(ROSTER)]
+    bots = [row.name for row in roster_rows(ROSTER)]
     if args.drill:
         with connect() as conn:
             drill(conn, args.drill)

@@ -20,9 +20,10 @@ def test_metrics_read_the_newest_state(conn):
     from lab import db
     from web.exporter import TraderCollector
 
-    conn.execute("INSERT INTO bots (name, exchange, strategy) VALUES ('a', 'kraken', 'S'), ('b', 'kraken', 'S')")
-    conn.execute("INSERT INTO bot_snapshots (bot, ts, dry_run, open_trades) VALUES "
-                 "('a', %s, false, 9), ('a', %s, true, 2), ('b', %s, NULL, NULL)",
+    conn.execute("INSERT INTO bots (name, exchange, strategy, cohort) VALUES ('a', 'kraken', 'S', 'league'), "
+                 "('b', 'kraken', 'S', 'aggressive')")
+    conn.execute("INSERT INTO bot_snapshots (bot, ts, dry_run, open_trades, profit_all_pct) VALUES "
+                 "('a', %s, false, 9, 5), ('a', %s, true, 2, 1.5), ('b', %s, NULL, NULL, -2)",
                  (NOW - dt.timedelta(hours=3), NOW - dt.timedelta(hours=1), NOW - dt.timedelta(minutes=30)))
     conn.execute("UPDATE bot_snapshots SET error = 'connection refused' WHERE bot = 'b'")
     conn.execute("INSERT INTO runs (kind, name, raw, started_at, finished_at, ok) VALUES "
@@ -55,6 +56,8 @@ def test_metrics_read_the_newest_state(conn):
     assert 'trader_bot_dry_run{bot="b"}' not in m
     assert m['trader_bot_snapshot_error{bot="b"}'] == 1 and m['trader_bot_snapshot_error{bot="a"}'] == 0
     assert m['trader_bot_open_trades{bot="a"}'] == 2
+    assert m['trader_bot_profit_pct{bot="a",cohort="league"}'] == 1.5
+    assert m['trader_bot_profit_pct{bot="b",cohort="aggressive"}'] == -2
     assert 1700 < m["trader_ingest_age_seconds"] < 1900
     assert m['trader_run_ok{kind="analysis"}'] == 0
     assert m['trader_run_started_timestamp_seconds{kind="analysis"}'] == NOW.timestamp()

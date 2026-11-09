@@ -241,8 +241,26 @@ def test_overview_warns_when_a_bot_is_not_dry_run(conn, signed_in):
     assert "Not dry run: kraken-s001" in signed_in[1].get("/").text
 
 
+def test_each_cohort_gets_a_row_and_the_overview_keeps_a_total(conn, signed_in):
+    seed(conn)
+    conn.execute("INSERT INTO overlays (id, grp, params) VALUES ('ab12cd34', 'slots', '{\"max_open_trades\": 5}')")
+    conn.execute("INSERT INTO bots (name, exchange, strategy, cohort, overlay) VALUES "
+                 "('kraken-agg', 'kraken', 'Strategy001', 'aggressive', 'ab12cd34'), "
+                 "('coinbase-agg', 'coinbase', 'Strategy001', 'aggressive', ''), ('new-agg', 'okx', 'S', 'aggressive', '')")
+    conn.execute("INSERT INTO bot_snapshots (bot, ts, profit_all_pct, profit_all_abs, balance_total, closed_trades) VALUES "
+                 "('kraken-agg', now(), 4, 40, 1040, 2), ('coinbase-agg', now(), -1, -10, 990, 1)")
+    _, client = signed_in
+    top = client.get("/").text
+    assert "Total profit" in top and "League profit" not in top and "55.00 USD" in top
+    assert top.index('href="/cohorts#league"') < top.index('href="/cohorts#aggressive"')
+    assert "2 of 3" in top and "1.50%" in top and "30.00" in top
+    page = client.get("/cohorts").text
+    assert '<h2 id="aggressive">' in page and 'ab12cd34 <span class="muted">max_open_trades 5</span>' in page
+    assert page.rindex("kraken-agg") > page.index('<h2 id="aggressive">') > page.rindex("kraken-s001")
+
+
 def test_pages_render_on_an_empty_database(conn, signed_in):
-    for path in ("/", "/data", "/runs", "/strategies", "/suggestions", "/walkforward", "/coverage", "/markets", "/links", "/markets/book", "/accounts"):
+    for path in ("/", "/cohorts", "/data", "/runs", "/strategies", "/suggestions", "/walkforward", "/coverage", "/markets", "/links", "/markets/book", "/accounts"):
         assert signed_in[1].get(path).status_code == 200, path
 
 
@@ -317,7 +335,7 @@ def test_until_scored_both_pages_show_how_far_the_population_is(conn, signed_in)
 
 def test_guide_lists_every_page_in_reading_order(conn, signed_in):
     body = signed_in[1].get("/guide").text
-    order = [body.index(f'<li><a href="{p}">') for p in ("/", "/data", "/strategies", "/walkforward", "/suggestions",
+    order = [body.index(f'<li><a href="{p}">') for p in ("/", "/cohorts", "/data", "/strategies", "/walkforward", "/suggestions",
                                                           "/confidence", "/book", "/coverage", "/markets", "/accounts", "/runs")]
     assert order == sorted(order) and "needs 20 strategies with at least 30" in body and "trial register" in body
 

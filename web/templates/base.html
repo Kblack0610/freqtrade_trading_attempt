@@ -13,6 +13,7 @@
   {% if user %}
   <nav>
     <a href="/" {% if request.url.path == "/" %}aria-current="page"{% endif %}>Overview</a>
+    <a href="/cohorts" {% if request.url.path.startswith("/cohorts") %}aria-current="page"{% endif %}>Cohorts</a>
     <a href="/live" {% if request.url.path.startswith("/live") %}aria-current="page"{% endif %}>Live</a>
     <a href="/strategies" {% if request.url.path.startswith("/strategies") %}aria-current="page"{% endif %}>Strategies</a>
     <a href="/walkforward" {% if request.url.path.startswith("/walkforward") %}aria-current="page"{% endif %}>Walk-forward</a>
