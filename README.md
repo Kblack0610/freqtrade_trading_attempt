@@ -34,6 +34,7 @@ Results go to the `trader` database in the cluster's shared Postgres, which the 
 | `lab/scorecard.py` | After the mixtures: each strategy's, mixture's and BTC hold's out-of-sample annual return per market climate (BTC trend x volatility tercile) with a 90% interval, from `walkforward_daily`; the "By market climate" table on `/book`. Markets backtests are split by contract category (`lab/markets.toml` [categories]) into `market_category_results`, shown on `/markets/book`. |
 | `lab/book.py` | After the score: what each scored strategy might return beside holding BTC, and what each stage costs and can lose. |
 | `lab/mixtures.py` | After the book: strategies run together (1/N, inverse volatility, HRP, each with or without a regime gate), weights and gates fit on earlier walk-forward months and scored on the next, every mixture a `trials` row, PBO across the set; "Running bots together" on `/book`. Spec space and budget: `lab/suggest.toml` [mixtures]. |
+| `lab/loop.py` | Last step of each analysis, the nightly research loop: which strategies and mixtures entered or left a market climate's passing set, and which promote suggestions appeared or went, as `research_events`. See Nightly research loop |
 | `lab/live.py` | Live bot entry point: always refuses, nothing deploys it. See `docs/live.md` and the operator rules in `docs/operating-rules.md` |
 | `lab/ingest.py` | Job run every 5 minutes: every bot's trades (closed and open) and a snapshot (profit, balance, dry-run flag, each open pair's newest candle time) into Postgres |
 | `lab/watcher.py` | Daily loss watch: each bot's marked-to-market equity every 60 s into `watch`, and the kill drill. See Watcher |
@@ -45,6 +46,7 @@ Results go to the `trader` database in the cluster's shared Postgres, which the 
 | `Dockerfile`, `lab/requirements.txt` | The `trader` image |
 | `.github/workflows/image.yml` | CI: build, migrate twice, tests, every strategy loads; on master also push to GHCR and open and merge the home-config digest-bump PR. See CI |
 | `ci/bump_home_config.py` | Opens and merges the home-config digest-bump PR after each master build (the deploy). See CI |
+| `ci/research_sync.py` | Run on the fleet machine each morning: files the loop's changes on the agent board and opens a paper roster PR for a promotion. See Nightly research loop |
 | `docs/README.md` | Index of the pages in `docs/` |
 
 ## The no-real-money guard
@@ -133,7 +135,7 @@ gh secret set FORGEJO_DEPLOY_TOKEN -R Kblack0610/freqtrade_trading_attempt --bod
 - **Drift.** Each league bot's strategy is backtested on its own exchange from the bot's start to now, with the bot's config, and set against its dry-run trades (`drift`). An entry matches when the backtest entered the same pair within one candle; the gap is live minus backtest profit per trade over trades closed on both sides. A low match rate says the backtest does not model what the bot does (startup candles, data gaps, a different pairlist); a steady negative gap is fill or fee error the backtests leave out. It needs weeks of trades to mean anything. The Overview shows the match per bot and each bot page has the comparison.
 - **Correlations.** Each strategy's daily returns against every strategy the league runs on that exchange, over the last 365 days; near 1 means it would only duplicate a bot already running.
 
-The leaderboard ranks by the low end of the Sharpe interval, so a strategy has to look good on its unlucky draw. Rows under 20 trades sink, and lookahead-biased rows go last. Promoting a strategy is still a human edit to the roster in home-config.
+The leaderboard ranks by the low end of the Sharpe interval, so a strategy has to look good on its unlucky draw. Rows under 20 trades sink, and lookahead-biased rows go last. Promoting a strategy is a home-config roster PR that the nightly research loop opens and a person merges.
 
 ## Walk-forward
 
@@ -189,6 +191,12 @@ Four gates in `lab/confidence.py` reuse trades already stored, so they add no tr
 Analysis also fills `benchmarks` from the regime venue's daily closes: holding BTC, holding BTC and ETH, monthly DCA into BTC, and BTC only above its 200-day mean, each over the last 1, 3 and 5 years and the whole shared history. Tax rates there are guesses, in config.
 
 Analysis also scores a volatility forecast (`lab/volatility.py`, knobs in `lab/suggest.toml` [volatility]): per analysis venue and whitelisted pair, daily realized variance from 5m candles, forecast the day before by HAR (log variance on its 1, 7 and 30-day means, refit each month on the days before it) and by two plain baselines, a 30-day mean and an EWMA. Each is scored by QLIKE on every month before the lockbox into `vol_scores`; `vol_verdict` says per venue whether HAR beats both, by a block-bootstrap interval on the daily QLIKE difference that has to sit below zero. `/book` shows the verdict. Sizing (inverse-vol weights, a vol-target stake variant) may use HAR only on a venue where it wins.
+
+## Nightly research loop
+
+Each night walk-forward (01:00 UTC) adds folds it has not stored, then analysis (02:45) rescores everything: suggestions, confidence, book, mixtures, the climate scorecard. Its last step, `lab/loop.py` (alone: `python -m lab.loop`), compares two sets with the previous run's, kept in `research_state`: every strategy or mixture whose climate cell has its low end above zero, and every open promote suggestion. Each member that entered or left becomes a `research_events` row; `trader_climate_passing{regime,kind}` counts the first set. The first run has no previous set, so everything passing enters once.
+
+`ci/research_sync.py` runs at 10:00 UTC on the fleet machine (agentctl runner `trader-research-sync`, from origin/master). It reads the unreported events through the deployed image (`kubectl exec deploy/trader-web -- python -m lab.loop pending`), files one agent-board row per night for the climate changes, and for each promotion opens a home-config PR appending its roster row with replicas raised to match, plus a board row to review it. It never merges that PR, and `lab/league.py` refuses anything but dry run (approved 2026-11-05, tr-17). Each event is marked reported (`python -m lab.loop ack <id>...`) once its row is filed, so a failed morning retries the rest. `DRY_RUN=1` prints what it would file.
 
 ## Confidence
 
@@ -264,6 +272,7 @@ The first run fetches full history (5m since 2019 on binanceus is the long pole)
 - `026`: `broker_balances.paper`, since the table now also holds read-only reads of real accounts.
 - `029`: `vol_scores` and `vol_verdict`, the volatility forecast's QLIKE per venue, pair, model and month, and whether HAR beats each baseline, rebuilt by `lab/volatility.py` on every analysis.
 - `031`: `mixtures` and `mixture_daily`, written by `lab/mixtures.py`; drops `portfolio` (016), the equal-weight pick on in-sample backtest returns it replaces.
+- `033`: `research_state` and `research_events`, the nightly research loop's passing sets and their changes, written by `lab/loop.py` and marked reported by `ci/research_sync.py`.
 
  A schema change is a new numbered file; never edit an applied one.
 

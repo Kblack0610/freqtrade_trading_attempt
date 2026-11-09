@@ -37,9 +37,17 @@ def test_metrics_read_the_newest_state(conn):
                  (NOW - dt.timedelta(hours=8),))
     conn.execute("INSERT INTO suggestions (kind, strategy, exchange, summary, action, gates) VALUES "
                  "('promote', 'S', 'kraken', 's', 'a', '[]'), ('promote', 'T', 'kraken', 's', 'a', '[]')")
+    conn.execute("INSERT INTO climate_scorecard (kind, name, exchange, variant, cell, days, trades, lo, trials) VALUES "
+                 "('strategy', 'S', 'kraken', 'tuned', 'up/low', 90, 9, 0.1, 5), "
+                 "('strategy', 'T', 'kraken', 'tuned', 'up/low', 90, 9, -0.1, 5), "
+                 "('mixture', 'm', '', 'abc', 'down/high', 90, 0, NULL, 5), "
+                 "('benchmark', 'hold BTC', '', '', 'up/low', 90, 0, 0.3, 5)")
 
     m = scrape(TraderCollector(db.connect))
     assert m["trader_db_up"] == 1
+    assert m['trader_climate_passing{kind="strategy",regime="up/low"}'] == 1
+    assert m['trader_climate_passing{kind="mixture",regime="down/high"}'] == 0
+    assert 'trader_climate_passing{kind="benchmark",regime="up/low"}' not in m
     assert m['trader_bot_dry_run{bot="a"}'] == 1
     assert 'trader_bot_dry_run{bot="b"}' not in m
     assert m['trader_bot_snapshot_error{bot="b"}'] == 1 and m['trader_bot_snapshot_error{bot="a"}'] == 0
