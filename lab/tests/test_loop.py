@@ -1,0 +1,73 @@
+import importlib.util
+import pathlib
+
+import pytest
+
+from lab import loop, suggest
+
+_spec = importlib.util.spec_from_file_location(
+    "research_sync", pathlib.Path(__file__).resolve().parents[2] / "ci" / "research_sync.py")
+research_sync = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(research_sync)
+
+ROSTER = "# name exchange strategy\n\nkraken-sample        kraken     SampleStrategy\nkraken-b  kraken  B\n"
+STS = "spec:\n  serviceName: x\n  replicas: 2  # rows\n  template: {}\n"
+
+
+def score(conn, name, cell, lo, kind="strategy"):
+    conn.execute("INSERT INTO climate_scorecard (kind, name, exchange, variant, cell, days, trades, annual, lo, hi, trials) "
+                 "VALUES (%s, %s, %s, 'tuned', %s, 90, 9, 0.2, %s, 0.4, 3)",
+                 (kind, name, "" if kind == "mixture" else "kraken", cell, lo))
+
+
+def test_a_change_is_an_event_once_and_a_steady_set_is_none(conn):
+    score(conn, "S", "up/low", 0.05)
+    score(conn, "T", "up/low", -0.05)
+    score(conn, "m", "down/high", 0.01, kind="mixture")
+    score(conn, "S", "flat/mid", None)
+    conn.execute("INSERT INTO suggestions (kind, strategy, exchange, summary, action, gates) VALUES "
+                 "('promote', 'Good', 'kraken', 's', 'a', '[]'), ('watch', 'Meh', 'kraken', 's', 'a', '[]')")
+    first = loop.run(conn)
+    assert first == {"research_passing": 2, "research_enters": 3, "research_leaves": 0}
+    assert loop.run(conn) == {"research_passing": 2, "research_enters": 0, "research_leaves": 0}
+
+    conn.execute("UPDATE climate_scorecard SET lo = -0.01 WHERE name = 'S' AND cell = 'up/low'")
+    conn.execute("UPDATE climate_scorecard SET lo = 0.02 WHERE name = 'T'")
+    conn.execute("DELETE FROM suggestions WHERE kind = 'promote'")
+    assert loop.run(conn) == {"research_passing": 2, "research_enters": 1, "research_leaves": 2}
+
+    events = loop.pending(conn)
+    assert [(e["signal"], e["change"], e["name"]) for e in events] == [
+        ("climate", "enters", "m"), ("climate", "enters", "S"), ("promote", "enters", "Good"),
+        ("climate", "enters", "T"), ("climate", "leaves", "S"), ("promote", "leaves", "Good")]
+    good = events[2]
+    assert good["action"] == suggest.roster_line("Good", "kraken") and good["cell"] == "" and good["trials"] == conn.execute("SELECT count(*) FROM trials").fetchone()[0]
+    assert events[1]["lo"] == 0.05 and events[1]["variant"] == "tuned" and events[0]["exchange"] == ""
+    assert loop.ack(conn, [e["id"] for e in events[:3]]) == 3
+    assert loop.ack(conn, [events[0]["id"]]) == 0
+    assert [e["name"] for e in loop.pending(conn)] == ["T", "S", "Good"]
+
+
+def test_the_roster_gains_one_row_and_replicas_follow():
+    line = suggest.roster_line("Good", "kraken")
+    roster, sts = research_sync.roster_change(ROSTER, STS, line)
+    assert roster.endswith(line + "\n") and research_sync.rows_of(roster)[:2] == research_sync.rows_of(ROSTER)
+    assert "  replicas: 3  # rows\n" in sts and sts.replace("3  #", "2  #") == STS
+    assert research_sync.roster_change(roster, sts, line) is None
+
+
+def test_the_roster_refuses_a_statefulset_already_out_of_step():
+    with pytest.raises(ValueError, match="replicas 5 for 2 roster rows"):
+        research_sync.roster_change(ROSTER, STS.replace("2  #", "5  #"), suggest.roster_line("Good", "kraken"))
+
+
+def test_one_board_row_carries_a_nights_climate_changes():
+    ev = [{"at": "2026-11-10T03:30:00+00:00", "change": c, "cell": "up/low", "kind": "strategy", "name": n,
+           "exchange": "kraken", "variant": "tuned", "lo": 0.01, "annual": 0.2, "trials": 40}
+          for c, n in [("enters", "S"), ("enters", "T"), ("leaves", "U")]]
+    text, details = research_sync.climate_row(ev)
+    assert "2026-11-10: 2 enter and 1 leave" in text
+    assert details[0] == "enters up/low: strategy S on kraken (tuned), annual +20.0%, low end +1.0%"
+    assert "trial register at 40" in details[-1]
+    many = research_sync.climate_row(ev * 20)[1]
+    assert len(many) == research_sync.MOST_DETAILS + 2 and many[-2].startswith("and 20 more")
