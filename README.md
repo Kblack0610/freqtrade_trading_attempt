@@ -220,7 +220,18 @@ A suggestion keeps its `first_seen` while it holds, so "since Nov 05" on the sit
 
 ## Stress gates
 
-Four gates in `lab/confidence.py` reuse trades already stored, so they add no trial to the register: the low end of expectancy must clear a slippage guess, the same trades in random order must stay inside the hard stop at Stage 1 stake, the strategy must stay positive without its best pair, and it must be positive on at least two venues.
+Confidence requires seven stress checks. A slippage sweep subtracts each additional round-trip cost in `[confidence] slippage_sweep` from the out-of-sample expectancy interval. Trade reordering must stay inside the hard stop at Stage 1 stake; pair holdout must remain positive without the most profitable pair, using tuned walk-forward trades before the lockbox; venue agreement requires positive tuned expectancy on at least two venues. These reuse trades and add no trials.
+
+`lab/robustness.py` also replays each tuned walk-forward test month with delayed entry signals, one numeric buy/sell parameter nudged at a time in both directions, and `--timeframe-detail` using `[confidence] detail_timeframe` candles. Each scenario pools its own months and needs at least `min_member_trades` trades with its bootstrap expectancy interval low above zero. Scenarios never tune on the test month. Missing, failed, unsupported, stale or empty evidence blocks readiness; a valid baseline remains usable for scoring. Strategies without numeric buy/sell parameters cannot clear parameter nudges. A requested nudge outside declared bounds or decimal precision also blocks the gate; values are never clamped back to the baseline. A strategy at or below the detail timeframe cannot clear the detail gate with that setting.
+
+Walk-forward stores scenarios in `walkforward.robustness`; their specification and tuned parameters enter the persistent trial register. Its cache includes experiment settings, implementation and finer-candle digests, so existing folds rerun through the normal budget. The confidence page displays every gate and its evidence. To populate the new evidence, run the usual walk-forward job with finer candles present for every whitelisted pair over the test months, then rescore confidence. No gate authorizes a bot or changes live-entry controls.
+
+| Symptom | Check and action |
+|---|---|
+| Entry delay, parameter nudges or timeframe detail says missing evidence | Run walk-forward after migration 038; older folds have no scenario evidence. |
+| Timeframe detail cannot run | Backfill the configured smaller timeframe for every venue pair and test month, then rerun walk-forward. |
+| Parameter nudge is unsupported | Inspect the strategy's tuned buy/sell parameters and declared bounds; unsupported experiments block readiness. |
+
 
 ## Book
 
@@ -321,6 +332,7 @@ The first run fetches full history (5m since 2019 on binanceus is the long pole)
 - `033`: `research_state` and `research_events`, the nightly research loop's passing sets and their changes, written by `lab/loop.py` and marked reported by `ci/research_sync.py`.
 - `034`: provenance on `backtest_chunks` and `walkforward`: `revision`, `config_digest`, `candles`, and a fold's `seed` (see Reproduce).
 - `037`: `vol_forecasts`, daily HAR variance and eligibility from prior months; permits the `har_target` research sleeve in the dated trade store.
+- `038`: `walkforward.robustness`, scenario outcomes and their specification for the confidence stress gates.
 
  A schema change is a new numbered file; never edit an applied one.
 

@@ -102,9 +102,12 @@ max_open_loss = 0.25
 fee_tolerance = 0.20
 # Out-of-sample expectancy must stay positive with only this share of the edge before fees.
 stress_gross_share = 0.5
-# The expectancy interval's low end must clear this cost a trade. A guess, 0.1% each side: nothing has measured
-# slippage on small orders yet, and only Stage 1 can.
-slippage_per_trade = 0.002
+# Additional round-trip execution costs; every point must leave the OOS interval's low end above zero.
+slippage_sweep = [0.001, 0.002, 0.004]
+# Replay each tuned test month with these execution and parameter perturbations, without retuning.
+entry_delay_candles = 1
+parameter_nudge_fraction = 0.10
+detail_timeframe = "1m"
 # Positive out of sample on this many venues, so an edge is not one venue's fee or data.
 min_venues_agreeing = 2
 # Dry run against backtest: enough matched trades, and the mean gap inside the expectancy interval's half width.

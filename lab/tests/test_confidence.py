@@ -3,7 +3,7 @@ import datetime as dt
 import numpy as np
 import pandas as pd
 
-from lab import confidence, metrics, suggest
+from lab import confidence, metrics, robustness, suggest
 
 CFG = suggest.load_config()
 C = CFG["confidence"]
@@ -14,7 +14,9 @@ PAIR = ("Good", "binanceus")
 def folds(returns, months=6):
     return [{"tuned_returns": list(part), "tuned_trades": len(part), "tuned_expectancy": float(np.mean(part)),
              "fold_start": dt.date(2023 + i // 12, i % 12 + 1, 1), "test_end": dt.date(2023 + (i + 1) // 12, (i + 1) % 12 + 1, 1),
-             "params": {"x": 1}} for i, part in enumerate(np.array_split(returns, months))]
+             "params": {"buy": {"x": 10}},
+             "robustness": {"_settings": robustness.settings(C), **{name: {"ok": True, "returns": list(part)}
+                            for name in robustness.plan(C, {"buy": {"x": 10}})}}} for i, part in enumerate(np.array_split(returns, months))]
 
 
 def population(rng, noise, planted=0, edge=0.2, trades=400):
@@ -88,7 +90,7 @@ def test_no_score_without_a_population():
 
 def test_every_gate_passing_is_ready():
     row = result(good_facts())
-    assert failed(row) == [] and row["ready"] and row["passed"] == len(row["gates"].obj) == 20
+    assert failed(row) == [] and row["ready"] and row["passed"] == len(row["gates"].obj) == 23
     assert row["oos_trades"] == 300
 
 
@@ -132,7 +134,7 @@ def test_a_bull_only_strategy_fails_the_regime_spread():
 def test_an_edge_smaller_than_slippage_fails_only_that_room():
     facts = good_facts()
     facts["walkforward"][PAIR] = folds(np.tile([0.0005, 0.0025], 150))
-    assert "slippage room" in failed(result(facts))
+    assert "slippage sweep" in failed(result(facts))
 
 
 def test_one_pair_carrying_the_profit_fails_the_holdout():
@@ -313,7 +315,7 @@ def test_nothing_inside_the_lockbox_reaches_the_score(conn):
     key = ("S", "kraken")
     assert [f["fold_start"] for f in facts["walkforward"][key]] == [dt.date(2026, 4, 1)]
     assert list(facts["daily"][key].index) == [dt.date(2026, 4, 30)]
-    assert len(facts["pairs"][key]) == 1
+    assert key not in facts["pairs"]  # Whole-history trades cannot satisfy the OOS holdout.
 
 
 def test_evidence_and_scores_are_unchanged_by_the_returns_input():
@@ -357,3 +359,74 @@ def test_no_reader_takes_a_stored_fold_whose_test_month_is_in_the_lockbox(conn):
     assert [r[2] for r in conn.execute(book.FOLDS, box)] == [before]
     assert conn.execute(scorecard.SPANS, box).fetchall() == [("S", "binanceus", before, dt.date(2026, 5, 1))]
     assert [r[3] for r in conn.execute(scorecard.DAILY, box)] == [dt.date(2026, 4, 3)]
+
+
+def test_missing_stale_failed_and_empty_robustness_block_readiness():
+    for damage in ("missing", "stale", "failed", "empty", "nonfinite", "negative"):
+        facts = good_facts()
+        for f in facts["walkforward"][PAIR]:
+            name = next(n for n in f["robustness"] if n.startswith("delay:"))
+            if damage == "missing":
+                del f["robustness"][name]
+            elif damage == "stale":
+                f["robustness"]["_settings"] = {}
+            elif damage == "failed":
+                f["robustness"][name] = {"ok": False, "error": "execution failed"}
+            else:
+                f["robustness"][name]["returns"] = {"empty": [], "nonfinite": [float("nan")], "negative": [-0.1] * 40}[damage]
+        assert "entry delay" in failed(result(facts))
+        assert not result(facts)["ready"]
+
+
+def test_each_robustness_family_independently_blocks_a_high_score():
+    for prefix, label in (("delay:", "entry delay"), ("nudge:", "parameter nudges"), ("detail:", "timeframe detail")):
+        facts = good_facts()
+        f = facts["walkforward"][PAIR][0]
+        del f["robustness"][next(n for n in f["robustness"] if n.startswith(prefix))]
+        assert failed(result(facts)) == [label]
+
+
+def test_slippage_sweep_reports_each_cost_and_uses_the_worst():
+    g = confidence.slippage_gate({"lo": 0.003}, C)
+    assert not g["pass"] and "0.10%" in g["value"] and "0.40%" in g["value"]
+    assert confidence.slippage_gate({"lo": 0.005}, C)["pass"]
+
+
+def test_robustness_and_trials_survive_database_roundtrip(conn):
+    conn.execute("TRUNCATE trials")
+    from lab import analyze, walkforward
+    from test_analyze import REPO
+    from unittest.mock import patch
+
+    conn.execute("INSERT INTO strategies (name, file, file_hash) VALUES ('S', 'x', 'h')")
+    params = {'buy': {'x': 10}}
+    scenarios = {name: {'ok': False, 'error': 'missing candles', 'returns': []}
+                 for name in robustness.plan(C, params)}
+    task = {'name': 'S', 'exchange': 'binanceus', 'fold': (dt.date(2023, 1, 1), dt.date(2023, 7, 1), dt.date(2023, 8, 1)),
+            'key': 'k', 'candles': 'c', 'seed': 1, 'attempts': 0}
+    with patch.object(analyze, 'USER_DATA', REPO / 'user_data'):
+        walkforward.store(conn, task, {'ok': True, 'params': params, 'robustness': scenarios})
+    [f] = confidence.load(conn, CFG)['walkforward'][('S', 'binanceus')]
+    assert f['robustness']['delay:1']['error'] == 'missing candles'
+    assert not any(g['pass'] for g in confidence.robustness_gates([f], ('S', 'binanceus'), C))
+    before = confidence.register(conn)
+    assert before == 1 + len(scenarios)
+    assert confidence.register(conn) == before
+    conn.execute('DELETE FROM walkforward')
+    assert confidence.register(conn) == before
+
+
+def test_pair_holdout_reads_only_successful_tuned_oos_folds(conn):
+    conn.execute("INSERT INTO strategies (name, file, file_hash) VALUES ('S', 'x', 'h')")
+    for start, end, ok in (('2023-01-01', '2023-02-01', True), ('2023-02-01', '2023-03-01', False),
+                           ('2026-05-01', '2026-06-01', True)):
+        conn.execute("INSERT INTO walkforward (strategy, exchange, fold_start, train_start, test_end, cache_key, ok) "
+                     "VALUES ('S', 'binanceus', %s, %s, %s, 'k', %s)", (start, start, end, ok))
+        for variant in ('base', 'tuned'):
+            for pair, ret in (('BTC/USD', 0.1), ('ETH/USD', 0.02)):
+                conn.execute("INSERT INTO walkforward_trades (strategy, exchange, fold_start, variant, pair, open_date, "
+                             "close_date, profit_ratio) VALUES ('S', 'binanceus', %s, %s, %s, %s, %s, %s)",
+                             (start, variant, pair, start, start, ret))
+    facts = confidence.load(conn, {**CFG, 'lockbox': {'start': dt.date(2026, 5, 1)}})
+    assert sorted(facts['pairs'][('S', 'binanceus')]) == [(1, 0.02), (1, 0.1)]
+    assert confidence.without_best_pair(facts['pairs'][('S', 'binanceus')]) == 0.02

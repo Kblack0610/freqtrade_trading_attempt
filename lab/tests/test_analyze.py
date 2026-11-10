@@ -412,3 +412,20 @@ def test_refreshing_the_current_year_rotates_through_every_overlay_series(lab, t
         nights.append({b[:2] + (json.dumps(b[3], sort_keys=True),) for b in r.backtests if len(b) == 4})
     # 12 overlay series each have a stale current year; 4 a night, none twice in three nights
     assert all(len(n) == 4 for n in nights) and len(nights[0] | nights[1] | nights[2]) == 12
+
+
+def test_detail_requires_complete_candles_for_every_whitelisted_pair(tmp_path, monkeypatch):
+    from freqtrade.misc import pair_to_filename
+    monkeypatch.setattr(analyze, 'RESULTS', tmp_path)
+    monkeypatch.setattr(analyze, 'whitelist', lambda ex: {'BTC/USD', 'ETH/USD'})
+    data = tmp_path / 'data' / 'venue'
+    data.mkdir(parents=True)
+    start, end = dt.date(2023, 1, 1), dt.date(2023, 1, 2)
+    dates = pd.date_range(str(start), str(end), freq='1min', inclusive='left', tz='UTC')
+    for pair in ('BTC/USD', 'ETH/USD'):
+        pd.DataFrame({'date': dates}).to_feather(data / f'{pair_to_filename(pair)}-1m.feather')
+    assert analyze.detail_coverage('venue', '1m', start, end) is None
+    pd.DataFrame({'date': dates.delete(500)}).to_feather(data / 'ETH_USD-1m.feather')
+    assert 'incomplete' in analyze.detail_coverage('venue', '1m', start, end)
+    (data / 'ETH_USD-1m.feather').unlink()
+    assert 'missing' in analyze.detail_coverage('venue', '1m', start, end)
