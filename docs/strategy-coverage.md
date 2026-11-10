@@ -57,7 +57,7 @@ Status is `scanned` (in `user_data/strategies/`, backtested nightly, a counted t
 | Grid | scanned | GridLadder (new): layers a step apart under a 72-hour mean, each sold a step up |
 | DCA as a strategy | scanned | DCASafetyOrders (new): base order, four scaled safety orders, one take profit on the average. Plain buy-every-week DCA has no exit, so it is not a trade strategy; the book scores holding BTC instead |
 | Pairs, long leg | scanned | RatioRevert (new): buy a coin cheap against BTC. Unhedged, so it carries the market as well |
-| Candlestick and count patterns | scanned, staged | PatternRecognition, TDSequential; `lab/families/candles/`, one per TA-Lib pattern, staged |
+| Candlestick and count patterns | scanned | PatternRecognition, TDSequential; `user_data/strategies/candles/`, 47 bullish TA-Lib patterns with a fixed exit |
 | Time based | scanned | HourBasedStrategy |
 | FreqAI ML | staged | `lab/families/ml/` LightGBM: needs the ML image and purged walk-forward folds (README, Staged families) |
 | Pairs, market neutral | blocked | the short leg needs margin or futures; `lab/league.py` runs spot only |

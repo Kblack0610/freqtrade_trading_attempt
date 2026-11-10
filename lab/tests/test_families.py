@@ -1,4 +1,4 @@
-"""The staged strategy families in lab/families/: generated files current, every strategy loadable by
+"""Generated strategy families: files current, every strategy loadable by
 name, and no lookahead on synthetic prices through the same check the nightly analysis runs."""
 
 import datetime as dt
@@ -15,7 +15,8 @@ from lab.families import generate
 
 LAB = Path(__file__).resolve().parents[1]
 FAMILIES = LAB / "families"
-CANDLES = FAMILIES / "candles"
+ACTIVE = LAB.parent / "user_data" / "strategies"
+CANDLES = ACTIVE / "candles"
 CHART = FAMILIES / "chart"
 TREND = FAMILIES / "trend"
 RANGE = FAMILIES / "range"
@@ -121,8 +122,51 @@ def test_the_nightly_lookahead_check_on_synthetic_prices(bias_data, monkeypatch,
 
 def test_the_nightly_analysis_does_not_scan_the_staged_families():
     """Staged means no trials: the analysis searches user_data/strategies only. Switching a family on
-    moves its folder there and drops this test."""
+    moves its folder there; the remaining staged families must stay outside discovery."""
     from lab import analyze
 
-    staged = {p.stem for fam in generate.families() for p in fam.glob("*.py")}
+    staged = {p.stem for fam in generate.families() if fam.parent == FAMILIES for p in fam.glob("*.py")}
     assert staged and not staged & {s["name"] for s in analyze.Cli().discover()}
+
+
+def test_active_candles_cover_every_bullish_talib_pattern():
+    import talib
+    from lab import analyze
+
+    cfg = tomllib.loads((CANDLES / "family.toml").read_text())
+    expected = {cfg["prefix"] + p.removeprefix("CDL") for p in talib.get_function_groups()["Pattern Recognition"]
+                if p not in cfg["skip"]["bearish_only"]}
+    assert {p.stem for p in CANDLES.glob("*.py")} == expected
+    discovered = {s["name"]: s for s in analyze.Cli().discover()}
+    assert expected <= discovered.keys()
+    assert all(discovered[name]["load_error"] is None for name in expected)
+    assert not (FAMILIES / "candles").exists()
+
+
+@pytest.mark.parametrize("family", [CANDLES], ids=lambda p: p.name)
+def test_each_active_family_member_is_a_trial_even_with_no_trades(conn, monkeypatch, family):
+    from lab import analyze, confidence
+
+    names = {p.stem for p in family.glob("*.py")}
+    assert names
+    conn.execute("TRUNCATE trials")
+    monkeypatch.setattr(analyze, "EXCHANGES", ["binanceus", "okx"])
+    monkeypatch.setattr(analyze, "daily_close", lambda coin: pd.Series(dtype=float))
+    for name in names:
+        conn.execute("INSERT INTO strategies (name, file, file_hash) VALUES (%s, %s, 'test')",
+                     (name, str(family / f"{name}.py")))
+        for venue in analyze.EXCHANGES:
+            conn.execute(
+                "INSERT INTO backtest_chunks (strategy, exchange, chunk_start, chunk_end, cache_key, ok, "
+                "bt_start, bt_end, trades, start_balance, final_balance) "
+                "VALUES (%s, %s, '2026-01-01', '2026-02-01', 'test', true, "
+                "'2026-01-01', '2026-02-01', 0, 1000, 1000)", (name, venue))
+    assert analyze.derive(conn)["series"] == len(names) * len(analyze.EXCHANGES)
+    assert conn.execute("SELECT max(trades) FROM strategy_windows").fetchone()[0] == 0
+    expected = {(name, venue, "as-is") for name in names for venue in analyze.EXCHANGES}
+    assert confidence.register(conn) == len(expected)
+    assert set(conn.execute("SELECT strategy, exchange, variant FROM trials").fetchall()) == expected
+    assert confidence.register(conn) == len(expected)
+    conn.execute("DELETE FROM strategy_windows")
+    conn.execute("DELETE FROM strategies")
+    assert confidence.register(conn) == len(expected)

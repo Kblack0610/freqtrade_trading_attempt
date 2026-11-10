@@ -93,3 +93,52 @@ wtc = { family = "biased-control", inputs = ["ohlcv"] }
 # lab/research/
 BustShort = { family = "short", inputs = ["ohlcv", "funding"], note = "Funding is measured (funding_rates); trades before its history are counted apart (docs/short-bust.md)." }
 DonchianLongShort = { family = "trend", inputs = ["ohlcv", "funding"], note = "The staged trend family's Donchian ensemble both ways, on futures candles; research only (docs/short-bust.md)." }
+
+# user_data/strategies/candles/: fixed-exit bullish TA-Lib patterns
+Candle3INSIDE = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+Candle3LINESTRIKE = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+Candle3OUTSIDE = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+Candle3STARSINSOUTH = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+Candle3WHITESOLDIERS = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+CandleABANDONEDBABY = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+CandleBELTHOLD = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+CandleBREAKAWAY = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+CandleCLOSINGMARUBOZU = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+CandleCONCEALBABYSWALL = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+CandleCOUNTERATTACK = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+CandleDOJI = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+CandleDOJISTAR = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+CandleDRAGONFLYDOJI = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+CandleENGULFING = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+CandleGAPSIDESIDEWHITE = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+CandleGRAVESTONEDOJI = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+CandleHAMMER = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+CandleHARAMI = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+CandleHARAMICROSS = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+CandleHIGHWAVE = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+CandleHIKKAKE = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+CandleHIKKAKEMOD = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+CandleHOMINGPIGEON = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+CandleINVERTEDHAMMER = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+CandleKICKING = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+CandleKICKINGBYLENGTH = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+CandleLADDERBOTTOM = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+CandleLONGLEGGEDDOJI = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+CandleLONGLINE = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+CandleMARUBOZU = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+CandleMATCHINGLOW = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+CandleMATHOLD = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+CandleMORNINGDOJISTAR = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+CandleMORNINGSTAR = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+CandlePIERCING = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+CandleRICKSHAWMAN = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+CandleRISEFALL3METHODS = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+CandleSEPARATINGLINES = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+CandleSHORTLINE = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+CandleSPINNINGTOP = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+CandleSTICKSANDWICH = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+CandleTAKURI = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+CandleTASUKIGAP = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+CandleTRISTAR = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+CandleUNIQUE3RIVER = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+CandleXSIDEGAP3METHODS = { family = "candlestick-pattern", inputs = ["ohlcv"] }
