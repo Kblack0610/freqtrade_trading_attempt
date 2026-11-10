@@ -248,6 +248,7 @@ MONEY_MAP = {
     ("lab/healthcheck.py", "healthy"): Client("none", why="our own pod's health endpoint"),
     ("lab/archive.py", "RangeFile"): Client("none", why="public candle archives"),
     ("lab/futures.py", "Ccxt"): Client("none", why="public funding and open interest through ccxt, no key"),
+    ("web/fetch_kit.py", "fetch"): Client("none", why="build-time download of the pinned web-kit files from GitHub, checked against web/kit.lock"),
     ("lab/backfill.py", "Cli"): Client("none", why="public candles through ccxt, no key"),
     ("lab/pairs.py", "main"): Client("none", why="public tickers through ccxt, no key"),
     ("web/auth.py", "login_for_code"): Client("none", why="Forgejo sign-in for the read-only site"),
