@@ -59,7 +59,7 @@ Results go to the `trader` database in the cluster's shared Postgres, which the 
 
 ## The no-real-money guard
 
-`lab/league.py` exits 2 before freqtrade starts if any `FREQTRADE__` env var is set, if the merged config is not `dry_run: true`, if it is not spot, or if the exchange block carries a key, secret, password, uid, private key or wallet address. Public market data needs no keys, so the exchange files keep them empty. `lab/ingest.py` exits 1 if any bot's `show_config` says it is not dry run. `lab/live.py` is the entry point a live bot would use: it refuses while its own guard is on, and nothing deploys it (`docs/live.md`).
+`lab/league.py` exits 2 before freqtrade starts if any `FREQTRADE__` env var is set, if the merged config is not `dry_run: true`, if it is not spot, or if the exchange block carries a key, secret, password, uid, private key or wallet address. Public market data needs no keys, so the exchange files keep them empty. `lab/ingest.py` exits 1 if any bot's `show_config` says it is not dry run. `lab/live.py` is the entry point a live bot would use: it refuses while its own guard is on, and nothing deploys it (`docs/live.md`). `lab/tests/test_money.py` proves these refusals, that paper money adds up, and that each outbound client sends only where its money-map row allows.
 
 ## Cohorts
 
