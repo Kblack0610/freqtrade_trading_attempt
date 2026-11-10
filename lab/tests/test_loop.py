@@ -71,3 +71,53 @@ def test_one_board_row_carries_a_nights_climate_changes():
     assert "trial register at 40" in details[-1]
     many = research_sync.climate_row(ev * 20)[1]
     assert len(many) == research_sync.MOST_DETAILS + 2 and many[-2].startswith("and 20 more")
+
+
+def test_monthly_retune_reports_new_fits_and_lost_qualification(conn):
+    action = 'Save parameters trained 2026-01-01 to 2026-04-01: {"buy": 1}'
+    conn.execute("INSERT INTO suggestions (kind, strategy, exchange, summary, action, gates) "
+                 "VALUES ('retune', 'S', 'kraken', 's', %s, '[]')", (action,))
+    assert loop.run(conn)["research_enters"] == 1
+    assert loop.run(conn)["research_enters"] == 0
+    assert loop.pending(conn)[0]["action"] == action
+    newer = action.replace('2026-04-01', '2026-05-01')
+    conn.execute("UPDATE suggestions SET action = %s WHERE kind = 'retune'", (newer,))
+    assert loop.run(conn) == {"research_passing": 0, "research_enters": 1, "research_leaves": 1}
+    events = loop.pending(conn)
+    assert [e["action"] for e in events] == [action, newer, action]
+    assert events[0]["variant"] != events[1]["variant"]
+    conn.execute("DELETE FROM suggestions WHERE kind = 'retune'")
+    assert loop.run(conn)["research_leaves"] == 1
+    assert loop.run(conn)["research_leaves"] == 0
+
+
+@pytest.mark.parametrize("dry", [False, True])
+def test_sync_reports_retunes_and_only_acks_after_board_success(monkeypatch, dry):
+    events = [dict(id=i, signal="retune", change=change, name="S", exchange="kraken", variant="abc123", action="fit JSON")
+              for i, change in enumerate(("enters", "leaves"), 1)]
+    calls, rows = [], []
+
+    def kubectl(*args):
+        calls.append(args)
+        return research_sync.json.dumps(events) if args == ("pending",) else "acked"
+
+    monkeypatch.setenv("DRY_RUN", "1" if dry else "0")
+    monkeypatch.setattr(research_sync, "kubectl_research", kubectl)
+    monkeypatch.setattr(research_sync, "board", lambda *args: rows.append(args))
+    monkeypatch.setattr(research_sync, "roster_pr", lambda e: pytest.fail("retunes must not change the roster"))
+    assert research_sync.main() == 0
+    assert calls == ([("pending",)] if dry else [("pending",), ("ack", "1", "2")])
+    assert len(rows) == (0 if dry else 2)
+    if not dry:
+        assert rows[0][1][0] == "fit JSON"
+        assert "no longer qualifies" in rows[1][0]
+
+    def failed_board(*args):
+        raise RuntimeError("board unavailable")
+
+    if not dry:
+        calls.clear()
+        monkeypatch.setattr(research_sync, "board", failed_board)
+        with pytest.raises(RuntimeError, match="board unavailable"):
+            research_sync.main()
+        assert calls == [("pending",)]
