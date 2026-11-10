@@ -84,6 +84,7 @@ def kubectl_research(*args: str) -> str:
            target, "-c", container, "--", "python", "-m", "lab.loop", *args]
     run = subprocess.run(cmd, capture_output=True, text=True)
     if run.returncode:
+        sys.stderr.write(run.stderr)  # the whole error for the runner's log; the exit line is its outcome
         why = (run.stderr.strip().splitlines() or ["no stderr"])[-1]
         raise SystemExit(f"lab.loop {args[0]} on {target} exited {run.returncode}: {why}")
     return run.stdout
