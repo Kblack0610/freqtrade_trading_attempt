@@ -53,7 +53,7 @@ from typing import Protocol
 import pandas as pd
 from psycopg.types.json import Jsonb
 
-from lab import metrics, book, confidence, loop, mixtures, scorecard, suggest, universe, variants, volatility, horizon
+from lab import metrics, book, confidence, loop, mixtures, scorecard, suggest, universe, variants, volatility, vol_target, horizon
 from lab.db import connect
 from lab.util import finite, utc
 
@@ -807,6 +807,7 @@ def main(runner: Runner | None = None, today: dt.date | None = None) -> int:
             summary.update(derive(conn))
             cfg = suggest.load_config()
             summary.update(volatility.run(conn, vol_files(first, cfg["volatility"]["timeframe"]), cfg))
+            summary.update(vol_target.run(conn))
             summary.update(suggest.run(conn))
             summary.update(confidence.run(conn))
             summary.update(book.run(conn))

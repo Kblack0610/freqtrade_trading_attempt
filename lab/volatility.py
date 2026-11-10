@@ -25,6 +25,7 @@ from lab import metrics
 
 MODELS = ("har", "mean", "ewma")
 SCORE_COLS = ["exchange", "pair", "model", "fold_start", "days", "qlike"]
+FORECAST_COLS = ["exchange", "pair", "day", "variance", "eligible"]
 VERDICT_COLS = ["exchange", "baseline", "pairs", "days", "har_qlike", "baseline_qlike", "diff_lo", "diff_hi", "har_wins"]
 
 
@@ -65,7 +66,7 @@ def forecasts(rv: pd.Series, months: list[dt.date], cfg: dict) -> pd.DataFrame:
         a = np.column_stack([np.ones(train.sum()), x[train].to_numpy()])
         beta, *_ = np.linalg.lstsq(a, y[train].to_numpy(), rcond=None)
         s2 = float(np.var(y[train].to_numpy() - a @ beta, ddof=a.shape[1]))
-        test = usable & (x.index >= start) & (x.index < end) & base.notna().all(axis=1)
+        test = x.notna().all(axis=1) & (x.index >= start) & (x.index < end) & base.notna().all(axis=1)
         if not test.any():
             continue
         har = np.exp(np.column_stack([np.ones(test.sum()), x[test].to_numpy()]) @ beta + s2 / 2)
@@ -92,17 +93,18 @@ def months_before(first: dt.date, lockbox: dt.date) -> list[dt.date]:
     return out
 
 
-def score(exchange: str, series: dict[str, pd.Series], cfg: dict) -> tuple[list[dict], list[dict]]:
+def score(exchange: str, series: dict[str, pd.Series], cfg: dict, forecast_rows: list | None = None) -> tuple[list[dict], list[dict]]:
     """series: pair -> daily realized variance. The per-pair, per-model, per-month QLIKE rows, and the verdict rows."""
     c, lockbox = cfg["volatility"], cfg["lockbox"]["start"]
-    scores, daily = [], []
+    scores, daily, frames = [], [], {}
     for pair, rv in sorted(series.items()):
         if rv.empty:
             continue
         f = forecasts(rv, months_before(min(rv.index), lockbox), cfg)
         if f.empty:
             continue
-        loss = pd.DataFrame({m: qlike(f["rv"], f[m]) for m in MODELS}).assign(day=f["day"], fold_start=f["fold_start"])
+        frames[pair] = f
+        loss = pd.DataFrame({m: qlike(f["rv"], f[m]) for m in MODELS}).assign(day=f["day"], fold_start=f["fold_start"]).dropna()
         for (start, model), q in loss.melt(id_vars=["day", "fold_start"], var_name="model").groupby(["fold_start", "model"]):
             scores.append({"exchange": exchange, "pair": pair, "model": model, "fold_start": start, "days": len(q),
                            "qlike": float(q["value"].mean())})
@@ -110,6 +112,11 @@ def score(exchange: str, series: dict[str, pd.Series], cfg: dict) -> tuple[list[
     if not daily:
         return scores, []
     by_day = pd.concat(daily).groupby("day")[list(MODELS)].mean().sort_index()
+    if forecast_rows is not None:
+        eligible = monthly_eligibility(by_day, sorted({m for f in frames.values() for m in f["fold_start"]}), cfg, exchange)
+        for pair, f in frames.items():
+            forecast_rows.extend({"exchange": exchange, "pair": pair, "day": r.day, "variance": float(r.har),
+                                  "eligible": eligible[r.fold_start]} for r in f.itertuples(index=False))
     verdict = []
     for b in MODELS[1:]:
         lo, hi = metrics.block_mean_ci((by_day["har"] - by_day[b]).to_numpy(), metrics.seed_of("volatility", exchange, b),
@@ -120,23 +127,42 @@ def score(exchange: str, series: dict[str, pd.Series], cfg: dict) -> tuple[list[
     return scores, verdict
 
 
+def monthly_eligibility(loss: pd.DataFrame, months: list[dt.date], cfg: dict, exchange: str = "") -> dict:
+    """A month may size by HAR only if its prior scored days beat both baselines. No current-month loss is read."""
+    c, out = cfg["volatility"], {}
+    for month in months:
+        prior = loss.loc[loss.index < month]
+        wins = len(prior) >= c["target_min_score_days"]
+        for baseline in MODELS[1:]:
+            if not wins:
+                break
+            _, hi = metrics.block_mean_ci((prior["har"] - prior[baseline]).to_numpy(),
+                                         metrics.seed_of("vol-target", exchange, month, baseline),
+                                         block=c["block_days"], level=c["level"])
+            wins = hi is not None and hi < 0
+        out[month] = wins
+    return out
+
+
 def run(conn, files: dict[str, dict[str, Path]], cfg: dict) -> dict:
     """files: exchange -> pair -> its candle file at [volatility] timeframe. Rebuilds vol_scores and vol_verdict."""
     c = cfg["volatility"]
     minutes = int(pd.Timedelta(c["timeframe"]).total_seconds() // 60)
-    scores, verdict = [], []
+    scores, verdict, forecast_rows = [], [], []
     for ex, pairs in sorted(files.items()):
         series = {p: realized_variance(pd.read_feather(f, columns=["date", "close"]), minutes, c["min_day_share"])
                   for p, f in pairs.items() if f.exists()}
-        s, v = score(ex, series, cfg)
+        s, v = score(ex, series, cfg, forecast_rows)
         scores += s
         verdict += v
     with conn.transaction():
         conn.execute("DELETE FROM vol_scores")
         conn.execute("DELETE FROM vol_verdict")
+        conn.execute("DELETE FROM vol_forecasts")
         with conn.cursor() as cur:
-            for table, cols, rows in (("vol_scores", SCORE_COLS, scores), ("vol_verdict", VERDICT_COLS, verdict)):
+            for table, cols, rows in (("vol_scores", SCORE_COLS, scores), ("vol_verdict", VERDICT_COLS, verdict),
+                                      ("vol_forecasts", FORECAST_COLS, forecast_rows)):
                 cur.executemany(f"INSERT INTO {table} ({', '.join(cols)}) VALUES ({', '.join(f'%({k})s' for k in cols)})",
                                 rows)
     wins = sorted({v["exchange"] for v in verdict} - {v["exchange"] for v in verdict if not v["har_wins"]})
-    return {"vol_scores": len(scores), "vol_har_wins": wins}
+    return {"vol_scores": len(scores), "vol_har_wins": wins, "vol_forecasts": len(forecast_rows)}
