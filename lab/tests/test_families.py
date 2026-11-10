@@ -17,7 +17,7 @@ LAB = Path(__file__).resolve().parents[1]
 FAMILIES = LAB / "families"
 ACTIVE = LAB.parent / "user_data" / "strategies"
 CANDLES = ACTIVE / "candles"
-CHART = FAMILIES / "chart"
+CHART = ACTIVE / "chart"
 TREND = FAMILIES / "trend"
 RANGE = FAMILIES / "range"
 PLANTED = LAB / "tests" / "fixtures" / "strategies"
@@ -143,7 +143,19 @@ def test_active_candles_cover_every_bullish_talib_pattern():
     assert not (FAMILIES / "candles").exists()
 
 
-@pytest.mark.parametrize("family", [CANDLES], ids=lambda p: p.name)
+def test_active_chart_members_are_discovered():
+    from lab import analyze
+
+    expected = {"ChartResistanceBreak", "ChartDoubleBottom", "ChartAscendingTriangle",
+                "ChartSymmetricTriangle", "ChartBullFlag"}
+    assert {p.stem for p in CHART.glob("*.py")} == expected
+    discovered = {s["name"]: s for s in analyze.Cli().discover()}
+    assert expected <= discovered.keys()
+    assert all(discovered[name]["load_error"] is None for name in expected)
+    assert not (FAMILIES / "chart").exists()
+
+
+@pytest.mark.parametrize("family", [CANDLES, CHART], ids=lambda p: p.name)
 def test_each_active_family_member_is_a_trial_even_with_no_trades(conn, monkeypatch, family):
     from lab import analyze, confidence
 
