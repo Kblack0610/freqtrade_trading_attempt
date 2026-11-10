@@ -5,6 +5,8 @@ the site keeps no session store and a restart signs nobody out. Rotating SESSION
 everyone out. Only logins in ALLOWED_USERS get a session.
 """
 
+from collections.abc import Mapping
+
 import base64
 import hashlib
 import hmac
@@ -22,7 +24,7 @@ SESSION_DAYS = 30
 
 
 class Config:
-    def __init__(self, env: dict | None = None):
+    def __init__(self, env: Mapping[str, str] | None = None):
         env = os.environ if env is None else env
         self.base_url = env.get("TRADER_WEB_BASE_URL", "http://localhost:8000").rstrip("/")
         # The browser goes to Forgejo's public ROOT_URL host; the token and user calls are
