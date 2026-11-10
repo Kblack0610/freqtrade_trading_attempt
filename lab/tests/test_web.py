@@ -457,7 +457,7 @@ def test_every_strategy_class_has_a_family():
 
 def test_coverage_joins_the_families_to_the_results(conn, signed_in):
     seed(conn)
-    conn.execute("DELETE FROM trials WHERE strategy IN ('Strategy001', 'Mystery')")  # keeps the migration's seed rows
+    conn.execute("TRUNCATE trials")  # family totals must exclude migration seeds and earlier tests' trials
     conn.execute("INSERT INTO strategies (name, file, file_hash, timeframe) VALUES ('Mystery', 'x.py', 'h4', '5m')")
     for name, exchange, trades in (("Strategy001", "binanceus", 120), ("Strategy001", "kraken", 30), ("Mystery", "binanceus", 7)):
         conn.execute("INSERT INTO strategy_windows (strategy, exchange, win, days, trades) VALUES (%s, %s, 'all', 900, %s)",
