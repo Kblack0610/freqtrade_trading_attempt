@@ -38,7 +38,7 @@ from typing import Protocol
 
 from psycopg.types.json import Jsonb
 
-from lab import analyze, book, confidence, horizon, metrics, mixtures, scorecard, suggest, universe, vol_target
+from lab import analyze, book, confidence, horizon, metrics, mixtures, robustness, scorecard, suggest, universe, vol_target
 from lab.db import connect
 
 EXCHANGES = os.environ.get("WF_EXCHANGES", "binanceus").split()
@@ -78,7 +78,18 @@ def train_end(test_start: dt.date) -> dt.date:
 
 def fold_key(file_hash: str, exchange: str, fold: tuple, ft_version: str, candles: str) -> str:
     return analyze.sha256(json.dumps([file_hash, analyze.config_digest(exchange), ft_version, exchange,
-                                      [str(d) for d in fold], EPOCHS, LOSS, MIN_TRADES, EMBARGO_DAYS, candles]).encode())
+                                      [str(d) for d in fold], EPOCHS, LOSS, MIN_TRADES, EMBARGO_DAYS, candles,
+                                      robustness.settings(suggest.load_config()["confidence"])]).encode())
+
+
+def fold_candles(exchange: str, timeframe: str, fold: tuple, days: dict) -> str:
+    """One digest for the native and detail candles, shared by planning and reproduction."""
+    digests = []
+    for tf in (timeframe, suggest.load_config()["confidence"]["detail_timeframe"]):
+        if (exchange, tf) not in days:
+            days[exchange, tf] = analyze.candle_digests(exchange, tf, by="day")
+        digests.append(analyze.span_digest(days[exchange, tf], fold[0], fold[2]))
+    return analyze.sha256("".join(digests).encode())
 
 
 class Runner(Protocol):
@@ -143,6 +154,8 @@ class Cli:
                 if not r["ok"]:
                     return took({"ok": False, "error": f"{side}: {r['error']}"})
                 out[side] = stats(r)
+            out["robustness"] = robustness.run(self.bt, strategy, strat, params_file, exchange,
+                                               test_start, test_end, suggest.load_config()["confidence"], stats)
         return took(out)
 
 
@@ -191,9 +204,7 @@ def plan(conn, found: list[dict], first: dict, today: dt.date, ft_version: str) 
                 if fold[0] < since.date():
                     skipped.append(f"{s['name']} on {ex} {fold[1]:%Y-%m}: training starts before its first candle")
                     continue
-                if (ex, s["timeframe"]) not in days:
-                    days[ex, s["timeframe"]] = analyze.candle_digests(ex, s["timeframe"], by="day")
-                candles = analyze.span_digest(days[ex, s["timeframe"]], fold[0], fold[2])
+                candles = fold_candles(ex, s["timeframe"], fold, days)
                 key = fold_key(s["file_hash"], ex, fold, ft_version, candles)
                 prior = done.get((s["name"], ex, fold[1]))
                 if prior and prior[0] == key and (prior[1] or prior[2] >= MAX_ATTEMPTS):
@@ -214,9 +225,9 @@ def store(conn, task: dict, res: dict) -> None:
         INSERT INTO walkforward (strategy, exchange, fold_start, train_start, test_end, cache_key, ok, attempts, error,
             epochs, loss, params, is_trades, is_profit, base_trades, base_profit, base_expectancy, base_returns,
             tuned_trades, tuned_profit, tuned_expectancy, tuned_returns, duration_s, revision, config_digest, candles, seed,
-            computed_at)
+            robustness, computed_at)
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-            %s, now())
+            %s, %s, now())
         ON CONFLICT (strategy, exchange, fold_start) DO UPDATE SET train_start = EXCLUDED.train_start,
             test_end = EXCLUDED.test_end, cache_key = EXCLUDED.cache_key, ok = EXCLUDED.ok, attempts = EXCLUDED.attempts,
             error = EXCLUDED.error, epochs = EXCLUDED.epochs, loss = EXCLUDED.loss, params = EXCLUDED.params,
@@ -225,14 +236,15 @@ def store(conn, task: dict, res: dict) -> None:
             base_returns = EXCLUDED.base_returns, tuned_trades = EXCLUDED.tuned_trades,
             tuned_profit = EXCLUDED.tuned_profit, tuned_expectancy = EXCLUDED.tuned_expectancy,
             tuned_returns = EXCLUDED.tuned_returns, duration_s = EXCLUDED.duration_s, revision = EXCLUDED.revision,
-            config_digest = EXCLUDED.config_digest, candles = EXCLUDED.candles, seed = EXCLUDED.seed, computed_at = now()""",
+            config_digest = EXCLUDED.config_digest, candles = EXCLUDED.candles, seed = EXCLUDED.seed, robustness = EXCLUDED.robustness, computed_at = now()""",
         (task["name"], task["exchange"], fold_start, train_start, test_end, task["key"], res["ok"], attempts, res.get("error"),
          EPOCHS, LOSS, Jsonb(res["params"]) if res.get("params") else None,
          side("is").get("trades"), side("is").get("profit"),
          side("base").get("trades"), side("base").get("profit"), side("base").get("expectancy"), side("base").get("returns"),
          side("tuned").get("trades"), side("tuned").get("profit"), side("tuned").get("expectancy"),
          side("tuned").get("returns"), res.get("duration_s"), analyze.REVISION, analyze.config_digest(task["exchange"]),
-         task["candles"], task["seed"]))
+         task["candles"], task["seed"], Jsonb({**res["robustness"], "_settings": robustness.settings(suggest.load_config()["confidence"])})
+         if res.get("robustness") is not None else None))
     conn.execute("DELETE FROM walkforward_trades WHERE strategy = %s AND exchange = %s AND fold_start = %s",
                  (task["name"], task["exchange"], fold_start))
     rows = [(task["name"], task["exchange"], v, fold_start, *t) for v in ("base", "tuned") for t in side(v).get("dated", [])]
@@ -265,7 +277,8 @@ def main(runner: Runner | None = None, today: dt.date | None = None) -> int:
             left = 0
 
             def run(t):
-                gb = analyze.task_gb(t["exchange"], t["timeframe"], TRAIN_DAYS + 31, HYPEROPT_LOAD)
+                gb = max(analyze.task_gb(t["exchange"], t["timeframe"], TRAIN_DAYS + 31, HYPEROPT_LOAD),
+                         analyze.task_gb(t["exchange"], suggest.load_config()["confidence"]["detail_timeframe"], 31))
                 with budget.hold(gb):
                     if stop_at is not None and time.monotonic() >= stop_at:
                         return None  # out of time: left for the next run

@@ -180,6 +180,24 @@ def candle_digests(exchange: str, timeframe: str, by: str = "year") -> dict:
     return {k: h.hexdigest() for k, h in out.items()}
 
 
+def detail_coverage(exchange: str, timeframe: str, start: dt.date, end: dt.date) -> str | None:
+    """Require every intrabar candle on every whitelist pair; partial detail data must not pass as a replay."""
+    from freqtrade.exchange import timeframe_to_seconds
+    from freqtrade.misc import pair_to_filename
+
+    step = timeframe_to_seconds(timeframe)
+    expected = pd.date_range(pd.Timestamp(start, tz="UTC"), pd.Timestamp(end, tz="UTC"),
+                             freq=pd.Timedelta(seconds=step), inclusive="left")
+    for pair in sorted(whitelist(exchange)):
+        path = RESULTS / "data" / exchange / f"{pair_to_filename(pair)}-{timeframe}.feather"
+        if not path.exists():
+            return f"missing {timeframe} candles for {pair}"
+        dates = pd.DatetimeIndex(pd.to_datetime(pd.read_feather(path, columns=["date"])["date"], utc=True))
+        if not expected.isin(dates).all():
+            return f"incomplete {timeframe} candles for {pair} over {start} to {end}"
+    return None
+
+
 def span_digest(days: dict[dt.date, str], start: dt.date, end: dt.date) -> str:
     """One digest over candle_digests(by="day") from start up to, not including, end."""
     return sha256("".join(f"{d}{h}" for d, h in sorted(days.items()) if start <= d < end).encode())
@@ -240,12 +258,16 @@ class Cli:
         return out
 
     def backtest(self, strategy: str, exchange: str, start: dt.date, end: dt.date, overlay: dict | None = None,
-                 strategy_path: Path | None = None) -> dict:
+                 strategy_path: Path | None = None, detail: str | None = None) -> dict:
         """overlay (overlay_config()'s) is layered last, over both config files. strategy_path puts a folder ahead of
         the repo's, so its copy of the strategy (and params file) loads."""
         from freqtrade.data.btanalysis import load_backtest_data, load_backtest_stats
 
         t0 = time.monotonic()
+        if detail:
+            error = detail_coverage(exchange, detail, start, end)
+            if error:
+                return {"ok": False, "error": error, "duration_s": time.monotonic() - t0}
         with tempfile.TemporaryDirectory(prefix="bt-") as d:
             cmd = ["freqtrade", "backtesting", "--userdir", str(USER_DATA), "--recursive-strategy-search",
                    *[a for p in config_files(exchange) for a in ("-c", str(p))],
@@ -257,6 +279,8 @@ class Cli:
                 cmd += ["-c", str(Path(d) / "overlay.json")]
             if strategy_path:
                 cmd += ["--strategy-path", str(strategy_path)]
+            if detail:
+                cmd += ["--timeframe-detail", detail]
             try:
                 p = subprocess.run(cmd, capture_output=True, text=True, timeout=CHUNK_TIMEOUT)
             except subprocess.TimeoutExpired:

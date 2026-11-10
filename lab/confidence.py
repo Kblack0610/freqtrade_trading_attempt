@@ -33,7 +33,7 @@ import pandas as pd
 from psycopg.types.json import Jsonb
 from scipy.stats import norm
 
-from lab import metrics, suggest
+from lab import metrics, robustness, suggest
 from lab.db import connect
 from lab.suggest import gate
 
@@ -45,6 +45,10 @@ REGISTER = [
     "FROM overlay_windows ON CONFLICT DO NOTHING",
     "INSERT INTO trials (strategy, exchange, variant) SELECT DISTINCT strategy, exchange, md5(params::text) "
     "FROM walkforward WHERE params IS NOT NULL ON CONFLICT DO NOTHING",
+    "INSERT INTO trials (strategy, exchange, variant) SELECT w.strategy, w.exchange, "
+    "'robustness:' || md5(jsonb_build_array(w.params, w.robustness->'_settings', r.key)::text) "
+    "FROM walkforward w CROSS JOIN LATERAL jsonb_each(coalesce(w.robustness, '{}'::jsonb)) r "
+    "WHERE r.key <> '_settings' ON CONFLICT DO NOTHING",
     "INSERT INTO trials (strategy, exchange, variant) SELECT name, '', 'load-failed' "
     "FROM strategies WHERE load_error IS NOT NULL ON CONFLICT DO NOTHING",
 ]
@@ -62,9 +66,10 @@ WHERE NOT t.is_open AND t.profit_ratio IS NOT NULL ORDER BY t.close_date, t.trad
 ROSTER = "SELECT strategy, exchange, name FROM bots WHERE last_seen >= %s ORDER BY name"
 
 PAIRS = """
-SELECT c.strategy, c.exchange, count(*), sum(t.profit_ratio)
-FROM backtest_trades t JOIN backtest_chunks c ON c.id = t.chunk_id WHERE c.overlay = '' AND t.close_date < %s
-GROUP BY c.strategy, c.exchange, t.pair
+SELECT t.strategy, t.exchange, count(*), sum(t.profit_ratio)
+FROM walkforward_trades t JOIN walkforward w USING (strategy, exchange, fold_start)
+WHERE t.variant = 'tuned' AND w.ok AND w.test_end <= %s AND t.close_date < %s
+GROUP BY t.strategy, t.exchange, t.pair
 """
 
 
@@ -109,7 +114,7 @@ def load(conn, cfg: dict, now: dt.datetime | None = None) -> dict:
     for s, e, name in conn.execute(ROSTER, (now - suggest.ROSTER_STALE,)):
         facts["roster"].setdefault((s, e), []).append(name)
     facts["pairs"] = {}
-    for s, e, n, total in conn.execute(PAIRS, (lockbox,)):
+    for s, e, n, total in conn.execute(PAIRS, (lockbox, lockbox)):
         facts["pairs"].setdefault((s, e), []).append((n, total))
     facts["now"] = now
     return facts
@@ -240,6 +245,46 @@ def venue_agreement(strategy: str, ev: dict, cfg: dict) -> tuple[int, int]:
     return sum(m > 0 for m in means), len(means)
 
 
+def slippage_gate(ev: dict, c: dict) -> dict:
+    sweep = c["slippage_sweep"]
+    values = [f"{cost:.2%}: {ev['lo'] - cost:+.4f}" for cost in sweep] if ev["lo"] is not None else []
+    return gate("slippage sweep", ", ".join(values) or None, "interval low > 0 at every extra round-trip cost",
+                bool(sweep) and ev["lo"] is not None and all(ev["lo"] > cost for cost in sweep))
+
+
+def robustness_gates(folds: list[dict], pair: tuple, c: dict) -> list[dict]:
+    pooled: dict = {}
+    settings = robustness.settings(c)
+    errors: dict = {kind: [] for kind in ("delay", "nudge", "detail")}
+    for f in folds:
+        expected = robustness.plan(c, f.get("params") or {})
+        stored = f.get("robustness") or {}
+        for name in expected:
+            kind = name.split(":", 1)[0]
+            r = stored.get(name) or {}
+            if stored.get("_settings") != settings:
+                r = {"error": "missing or stale experiment settings"}
+            values = r.get("returns")
+            if not r.get("ok") or values is None or not np.isfinite(values).all():
+                errors[kind].append(f"{f['fold_start']}: {name}: {r.get('error') or 'missing or invalid evidence'}")
+            else:
+                pooled.setdefault(name, []).extend(values)
+    out = []
+    for kind, label in (("delay", "entry delay"), ("nudge", "parameter nudges"), ("detail", "timeframe detail")):
+        tested = []
+        ok = bool(folds) and not errors[kind]
+        for name, values in pooled.items():
+            if name.split(":", 1)[0] != kind:
+                continue
+            ev = interval(values, metrics.seed_of(*pair, name), c)
+            passed = ev["trades"] >= c["min_member_trades"] and ev["lo"] is not None and ev["lo"] > 0
+            ok = ok and passed
+            tested.append(f"{name}: {ev['trades']} trades, low {ev['lo']}")
+        out.append(gate(label, "; ".join(errors[kind] + tested) or "no evidence",
+                        f"all scenarios, >= {c['min_member_trades']} trades each, interval low > 0", ok and bool(tested)))
+    return out
+
+
 def gates(pair: tuple, facts: dict, ev: dict | None, score: float | None, trials: int, cfg: dict,
           venues: tuple[int, int] = (0, 0)) -> list[dict]:
     """Every gate for one strategy and exchange, passed or not, in a fixed order."""
@@ -287,8 +332,8 @@ def gates(pair: tuple, facts: dict, ev: dict | None, score: float | None, trials
         gate("worst open loss", worst, f">= -{c['max_open_loss']}", worst is not None and worst >= -c["max_open_loss"]),
         gate("cost stress", stressed, f"> 0 at {c['stress_gross_share']:.0%} of the gross edge",
              stressed is not None and stressed > 0),
-        gate("slippage room", ev["lo"], f"> {c['slippage_per_trade']} a trade",
-             ev["lo"] is not None and ev["lo"] > c["slippage_per_trade"]),
+        slippage_gate(ev, c),
+        *robustness_gates(facts["walkforward"].get(pair, []), pair, c),
         gate("trades reordered, worst fall", fall, f"<= {cfg['book']['hard_stop']} at Stage 1 stake",
              fall is not None and fall <= cfg["book"]["hard_stop"]),
         gate("without its best pair", rest, "> 0", rest is not None and rest > 0),
