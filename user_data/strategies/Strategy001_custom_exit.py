@@ -1,5 +1,7 @@
 
 # --- Do not remove these libs ---
+from datetime import datetime
+from freqtrade.persistence import Trade
 from freqtrade.strategy import IStrategy
 from typing import Dict, List
 from functools import reduce

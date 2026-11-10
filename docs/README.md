@@ -2,6 +2,11 @@
 
 The repo README is the reference for layout, the analysis and the site. These pages go deeper on one subject each.
 
+- [Overview](overview.md): features and implementation status.
+- [Architecture](architecture.md): components, data flow and storage boundaries.
+- [Standards](standards.md): contributor checks and their scope.
+- [Deployment](operations/deploy.md): image promotion to home-k3s, verification and rollback.
+
 ## Live
 
 - [live.md](live.md): why nothing trades money, what `lab/live.py` would check, how a human lifts the guard, reconciliation and backups.

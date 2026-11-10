@@ -6,6 +6,10 @@ The league runs on home-k3s. Its deploy (roster, StatefulSet, CronJobs, secrets)
 
 Results go to the `trader` database in the cluster's shared Postgres, which the nightly `pg_dumpall` backs up. The site in `web/` shows them, behind a Forgejo sign-in; home-config deploys it.
 
+## Documentation
+
+[Overview](docs/overview.md) describes features and status. [Architecture](docs/architecture.md) maps code and storage boundaries. [Contributor standards](docs/standards.md) defines the check scope; [deployment](docs/operations/deploy.md) describes the home-k3s delivery path. The [docs index](docs/README.md) links the subject references.
+
 ## Layout
 
 `lab` and `web` are packages imported from the repo root: `from lab import metrics`, `from lab.markets import fees`. The image sets `PYTHONPATH=/repo`; a job runs as `python /repo/lab/<job>.py`, or `python -m lab.markets.<module>` for the markets jobs.
@@ -108,6 +112,18 @@ Backfill knobs (env): `BACKFILL_EXCHANGES` (`binanceus coinbase kraken`), `TIMEF
 docker run --rm -v "$PWD:/repo:ro" zricethezav/gitleaks:v8.28.0 git /repo --redact --no-banner
 ```
 
+`quality` installs the pinned tools from `lab/requirements-dev.txt`, then runs `npm run typecheck` and `npm run lint`. [package.json](package.json) is a private command manifest with no Node dependencies; Python remains the runtime. [pyproject.toml](pyproject.toml) owns the initial mypy module scope and Ruff rule selection; [standards](docs/standards.md) explains their limits. The image test job reads `scripts.test` from the same manifest and executes it inside the Python image, after migrations.
+
+For static checks in a local Python environment:
+
+```sh
+python -m pip install -r lab/requirements-dev.txt
+npm run typecheck
+npm run lint
+```
+
+`npm test` runs pytest using the active Python environment. The Docker commands under [Run locally](#run-locally) supply the runtime dependencies and disposable database for the full suite. An unset `DATABASE_URL` skips database tests.
+
 `secrets`, the migrate-and-test step and the ML test step each stop after 10 minutes (`timeout-minutes`), so a hung test fails the run instead of holding a runner for six hours. `test` builds the image, runs the migrations twice and the tests against a Postgres 17 service; the second run must report `0 new`, which proves a migration applies once and a rerun is a no-op:
 
 ```sh
@@ -123,7 +139,7 @@ freqtrade list-strategies --recursive-strategy-search \
 ! grep -E 'LOAD FAILED|DUPLICATE' strategies.txt
 ```
 
-`test-ml` builds the ML image (`--build-arg FREQTRADE_IMAGE=$ML_BASE`, the `2026.9_freqai` tag pinned by digest) and runs `lab/tests/test_ml.py` and `lab/tests/test_families.py` there. `publish` runs only on a push to master, after `secrets`, `test` and `test-ml` pass, and pushes `trader` and `trader-ml` to GHCR as `sha-<7>` and `latest`.
+`test-ml` builds the ML image (`--build-arg FREQTRADE_IMAGE=$ML_BASE`, the `2026.9_freqai` tag pinned by digest) and runs `lab/tests/test_ml.py` and `lab/tests/test_families.py` there. `publish` runs only on a push to master, after `secrets`, `quality`, `test` and `test-ml` pass, and pushes `trader` and `trader-ml` to GHCR as `sha-<7>` and `latest`.
 
 `bump-home-config` then runs `ci/bump_home_config.py`: it sets the `trader` digest in home-config `apps/freqtrade/kustomization.yaml` (`images:`) to the one just pushed, opens that change on Forgejo as PR `trader-sha-<7>` through the public API at git.kennethblack.me, closes the older open `trader-sha-*` PRs it supersedes, then squash-merges its own. That merge is the deploy: Flux rolls the bots onto the new digest. It does not wait on home-config's PR checks, which never exercise a digest line; the image already passed `test` and `test-ml`. A bump that cannot merge fails the job and stays open for a person. It skips when master has already moved past the commit (the newer build opens the bump) and warns and skips when the repo secret `FORGEJO_DEPLOY_TOKEN` is unset. That secret is a Forgejo token with write on home-config, the same one the Forgejo deploy workflows use:
 

@@ -1,0 +1,3 @@
+# Static checks run outside the runtime image; pytest is in requirements.txt.
+mypy==1.18.2
+ruff==0.14.3
