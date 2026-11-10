@@ -121,3 +121,21 @@ def test_sync_reports_retunes_and_only_acks_after_board_success(monkeypatch, dry
         with pytest.raises(RuntimeError, match="board unavailable"):
             research_sync.main()
         assert calls == [("pending",)]
+
+
+def test_sync_reads_on_the_site_and_acks_with_the_writer_role(monkeypatch):
+    cmds = []
+
+    def run(cmd, **kw):
+        cmds.append(cmd)
+        fail = cmd[-2:] == ["ack", "9"]
+        return research_sync.subprocess.CompletedProcess(
+            cmd, 1 if fail else 0, "[]", "psycopg.errors.ReadOnlySqlTransaction: cannot execute UPDATE" if fail else "")
+
+    monkeypatch.setattr(research_sync.subprocess, "run", run)
+    research_sync.kubectl_research("pending")
+    research_sync.kubectl_research("ack", "1")
+    assert [c[c.index("exec") + 1:c.index("--")] for c in cmds] == [
+        ["deploy/trader-web", "-c", "web"], ["deploy/freqtrade-watcher", "-c", "watcher"]]
+    with pytest.raises(SystemExit, match="ack on deploy/freqtrade-watcher exited 1: .*ReadOnlySqlTransaction"):
+        research_sync.kubectl_research("ack", "9")
