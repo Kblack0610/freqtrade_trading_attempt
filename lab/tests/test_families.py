@@ -20,6 +20,7 @@ CHART = FAMILIES / "chart"
 TREND = FAMILIES / "trend"
 RANGE = FAMILIES / "range"
 PLANTED = LAB / "tests" / "fixtures" / "strategies"
+CATALOGUE = LAB.parent / "user_data" / "strategies" / "catalogue"  # scanned, so these are counted trials
 
 
 def test_every_family_file_is_what_the_generator_writes():
@@ -72,9 +73,9 @@ def test_no_lab_module_shadows_an_installed_one():
     assert (lab | repo) & (installed | set(sys.stdlib_module_names)) == set()
 
 
-def synthetic_candles(start: dt.datetime, end: dt.datetime, freq: str) -> pd.DataFrame:
+def synthetic_candles(start: dt.datetime, end: dt.datetime, freq: str, seed: int = 11) -> pd.DataFrame:
     date = pd.date_range(start, end, freq=freq, tz="UTC")
-    rng = np.random.default_rng(11)
+    rng = np.random.default_rng(seed)
     close = 30_000 * np.exp(np.cumsum(rng.normal(0, 0.012, len(date))))
     opn = np.r_[close[0], close[:-1]]
     wick = np.abs(rng.normal(0, 0.004, len(date)))
@@ -89,12 +90,14 @@ def bias_data(tmp_path, monkeypatch):
     now = dt.datetime.now(dt.timezone.utc).replace(minute=0, second=0, microsecond=0)
     data = tmp_path / "data" / analyze.BIAS_EXCHANGE
     data.mkdir(parents=True)
-    for tf, freq in (("1h", "h"), ("5m", "5min")):
-        synthetic_candles(now - dt.timedelta(days=analyze.LOOKAHEAD_DAYS + 30), now, freq).to_feather(data / f"BTC_USD-{tf}.feather")
-    # Daily candles reach far enough back for a 200-day startup before a 1d strategy's longer window, and for
-    # the range family's BTC 200-day mean.
-    day = now.replace(hour=0)
-    synthetic_candles(day - dt.timedelta(days=DAILY_DAYS + 400), day - dt.timedelta(days=1), "D").to_feather(data / "BTC_USD-1d.feather")
+    # BTC plus two coins on other seeds, so a ratio to BTC (RatioRevert) and a ranking (XSMomentumRotation) move.
+    for seed, coin in ((11, "BTC"), (12, "ETH"), (13, "SOL")):
+        for tf, freq in (("1h", "h"), ("5m", "5min")):
+            synthetic_candles(now - dt.timedelta(days=analyze.LOOKAHEAD_DAYS + 30), now, freq, seed).to_feather(data / f"{coin}_USD-{tf}.feather")
+        # Daily candles reach far enough back for a 200-day startup before a 1d strategy's longer window, and for
+        # the range family's BTC 200-day mean.
+        day = now.replace(hour=0)
+        synthetic_candles(day - dt.timedelta(days=DAILY_DAYS + 400), day - dt.timedelta(days=1), "D", seed).to_feather(data / f"{coin}_USD-1d.feather")
     monkeypatch.setattr(analyze, "RESULTS", tmp_path)
     return analyze
 
@@ -105,10 +108,11 @@ DAILY_DAYS = 900  # a 1d strategy's lookahead window: 120 daily candles hold too
 @pytest.mark.parametrize("strategy, folder, biased", [
     ("CandleENGULFING", CANDLES, False), ("ChartResistanceBreak", CHART, False),
     ("TrendDonchianFast", TREND, False), ("RangeZ24", RANGE, False),
+    *[(f.stem, CATALOGUE, False) for f in sorted(CATALOGUE.glob("*.py"))],  # each one, as each is a trial
     ("PlantedLookahead", PLANTED, True),  # the control: the same check on the same data must catch it
 ])
 def test_the_nightly_lookahead_check_on_synthetic_prices(bias_data, monkeypatch, strategy, folder, biased):
-    if folder == TREND:
+    if folder == TREND or strategy in ("TSMomentum", "XSMomentumRotation"):  # daily
         monkeypatch.setattr(bias_data, "LOOKAHEAD_DAYS", DAILY_DAYS)
     res = bias_data.bias_one("lookahead", strategy, str(folder))
     assert res.get("error") is None, res

@@ -14,6 +14,10 @@ The repo README is the reference for layout, the analysis and the site. These pa
 
 - [markets.md](markets.md): the venue reference behind `lab/markets/` (Kalshi, Polymarket, PredictIt, Manifold, The Odds API), the recorder, links, backtest, paper league and demo orders.
 
+## Strategy coverage
+
+- [strategy-coverage.md](strategy-coverage.md): what a dry-run bot costs, why every strategy runs on binanceus only (the `strategies` cohort), the strategy family catalogue (scanned, staged, blocked) and the control-set proposal.
+
 ## Short a bust
 
 - [short-bust.md](short-bust.md): the research result on shorting a bust from `lab/research/bust.py`, its limits and which route, if any, is worth taking.

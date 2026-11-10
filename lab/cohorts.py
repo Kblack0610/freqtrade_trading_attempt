@@ -5,8 +5,9 @@
 strategies by the low end of the Sharpe interval in the cohort's window, each with the setup overlay that scored best
 for it, one row per venue; lookahead-biased or unloadable strategies are left out, since their backtests are void. A
 mixture cohort (`kind = "mixture"`) is the sleeves of the best mixture lab/mixtures.py scored that bots can run as
-specified, one row per sleeve on its own exchange. The promote gates are not applied: a cohort forward-tests
-near-misses. Nothing here edits the roster: ci/cohort_roster.py turns the rows into a home-config PR that a person
+specified, one row per sleeve on its own exchange. An all cohort (`kind = "all"`) is every lookahead-clean, loadable
+strategy outside its skipped families, one row per venue, refused when its candle calls would pass the venue's
+budget. The promote gates are not applied: a cohort forward-tests near-misses. Nothing here edits the roster: ci/cohort_roster.py turns the rows into a home-config PR that a person
 merges.
 """
 
@@ -18,10 +19,13 @@ import sys
 import tomllib
 from pathlib import Path
 
-from lab import variants
+from freqtrade.exchange import timeframe_to_minutes
+
+from lab import analyze, variants
 from lab.db import connect
 
 PATH = Path(os.environ.get("COHORTS_CONFIG", Path(__file__).with_name("cohorts.toml")))
+FAMILIES = Path(__file__).with_name("families.toml")
 BASE = "base"  # the roster's word for no overlay
 
 
@@ -80,6 +84,36 @@ def pick_mixture(rows: list[tuple], cfg: dict) -> list[str]:
     return [f"{cfg['prefix']}-{e}-{s.lower()} {e} {s} {cfg['cohort']} {BASE}" for s, e in sleeves]
 
 
+def strategy_rows(conn) -> list[tuple]:
+    """(strategy, timeframe) of every strategy the newest discovery found that loads and has no lookahead bias."""
+    return list(conn.execute(
+        "SELECT s.name, s.timeframe FROM strategies s WHERE s.load_error IS NULL "
+        "AND s.seen_at = (SELECT max(seen_at) FROM strategies) "
+        "AND NOT EXISTS (SELECT 1 FROM bias_checks b WHERE b.strategy = s.name AND b.kind = 'lookahead' AND b.has_bias)"))
+
+
+def calls_per_minute(timeframe: str, pairs: int) -> float:
+    """OHLCV calls a bot makes a minute: one per pair per new candle."""
+    return pairs / timeframe_to_minutes(timeframe)
+
+
+def pick_all(rows: list[tuple], cfg: dict, family: dict[str, str], pairs: dict[str, int]) -> list[str]:
+    """Pure: one roster line per strategy per venue, base overlay, for every strategy not in a skipped family (an
+    untagged one runs). Raises ValueError when a venue's candle calls would pass its budget: shrink the cohort or
+    raise the budget in the toml, never trim it silently."""
+    keep = sorted((s, tf) for s, tf in rows if family.get(s) not in cfg["skip_families"])
+    for v in cfg["venues"]:
+        calls = sum(calls_per_minute(tf, pairs[v]) for _, tf in keep)
+        if calls > cfg["budget"][v]:
+            raise ValueError(f"{cfg['cohort']}: {len(keep)} bots on {v} make {calls:.0f} candle calls a minute, "
+                             f"over its budget of {cfg['budget'][v]}")
+    return [f"{cfg['prefix']}-{v}-{s.lower()} {v} {s} {cfg['cohort']} {BASE}" for s, _ in keep for v in cfg["venues"]]
+
+
+def families() -> dict[str, str]:
+    return {s: t["family"] for s, t in tomllib.loads(FAMILIES.read_text())["strategies"].items()}
+
+
 def main(argv: list[str]) -> int:
     if len(argv) != 2 or argv[0] != "pick":
         print("usage: python -m lab.cohorts pick <cohort>", file=sys.stderr)
@@ -90,7 +124,13 @@ def main(argv: list[str]) -> int:
         return 2
     cfg = {"prefix": argv[1][:3], "cohort": argv[1], **cfg}
     with connect() as conn:
-        if cfg.get("kind") == "mixture":
+        if cfg.get("kind") == "all":
+            try:
+                lines = pick_all(strategy_rows(conn), cfg, families(), {v: len(analyze.pair_list(v)) for v in cfg["venues"]})
+            except ValueError as e:
+                print(e, file=sys.stderr)
+                return 1
+        elif cfg.get("kind") == "mixture":
             lines = pick_mixture(mixture_rows(conn, cfg["weighting"], cfg["gated"], cfg["min_days"]), cfg)
         else:
             known, _ = variants.load()

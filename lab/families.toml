@@ -12,6 +12,9 @@ momentum = "Buys strength: MACD above its signal or zero, rising closes, positiv
 breakout = "Buys a price pushing through a level."
 candlestick-pattern = "Enters on a candle or count pattern."
 time-based = "Enters by the clock."
+grid = "Buys layers on a ladder under a range and sells each one a step higher."
+dca = "Averages down: a base order, then larger safety orders lower, one take profit on the average."
+relative-value = "Buys a coin cheap against another (its ratio to BTC), the long leg of a pair trade."
 exit-example = "A Freqtrade example of an exit or stoploss hook; the entry is a placeholder."
 template = "A sample or no-op strategy, kept as a reference, not a method."
 biased-control = "Known lookahead bias; kept so the bias check has something to catch. Its results are void."
@@ -73,6 +76,14 @@ SmoothOperator = { family = "mean-reversion", inputs = ["ohlcv"] }
 SmoothScalp = { family = "mean-reversion", inputs = ["ohlcv"] }
 TDSequentialStrategy = { family = "candlestick-pattern", inputs = ["ohlcv"], note = "A TD Sequential close count, an exhaustion signal; could be read as mean-reversion." }
 TechnicalExampleStrategy = { family = "template", inputs = ["ohlcv"], note = "An example of the technical library: buys whenever CMF is below zero." }
+
+# user_data/strategies/catalogue/: the families the catalogue found missing (docs/strategy-coverage.md)
+DCASafetyOrders = { family = "dca", inputs = ["ohlcv"] }
+GridLadder = { family = "grid", inputs = ["ohlcv"] }
+RatioRevert = { family = "relative-value", inputs = ["ohlcv"], note = "Reads BTC/USD as the other leg; spot cannot hedge it, so it also carries the market." }
+SqueezeBreakout = { family = "breakout", inputs = ["ohlcv"] }
+TSMomentum = { family = "momentum", inputs = ["ohlcv"], note = "Time-series momentum on its own past return; could be read as trend." }
+XSMomentumRotation = { family = "momentum", inputs = ["ohlcv"], note = "Cross-sectional: ranks the whole whitelist, so it reads every pair's candles." }
 
 # user_data/strategies/lookahead_bias/
 DevilStra = { family = "biased-control", inputs = ["ohlcv"] }
