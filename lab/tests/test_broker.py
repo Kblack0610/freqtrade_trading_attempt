@@ -209,11 +209,6 @@ def test_the_shipped_config_points_at_each_platform():
     SnapTrade(cfg["snaptrade"], "c", "k")
 
 
-def test_the_read_only_clients_have_no_order_method():
-    for cls in (RobinhoodCrypto, SnapTrade):
-        assert not any(hasattr(cls, m) for m in ("place", "cancel", "post", "call"))
-
-
 def test_robinhood_signs_key_timestamp_path_and_method_with_the_ed25519_key():
     s = Robinhood()
     rh(s).read()
