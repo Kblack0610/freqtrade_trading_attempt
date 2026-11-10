@@ -248,11 +248,12 @@ def test_dated_test_month_trades_are_stored_per_variant_and_replaced_on_rerun(wl
     q = ("SELECT variant, count(*), sum(profit_ratio) FROM walkforward_trades "
          "WHERE strategy = 'Live' AND fold_start = '2026-10-01' GROUP BY variant ORDER BY variant")
     got = wlab.execute(q).fetchall()
-    assert [(v, n) for v, n, _ in got] == [("base", 10), ("tuned", 12)]
-    assert got[1][2] == pytest.approx(0.04)
+    assert [(v, n) for v, n, _ in got] == [("base", 10), ("har_target", 12), ("tuned", 12)]
+    assert got[1][2] == 0, "without forecasts the HAR sleeve holds cash"
+    assert got[2][2] == pytest.approx(0.04)
     wlab.execute("UPDATE walkforward SET cache_key = 'stale' WHERE strategy = 'Live'")
     wf.main(FakeRunner(), TODAY)
-    assert wlab.execute(q).fetchall()[1][1] == 12, "a rerun replaces the fold's trades, never doubles them"
+    assert wlab.execute(q).fetchall() == got, "a rerun replaces every variant, never doubles its trades"
     day = wlab.execute("SELECT trades FROM walkforward_daily WHERE strategy = 'Live' AND variant = 'tuned' "
                        "AND day = '2026-10-01'").fetchone()
     assert day == (1,)
