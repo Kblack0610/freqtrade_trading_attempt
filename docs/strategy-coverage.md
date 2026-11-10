@@ -51,7 +51,8 @@ Status is `scanned` (in `user_data/strategies/`, backtested nightly, a counted t
 | Family | Status | In the repo |
 |---|---|---|
 | Trend | scanned, staged | 10 scanned (MA crosses, Supertrend, ADX); `lab/families/trend/` Donchian ensemble, staged |
-| Breakout | scanned, staged | Diamond, SqueezeBreakout (new); `lab/families/chart/` pattern breaks, staged |
+| Breakout | scanned | Diamond, SqueezeBreakout (new) |
+| Chart patterns | scanned | `user_data/strategies/chart/`, 5 long signals from the causal numeric detector in `lab/patterns.py` |
 | Mean reversion | scanned, staged | 24 scanned (RSI, Bollinger, CCI dips); `lab/families/range/` flat-climate z-score, staged |
 | Momentum | scanned | 8 MACD-style; TSMomentum and XSMomentumRotation (new): time-series and cross-sectional |
 | Grid | scanned | GridLadder (new): layers a step apart under a 72-hour mean, each sold a step up |

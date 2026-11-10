@@ -11,6 +11,7 @@ mean-reversion = "Buys a dip: oversold RSI, MFI, CCI or stochastics, or a close 
 momentum = "Buys strength: MACD above its signal or zero, rising closes, positive momentum."
 breakout = "Buys a price pushing through a level."
 candlestick-pattern = "Enters on a candle or count pattern."
+chart-pattern = "Enters on numeric chart patterns: confirmed swing pivots or a flag breakout."
 time-based = "Enters by the clock."
 grid = "Buys layers on a ladder under a range and sells each one a step higher."
 dca = "Averages down: a base order, then larger safety orders lower, one take profit on the average."
@@ -142,3 +143,10 @@ CandleTASUKIGAP = { family = "candlestick-pattern", inputs = ["ohlcv"] }
 CandleTRISTAR = { family = "candlestick-pattern", inputs = ["ohlcv"] }
 CandleUNIQUE3RIVER = { family = "candlestick-pattern", inputs = ["ohlcv"] }
 CandleXSIDEGAP3METHODS = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+
+# user_data/strategies/chart/: fixed-exit long chart-pattern signals
+ChartAscendingTriangle = { family = "chart-pattern", inputs = ["ohlcv"] }
+ChartBullFlag = { family = "chart-pattern", inputs = ["ohlcv"] }
+ChartDoubleBottom = { family = "chart-pattern", inputs = ["ohlcv"] }
+ChartResistanceBreak = { family = "chart-pattern", inputs = ["ohlcv"] }
+ChartSymmetricTriangle = { family = "chart-pattern", inputs = ["ohlcv"] }
