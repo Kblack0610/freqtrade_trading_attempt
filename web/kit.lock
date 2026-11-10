@@ -1,0 +1,14 @@
+{
+  "repo": "Kblack0610/.dotfiles",
+  "commit": "9d9a4a0ed4e1d4d09cfe2b25799fcc9b7e489c91",
+  "path": ".local/src/web-kit",
+  "files": {
+    "OFL-inter.txt": "262481e844521b326f5ecd053e59b98c8b2da78c8ee1bdbb6e8174305e54935a",
+    "OFL-jetbrains-mono.txt": "a76abf002c49097d146e86740a3105a5d00450b1592e820a1109a8c5680cd697",
+    "inter.woff2": "3100e775e8616cd2611beecfa23a4263d7037586789b43f035236a2e6fbd4c62",
+    "jetbrains-mono.woff2": "83c005d49d8a6a50474c73a5a36ac0468076e9c4a29da7bdb14995d80560a5be",
+    "kb-shell.js": "f6816ac7766ca75ab0d911e8601666bb0d1f9442d2eb13a3ae06cb4928704baf",
+    "shell.css": "7f54efac6bb29cba3982f67c96b54d65c3e9078f73bd523bf0058973f5965dde",
+    "tokens.css": "8f96170385c5be731afc8d4c1705c110070b3f8c1c59fdb86b95830e633b4d0f"
+  }
+}

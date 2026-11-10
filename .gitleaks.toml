@@ -1,0 +1,8 @@
+# Extend the default rules. web/kit.lock holds public sha256 checksums of the pinned web-kit files, which the
+# generic-api-key rule reads as keys.
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "web-kit checksums are public hashes, not secrets"
+paths = ['''^web/kit\.lock$''']

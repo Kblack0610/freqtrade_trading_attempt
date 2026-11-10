@@ -29,7 +29,7 @@ from starlette.concurrency import run_in_threadpool
 from lab import book as book_lab
 from lab import live as live_lab
 from lab import db, metrics, suggest, universe
-from web import auth, charts, exporter
+from web import auth, charts, exporter, nav
 
 HERE = Path(__file__).resolve().parent
 TZ = ZoneInfo(os.environ.get("TRADER_WEB_TZ", "UTC"))
@@ -316,7 +316,7 @@ def skip_groups(skipped: list[str]) -> list[tuple[str, list[str]]]:
 
 
 templates.env.filters.update(local=local, ago=ago, num=num, pct=pct, tone=tone, gv=gv, skip_groups=skip_groups)
-templates.env.globals.update(stale=stale, tz=str(TZ), min_trades=MIN_TRADES)
+templates.env.globals.update(nav_groups=nav.groups, stale=stale, tz=str(TZ), min_trades=MIN_TRADES)
 
 
 class SignIn(Exception):

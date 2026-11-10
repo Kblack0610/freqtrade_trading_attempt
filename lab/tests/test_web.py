@@ -595,3 +595,49 @@ def test_book_sets_each_strategy_against_holding(conn, signed_in):
     body = signed_in[1].get("/book").text
     assert "Each strategy against holding" in body and "1 of 2 comparisons beat a passive plan" in body
     assert "200-day filter" in body and ">beats<" in body
+
+
+def test_nav_groups_render_in_order(signed_in):
+    _, client = signed_in
+    html = client.get("/").text
+    heads = re.findall(r'<div class="kb-group">(\w+)</div>', html)
+    assert heads == ["Now", "Evidence", "Pipeline"]
+    assert 'class="kb-nav"' in html and '<kb-shell>' in html and "/static/kit/kb-shell.js" in html
+
+
+@pytest.mark.parametrize("path,tab", [("/", "Overview"), ("/bots/kraken-s001", "Overview"), ("/strategies/Strategy001", "Strategies"),
+                                      ("/runs/1", "Runs"), ("/links", "Markets"), ("/walkforward", "Walk-forward")])
+def test_nav_marks_the_current_tab(path, tab):
+    from web import nav
+
+    current = [t["title"] for g in nav.groups(path) for t in g["tabs"] if t["current"]]
+    assert current == [tab]
+
+
+def test_every_tab_path_is_a_route(site):
+    app_mod, _ = site
+    from web import nav
+
+    routes = {r.path for r in app_mod.app.routes}
+    assert all(t[1] in routes for _, tabs in nav.TABS for t in tabs)
+
+
+def test_kit_files_match_the_lock():
+    import hashlib
+    from pathlib import Path
+
+    web = Path(__file__).parents[2] / "web"
+    lock = json.loads((web / "kit.lock").read_text())
+    for name, want in lock["files"].items():
+        f = web / "static" / "kit" / name
+        assert f.exists(), f"{name} missing: run python web/fetch_kit.py"
+        assert hashlib.sha256(f.read_bytes()).hexdigest() == want
+
+
+def test_fetch_kit_refuses_a_wrong_checksum(tmp_path):
+    from web import fetch_kit
+
+    lock = {"repo": "r", "commit": "c", "path": "p", "files": {"a.css": "0" * 64}}
+    with pytest.raises(SystemExit, match="does not match"):
+        fetch_kit.fetch(lock, tmp_path, get=lambda url: b"body")
+    assert not (tmp_path / "a.css").exists()

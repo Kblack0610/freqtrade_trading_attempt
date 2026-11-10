@@ -4,35 +4,28 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}trader{% endblock %} - trader</title>
+<link rel="stylesheet" href="/static/kit/tokens.css">
+<link rel="stylesheet" href="/static/kit/shell.css">
 <link rel="stylesheet" href="/static/style.css">
+<script type="module" src="/static/kit/kb-shell.js"></script>
 <script src="/static/htmx.min.js" defer></script>
 </head>
 <body>
-<header class="top">
-  <a class="brand" href="/">trader</a>
+<kb-shell>
+  <a class="kb-brand" href="/">trader</a>
   {% if user %}
-  <nav>
-    <a href="/" {% if request.url.path == "/" %}aria-current="page"{% endif %}>Overview</a>
-    <a href="/cohorts" {% if request.url.path.startswith("/cohorts") %}aria-current="page"{% endif %}>Cohorts</a>
-    <a href="/live" {% if request.url.path.startswith("/live") %}aria-current="page"{% endif %}>Live</a>
-    <a href="/strategies" {% if request.url.path.startswith("/strategies") %}aria-current="page"{% endif %}>Strategies</a>
-    <a href="/walkforward" {% if request.url.path.startswith("/walkforward") %}aria-current="page"{% endif %}>Walk-forward</a>
-    <a href="/suggestions" {% if request.url.path.startswith("/suggestions") %}aria-current="page"{% endif %}>Suggestions</a>
-    <a href="/confidence" {% if request.url.path.startswith("/confidence") %}aria-current="page"{% endif %}>Confidence</a>
-    <a href="/book" {% if request.url.path.startswith("/book") %}aria-current="page"{% endif %}>Book</a>
-    <a href="/markets" {% if request.url.path.startswith("/markets") or request.url.path.startswith("/links") %}aria-current="page"{% endif %}>Markets</a>
-    <a href="/accounts" {% if request.url.path.startswith("/accounts") %}aria-current="page"{% endif %}>Accounts</a>
-    <a href="/coverage" {% if request.url.path.startswith("/coverage") %}aria-current="page"{% endif %}>Coverage</a>
-    <a href="/guide" {% if request.url.path.startswith("/guide") %}aria-current="page"{% endif %}>Guide</a>
-    <a href="/data" {% if request.url.path.startswith("/data") %}aria-current="page"{% endif %}>Data</a>
-    <a href="/runs" {% if request.url.path.startswith("/runs") %}aria-current="page"{% endif %}>Runs</a>
+  <nav class="kb-nav" aria-label="Sections">
+    {% for g in nav_groups(request.url.path) %}
+    <div class="kb-group">{{ g.name }}</div>
+    {% for t in g.tabs %}<a href="{{ t.path }}" {% if t.current %}aria-current="page"{% endif %}>{{ t.title }}</a>
+    {% endfor %}{% endfor %}
+    <form class="kb-foot" method="post" action="/logout"><span class="muted">{{ user }}</span> <button type="submit">Sign out</button></form>
   </nav>
-  <form class="who" method="post" action="/logout"><span class="muted">{{ user }}</span> <button type="submit">Sign out</button></form>
   {% endif %}
-</header>
-<main>
+</kb-shell>
+<main class="kb-main">
 {% block body %}{% endblock %}
 </main>
-<footer class="muted">Dry run only: no real money, no trade controls. Times in {{ tz }}.</footer>
+<footer class="kb-main muted">Dry run only: no real money, no trade controls. Times in {{ tz }}.</footer>
 </body>
 </html>
