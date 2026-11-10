@@ -88,12 +88,15 @@ def test_run_rebuilds_scores_and_verdict(conn, tmp_path):
     files["SOL/USD"] = tmp_path / "missing.feather"
     out = volatility.run(conn, {"binanceus": files}, CFG)
     assert out["vol_scores"] > 0
+    assert out["vol_forecasts"] > 0
+    assert conn.execute("SELECT max(day) FROM vol_forecasts").fetchone()[0] < LOCKBOX
     models = conn.execute("SELECT model, count(DISTINCT pair) FROM vol_scores GROUP BY 1 ORDER BY 1").fetchall()
     assert models == [("ewma", 2), ("har", 2), ("mean", 2)]
     assert conn.execute("SELECT max(fold_start) FROM vol_scores").fetchone()[0] < LOCKBOX
     assert conn.execute("SELECT count(*) FROM vol_verdict WHERE exchange = 'binanceus'").fetchone()[0] == 2
     volatility.run(conn, {}, CFG)
     assert conn.execute("SELECT count(*) FROM vol_scores").fetchone()[0] == 0
+    assert conn.execute("SELECT count(*) FROM vol_forecasts").fetchone()[0] == 0
 
 
 def test_only_fully_backfilled_venues_are_read(monkeypatch, tmp_path):

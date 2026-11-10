@@ -173,6 +173,11 @@ min_train_days = 365
 # baseline, is below zero against each baseline. Blocks of days, since volatility clusters.
 level = 0.95
 block_days = 10
+# Research sizing only: annualized per-pair volatility target, no borrowed exposure. A month must have this many
+# previously scored days with HAR beating both baselines; until then its HAR sleeve holds cash.
+target_annual = 0.20
+target_max_scale = 1.0
+target_min_score_days = 90
 
 [live]
 # What lab/live.py would run. Nothing deploys it, and its guard is on. Stake and slots come from this stage.

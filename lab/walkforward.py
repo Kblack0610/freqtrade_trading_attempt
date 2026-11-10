@@ -38,7 +38,7 @@ from typing import Protocol
 
 from psycopg.types.json import Jsonb
 
-from lab import analyze, book, confidence, horizon, metrics, mixtures, scorecard, suggest, universe
+from lab import analyze, book, confidence, horizon, metrics, mixtures, scorecard, suggest, universe, vol_target
 from lab.db import connect
 
 EXCHANGES = os.environ.get("WF_EXCHANGES", "binanceus").split()
@@ -295,6 +295,7 @@ def main(runner: Runner | None = None, today: dt.date | None = None) -> int:
             if left:
                 print(f"walkforward: budget of {BUDGET_S:.0f}s spent, {left} folds left for the next run", flush=True)
             report.update(folds_failed=failed, folds_left=left, failures=failures[:100])
+            report.update(vol_target.run(conn))
             report.update(suggest.run(conn))
             report.update(confidence.run(conn))
             report.update(book.run(conn))
