@@ -119,3 +119,15 @@ def test_a_5xx_backs_off_then_raises_after_the_last_retry():
     s = Session((503, None), (503, None), (503, None))
     with pytest.raises(RuntimeError, match="503"):
         list(Manifold(cfg(page_limit=2), s, sleep=nosleep).open_markets())
+
+
+def test_predictit_reads_the_prose_end_date_and_drops_an_unreadable_one():
+    assert predictit._eastern("2:59:59 a.m. ET January 1, 2027") == dt.datetime(2027, 1, 1, 7, 59, 59, tzinfo=UTC)
+    assert predictit._eastern("11:00 p.m. ET March 3, 2027") == dt.datetime(2027, 3, 4, 4, 0, tzinfo=UTC)
+    assert predictit._eastern("soon") is None
+
+
+def test_an_out_of_range_epoch_is_no_time():
+    from lab.markets.api import when
+    assert when(253402300800000) is None  # year 10000, a real Manifold closeTime
+    assert when(1700000000000) == dt.datetime(2023, 11, 14, 22, 13, 20, tzinfo=UTC)
