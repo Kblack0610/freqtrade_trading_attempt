@@ -26,14 +26,23 @@ def in_cohort(roster: str, cohort: str) -> bool:
     return any(len(r.split()) == 5 and r.split()[3] == cohort for r in rows_of(roster))
 
 
+def runs(row: str) -> tuple[str, str, str]:
+    """(exchange, strategy, overlay) of a roster row; a 3-column row runs the base overlay."""
+    f = row.split()
+    return f[1], f[2], f[4] if len(f) == 5 else "base"
+
+
 def seed(roster: str, statefulset: str, cohort: str, lines: list[str]) -> tuple[str, str] | None:
     """Pure: roster.tsv and statefulset.yaml with every line appended; None when the cohort is already in the roster
-    or no line is new. A row of a bot name already there is skipped (research_sync.roster_change)."""
+    or no line is new. A row of a bot name already there is skipped (research_sync.roster_change), and so is one that
+    would run a strategy, exchange and overlay a bot already runs: a second bot would make the same trades."""
     if in_cohort(roster, cohort):
         return None
+    running = {runs(r) for r in rows_of(roster)}
     out = None
     for line in lines:
-        out = roster_change(*(out or (roster, statefulset)), line) or out
+        if runs(line) not in running:
+            out = roster_change(*(out or (roster, statefulset)), line) or out
     return out
 
 

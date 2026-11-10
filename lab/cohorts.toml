@@ -25,3 +25,18 @@ weighting = "equal"
 gated = false
 # Days of out-of-sample return a mixture needs before it can be picked: about three scored months.
 min_days = 90
+
+[strategies]
+# Every strategy in dry run: each loadable, lookahead-clean strategy outside `skip_families` (lab/families.toml), one
+# bot per strategy on each venue in `venues`, under its own settings (base overlay). Cost and the reasons for one
+# venue: docs/strategy-coverage.md. Dry run adds no backtest trial; it measures what the backtest leaves out (fills,
+# fees, live candles: the drift table). A strategy file added to the repo is a trial whether or not a bot runs it.
+kind = "all"
+venues = ["binanceus"]
+skip_families = ["template", "exit-example", "biased-control", "short"]
+
+[strategies.budget]
+# OHLCV calls a minute the cohort may make on a venue: one per pair per new candle, summed over its bots. binanceus
+# allows 1200 request weight a minute per IP and a klines call weighs 2, so 600 calls; this is half, leaving the rest
+# to the other cohorts and the backfill job, which share the cluster's one address. A pick over budget fails.
+binanceus = 300

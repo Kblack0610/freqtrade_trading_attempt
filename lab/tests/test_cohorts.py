@@ -3,7 +3,7 @@ import pathlib
 
 import pytest
 
-from lab import cohorts, league, variants
+from lab import analyze, cohorts, league, variants
 
 _spec = importlib.util.spec_from_file_location(
     "cohort_roster", pathlib.Path(__file__).resolve().parents[2] / "ci" / "cohort_roster.py")
@@ -115,3 +115,56 @@ def test_score_rows_leave_out_biased_and_unloadable_strategies(conn):
                  "VALUES ('ov1', 'Good', 'binanceus', '365d', 365, 5, 0.9)")
     got = cohorts.score_rows(conn, "365d", ["binanceus"], 30)
     assert got == [("Good", "binanceus", "", 0.2)]
+
+
+ALL = {"prefix": "str", "cohort": "strategies", "venues": ["binanceus"], "skip_families": ["template"],
+       "budget": {"binanceus": 3}}
+
+
+def test_an_all_cohort_is_every_strategy_outside_the_skipped_families_one_row_per_venue():
+    rows = [("B", "5m"), ("A", "1h"), ("T", "5m"), ("U", "1d")]
+    lines = cohorts.pick_all(rows, ALL, {"A": "trend", "B": "grid", "T": "template"}, {"binanceus": 10})
+    # an untagged strategy runs: only a family named in skip_families keeps a strategy out
+    assert lines == ["str-binanceus-a binanceus A strategies base", "str-binanceus-b binanceus B strategies base",
+                     "str-binanceus-u binanceus U strategies base"]
+    assert cohorts.calls_per_minute("5m", 10) == 2 and cohorts.calls_per_minute("1h", 30) == 0.5
+
+
+def test_an_all_cohort_over_its_venue_budget_is_refused_not_trimmed():
+    with pytest.raises(ValueError, match="2 bots on binanceus make 20 candle calls a minute, over its budget of 3"):
+        cohorts.pick_all([("A", "1m"), ("B", "1m")], ALL, {}, {"binanceus": 10})
+
+
+def test_the_shipped_strategies_cohort_fits_its_budget_with_every_strategy_on_disk(tmp_path):
+    """Every strategy file's own timeframe, as the nightly discovery stores it: a new 1m strategy that pushes the
+    cohort over its venue budget fails here, before the picker refuses it in the cluster."""
+    import re
+    cfg = {"prefix": "str", "cohort": "strategies", **cohorts.load()["strategies"]}
+    root = pathlib.Path(__file__).resolve().parents[2] / "user_data" / "strategies"
+    rows = []
+    for f in root.rglob("*.py"):
+        src = f.read_text()
+        tf = re.search(r"^\s+timeframe\s*=\s*['\"](\w+)['\"]", src, re.M)
+        rows += [(name, tf[1] if tf else "5m") for name in re.findall(r"^class (\w+)\(", src, re.M)]
+    family = cohorts.families()
+    lines = cohorts.pick_all(rows, cfg, family, {v: len(analyze.pair_list(v)) for v in cfg["venues"]})
+    assert len(lines) == len([s for s, _ in rows if family.get(s) not in cfg["skip_families"]]) * len(cfg["venues"])
+    roster = tmp_path / "roster.tsv"
+    roster.write_text("\n".join(lines))
+    assert {r.cohort for r in league.roster_rows(roster)} == {"strategies"}
+
+
+def test_strategy_rows_are_the_newest_discovery_less_biased_and_unloadable(conn):
+    for name, err, seen in (("Good", None, "2026-11-09"), ("Biased", None, "2026-11-09"),
+                            ("Broken", "boom", "2026-11-09"), ("Gone", None, "2026-11-01")):
+        conn.execute("INSERT INTO strategies (name, file, file_hash, timeframe, load_error, seen_at) "
+                     "VALUES (%s, 'f', 'h', '5m', %s, %s)", (name, err, seen))
+    conn.execute("INSERT INTO bias_checks (strategy, kind, file_hash, has_bias) VALUES ('Biased', 'lookahead', 'h', true)")
+    assert cohorts.strategy_rows(conn) == [("Good", "5m")]
+
+
+def test_the_roster_pr_skips_a_row_a_bot_already_runs():
+    lines = ["str-binanceus-s1 binanceus S1 strategies base", "str-kraken-s1 kraken S1 strategies ov1",
+             "str-binanceus-s2 binanceus S2 strategies base"]
+    roster, sts = cohort_roster.seed(ROSTER, STS, "strategies", lines)
+    assert roster == ROSTER + "\n".join(lines[1:]) + "\n" and "replicas: 4  # rows" in sts
