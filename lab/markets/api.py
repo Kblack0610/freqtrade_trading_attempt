@@ -15,11 +15,14 @@ def num(v) -> float | None:
 
 
 def when(v) -> dt.datetime | None:
-    """An ISO-8601 string (Z, +00 or +00:00) or epoch milliseconds, as an aware UTC time."""
+    """An ISO-8601 string (Z, +00 or +00:00) or epoch milliseconds, as an aware UTC time; an out-of-range epoch is None."""
     if v in (None, "", "NA"):
         return None
     if isinstance(v, (int, float)):
-        return dt.datetime.fromtimestamp(v / 1000, dt.timezone.utc)
+        try:
+            return dt.datetime.fromtimestamp(v / 1000, dt.timezone.utc)
+        except (ValueError, OverflowError, OSError):
+            return None
     t = dt.datetime.fromisoformat(v.replace("Z", "+00:00"))
     return t if t.tzinfo else t.replace(tzinfo=dt.timezone.utc)
 
