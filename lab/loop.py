@@ -5,13 +5,16 @@ Nightly, walk-forward (01:00) adds folds and analysis (02:45) rescores: backtest
 mixtures, the climate scorecard. This step reads the result. It holds two sets: every strategy or mixture whose
 climate_scorecard cell has its low end above zero (signal climate) and every open promote suggestion (signal
 promote). Each member that entered or left a set since the last run becomes a `research_events` row, and the set
-is stored in `research_state` for the next run. The first run has no previous set, so everything passing enters.
+is stored in `research_state` for the next run. Qualified monthly retune fits join the set, keyed by their
+action digest (training dates and parameters), so a new fit is reported once, even if the parameters match.
+The first run has no previous set, so everything passing enters.
 
 ci/research_sync.py, on the fleet machine, reads the unreported events (`python -m lab.loop pending`), files
 them on the agent board, opens a paper-only roster PR for a promotion, and marks them reported
 (`python -m lab.loop ack <id>...`). Nothing here trades or edits the roster.
 """
 
+import hashlib
 import json
 import sys
 
@@ -29,6 +32,8 @@ EVENT_COLS = ("signal", "change", "kind", "name", "exchange", "variant", "cell",
 def current(conn) -> dict[tuple, dict]:
     rows = list(conn.execute(CLIMATE))
     rows += [("promote", "", s, e, "", "", None, None, suggest.roster_line(s, e)) for s, e in conn.execute(PROMOTE)]
+    rows += [("retune", "strategy", s, e, hashlib.sha256(action.encode()).hexdigest(), "", None, None, action)
+             for s, e, action in conn.execute("SELECT strategy, exchange, action FROM suggestions WHERE kind = 'retune'")]
     return {r[:6]: dict(zip(STATE_COLS, r)) for r in rows}
 
 

@@ -10,7 +10,9 @@ the deployed image (`kubectl exec deploy/trader-web -- python -m lab.loop pendin
 - a promotion that enters: a home-config PR that appends its dry-run roster row to apps/freqtrade/roster.tsv and
   raises the StatefulSet's replicas to the row count, plus a board row to review it. Paper only: league.py refuses
   anything but key-less spot dry run, and the PR is opened, never merged (approved 2026-11-05, tr-17);
-- a promotion that leaves: a board row, so an open roster PR for it is closed by a person.
+- a promotion that leaves: a board row, so an open roster PR for it is closed by a person;
+- a monthly retune fit entering or leaving qualification: a review row with its parameter artifact. Parameters
+  are never saved to a strategy or applied to a bot by this sync.
 
 Each event is acked (`python -m lab.loop ack`) once its row is filed, so a failed night retries the rest.
 
@@ -137,6 +139,14 @@ def main() -> int:
             text = (f"check(trader): {e['name']} on {e['exchange']} no longer clears the promote gates; close its "
                     "roster PR if it is still open #size/s")
             details = ["https://trader.kblab.me/suggestions"]
+        print(text, *details, sep="\n  ")
+        if not dry:
+            board(text, details)
+            done.append(e["id"])
+    for e in (e for e in events if e["signal"] == "retune"):
+        state = "review monthly retune" if e["change"] == "enters" else "monthly retune fit superseded or no longer qualifies"
+        text = f"check(trader): {state} for {e['name']} on {e['exchange']} (fit {e['variant'][:12]}) #size/s"
+        details = [e["action"], "Research only: review the fit before applying parameters; bots keep their current settings."]
         print(text, *details, sep="\n  ")
         if not dry:
             board(text, details)
