@@ -8,6 +8,7 @@ PredictIt dates are Eastern time without an offset.
 """
 
 import datetime as dt
+import re
 from typing import Iterator
 from zoneinfo import ZoneInfo
 
@@ -20,8 +21,28 @@ EASTERN = ZoneInfo("America/New_York")
 def _eastern(v) -> dt.datetime | None:
     if v in (None, "", "NA"):
         return None
-    t = dt.datetime.fromisoformat(v)
+    try:
+        t = dt.datetime.fromisoformat(v)
+    except (TypeError, ValueError):
+        t = _prose(v)
+        if t is None:
+            return None
     return t if t.tzinfo else t.replace(tzinfo=EASTERN)
+
+
+PROSE = re.compile(r"(\d{1,2}):(\d{2})(?::(\d{2}))? ([ap])\.?m\.? ET (\w+) (\d{1,2}), (\d{4})", re.I)
+
+
+def _prose(v) -> dt.datetime | None:
+    """PredictIt's '2:59:59 a.m. ET January 1, 2027' form; None for anything unreadable, so one field never kills a sweep."""
+    m = PROSE.fullmatch(str(v).strip())
+    if not m:
+        return None
+    h, mi, sec, ap, mon, day, yr = m.groups()
+    try:
+        return dt.datetime.strptime(f"{mon[:3]} {day} {yr} {int(h) % 12 + (12 if ap.lower() == 'p' else 0)}:{mi}:{sec or 0}", "%b %d %Y %H:%M:%S")
+    except ValueError:
+        return None
 
 
 def quotes(market: dict, ts: dt.datetime) -> list[Quote]:
