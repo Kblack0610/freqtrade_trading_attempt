@@ -281,3 +281,25 @@ def test_a_spent_budget_starts_no_more_folds_and_still_records_the_run(wlab, mon
     monkeypatch.setattr(wf, "BUDGET_S", 0.0)
     rest = FakeRunner()
     assert wf.main(rest, TODAY) == 0 and len(rest.calls) == 8, "the next run carries on where this one stopped"
+
+
+def test_robustness_configuration_invalidates_cached_folds(monkeypatch):
+    cfg = wf.suggest.load_config()
+    first = wf.fold_key('h', 'binanceus', (TODAY, TODAY, TODAY), 'v', 'candles')
+    monkeypatch.setattr(wf.suggest, 'load_config', lambda: {**cfg, 'confidence': {
+        **cfg['confidence'], 'entry_delay_candles': cfg['confidence']['entry_delay_candles'] + 1}})
+    assert wf.fold_key('h', 'binanceus', (TODAY, TODAY, TODAY), 'v', 'candles') != first
+
+
+def test_detail_candles_invalidate_fold_cache(wlab, monkeypatch):
+    calls = []
+    def digest(exchange, timeframe, by='year'):
+        calls.append(timeframe)
+        return {dt.date(2026, 10, 1): digest.value if timeframe == '1m' else 'base'}
+    digest.value = 'detail-1'
+    monkeypatch.setattr(analyze, 'candle_digests', digest)
+    wf.main(FakeRunner(), TODAY)
+    digest.value = 'detail-2'
+    runner = FakeRunner()
+    wf.main(runner, TODAY)
+    assert len(runner.calls) == 3  # Only the newest test month includes the changed October candle.

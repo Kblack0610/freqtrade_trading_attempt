@@ -94,3 +94,18 @@ def test_cached_folds_run_again_identical_or_a_mismatch(folds):
     assert reproduce.main(FakeRunner([]), Retuned(), random.Random(2)) == 0
     ok, raw = last_run(folds)
     assert raw["mismatch"] == 2 and all(r["diff"][0].startswith("params:") for r in raw["results"])
+
+
+def test_reproduction_detects_changed_robustness_returns():
+    result = {'ok': True, 'params': {'buy': {'x': 10}},
+              'robustness': {'delay:1': {'ok': True, 'returns': [0.01]}}}
+    class Runner:
+        def fold(self, *args):
+            return result
+    f = {'strategy': 'S', 'exchange': 'binanceus', 'file': 'S.py', 'fold': (WF_TODAY,) * 3,
+         'stored': reproduce.fold_result(result['params'], None, None, [], None, [],
+                                         {'delay:1': {'ok': True, 'returns': [0.01]}})}
+    assert reproduce.check_fold(Runner(), f)['diff'] == []
+    result['robustness']['delay:1']['returns'] = [-0.01]
+    [difference] = reproduce.check_fold(Runner(), f)['diff']
+    assert difference.startswith('robustness:')

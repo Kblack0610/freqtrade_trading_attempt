@@ -67,28 +67,28 @@ def fold_sample(conn, rng: random.Random, n: int, ft_version: str) -> list[dict]
     """Up to n stored folds with tuned parameters whose cache key their inputs still give."""
     rows = conn.execute("""
         SELECT w.strategy, w.exchange, w.train_start, w.fold_start, w.test_end, w.cache_key, s.file, s.file_hash,
-               s.timeframe, w.params, w.is_trades, w.base_trades, w.base_returns, w.tuned_trades, w.tuned_returns
+               s.timeframe, w.params, w.is_trades, w.base_trades, w.base_returns, w.tuned_trades, w.tuned_returns, w.robustness
         FROM walkforward w JOIN strategies s ON s.name = w.strategy
         WHERE w.ok AND w.params IS NOT NULL AND s.load_error IS NULL ORDER BY 1, 2, 4""").fetchall()
     rng.shuffle(rows)
     days: dict[tuple[str, str], dict] = {}
     out = []
     for (strategy, ex, train_start, fold_start, test_end, key, file, file_hash, tf, params, is_trades,
-         base_trades, base_returns, tuned_trades, tuned_returns) in rows:
+         base_trades, base_returns, tuned_trades, tuned_returns, robustness) in rows:
         if len(out) >= n:
             break
-        if (ex, tf) not in days:
-            days[ex, tf] = analyze.candle_digests(ex, tf, by="day")
         fold = (train_start, fold_start, test_end)
-        candles = analyze.span_digest(days[ex, tf], train_start, test_end)
+        candles = walkforward.fold_candles(ex, tf, fold, days)
         if walkforward.fold_key(file_hash, ex, fold, ft_version, candles) == key:
             out.append({"strategy": strategy, "exchange": ex, "fold": fold, "file": file,
-                        "stored": fold_result(params, is_trades, base_trades, base_returns, tuned_trades, tuned_returns)})
+                        "stored": fold_result(params, is_trades, base_trades, base_returns, tuned_trades, tuned_returns,
+                                              {k: v for k, v in robustness.items() if k != "_settings"} if robustness is not None else None)})
     return out
 
 
-def fold_result(params, is_trades, base_trades, base_returns, tuned_trades, tuned_returns) -> dict:
-    return {"params": params, "is_trades": is_trades, "base_trades": base_trades, "base_returns": list(base_returns or []),
+def fold_result(params, is_trades, base_trades, base_returns, tuned_trades, tuned_returns, robustness=None) -> dict:
+    return {**({"robustness": robustness} if robustness is not None else {}),
+            "params": params, "is_trades": is_trades, "base_trades": base_trades, "base_returns": list(base_returns or []),
             "tuned_trades": tuned_trades, "tuned_returns": list(tuned_returns or [])}
 
 
@@ -116,10 +116,10 @@ def check_fold(runner, f: dict) -> dict:
         return {"failed": res.get("error") or "no tuned parameters"}
     side = lambda k: res.get(k) or {}  # noqa: E731
     again = fold_result(res["params"], side("is").get("trades"), side("base").get("trades"), side("base").get("returns"),
-                        side("tuned").get("trades"), side("tuned").get("returns"))
+                        side("tuned").get("trades"), side("tuned").get("returns"), res.get("robustness"))
     stored = f["stored"]
-    return {"diff": [f"{k}: {json.dumps(stored[k])[:120]} stored, {json.dumps(again[k])[:120]} now"
-                     for k in stored if finite(again[k]) != stored[k]]}
+    return {"diff": [f"{k}: {json.dumps(stored[k])[:120]} stored, {json.dumps(again.get(k))[:120]} now"
+                     for k in stored if finite(again.get(k)) != stored[k]]}
 
 
 def main(chunk_runner=None, fold_runner=None, rng: random.Random | None = None) -> int:
