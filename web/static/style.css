@@ -1,40 +1,20 @@
+/* Palette, fonts, type scale and the shell come from the pinned web-kit (static/kit, web/kit.lock).
+   This file keeps trader's own colours and its page and component rules. */
 :root {
-  color-scheme: light;
-  --bg: #f7f7f5;
-  --panel: #ffffff;
-  --fg: #1d1f21;
-  --muted: #6b6f76;
-  --line: #e2e2de;
-  --accent: #2f5fd0;
   --up: #1a7f4b;
   --down: #c0392b;
   --alert-bg: #fdecea;
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    color-scheme: dark;
-    --bg: #141517;
-    --panel: #1c1e21;
-    --fg: #e6e6e3;
-    --muted: #9a9ea6;
-    --line: #2c2f33;
-    --accent: #7aa2ff;
     --up: #4cc38a;
     --down: #ff6b5e;
     --alert-bg: #3a1d1a;
   }
 }
-* { box-sizing: border-box; }
-body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
 a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; }
-.top { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 1.5rem; padding: 0.75rem 1rem; background: var(--panel); border-bottom: 1px solid var(--line); }
-.brand { font-weight: 700; color: var(--fg); }
-nav { display: flex; flex-wrap: wrap; gap: 0.25rem 1rem; }
-nav a { white-space: nowrap; }
-nav a[aria-current="page"] { color: var(--fg); font-weight: 600; }
-.who { margin-left: auto; display: flex; align-items: center; gap: 0.5rem; }
-button { font: inherit; padding: 0.2rem 0.6rem; background: transparent; color: var(--fg); border: 1px solid var(--line); border-radius: 6px; cursor: pointer; }
+button { font: inherit; padding: 0.2rem 0.6rem; background: transparent; color: var(--ink); border: 1px solid var(--line); border-radius: 6px; cursor: pointer; }
 main { max-width: 1100px; margin: 0 auto; padding: 1rem; }
 footer { max-width: 1100px; margin: 0 auto; padding: 1rem; font-size: 0.85rem; }
 h1 { font-size: 1.4rem; margin: 0.5rem 0; }
@@ -61,9 +41,11 @@ ul.plain { padding-left: 1.2rem; }
 .chart .series.down { stroke: var(--down); }
 .chart .axis { fill: var(--muted); font-size: 11px; }
 .chart .axis.end { text-anchor: end; }
-nav.tabs { margin: 0.5rem 0 1rem; }
+nav.tabs { display: flex; flex-wrap: wrap; gap: 0.25rem 1rem; margin: 0.5rem 0 1rem; }
+nav.tabs a { white-space: nowrap; }
+nav.tabs a[aria-current="page"] { color: var(--ink); font-weight: 600; }
 tr.muted td { color: var(--muted); }
-a.tile { color: var(--fg); }
+a.tile { color: var(--ink); }
 a.tile:hover { text-decoration: none; border-color: var(--accent); }
 .card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 0.75rem 1rem; margin: 0 0 0.75rem; }
 .card h3 { margin: 0 0 0.25rem; font-size: 1rem; }

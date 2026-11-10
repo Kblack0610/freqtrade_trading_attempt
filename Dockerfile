@@ -19,6 +19,9 @@ ENV PYTHONPATH=/repo
 # check-then-create races when several freqtrade processes start at once (lab/backfill.py runs one
 # per exchange) and the loser exits with "exists already and is not a directory".
 RUN mkdir -p user_data/logs user_data/data user_data/backtest_results user_data/hyperopt_results user_data/plot
+# The site's shell (tokens, fonts, <kb-shell>) is the pinned web-kit: fetch_kit.py downloads it and checks every
+# file against web/kit.lock, so a bad checksum fails the build. Needs no pip package.
+RUN python web/fetch_kit.py
 # The entrypoint stays freqtrade's: every workload in home-config sets its own command.
 # Healthy when the bot API (lab/league.py, :8080) or the site (web/app.py, :8000) answers. Docker
 # and compose read this; k8s ignores it and uses the probes in home-config. A one-shot job has
