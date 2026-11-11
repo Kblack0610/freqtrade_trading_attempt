@@ -79,7 +79,7 @@ The catalogue above says which mechanisms exist. A strategy's label does not pro
 | Venue | binanceus, coinbase, kraken, okx, kucoin | the backtest's exchange |
 | Trade frequency | trades a month, in terciles across the scanned strategies | trade counts |
 
-- **A cell's elite** is the strategy x venue x overlay with the highest low end of the 365-day Sharpe interval among those in the cell, the same score `aggressive` ranks by.
+- **A cell's elite** is the strategy x venue with the highest low end of the 365-day Sharpe interval among those in the cell, the same score `aggressive` ranks by. `lab/diversity.py` builds the cells from `[diversity]` in `lab/suggest.toml`; /coverage shows them folded onto family x holding period and family x climate, a dash for each gap.
 - **Two strategies are one** when their daily returns correlate at |rho| over 0.5 (the correlation matrix behind the `max_rho` promote gate), whatever cells they sit in. A family tag that disagrees with that, such as a "trend" strategy at rho 0.9 with a mean-reversion one, is fixed in `lab/families.toml`.
 - **A diverse pick** is greedy: the best elite first, then each next elite whose largest |rho| to those already picked is 0.5 or under.
 
@@ -101,7 +101,7 @@ Each cohort's roster names start with its first three letters, so `lab/cohorts.p
 
 ### The strategy card
 
-What a strategy's page should answer at a glance: expected return a year with its 90% interval, win rate, trades a month, median holding time, timeframe, the climates where its low end is above 0, walk-forward months out of sample, and which gates it passes or misses. Each field comes from a table above. A missing input reads as missing ("no out-of-sample months"), never as a blank or a zero.
+What a strategy's page answers at a glance (its "At a glance" card, per venue): return a year over the 365-day window with the 90% intervals of its Sharpe and of its return per trade, win rate, trades a month, median holding time, timeframe, the climates where its low end is above 0, walk-forward months out of sample, and which gates it passes or misses. Each field comes from a table above. A missing input reads as missing ("no out-of-sample months"), never as a blank or a zero.
 
 ## Every added strategy raises the bar
 
