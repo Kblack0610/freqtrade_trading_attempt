@@ -8,7 +8,12 @@ Per exchange and timeframe, using Freqtrade's own download-data:
 - then every series gets an append pass up to now. Prepend drops a series' newest candle, so the
   append always runs after it.
 A series is marked oldest_reached when a prepend pass leaves its first candle where it was (the
-listing date, or the floor), and is never prepended again.
+listing date, or the floor), and is never prepended again. A series with no candles yet whose exchange
+publishes that history in bulk (OKX 1m, lab/archive.py) takes it from there first, so the prepend pass
+has little or nothing left to page through.
+
+A timeframe the exchange does not serve (coinbase 4h) is built from the longest served one that divides
+it (1h) after each run, and inherits that series' oldest_reached.
 
 An exchange with no OHLCV history (FORWARD_EXCHANGES, i.e. Kraken, which serves only its newest
 720 candles) takes its past from the exchange's published archive (lab/archive.py), once per series,
@@ -61,6 +66,7 @@ class Freqtrade(Protocol):
     def timeframes(self, exchange: str) -> list[str]: ...
     def recent(self, exchange: str, pair: str, timeframe: str) -> list[list]: ...
     def archive(self, exchange: str) -> zipfile.ZipFile | None: ...
+    def bulk(self, exchange: str, pair: str, timeframe: str) -> pd.DataFrame | None: ...
 
 
 def datadir(exchange: str) -> Path:
@@ -104,6 +110,11 @@ class Cli:
 
     def archive(self, exchange: str) -> zipfile.ZipFile | None:
         return zipfile.ZipFile(archive.RangeFile(archive.FULL)) if exchange == "kraken" else None
+
+    def bulk(self, exchange: str, pair: str, timeframe: str) -> pd.DataFrame | None:
+        if exchange == "okx" and timeframe == "1m":
+            return archive.okx_candles(pair, PREPEND_FLOORS.get(timeframe))
+        return None
 
 
 def pairs_of(exchange: str) -> list[str]:
@@ -172,6 +183,39 @@ def import_archive(z: zipfile.ZipFile, exchange: str, series: list[tuple[str, st
     return done
 
 
+def import_bulk(ft: Freqtrade, exchange: str, pair: str, tf: str) -> None:
+    """A failure here only costs time: the prepend pass that follows pages the same history from the API."""
+    try:
+        new = ft.bulk(exchange, pair, tf)
+    except Exception as e:
+        print(f"backfill: {exchange}: bulk {pair} {tf}: {type(e).__name__}: {e}", flush=True)
+        return
+    if new is not None and not new.empty:
+        datadir(exchange).mkdir(parents=True, exist_ok=True)
+        merge_candles(get_datahandler(datadir(exchange), "feather"), pair, tf, new)
+        print(f"backfill: {exchange}: bulk {pair} {tf}: {len(new)} candles", flush=True)
+
+
+def source_of(tf: str, served: list[str]) -> str | None:
+    """The longest served timeframe that divides tf, which tf can be built from."""
+    secs = timeframe_to_seconds(tf)
+    fits = [s for s in served if timeframe_to_seconds(s) < secs and secs % timeframe_to_seconds(s) == 0]
+    return max(fits, key=timeframe_to_seconds, default=None)
+
+
+def derive(exchange: str, pair: str, src: str, tf: str) -> None:
+    """Rebuild one series from its source series; a last bucket the source has not finished is left out."""
+    dh = get_datahandler(datadir(exchange), "feather")
+    old = dh.ohlcv_load(pair, src, CandleType.SPOT, fill_missing=False, warn_no_data=False)
+    if old.empty:
+        return
+    new = archive.resample(old[archive.COLS], tf)
+    if old["date"].iloc[-1] + pd.Timedelta(src) < new["date"].iloc[-1] + pd.Timedelta(tf):
+        new = new.iloc[:-1]
+    dh.ohlcv_store(pair, tf, clean_ohlcv_dataframe(new, tf, pair, fill_missing=False, drop_incomplete=False),
+                   CandleType.SPOT)
+
+
 def reached(prior: dict | None, first_ts: dt.datetime | None, prepended: bool) -> bool:
     if prior and prior["oldest_reached"]:
         return True
@@ -196,7 +240,10 @@ def backfill_exchange(ft: Freqtrade, conn, exchange: str, pairs: list[str], time
     prepended: set[tuple[str, str]] = set()
     supported = set(ft.timeframes(exchange))
     tfs = [tf for tf in timeframes if tf in supported]
-    if skipped := [tf for tf in timeframes if tf not in supported]:
+    derived = {tf: src for tf in timeframes if tf not in supported and (src := source_of(tf, tfs))}
+    for tf, src in derived.items():
+        print(f"backfill: {exchange}: no {tf} candles on this exchange, built from {src}", flush=True)
+    if skipped := [tf for tf in timeframes if tf not in supported and tf not in derived]:
         print(f"backfill: {exchange}: no {' '.join(skipped)} candles on this exchange, skipped", flush=True)
     archived: set[tuple[str, str]] = set()
     if exchange in FORWARD_EXCHANGES:
@@ -214,12 +261,18 @@ def backfill_exchange(ft: Freqtrade, conn, exchange: str, pairs: list[str], time
     else:
         for tf in tfs:
             todo = [p for p in pairs if not prior.get((p, tf), {}).get("oldest_reached")]
+            for p in todo:
+                if prior.get((p, tf), {}).get("first_ts") is None:
+                    import_bulk(ft, exchange, p, tf)
             if todo:
                 if ft.download(exchange, ["--prepend", "--timerange", f"{PREPEND_FLOORS.get(tf, PREPEND_FROM)}-", "-t", tf, "--pairs", *todo]):
                     prepended.update((p, tf) for p in todo)
                 else:
                     ok = False
             ok = ft.download(exchange, ["-t", tf, "--pairs", *pairs]) and ok
+    for tf, src in derived.items():
+        for p in pairs:
+            derive(exchange, p, src, tf)
     series = [(p, tf) for p in pairs for tf in tfs]
 
     rows = []
@@ -228,6 +281,13 @@ def backfill_exchange(ft: Freqtrade, conn, exchange: str, pairs: list[str], time
         r.update(exchange=exchange, pair=pair, timeframe=tf,
                  oldest_reached=(pair, tf) in archived or reached(prior.get((pair, tf)), r["first_ts"], (pair, tf) in prepended))
         rows.append(r)
+    done_at = {(r["pair"], r["timeframe"]): r["oldest_reached"] for r in rows}
+    for tf, src in derived.items():
+        for pair in pairs:
+            r = scan(series_file(exchange, pair, tf), tf)
+            r.update(exchange=exchange, pair=pair, timeframe=tf, oldest_reached=done_at[pair, src])
+            rows.append(r)
+            series.append((pair, tf))
     with conn.transaction():
         conn.cursor().executemany(UPSERT, rows)
         # A pair or timeframe dropped from the config is no longer backfilled; its row would only look stale.
