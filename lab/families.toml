@@ -10,6 +10,7 @@ trend = "Enters with the trend: a moving-average cross, MA ordering, Supertrend 
 mean-reversion = "Buys a dip: oversold RSI, MFI, CCI or stochastics, or a close under a lower Bollinger band."
 momentum = "Buys strength: MACD above its signal or zero, rising closes, positive momentum."
 breakout = "Buys a price pushing through a level."
+flow = "Buys volume leading price: a surge on an up close, or on-balance volume at a new high before the close."
 candlestick-pattern = "Enters on a candle or count pattern."
 chart-pattern = "Enters on numeric chart patterns: confirmed swing pivots or a flag breakout."
 time-based = "Enters by the clock."
@@ -146,9 +147,75 @@ CandleTRISTAR = { family = "candlestick-pattern", inputs = ["ohlcv"] }
 CandleUNIQUE3RIVER = { family = "candlestick-pattern", inputs = ["ohlcv"] }
 CandleXSIDEGAP3METHODS = { family = "candlestick-pattern", inputs = ["ohlcv"] }
 
-# user_data/strategies/chart/: fixed-exit long chart-pattern signals
+# user_data/strategies/chart/: fixed-exit long chart-pattern signals, each on the 15m, 1h, 4h and 1d rungs
 ChartAscendingTriangle = { family = "chart-pattern", inputs = ["ohlcv"] }
 ChartBullFlag = { family = "chart-pattern", inputs = ["ohlcv"] }
 ChartDoubleBottom = { family = "chart-pattern", inputs = ["ohlcv"] }
 ChartResistanceBreak = { family = "chart-pattern", inputs = ["ohlcv"] }
 ChartSymmetricTriangle = { family = "chart-pattern", inputs = ["ohlcv"] }
+ChartAscendingTriangle_15m = { family = "chart-pattern", inputs = ["ohlcv"] }
+ChartAscendingTriangle_1d = { family = "chart-pattern", inputs = ["ohlcv"] }
+ChartAscendingTriangle_4h = { family = "chart-pattern", inputs = ["ohlcv"] }
+ChartBullFlag_15m = { family = "chart-pattern", inputs = ["ohlcv"] }
+ChartBullFlag_1d = { family = "chart-pattern", inputs = ["ohlcv"] }
+ChartBullFlag_4h = { family = "chart-pattern", inputs = ["ohlcv"] }
+ChartDoubleBottom_15m = { family = "chart-pattern", inputs = ["ohlcv"] }
+ChartDoubleBottom_1d = { family = "chart-pattern", inputs = ["ohlcv"] }
+ChartDoubleBottom_4h = { family = "chart-pattern", inputs = ["ohlcv"] }
+ChartResistanceBreak_15m = { family = "chart-pattern", inputs = ["ohlcv"] }
+ChartResistanceBreak_1d = { family = "chart-pattern", inputs = ["ohlcv"] }
+ChartResistanceBreak_4h = { family = "chart-pattern", inputs = ["ohlcv"] }
+ChartSymmetricTriangle_15m = { family = "chart-pattern", inputs = ["ohlcv"] }
+ChartSymmetricTriangle_1d = { family = "chart-pattern", inputs = ["ohlcv"] }
+ChartSymmetricTriangle_4h = { family = "chart-pattern", inputs = ["ohlcv"] }
+
+# user_data/strategies/trend/: the long-flat Donchian ensemble, one per rung
+TrendDonchian = { family = "trend", inputs = ["ohlcv"] }
+TrendDonchianFast = { family = "trend", inputs = ["ohlcv"] }
+TrendDonchianFast_15m = { family = "trend", inputs = ["ohlcv"] }
+TrendDonchianFast_1h = { family = "trend", inputs = ["ohlcv"] }
+TrendDonchianFast_4h = { family = "trend", inputs = ["ohlcv"] }
+TrendDonchian_15m = { family = "trend", inputs = ["ohlcv"] }
+TrendDonchian_1h = { family = "trend", inputs = ["ohlcv"] }
+TrendDonchian_4h = { family = "trend", inputs = ["ohlcv"] }
+
+# user_data/strategies/range/: buy a z-score dip while BTC is flat, one per rung
+RangeZ24 = { family = "mean-reversion", inputs = ["ohlcv"] }
+RangeZ24_15m = { family = "mean-reversion", inputs = ["ohlcv"] }
+RangeZ24_1d = { family = "mean-reversion", inputs = ["ohlcv"] }
+RangeZ24_4h = { family = "mean-reversion", inputs = ["ohlcv"] }
+RangeZ72 = { family = "mean-reversion", inputs = ["ohlcv"] }
+RangeZ72_15m = { family = "mean-reversion", inputs = ["ohlcv"] }
+RangeZ72_1d = { family = "mean-reversion", inputs = ["ohlcv"] }
+RangeZ72_4h = { family = "mean-reversion", inputs = ["ohlcv"] }
+
+# user_data/strategies/breakout/: volatility breakouts with a fixed exit, one per rung
+BreakoutAtr = { family = "breakout", inputs = ["ohlcv"] }
+BreakoutAtr_15m = { family = "breakout", inputs = ["ohlcv"] }
+BreakoutAtr_1d = { family = "breakout", inputs = ["ohlcv"] }
+BreakoutAtr_4h = { family = "breakout", inputs = ["ohlcv"] }
+BreakoutKeltner = { family = "breakout", inputs = ["ohlcv"] }
+BreakoutKeltner_15m = { family = "breakout", inputs = ["ohlcv"] }
+BreakoutKeltner_1d = { family = "breakout", inputs = ["ohlcv"] }
+BreakoutKeltner_4h = { family = "breakout", inputs = ["ohlcv"] }
+BreakoutSqueeze_15m = { family = "breakout", inputs = ["ohlcv"] }
+BreakoutSqueeze_1d = { family = "breakout", inputs = ["ohlcv"] }
+BreakoutSqueeze_4h = { family = "breakout", inputs = ["ohlcv"] }
+
+# user_data/strategies/clock/: enter at a set UTC time, leave on a time stop
+ClockEvening = { family = "time-based", inputs = ["ohlcv"] }
+ClockEvening_15m = { family = "time-based", inputs = ["ohlcv"] }
+ClockEvening_4h = { family = "time-based", inputs = ["ohlcv"] }
+ClockWeekend = { family = "time-based", inputs = ["ohlcv"] }
+ClockWeekend_1d = { family = "time-based", inputs = ["ohlcv"] }
+ClockWeekend_4h = { family = "time-based", inputs = ["ohlcv"] }
+
+# user_data/strategies/flow/: volume leading price with a fixed exit, one per rung
+FlowObv = { family = "flow", inputs = ["ohlcv"] }
+FlowObv_15m = { family = "flow", inputs = ["ohlcv"] }
+FlowObv_1d = { family = "flow", inputs = ["ohlcv"] }
+FlowObv_4h = { family = "flow", inputs = ["ohlcv"] }
+FlowSurge = { family = "flow", inputs = ["ohlcv"] }
+FlowSurge_15m = { family = "flow", inputs = ["ohlcv"] }
+FlowSurge_1d = { family = "flow", inputs = ["ohlcv"] }
+FlowSurge_4h = { family = "flow", inputs = ["ohlcv"] }

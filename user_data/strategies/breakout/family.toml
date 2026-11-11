@@ -1,0 +1,30 @@
+# The volatility-breakout family: buy a close that clears a range set by recent volatility, all with the same fixed
+# exit. Signals are lab/channels.py. SqueezeBreakout (catalogue) is the hand-written 1h squeeze with its own exit;
+# Squeeze here runs the same entry on the other rungs only. Long only, spot.
+# lab/families/generate.py writes the strategy files from this file: edit here, then rerun it.
+kind = "signal"
+module = "channels"
+title = "Volatility-breakout"
+prefix = "Breakout"
+timeframe = "1h"
+ladder = ["15m", "1h", "4h", "1d"]  # holding period is a diversity axis (docs/strategy-coverage.md); generate.py scales the exit per rung
+# Lets the 20-bar EMA settle well under the recursive check's tolerance.
+startup_candle_count = 200
+
+[exit]
+minimal_roi = { "0" = 0.06, "1440" = 0.03 }
+stoploss = -0.04
+time_stop_hours = 72
+
+[strategies.Atr]
+call = "atr_break"
+args = { window = 14, k = 1.0 }
+
+[strategies.Keltner]
+call = "keltner_break"
+args = { window = 20, k = 2.0 }
+
+[strategies.Squeeze]
+call = "squeeze_release"
+args = { window = 20, bands = 2.0, keltner = 1.5, within = 6 }
+timeframes = ["15m", "4h", "1d"]

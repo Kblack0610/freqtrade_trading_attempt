@@ -9,8 +9,8 @@ from freqtrade.strategy import IStrategy
 
 from lab import channels
 
-# The same settings as the staged TrendDonchian, read from its family file.
-FAMILY = tomllib.loads((Path(__file__).resolve().parents[1] / "families" / "trend" / "family.toml").read_text())
+# The same settings as TrendDonchian, read from its family file.
+FAMILY = tomllib.loads((Path(__file__).resolve().parents[2] / "user_data" / "strategies" / "trend" / "family.toml").read_text())
 SPEC, SIZING = FAMILY["strategies"]["Donchian"], FAMILY["sizing"]
 
 

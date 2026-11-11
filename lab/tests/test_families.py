@@ -18,8 +18,11 @@ FAMILIES = LAB / "families"
 ACTIVE = LAB.parent / "user_data" / "strategies"
 CANDLES = ACTIVE / "candles"
 CHART = ACTIVE / "chart"
-TREND = FAMILIES / "trend"
-RANGE = FAMILIES / "range"
+TREND = ACTIVE / "trend"
+RANGE = ACTIVE / "range"
+BREAKOUT = ACTIVE / "breakout"
+CLOCK = ACTIVE / "clock"
+FLOW = ACTIVE / "flow"
 PLANTED = LAB / "tests" / "fixtures" / "strategies"
 CATALOGUE = LAB.parent / "user_data" / "strategies" / "catalogue"  # scanned, so these are counted trials
 
@@ -57,12 +60,13 @@ def test_every_family_strategy_loads_by_name():
 
     base = Configuration.from_files([str(p) for p in analyze.config_files(analyze.BIAS_EXCHANGE)])
     for fam in generate.families():
-        timeframe = tomllib.loads((fam / "family.toml").read_text()).get("timeframe", "1h")
-        for f in sorted(fam.glob("*.py")):
+        timeframe = {name: tf for name, _, _, tf, _ in generate.rungs(tomllib.loads((fam / "family.toml").read_text()))}
+        assert {f.stem for f in fam.glob("*.py")} == timeframe.keys(), fam.name
+        for name, tf in sorted(timeframe.items()):
             # A fresh copy each time: the resolver writes the strategy's timeframe and exit into the config,
             # where they would override the next strategy's own.
-            s = StrategyResolver.load_strategy({**base, "strategy_path": str(fam), "strategy": f.stem})
-            assert s.timeframe == timeframe and s.can_short is False and s.stoploss < 0, f.stem
+            s = StrategyResolver.load_strategy({**base, "strategy_path": str(fam), "strategy": name})
+            assert s.timeframe == tf and s.can_short is False and -1 < s.stoploss < 0, name
 
 
 def test_no_lab_module_shadows_an_installed_one():
@@ -81,7 +85,8 @@ def synthetic_candles(start: dt.datetime, end: dt.datetime, freq: str, seed: int
     opn = np.r_[close[0], close[:-1]]
     wick = np.abs(rng.normal(0, 0.004, len(date)))
     return pd.DataFrame({"date": date, "open": opn, "high": np.maximum(opn, close) * (1 + wick),
-                         "low": np.minimum(opn, close) * (1 - wick), "close": close, "volume": 10.0})
+                         "low": np.minimum(opn, close) * (1 - wick), "close": close,
+                         "volume": 10.0 * np.exp(rng.normal(0, 0.8, len(date)))})  # varies, so volume signals fire
 
 
 @pytest.fixture
@@ -92,41 +97,38 @@ def bias_data(tmp_path, monkeypatch):
     data = tmp_path / "data" / analyze.BIAS_EXCHANGE
     data.mkdir(parents=True)
     # BTC plus two coins on other seeds, so a ratio to BTC (RatioRevert) and a ranking (XSMomentumRotation) move.
+    # Each timeframe reaches back over its lookahead window, a 200-candle startup and, for 1d, the range family's
+    # BTC 200-day mean; each ends at its last closed candle.
     for seed, coin in ((11, "BTC"), (12, "ETH"), (13, "SOL")):
-        for tf, freq in (("1h", "h"), ("5m", "5min")):
-            synthetic_candles(now - dt.timedelta(days=analyze.LOOKAHEAD_DAYS + 30), now, freq, seed).to_feather(data / f"{coin}_USD-{tf}.feather")
-        # Daily candles reach far enough back for a 200-day startup before a 1d strategy's longer window, and for
-        # the range family's BTC 200-day mean.
-        day = now.replace(hour=0)
-        synthetic_candles(day - dt.timedelta(days=DAILY_DAYS + 400), day - dt.timedelta(days=1), "D", seed).to_feather(data / f"{coin}_USD-1d.feather")
+        for tf, freq in (("5m", "5min"), ("15m", "15min"), ("1h", "h"), ("4h", "4h"), ("1d", "D")):
+            step = pd.tseries.frequencies.to_offset(freq)
+            end = pd.Timestamp(now).floor(freq) - step
+            start = (end - pd.Timedelta(days=analyze.lookahead_days(tf) + 30) - 400 * step).floor(freq)
+            synthetic_candles(start, end, freq, seed).to_feather(data / f"{coin}_USD-{tf}.feather")
     monkeypatch.setattr(analyze, "RESULTS", tmp_path)
     return analyze
 
 
-DAILY_DAYS = 900  # a 1d strategy's lookahead window: 120 daily candles hold too few entries for the check
-
-
 @pytest.mark.parametrize("strategy, folder, biased", [
+    # One of each family, across the rungs: every member of a family shares its template and signal module.
     ("CandleENGULFING", CANDLES, False), ("ChartResistanceBreak", CHART, False),
-    ("TrendDonchianFast", TREND, False), ("RangeZ24", RANGE, False),
+    ("TrendDonchianFast", TREND, False), ("TrendDonchian_4h", TREND, False), ("RangeZ24", RANGE, False),
+    ("BreakoutAtr", BREAKOUT, False), ("BreakoutSqueeze_15m", BREAKOUT, False),
+    ("ClockEvening_15m", CLOCK, False), ("ClockWeekend_1d", CLOCK, False),
+    ("FlowSurge_15m", FLOW, False), ("FlowObv", FLOW, False),
     *[(f.stem, CATALOGUE, False) for f in sorted(CATALOGUE.glob("*.py"))],  # each one, as each is a trial
     ("PlantedLookahead", PLANTED, True),  # the control: the same check on the same data must catch it
 ])
-def test_the_nightly_lookahead_check_on_synthetic_prices(bias_data, monkeypatch, strategy, folder, biased):
-    if folder == TREND or strategy in ("TSMomentum", "XSMomentumRotation"):  # daily
-        monkeypatch.setattr(bias_data, "LOOKAHEAD_DAYS", DAILY_DAYS)
+def test_the_nightly_lookahead_check_on_synthetic_prices(bias_data, strategy, folder, biased):
     res = bias_data.bias_one("lookahead", strategy, str(folder))
     assert res.get("error") is None, res
     assert res["has_bias"] is biased and res["detail"]["signals"] > 0, res
 
 
-def test_the_nightly_analysis_does_not_scan_the_staged_families():
-    """Staged means no trials: the analysis searches user_data/strategies only. Switching a family on
-    moves its folder there; the remaining staged families must stay outside discovery."""
+def test_a_slow_timeframe_gets_a_lookahead_window_of_enough_candles():
     from lab import analyze
 
-    staged = {p.stem for fam in generate.families() if fam.parent == FAMILIES for p in fam.glob("*.py")}
-    assert staged and not staged & {s["name"] for s in analyze.Cli().discover()}
+    assert [analyze.lookahead_days(tf) for tf in ("5m", "1h", "4h", "1d")] == [120, 120, 150, 900]
 
 
 def test_active_candles_cover_every_bullish_talib_pattern():
@@ -143,19 +145,23 @@ def test_active_candles_cover_every_bullish_talib_pattern():
     assert not (FAMILIES / "candles").exists()
 
 
-def test_active_chart_members_are_discovered():
+ACTIVE_FAMILIES = [f for f in generate.families() if f.parent == ACTIVE]
+
+
+def test_every_active_family_member_is_discovered():
+    """Switched on means scanned: the nightly analysis finds every rung of every family under user_data/strategies."""
     from lab import analyze
 
-    expected = {"ChartResistanceBreak", "ChartDoubleBottom", "ChartAscendingTriangle",
-                "ChartSymmetricTriangle", "ChartBullFlag"}
-    assert {p.stem for p in CHART.glob("*.py")} == expected
+    assert {f.name for f in ACTIVE_FAMILIES} >= {"candles", "chart", "trend", "range", "breakout", "clock", "flow"}
     discovered = {s["name"]: s for s in analyze.Cli().discover()}
-    assert expected <= discovered.keys()
-    assert all(discovered[name]["load_error"] is None for name in expected)
-    assert not (FAMILIES / "chart").exists()
+    for fam in ACTIVE_FAMILIES:
+        expected = {p.stem for p in fam.glob("*.py")}
+        assert expected <= discovered.keys(), fam.name
+        assert all(discovered[name]["load_error"] is None for name in expected), fam.name
+        assert not (FAMILIES / fam.name).exists()
 
 
-@pytest.mark.parametrize("family", [CANDLES, CHART], ids=lambda p: p.name)
+@pytest.mark.parametrize("family", ACTIVE_FAMILIES, ids=lambda p: p.name)
 def test_each_active_family_member_is_a_trial_even_with_no_trades(conn, monkeypatch, family):
     from lab import analyze, confidence
 

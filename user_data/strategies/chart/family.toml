@@ -5,6 +5,7 @@
 kind = "chart"
 prefix = "Chart"
 timeframe = "1h"
+ladder = ["15m", "1h", "4h", "1d"]  # holding period is a diversity axis (docs/strategy-coverage.md); generate.py scales the exit per rung
 # Covers the longest lookback below: a 120-bar window plus the pivot width.
 startup_candle_count = 150
 

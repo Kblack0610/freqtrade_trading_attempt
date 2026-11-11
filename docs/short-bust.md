@@ -10,7 +10,7 @@ Funding does not change that. Measured funding (`funding_rates`, collected by `l
 
 So the recommendation stands: do not build an automated short. If the human wants protection against an AI bust, the plain route is a small long put position at a broker, where the most it can lose is what it cost.
 
-The trend family's Donchian ensemble run both ways (`DonchianLongShort`, the staged `TrendDonchian` settings on swap candles) made +262% on majors and +14% on ai over the whole history, but nearly all of it came from trades outside every fall and before 2024, where no funding is measured (+253% of the majors' +260% outside the falls). Over the trades with measured funding, 2024 on, it lost: majors -6.6% before funding and -11.5% after (its long legs paid), ai -3.1% and -3.4%. Inside the falls it made +1.2% and +4.8%. It is one parameter set, so this describes what happened and shows no edge.
+The trend family's Donchian ensemble run both ways (`DonchianLongShort`, the `TrendDonchian` settings on swap candles) made +262% on majors and +14% on ai over the whole history, but nearly all of it came from trades outside every fall and before 2024, where no funding is measured (+253% of the majors' +260% outside the falls). Over the trades with measured funding, 2024 on, it lost: majors -6.6% before funding and -11.5% after (its long legs paid), ai -3.1% and -3.4%. Inside the falls it made +1.2% and +4.8%. It is one parameter set, so this describes what happened and shows no edge.
 
 ## The test
 
