@@ -21,7 +21,12 @@ next to the real strategy, where every nightly backtest would load it.
 Rows go to `walkforward`, and each test-month trade, dated, to `walkforward_trades`; lab/suggest.py turns them into retune suggestions and runs at the end.
 A run starts no fold after WF_BUDGET_S seconds (0: no limit), so a backlog longer than the job's deadline still ends in
 a recorded run with its post steps; the folds it left (`folds_left`) run next time, skipped by cache_key once stored.
-Exits 1 when more than a tenth of the folds run this time failed, or on a crash.
+A run can be split over WF_SHARDS pods (a Kubernetes Indexed Job, each pod's JOB_COMPLETION_INDEX its shard): each
+strategy x venue belongs to one shard by a hash of its names, so every pod plans the same split. Each shard records a
+`walkforward_shard` row named WF_JOB#index; the shard that finishes last (under an advisory lock) runs the post steps
+and records the run's `walkforward` row, its counts summed over the shards. A shard killed before it records leaves
+the run without that row, so TraderRunStale tells; its folds run next time.
+Exits 1 when more than a tenth of the folds this shard ran failed, or on a crash.
 """
 
 import datetime as dt
@@ -32,6 +37,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import traceback
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Protocol
@@ -55,6 +61,9 @@ BUDGET_S = float(os.environ.get("WF_BUDGET_S", "0"))  # under the job's deadline
 EMBARGO_DAYS = int(os.environ.get("WF_EMBARGO_DAYS", "7"))  # a gap longer than any trade's hold, before each test month
 HYPEROPT_LOAD = 2  # hyperopt keeps the analysed frame and each epoch's backtest copy
 ONLY = set(os.environ.get("WF_STRATEGIES", "").split())
+SHARDS = int(os.environ.get("WF_SHARDS", "1"))
+SHARD = int(os.environ.get("JOB_COMPLETION_INDEX", "0"))
+JOB = os.environ.get("WF_JOB", "")  # the Job's name, shared by its shards; a single run names itself by its start
 MAX_ATTEMPTS = analyze.MAX_ATTEMPTS
 FAIL_SHARE = analyze.FAIL_SHARE
 
@@ -159,6 +168,11 @@ class Cli:
         return took(out)
 
 
+def shard_of(strategy: str, exchange: str, shards: int) -> int:
+    """The shard a strategy x venue runs in: stable across pods and runs, so each plans the same split."""
+    return int(analyze.sha256(f"{strategy} {exchange}".encode())[:8], 16) % shards
+
+
 def candidates(conn) -> list[dict]:
     """League strategies first, then promote and watch suggestions by score, then each venue's best 365-day
     expectancy low end, one venue after another; loadable and lookahead-clean."""
@@ -196,6 +210,8 @@ def plan(conn, found: list[dict], first: dict, today: dt.date, ft_version: str) 
     days: dict[tuple[str, str], dict] = {}
     for s in found:
         for ex in EXCHANGES:
+            if shard_of(s["name"], ex, SHARDS) != SHARD:
+                continue
             since = first.get((ex, s["timeframe"]))
             if since is None:
                 skipped.append(f"{s['name']} on {ex}: {s['timeframe']} not fully backfilled")
@@ -254,76 +270,117 @@ def store(conn, task: dict, res: dict) -> None:
                             "close_date, profit_ratio) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)", rows)
 
 
+def run_folds(conn, runner: Runner, today: dt.date, report: dict) -> bool:
+    """This shard's folds, stored as each finishes; True unless more than FAIL_SHARE of them failed."""
+    found = candidates(conn)
+    todo, cached, skipped = plan(conn, found, analyze.coverage(conn), today, runner.version())
+    report.update(candidates=[s["name"] for s in found], folds_run=len(todo), folds_cached=cached,
+                  skipped=skipped[:100])
+    print(f"walkforward: shard {SHARD + 1}/{SHARDS}: {len(found)} candidates on {' '.join(EXCHANGES)}, {len(todo)} folds "
+          f"to run, {cached} cached, {len(skipped)} skipped, {WORKERS} workers", flush=True)
+    failed, done, failures = 0, 0, []
+    budget = analyze.Budget(MEMORY_GB)
+    stop_at = time.monotonic() + BUDGET_S if BUDGET_S else None
+    left = 0
+
+    def run(t):
+        gb = max(analyze.task_gb(t["exchange"], t["timeframe"], TRAIN_DAYS + 31, HYPEROPT_LOAD),
+                 analyze.task_gb(t["exchange"], suggest.load_config()["confidence"]["detail_timeframe"], 31))
+        with budget.hold(gb):
+            if stop_at is not None and time.monotonic() >= stop_at:
+                return None  # out of time: left for the next run
+            return runner.fold(t["name"], t["file"], t["exchange"], t["fold"], t["seed"])
+
+    with ThreadPoolExecutor(max_workers=WORKERS) as pool:
+        futs = {pool.submit(run, t): t for t in todo}
+        try:
+            for fut in as_completed(futs):
+                task = futs[fut]
+                try:
+                    res = fut.result()
+                except Exception as e:  # one fold's runner bug must not lose the others
+                    res = {"ok": False, "error": f"{type(e).__name__}: {e}"}
+                if res is None:
+                    left += 1
+                    continue
+                store(conn, task, res)
+                done += 1
+                if not res["ok"] and not res.get("no_data"):
+                    failed += 1
+                    failures.append(f"{task['name']} {task['exchange']} {task['fold'][1]:%Y-%m}: {res['error']}"[:300])
+                print(f"walkforward: {done}/{len(todo)} folds, {failed} failed", flush=True)
+        except BaseException:
+            pool.shutdown(cancel_futures=True)
+            raise
+    if left:
+        print(f"walkforward: budget of {BUDGET_S:.0f}s spent, {left} folds left for the next run", flush=True)
+    report.update(folds_failed=failed, folds_left=left, failures=failures[:100])
+    return failed <= FAIL_SHARE * max(done, 1)
+
+
+def close_shard(conn, shard_id: int, job: str, report: dict, ok: bool) -> list[tuple] | None:
+    """Records this shard; when it is the last of the job's shards to finish, the finished shards' (started_at,
+    ok, raw), for the run's row. The advisory lock makes exactly one shard the last."""
+    with conn.transaction():
+        conn.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (f"walkforward:{job}",))
+        conn.execute("UPDATE runs SET raw = %s, finished_at = now(), ok = %s WHERE id = %s", (Jsonb(report), ok, shard_id))
+        rows = conn.execute("SELECT started_at, ok, raw FROM runs WHERE kind = 'walkforward_shard' "
+                            "AND split_part(name, '#', 1) = %s AND finished_at IS NOT NULL", (job,)).fetchall()
+    return rows if len(rows) >= SHARDS else None
+
+
+def finish(conn, job: str, shards: list[tuple]) -> bool:
+    """The post steps, once per run, and the run's `walkforward` row: the shards' counts summed, their lists joined."""
+    raws = [r for _, _, r in shards]
+    report: dict = {k: raws[0].get(k) for k in ("exchanges", "universe", "folds", "train_days", "epochs", "loss")}
+    report["shards"] = len(raws)
+    for k in ("folds_run", "folds_cached", "folds_failed", "folds_left"):
+        report[k] = sum(r.get(k) or 0 for r in raws)
+    report["candidates"] = list(dict.fromkeys(x for r in raws for x in r.get("candidates") or []))
+    for k in ("skipped", "failures"):
+        report[k] = [x for r in raws for x in r.get(k) or []][:100]
+    errors = [r["error"] for r in raws if r.get("error")]
+    if errors:
+        report["error"] = "; ".join(errors)[:1000]
+    ok = all(o for _, o, _ in shards)
+    try:
+        report.update(vol_target.run(conn))
+        report.update(suggest.run(conn))
+        report.update(confidence.run(conn))
+        report.update(book.run(conn))
+        report.update(mixtures.run(conn))
+        report.update(scorecard.run(conn))
+        report.update(horizon.run(conn))
+    except Exception as e:
+        report["error"] = f"{report.get('error', '')}; post: {type(e).__name__}: {e}".lstrip("; ")
+        traceback.print_exc()
+        ok = False
+    conn.execute("INSERT INTO runs (kind, name, raw, started_at, finished_at, ok) VALUES ('walkforward', %s, %s, %s, "
+                 "now(), %s)", (job, Jsonb(report), min(t for t, _, _ in shards), ok))
+    print(f"walkforward: done: {json.dumps({k: v for k, v in report.items() if k not in ('failures', 'skipped')})}",
+          flush=True)
+    return ok
+
+
 def main(runner: Runner | None = None, today: dt.date | None = None) -> int:
     runner = runner or Cli()
     today = today or dt.datetime.now(dt.timezone.utc).date()
     with connect(autocommit=True) as conn:
         started = dt.datetime.now(dt.timezone.utc)
-        run_id = conn.execute("INSERT INTO runs (kind, name, raw, started_at) VALUES ('walkforward', %s, '{}', %s) "
-                              "RETURNING id", (started.strftime("%Y-%m-%d %H:%M:%S"), started)).fetchone()[0]
+        job = JOB or f"{started:%Y-%m-%d %H:%M:%S.%f}"
+        shard_id = conn.execute("INSERT INTO runs (kind, name, raw, started_at) VALUES ('walkforward_shard', %s, '{}', %s) "
+                                "RETURNING id", (f"{job}#{SHARD}", started)).fetchone()[0]
         report: dict = {"exchanges": EXCHANGES, "universe": universe.describe_all(analyze.USER_DATA, EXCHANGES), "folds": FOLDS,
-                        "train_days": TRAIN_DAYS, "epochs": EPOCHS, "loss": LOSS}
+                        "train_days": TRAIN_DAYS, "epochs": EPOCHS, "loss": LOSS, "shard": SHARD, "shards": SHARDS}
         ok = False
         try:
-            found = candidates(conn)
-            todo, cached, skipped = plan(conn, found, analyze.coverage(conn), today, runner.version())
-            report.update(candidates=[s["name"] for s in found], folds_run=len(todo), folds_cached=cached,
-                          skipped=skipped[:100])
-            print(f"walkforward: {len(found)} candidates on {' '.join(EXCHANGES)}, {len(todo)} folds to run, "
-                  f"{cached} cached, {len(skipped)} skipped, {WORKERS} workers", flush=True)
-            failed, done, failures = 0, 0, []
-            budget = analyze.Budget(MEMORY_GB)
-            stop_at = time.monotonic() + BUDGET_S if BUDGET_S else None
-            left = 0
-
-            def run(t):
-                gb = max(analyze.task_gb(t["exchange"], t["timeframe"], TRAIN_DAYS + 31, HYPEROPT_LOAD),
-                         analyze.task_gb(t["exchange"], suggest.load_config()["confidence"]["detail_timeframe"], 31))
-                with budget.hold(gb):
-                    if stop_at is not None and time.monotonic() >= stop_at:
-                        return None  # out of time: left for the next run
-                    return runner.fold(t["name"], t["file"], t["exchange"], t["fold"], t["seed"])
-
-            with ThreadPoolExecutor(max_workers=WORKERS) as pool:
-                futs = {pool.submit(run, t): t for t in todo}
-                try:
-                    for fut in as_completed(futs):
-                        task = futs[fut]
-                        try:
-                            res = fut.result()
-                        except Exception as e:  # one fold's runner bug must not lose the others
-                            res = {"ok": False, "error": f"{type(e).__name__}: {e}"}
-                        if res is None:
-                            left += 1
-                            continue
-                        store(conn, task, res)
-                        done += 1
-                        if not res["ok"] and not res.get("no_data"):
-                            failed += 1
-                            failures.append(f"{task['name']} {task['exchange']} {task['fold'][1]:%Y-%m}: {res['error']}"[:300])
-                        print(f"walkforward: {done}/{len(todo)} folds, {failed} failed", flush=True)
-                except BaseException:
-                    pool.shutdown(cancel_futures=True)
-                    raise
-            if left:
-                print(f"walkforward: budget of {BUDGET_S:.0f}s spent, {left} folds left for the next run", flush=True)
-            report.update(folds_failed=failed, folds_left=left, failures=failures[:100])
-            report.update(vol_target.run(conn))
-            report.update(suggest.run(conn))
-            report.update(confidence.run(conn))
-            report.update(book.run(conn))
-            report.update(mixtures.run(conn))
-            report.update(scorecard.run(conn))
-            report.update(horizon.run(conn))
-            ok = failed <= FAIL_SHARE * max(done, 1)
-            print(f"walkforward: done: {json.dumps({k: v for k, v in report.items() if k not in ('failures', 'skipped')})}",
-                  flush=True)
-        except Exception as e:
+            ok = run_folds(conn, runner, today, report)
+        except Exception as e:  # recorded, so the last shard still finishes the run over the others' folds
             report["error"] = f"{type(e).__name__}: {e}"
-            raise
-        finally:
-            conn.execute("UPDATE runs SET raw = %s, finished_at = now(), ok = %s WHERE id = %s",
-                         (Jsonb(report), ok, run_id))
+            traceback.print_exc()
+        shards = close_shard(conn, shard_id, job, report, ok)
+        if shards is not None:
+            ok = finish(conn, job, shards) and ok
     return 0 if ok else 1
 
 

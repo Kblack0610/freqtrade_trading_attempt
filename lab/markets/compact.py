@@ -19,7 +19,8 @@ import traceback
 import pyarrow.parquet as pq
 from pyarrow import fs as pafs
 
-from lab.markets.recorder import SCHEMA, load_config, s3_from_env
+from lab.markets.recorder import SCHEMA, load_config
+from lab.util import s3_from_env
 
 DAY = "day.parquet"
 PARTS = b"parts"
