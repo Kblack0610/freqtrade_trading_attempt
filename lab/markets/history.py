@@ -33,8 +33,9 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from lab.db import connect
-from lab.markets.recorder import ADAPTERS, META, load_config, s3_from_env
+from lab.markets.recorder import ADAPTERS, META, load_config
 from lab.markets.venue import Span
+from lab.util import s3_from_env
 
 TS = pa.timestamp("us", tz="UTC")
 SCHEMAS = {

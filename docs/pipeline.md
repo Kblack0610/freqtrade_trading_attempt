@@ -19,13 +19,14 @@ roster --> paper bots (the league) --ingest--> Postgres --> drift, watcher, deca
 
 ## The nightly clock
 
-All times UTC. Every lab job runs on razer-laptop, because the candle files live on the `freqtrade-lab` volume there.
+All times UTC. Backfill and analysis run on razer-laptop, because the candle files live on the `freqtrade-lab` volume there. Walk-forward runs as several pods on any amd64 node except hp-victus, from a copy of the candles in MinIO.
 
 | When | Job | What it does | Typical length |
 |---|---|---|---|
 | every 5 min | `freqtrade-ingest` | Copies every paper bot's trades and a snapshot into Postgres | seconds |
 | hourly at :20 | `freqtrade-backfill` | New candles for the league exchanges | about 2 minutes |
 | hourly at :50 | `freqtrade-backfill-research` | New and older candles for okx and kucoin | about 1 minute once caught up |
+| 00:45 | `freqtrade-candles-publish` | Copies the changed candle files to MinIO for the walk-forward pods | minutes |
 | 01:00 | `freqtrade-walkforward` | Tunes and tests strategies month by month | up to the 4.5 h budget, 8 h hard limit |
 | 02:45 | `freqtrade-analysis` | Backtests everything, then scores everything | under an hour on a normal night, hours after a big change |
 | 05:35 | `freqtrade-futures` | Funding rates and open interest | under a minute |
@@ -74,6 +75,7 @@ A backtest of a strategy as written says nothing about tuning it, and hyperopt (
 
 - **A fold.** Take one whole month. Tune the strategy on the 180 days before it, stopping 7 days short so no trade spans the gap (the embargo). Then backtest the month as written and with the tuned settings. The tuned result on that month is out of sample: the tuner never saw it.
 - **How many.** Up to `WF_LIMIT` candidate strategies, on each walk-forward exchange (binanceus, okx, kucoin), for each of the last `WF_FOLDS` (12) months before the lockbox. Coinbase is left out because its fees leave nothing to tune.
+- **Shards.** The night's folds are split over several pods by strategy and exchange; the last pod to finish runs the scoring steps once and writes the night's run row.
 - **Budget and carry-over.** After `WF_BUDGET_S` (4.5 h) a run starts no new fold, records the run with `folds_left`, and the next night picks up where it stopped. A change that touches every fold's fingerprint (a new freqtrade version, new stress scenarios) puts every fold back in the queue, which takes several nights to drain.
 - **Stress scenarios.** Each tuned month is replayed with entries one candle late, each numeric parameter nudged 10% up and down, and fills checked on 1m candles. A strategy whose edge vanishes under any of these is fragile.
 - **Reading it.** Walk-forward efficiency is tuned return out of sample over tuned return in sample. Near 1, the tuning carries over; near 0 or below, the tuner fitted noise.
@@ -187,4 +189,6 @@ The `/confidence` page shows each strategy's gates and which ones it fails.
 | Analysis takes hours on a quiet night | Something changed every chunk's fingerprint: a strategy edit, a config or fee change, or a freqtrade bump |
 | The score is high but the strategy is not ready | Ready needs every gate. Time-based gates (minimum backtest length, the dry run floor of 30 days, a BTC fall and a stop) cannot pass early; the drift and dry run sequences pass once enough paper trades say so |
 | `folds_run` is 0 and the night's walk-forward or analysis never started | The pod is Pending. `kubectl -n freqtrade describe pod` says `Insufficient cpu` when the job requests more than razer-laptop has free (it offers pods 4 CPUs); TraderLabPodUnschedulable fires after 30 minutes. The fix and the row for it are in home-config `apps/freqtrade/README.md` |
+| The night has `walkforward_shard` rows but no `walkforward` row | A shard pod was killed (OOM, deadline) before it recorded itself, so no shard was last. `kubectl -n freqtrade get pods -l app=freqtrade-walkforward` shows which index failed; its folds run the next night |
+| A walk-forward pod exits at once, its log ending in a `snapshot.py fetch` error | The snapshot is missing or stale: check the last `freqtrade-candles-publish` job's log, which prints the manifest digest and the files uploaded |
 | Every confidence row fails dry run and drift | Those gates need the strategy as a paper bot with enough closed trades for the sequences (a 0.3 SD edge takes about 130; drift rows written before migration 040 carry no gaps until the next analysis run); check it is in the roster |
