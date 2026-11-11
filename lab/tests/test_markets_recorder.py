@@ -73,6 +73,47 @@ def test_a_metadata_change_alone_updates_the_market_without_a_quote_row(conn, tm
     assert conn.execute("SELECT close_time FROM markets WHERE market_id = 'A'").fetchone()[0].day == 10
 
 
+def test_page_state_excludes_history_and_counts_new_multi_outcome_markets_once(conn, tmp_path, monkeypatch):
+    fs, root = pafs.LocalFileSystem(), str(tmp_path / "b")
+    history = [q(str(i), 0.1, 0.2) for i in range(100)]
+    recorder.sweep(FakeVenue([history]), VCFG, conn, fs, root, LOOKBACK, T0)
+    read_state = recorder.state
+    sizes = []
+
+    def measured_state(conn, venue, ids):
+        meta, book = read_state(conn, venue, ids)
+        sizes.append((len(meta), len(book)))
+        return meta, book
+
+    monkeypatch.setattr(recorder, "state", measured_state)
+    new = q("new", 0.3, 0.4)
+    s = recorder.sweep(FakeVenue([[q("0", 0.1, 0.2), new],
+                                 [q("1", 0.2, 0.3), dataclasses.replace(new, outcome="no")]]),
+                       VCFG, conn, fs, root, LOOKBACK, T0 + dt.timedelta(minutes=5))
+    assert sizes == [(1, 1), (1, 1)]
+    assert (s["seen"], s["new_markets"], s["changes"]) == (4, 1, 3)
+    assert conn.execute("SELECT count(*) FROM markets").fetchone() == (101,)
+    assert conn.execute("SELECT count(*) FROM outcomes WHERE market_id = 'new'").fetchone() == (2,)
+
+
+def test_failure_after_a_page_leaves_the_stored_state_and_objects_unchanged(conn, tmp_path):
+    import pytest
+
+    fs, root = pafs.LocalFileSystem(), str(tmp_path / "b")
+    recorder.sweep(FakeVenue([[q("A", 0.1, 0.2)]]), VCFG, conn, fs, root, LOOKBACK, T0)
+
+    class FailsAfterPage(FakeVenue):
+        def open_markets(self):
+            yield [q("A", 0.8, 0.9), q("B", 0.3, 0.4)]
+            raise RuntimeError("second page failed")
+
+    with pytest.raises(RuntimeError, match="second page failed"):
+        recorder.sweep(FailsAfterPage([]), VCFG, conn, fs, root, LOOKBACK, T0 + dt.timedelta(minutes=5))
+    assert len(objects(tmp_path)) == 1
+    assert conn.execute("SELECT market_id, bid FROM outcomes").fetchall() == [("A", 0.1)]
+    assert conn.execute("SELECT count(*) FROM market_sweeps").fetchone() == (1,)
+
+
 def test_resolutions_read_from_the_last_good_sweep_and_settle_the_market(conn, tmp_path):
     fs, root = pafs.LocalFileSystem(), str(tmp_path / "b")
     first = FakeVenue([[q("A", 0.1, 0.2)]])
