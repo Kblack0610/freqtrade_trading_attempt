@@ -10,7 +10,7 @@ permissions:
 
 env:
   # The ML image's base, pinned by digest like the Dockerfile's default (README, CI).
-  ML_BASE: freqtradeorg/freqtrade:2026.9_freqai@sha256:a98dc1ca26d47a3fb01b916dfdee97b087bf9924cd6ce325bebb35a2722af746
+  ML_BASE: freqtradeorg/freqtrade:2026.10_freqai@sha256:8ab9efee447bedb5b9e31eeaaca0b11252168d6d86c57404c3494d5b43f5538c
 
 jobs:
   # gitleaks over the commits this push or PR adds. History before 2026-11 holds freqtrade API

@@ -6,7 +6,7 @@
 from freqtrade import data
 from freqtrade.strategy import CategoricalParameter, DecimalParameter
 
-from numpy.lib import math
+import math
 from freqtrade.strategy import IStrategy
 from pandas import DataFrame
 

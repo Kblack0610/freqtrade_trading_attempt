@@ -13,7 +13,7 @@ Supertrend strategy:
 """
 
 import logging
-from numpy.lib import math
+import math
 from freqtrade.strategy import IStrategy, IntParameter
 from pandas import DataFrame
 import talib.abstract as ta

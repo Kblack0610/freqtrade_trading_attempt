@@ -1,9 +1,9 @@
 # The trader image: the pinned Freqtrade release plus this repo, so the bots, the jobs
 # and the site all run one artifact. home-config pins it by digest.
 # The base is pinned by digest, so a re-pushed tag cannot change what a cached backtest ran on (lab/reproduce.py).
-# FREQTRADE_IMAGE=freqtradeorg/freqtrade:2026.9_freqai@sha256:... builds the ML image (trader-ml) for user_data/strategies/ml;
+# FREQTRADE_IMAGE=freqtradeorg/freqtrade:2026.10_freqai@sha256:... builds the ML image (trader-ml) for user_data/strategies/ml;
 # the bots never run on it. CI passes that ref (.github/workflows/image.yml, ML_BASE).
-ARG FREQTRADE_IMAGE=freqtradeorg/freqtrade:2026.9@sha256:989aff5636d8f0213ed44fe334c3314a194a51c0c755d16866960247aafd2eae
+ARG FREQTRADE_IMAGE=freqtradeorg/freqtrade:2026.10@sha256:0cc4b6dc9b16e0516d27efae1765e925da7d6aea5c8f3c3825930ffe3098d7c7
 FROM ${FREQTRADE_IMAGE}
 
 COPY lab/requirements.txt /tmp/lab-requirements.txt
