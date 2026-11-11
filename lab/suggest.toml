@@ -110,11 +110,17 @@ parameter_nudge_fraction = 0.10
 detail_timeframe = "1m"
 # Positive out of sample on this many venues, so an edge is not one venue's fee or data.
 min_venues_agreeing = 2
-# Dry run against backtest: enough matched trades, and the mean gap inside the expectancy interval's half width.
-min_drift_trades = 20
-# A dry run tests behaviour, not edge: this long, this many trades, through a BTC fall this deep, with real stops.
-min_live_days = 90
-min_live_trades = 60
+# Anytime-valid paper gates (docs/anytime-gates.md, option a): confidence sequences read after every closed trade, so
+# the nightly read costs no false passes. This is the league-wide false pass rate; each live bot's sequences get
+# alpha / (bots live now), Bonferroni. Fixed before any paper result is read; no result moves it.
+anytime_alpha = 0.05
+# Drift passes when its gap sequence sits inside the expectancy interval's half width; the gap per trade is clipped
+# to +- this (a gap beyond 10 points is a mismatched exit, not a fill difference). Dry run passes when the paper expectancy sequence's low end is above zero; a trade's return is clipped
+# to these bounds (the widest stop is -0.30).
+drift_bound = 0.10
+live_return_bounds = [-0.30, 0.30]
+# The behaviour a backtest cannot give stays as a floor: this long, through a BTC fall this deep, with a real stop.
+min_live_days = 30
 min_live_btc_drop = 0.10
 min_live_stopouts = 1
 # Retire on decay, apart from the hard stop: a CUSUM over live trades against the out-of-sample low end alarms at
