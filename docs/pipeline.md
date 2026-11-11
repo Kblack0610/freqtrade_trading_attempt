@@ -80,7 +80,7 @@ A backtest of a strategy as written says nothing about tuning it, and hyperopt (
 - **How the tuner runs.** A strategy that declares its own parameters gets `WF_EPOCHS` (150) tries; one that declares none only has ROI and stoploss to tune, so it gets `WF_EPOCHS_ROI` (60). Hyperopt stops after `WF_EARLY_STOP` (40) tries with no better result. Each fold row keeps its hyperopt and backtest seconds apart (`hyperopt_s`, `backtest_s`), so the expensive step is measured.
 - **Sampler A/B.** Each fold uses one of `WF_SAMPLERS` (NSGA-III, freqtrade's default, or TPE), picked from its seed, so every strategy has months in both arms. The run report's `arms` gives, per arm, the folds, mean hyperopt seconds, epochs run and the out-of-sample uplift (tuned minus as-written profit per trade). Pick the winner on that uplift, never on the in-sample score, then set `WF_SAMPLERS` to it alone. Both arms' tuned settings count in the trial register.
 - **Stress scenarios.** Each tuned month is replayed with entries one candle late, each numeric parameter nudged 10% up and down, and fills checked on 1m candles. A strategy whose edge vanishes under any of these is fragile.
-- **Reading it.** Walk-forward efficiency is tuned return out of sample over tuned return in sample. Near 1, the tuning carries over; near 0 or below, the tuner fitted noise.
+- **Reading it.** Walk-forward efficiency is the tuned return per day out of sample over the same in sample. Near 1, the tuning carries over; near 0 or below, the tuner fitted noise.
 
 Reference: [Walk-forward](../README.md#walk-forward), [Stress gates](../README.md#stress-gates).
 
@@ -95,38 +95,41 @@ At the end of the analysis the derived tables are rebuilt from everything stored
 - **Suggestions** (`lab/suggest.py`): promote to the paper league, watch, demote, retire, fix or retune, each showing every gate it was held to. Promote decides who enters the paper league; it is the looser bar.
 - **Confidence** (`lab/confidence.py`): a score from 0 to 100, the chance that the true profit per trade after fees is above zero, from the tuned out-of-sample trades, pulled toward the average of every strategy tried. No score exists until at least 20 strategies have 30 out-of-sample trades each.
 - **Ready** means the score is at least 90 and every gate passes. It earns a small capped experiment and nothing more.
-- **The trial register.** `trials` counts every strategy, exchange, overlay, tuned setting and mixture ever tried, and never forgets one. The more things are tried, the higher the bar for all of them, because more tries make a lucky winner more likely.
+- **The trial register.** `trials` counts every strategy, exchange, overlay, tuned setting, stress scenario, volatility-target variant and mixture ever tried, plus each strategy that failed to load, and never forgets one (`REGISTER` in `lab/confidence.py`, `lab/mixtures.py`, `lab/vol_target.py`). The more things are tried, the higher the bar for all of them, because more tries make a lucky winner more likely.
 - **The lockbox.** Months from `[lockbox] start` (2026-05-01) on are kept out of tuning and scoring. When a strategy clears everything else, a PR moves the date and it gets one look at those months.
 - **Book and mixtures** (`lab/book.py`, `lab/mixtures.py`): what a scored strategy might return over 1 and 5 years next to holding BTC, and portfolios of several strategies fitted on earlier months and tested on the next.
 
-The confidence gates, from `lab/suggest.toml` `[confidence]`, and what each one waits on:
+The confidence gates and what each one waits on. The thresholds live in `lab/suggest.toml` `[confidence]` and nowhere else; every confidence row shows the value each gate was held to.
 
-| Gate | Needs | Waits on |
+| Gate | Tests | Waits on |
 |---|---|---|
-| bias | lookahead and recursive clean | compute (nightly) |
-| costs | per-trade fee matches the venue's real fee | compute |
-| out-of-sample trades | at least 250 tuned out-of-sample trades | more walk-forward months, so time |
-| expectancy interval low | 95% interval of profit per trade above zero | trades, so time |
-| deflated Sharpe | at least 0.95 against the whole trial register | data length, and fewer trials |
-| overfit probability | at most 0.25 on the venue | data length |
-| minimum backtest length | out-of-sample years of at least 2 ln(N) / Sharpe^2, N the trial count | time: with about 1,100 trials, a Sharpe of 1 needs about 14 years, 2 needs about 3.5, 3 needs about 1.6 |
-| months positive | 70% of at least 6 out-of-sample months | months, so time |
-| regime spread | profitable across BTC up, down and flat climates | the market visiting each climate |
-| excess over hold | beats holding BTC at the low end | data |
-| worst open loss | no trade deeper than 25% against entry | compute |
-| cost stress | still positive with half the gross edge and 0.1 to 0.4% extra cost per round trip | compute |
-| stress scenarios | survives late entry, nudged parameters, 1m fills | compute |
-| venues agreeing | positive on at least 2 exchanges | compute and data |
-| drift | the gap sequence (paper minus backtest, per matched trade) sits inside the expectancy interval half width, anytime-valid at alpha 0.05 split over the live bots; fails early when it lies outside | paper bot running, so time |
-| dry run | the paper expectancy sequence low end above zero (anytime-valid, [design](anytime-gates.md)), after 30 days, through a BTC fall of 10% or more, with at least one real stop; fails early when its high end drops below zero | paper trades, and the market for the fall |
+| bias | lookahead-analysis and recursive-analysis are clean | compute (nightly) |
+| costs | the per-trade fee paid matches the venue's real fee | compute |
+| out-of-sample trades | enough tuned out-of-sample trades | more walk-forward months, so time |
+| expectancy interval low | the interval on profit per trade sits above zero | trades, so time |
+| deflated Sharpe | the Sharpe deflated against the whole trial register | data length, and fewer trials |
+| overfit probability | the probability of backtest overfitting (CSCV) on the venue | data length |
+| minimum backtest length | out-of-sample years of at least 2 ln(N) / Sharpe^2, N the trial count | time: with 1,000 trials a Sharpe of 1 needs about 14 years, 2 about 3.5, 3 about 1.5 |
+| months positive | enough out-of-sample months, and a share of them positive | months, so time |
+| regime spread | across BTC up, down and flat, each bucket with enough days: at most one bucket negative, and no bucket earning most of the profit | the market visiting each climate |
+| excess over hold, low | beats holding the same share of BTC at the low end | data |
+| worst open loss | no trade deeper against its entry than the cap | compute |
+| cost stress | still positive with only part of the gross edge | compute |
+| slippage sweep | the interval low stays above zero at each extra round-trip cost | compute |
+| entry delay, parameter nudges, timeframe detail | each tuned month survives entries one candle late, every numeric parameter nudged up and down, and fills checked on 1m candles | compute |
+| trades reordered, worst fall | the worst drawdown over shuffled trade orders stays inside the book's hard stop | compute |
+| without its best pair | still positive with its best pair removed | compute |
+| venues agreeing | positive on enough exchanges | compute and data |
+| drift | the gap sequence (paper minus backtest, per matched trade) sits inside the expectancy interval half width, anytime-valid ([design](anytime-gates.md)); fails early when it lies outside | paper bot running, so time |
+| dry run | the paper expectancy sequence low end above zero, anytime-valid, after a minimum of days, through a BTC fall, with at least one real stop; fails early when its high end drops below zero | paper trades, and the market for the fall |
 | not decayed | the decay test has not fired on paper or live trades | time |
-| score | at least 90 | the above |
+| score | the confidence score clears the ready bar | the above |
 
 Reference: [Suggestions](../README.md#suggestions), [Confidence](../README.md#confidence), [Book](../README.md#book).
 
 ## Step 6: the research loop and sync
 
-`lab/loop.py`, the last step of the analysis, compares tonight's passing strategies, promote suggestions and retune fits with last night's and writes what changed as `research_events`. At 10:00 UTC `ci/research_sync.py` on the fleet machine files one board row a night for the changes and opens a home-config roster PR for each promotion. A person merges it; nothing promotes itself. Reference: [Nightly research loop](../README.md#nightly-research-loop).
+`lab/loop.py`, the last step of the analysis, compares tonight's climate scorecard cells whose low end is above zero, promote suggestions and retune fits with last night's and writes what changed as `research_events`. At 10:00 UTC `ci/research_sync.py` on the fleet machine files one board row a night for the changes and opens a home-config roster PR for each promotion. A person merges it; nothing promotes itself. Reference: [Nightly research loop](../README.md#nightly-research-loop).
 
 ## Step 7: the paper league
 
@@ -134,7 +137,7 @@ Each row of home-config `apps/freqtrade/roster.tsv` is one paper bot: a strategy
 
 - `freqtrade-ingest` copies every bot's trades into Postgres every 5 minutes.
 - Drift compares each bot's trades with a backtest of the same days. A low match rate means the backtest does not model what the bot does; a steady negative gap means fills or fees the backtest leaves out.
-- `lab/watcher.py` pauses a bot that falls past its hard stop.
+- `lab/watcher.py` marks a bot breached when its equity falls past the day-loss limit. This is Stage 0, so a breach only raises an alert; only a drill stops a bot's entries.
 - The decay test (a CUSUM over closed trades) says when trades stop looking like what walk-forward measured, and suggests retiring the strategy.
 
 Reference: [Cohorts](../README.md#cohorts), [Watcher](../README.md#watcher).
@@ -183,6 +186,18 @@ for kind in ('analysis', 'walkforward'):
 
 The `/confidence` page shows each strategy's gates and which ones it fails.
 
+## How the pipeline is tested
+
+The tests check that each stage gives the right answer on inputs whose answer is known:
+
+- **Engine.** `test_golden.py` runs real freqtrade backtests on fixture candles: the same backtest twice gives the same trades byte for byte, one changed candle changes its digest and the trades, an overlay reaches freqtrade, and a walk-forward fold runs real hyperopt with its sampler.
+- **Bias.** Every strategy gets lookahead-analysis and recursive-analysis each night, and the bias gate fails one that is not clean. `test_patterns.py` plants a rule that reads the next close and checks the prefix test catches it. `test_analyze.py` checks the planted `PlantedLookahead` fixture is flagged, but it skips unless backfilled binanceus candles are present, so CI does not run it.
+- **Cache.** The nightly reproduce check reruns cached chunks and a fold; `test_reproduce.py` checks a changed result counts as a mismatch and a failed rerun fails the run.
+- **Scoring.** `test_confidence.py` has the known answers: pure noise clears the score and the interval under 5% of the time, a market lifting every strategy does not lift the score, and an edge planted among noise strategies scores ready.
+- **Paper.** The drift and dry run gates are anytime-valid sequences ([design](anytime-gates.md)), so reading them every night does not inflate their error rate.
+
+Not covered yet: known-answer cases for fills, stops and fees inside the engine; a check that each fold's hyperopt window ends before its test month; hyperopt determinism under a fixed seed; exact trial-register counts; and a run of null and planted-edge strategies through the whole pipeline, which would give each gate's false-positive rate and power.
+
 ## Troubleshooting
 
 | Symptom | Cause and action |
@@ -191,7 +206,7 @@ The `/confidence` page shows each strategy's gates and which ones it fails.
 | `folds_left` stays high for days | A fingerprint change requeued every fold. It drains at roughly one budget per night; check `folds_run` is not zero and the job is not hitting its deadline |
 | Analysis takes hours on a quiet night | Something changed every chunk's fingerprint: a strategy edit, a config or fee change, or a freqtrade bump |
 | The score is high but the strategy is not ready | Ready needs every gate. Time-based gates (minimum backtest length, the dry run floor of 30 days, a BTC fall and a stop) cannot pass early; the drift and dry run sequences pass once enough paper trades say so |
-| `folds_run` is 0 and the night's walk-forward or analysis never started | The pod is Pending. `kubectl -n freqtrade describe pod` says `Insufficient cpu` when the job requests more than razer-laptop has free (it offers pods 4 CPUs); TraderLabPodUnschedulable fires after 30 minutes. The fix and the row for it are in home-config `apps/freqtrade/README.md` |
+| `folds_run` is 0 and the night's walk-forward or analysis never started | The pod is Pending. `kubectl -n freqtrade describe pod` says `Insufficient cpu` when the job requests more than its nodes have free (the analysis is pinned to razer-laptop by its volume; the walk-forward shards run on any node but hp-victus); TraderLabPodUnschedulable fires after 30 minutes and pages the fleet. The fix and the row for it are in home-config `apps/freqtrade/README.md` |
 | The night has `walkforward_shard` rows but no `walkforward` row | A shard pod was killed (OOM, deadline) before it recorded itself, so no shard was last. `kubectl -n freqtrade get pods -l app=freqtrade-walkforward` shows which index failed; its folds run the next night |
 | A walk-forward pod exits at once, its log ending in a `snapshot.py fetch` error | The snapshot is missing or stale: check the last `freqtrade-candles-publish` job's log, which prints the manifest digest and the files uploaded |
 | Every confidence row fails dry run and drift | Those gates need the strategy as a paper bot with enough closed trades for the sequences (a 0.3 SD edge takes about 130; drift rows written before migration 040 carry no gaps until the next analysis run); check it is in the roster |
