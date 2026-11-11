@@ -115,7 +115,7 @@ The confidence gates, from `lab/suggest.toml` `[confidence]`, and what each one 
 | stress scenarios | survives late entry, nudged parameters, 1m fills | compute |
 | venues agreeing | positive on at least 2 exchanges | compute and data |
 | drift | at least 20 paper trades matching the backtest | paper bot running, so time |
-| dry run | 90 days, 60 trades, through a BTC fall of 10% or more, at least one real stop | time and the market |
+| dry run | 90 days, 60 trades, through a BTC fall of 10% or more, at least one real stop ([anytime-valid replacement proposed](anytime-gates.md)) | time and the market |
 | not decayed | the decay test has not fired on paper or live trades | time |
 | score | at least 90 | the above |
 
