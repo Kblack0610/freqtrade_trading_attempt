@@ -176,7 +176,7 @@ def test_drift_matches_entries_within_a_candle():
                        "profit_abs": [4.5, 3.0, 6.0]})
     d = metrics.drift(live, bt, pd.Timedelta("5m"))
     assert (d["live_entries"], d["bt_entries"], d["matched"], d["live_closed"], d["bt_closed"]) == (3, 3, 2, 2, 2)
-    assert d["gap_trades"] == 1 and math.isclose(d["gap"], -0.005)
+    assert d["gap_trades"] == 1 and math.isclose(d["gap"], -0.005) and d["gaps"] == pytest.approx([-0.005])
     assert math.isclose(d["live_expectancy"], -0.005) and math.isclose(d["bt_profit"], 10.5)
     assert metrics.drift(live.iloc[0:0], bt, pd.Timedelta("5m"))["matched"] == 0
 
@@ -227,3 +227,32 @@ def test_diff_ci_straddles_zero_for_one_sample_and_clears_it_for_a_shifted_one()
     lo, _ = metrics.diff_ci(x + 0.01, x, 7)
     assert lo > 0
     assert metrics.diff_ci(x, np.array([1.0]), 7) == (None, None)
+
+
+def test_confidence_sequence_keeps_its_level_under_optional_stopping():
+    """The negative control: a fixed-sample t test read after every trade rejects a true mean far above alpha; the
+    sequence, read just as often, excludes the true mean in at most alpha of runs."""
+    from scipy.stats import t as student
+    rng, alpha, n, runs = np.random.default_rng(7), 0.1, 150, 300
+    seq_miss = t_miss = 0
+    for _ in range(runs):
+        x = np.clip(rng.normal(0.01, 0.04, n), -0.3, 0.3)
+        lo, hi = metrics.confidence_sequence(x, -0.3, 0.3, alpha, grid=100)
+        seq_miss += bool(((lo > 0.01) | (hi < 0.01)).any())
+        k = np.arange(2, n + 1)
+        mean = np.cumsum(x)[1:] / k
+        sd = np.array([x[:i].std(ddof=1) for i in k])
+        half = student.ppf(1 - alpha / 2, k - 1) * sd / np.sqrt(k)
+        t_miss += bool(((mean - half > 0.01) | (mean + half < 0.01)).any())
+    assert seq_miss / runs <= alpha
+    assert t_miss / runs > 2 * alpha
+
+
+def test_confidence_sequence_separates_a_real_edge_and_never_widens():
+    x = np.random.default_rng(1).normal(0.03, 0.02, 200)
+    lo, hi = metrics.confidence_sequence(x, -0.3, 0.3, 0.05, grid=200)
+    assert lo[-1] > 0 and lo[-1] <= x.mean() <= hi[-1]
+    assert (np.diff(lo) >= 0).all() and (np.diff(hi) <= 0).all()
+    assert metrics.confidence_sequence([], -1, 1, 0.05)[0].size == 0
+    bad_lo, bad_hi = metrics.confidence_sequence(np.full(100, -0.05), -0.3, 0.3, 0.05, grid=200)
+    assert bad_hi[-1] < 0

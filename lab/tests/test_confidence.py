@@ -44,9 +44,9 @@ def good_facts():
     return {"oos": {PAIR: oos}, "strategies": {"Good": {"lookahead": False, "recursive": False}},
             "series": {PAIR: {"windows": {"all": w}}}, "walkforward": wf, "daily": {PAIR: daily}, "close": close,
             "trend": metrics.regimes(close, C["trend_band"], 90).set_index("day")["trend"],
-            "overfit": {("binanceus", "all"): 0.1}, "pairs": {PAIR: [(100, 2.0), (100, 1.5), (100, 1.0)]}, "drift": {PAIR: {"gap": 0.0005, "trades": 40}},
-            "live": {PAIR: {"since": dt.datetime(2025, 1, 1, tzinfo=dt.timezone.utc), "closed": 80, "stopouts": 3}},
-            "live_returns": {PAIR: list(np.random.default_rng(2).normal(0.02, 0.03, 80))}, "roster": {PAIR: ["bot-good"]},
+            "overfit": {("binanceus", "all"): 0.1}, "pairs": {PAIR: [(100, 2.0), (100, 1.5), (100, 1.0)]}, "drift": {PAIR: {"gap": 0.0005, "trades": 400, "gaps": list(np.random.default_rng(4).normal(0.0005, 0.002, 400))}},
+            "live": {PAIR: {"since": dt.datetime(2025, 1, 1, tzinfo=dt.timezone.utc), "closed": 300, "stopouts": 3}},
+            "live_returns": {PAIR: list(np.random.default_rng(2).normal(0.02, 0.03, 300))}, "roster": {PAIR: ["bot-good"]},
             "now": NOW}
 
 
@@ -107,11 +107,11 @@ def spoil(facts, name):
     elif name == "worst open loss":
         w["worst_open"] = -0.75
     elif name == "drift":
-        facts["drift"][PAIR]["gap"] = -0.05
+        facts["drift"][PAIR]["gaps"] = [-0.05] * 400
     elif name == "minimum backtest length":
         facts["oos"][PAIR] = pd.Series(np.random.default_rng(3).normal(0.0003, 0.01, 1500), index=facts["oos"][PAIR].index)
     elif name == "dry run":
-        facts["live"][PAIR]["closed"] = 59
+        facts["live"][PAIR]["since"] = NOW - dt.timedelta(days=10)
     elif name == "not decayed":
         facts["live_returns"][PAIR] = list(np.random.default_rng(3).normal(-0.02, 0.03, 80))
     return facts
@@ -121,7 +121,23 @@ def test_one_bad_gate_is_named_and_blocks_ready_whatever_the_score():
     for name in ("bias", "costs", "overfit probability", "minimum backtest length", "excess over hold, low", "worst open loss", "drift", "dry run",
                  "not decayed"):
         row = result(spoil(good_facts(), name))
-        assert failed(row) == [name] and not row["ready"] and row["score"] >= C["ready_score"]
+        # losing live trades fail the dry run's expectancy sequence as well as the decay test
+        assert failed(row) == (["dry run", name] if name == "not decayed" else [name]) and not row["ready"] and row["score"] >= C["ready_score"]
+
+
+def test_a_broken_paper_bot_fails_the_dry_run_early_and_says_so():
+    facts = good_facts()
+    facts["live_returns"][PAIR] = [-0.05] * 120
+    row = result(facts)
+    value = next(g["value"] for g in row["gates"].obj if g["gate"] == "dry run")
+    assert "dry run" in failed(row) and "failed early" in value
+
+
+def test_alpha_is_split_over_the_live_bots():
+    facts = good_facts()
+    assert confidence.league_alpha(facts, C) == C["anytime_alpha"]
+    facts["live"].update({("B", "okx"): {}, ("C", "okx"): {}})
+    assert confidence.league_alpha(facts, C) == C["anytime_alpha"] / 3
 
 
 def test_a_bull_only_strategy_fails_the_regime_spread():
