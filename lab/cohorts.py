@@ -33,6 +33,17 @@ def load(path: Path | None = None) -> dict:
     return tomllib.loads((path or PATH).read_text())
 
 
+def prefixes(cfgs: dict) -> dict[str, str]:
+    """Pure: each cohort's roster-name prefix, its first three letters. Raises ValueError when two cohorts share one:
+    their rows would be told apart only by the cohort column, and a name already in the roster blocks the other."""
+    seen: dict[str, str] = {}
+    for name in cfgs:
+        other = seen.setdefault(name[:3], name)
+        if other != name:
+            raise ValueError(f"cohorts {other!r} and {name!r} share the roster prefix {name[:3]!r}: rename one")
+    return {name: name[:3] for name in cfgs}
+
+
 def score_rows(conn, window: str, venues: list[str], min_trades: int) -> list[tuple]:
     """(strategy, exchange, overlay, sharpe_lo) for every lookahead-clean, loadable strategy's window, overlay '' for
     the strategy as it stands."""
@@ -118,11 +129,16 @@ def main(argv: list[str]) -> int:
     if len(argv) != 2 or argv[0] != "pick":
         print("usage: python -m lab.cohorts pick <cohort>", file=sys.stderr)
         return 2
-    cfg = load().get(argv[1])
-    if cfg is None:
+    cfgs = load()
+    if argv[1] not in cfgs:
         print(f"no cohort {argv[1]!r} in {PATH}", file=sys.stderr)
         return 2
-    cfg = {"prefix": argv[1][:3], "cohort": argv[1], **cfg}
+    try:
+        prefix = prefixes(cfgs)[argv[1]]
+    except ValueError as e:
+        print(e, file=sys.stderr)
+        return 1
+    cfg = {"prefix": prefix, "cohort": argv[1], **cfgs[argv[1]]}
     with connect() as conn:
         if cfg.get("kind") == "all":
             try:

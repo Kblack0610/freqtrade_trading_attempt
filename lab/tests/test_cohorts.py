@@ -168,3 +168,10 @@ def test_the_roster_pr_skips_a_row_a_bot_already_runs():
              "str-binanceus-s2 binanceus S2 strategies base"]
     roster, sts = cohort_roster.seed(ROSTER, STS, "strategies", lines)
     assert roster == ROSTER + "\n".join(lines[1:]) + "\n" and "replicas: 4  # rows" in sts
+
+
+def test_two_cohorts_sharing_a_roster_prefix_are_refused_and_the_shipped_ones_are_distinct():
+    with pytest.raises(ValueError, match="'strategies' and 'strategic' share the roster prefix 'str'"):
+        cohorts.prefixes({"strategies": {}, "strategic": {}})
+    shipped = cohorts.load()
+    assert cohorts.prefixes(shipped) == {name: name[:3] for name in shipped}
