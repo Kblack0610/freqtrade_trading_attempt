@@ -419,7 +419,8 @@ def test_robustness_and_trials_survive_database_roundtrip(conn):
     scenarios = {name: {'ok': False, 'error': 'missing candles', 'returns': []}
                  for name in robustness.plan(C, params)}
     task = {'name': 'S', 'exchange': 'binanceus', 'fold': (dt.date(2023, 1, 1), dt.date(2023, 7, 1), dt.date(2023, 8, 1)),
-            'key': 'k', 'candles': 'c', 'seed': 1, 'attempts': 0}
+            'key': 'k', 'candles': 'c', 'seed': 1, 'attempts': 0,
+            'tune': {'spaces': 'default', 'epochs': 150, 'early_stop': 40, 'sampler': 'NSGAIIISampler'}}
     with patch.object(analyze, 'USER_DATA', REPO / 'user_data'):
         walkforward.store(conn, task, {'ok': True, 'params': params, 'robustness': scenarios})
     [f] = confidence.load(conn, CFG)['walkforward'][('S', 'binanceus')]

@@ -79,7 +79,8 @@ def fold_sample(conn, rng: random.Random, n: int, ft_version: str) -> list[dict]
             break
         fold = (train_start, fold_start, test_end)
         candles = walkforward.fold_candles(ex, tf, fold, days)
-        if walkforward.fold_key(file_hash, ex, fold, ft_version, candles) == key:
+        tune = walkforward.tuning(file, metrics.seed_of(strategy, ex, fold_start))
+        if walkforward.fold_key(file_hash, ex, fold, ft_version, candles, tune) == key:
             out.append({"strategy": strategy, "exchange": ex, "fold": fold, "file": file,
                         "stored": fold_result(params, is_trades, base_trades, base_returns, tuned_trades, tuned_returns,
                                               {k: v for k, v in robustness.items() if k != "_settings"} if robustness is not None else None)})
