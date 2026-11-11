@@ -74,7 +74,7 @@ Reference: [The analysis](../README.md#the-analysis).
 A backtest of a strategy as written says nothing about tuning it, and hyperopt (freqtrade's parameter tuner) always looks great on the data it tuned on. Walk-forward measures how much of that gain survives on data the tuner never saw.
 
 - **A fold.** Take one whole month. Tune the strategy on the 180 days before it, stopping 7 days short so no trade spans the gap (the embargo). Then backtest the month as written and with the tuned settings. The tuned result on that month is out of sample: the tuner never saw it.
-- **How many.** Up to `WF_LIMIT` candidate strategies, on each walk-forward exchange (binanceus, okx, kucoin), for each of the last `WF_FOLDS` (12) months before the lockbox. Coinbase is left out because its fees leave nothing to tune.
+- **How many.** Up to `WF_LIMIT` candidate strategies, on each walk-forward exchange (binanceus, okx, kucoin), for every whole month before the lockbox back to the first `WF_TRAIN_DAYS` (180) days of that venue's candles, about 60 to 80 test months a strategy where the candles start in 2019. The newest months run first, so a backlog fills backwards over nights. More test months add data and no new candidates, so the trial register count stays the same, and the climate scorecard (`lab/scorecard.py`) still reports the test days per BTC regime, so an older bull or bear market shows apart instead of blending into one number. Coinbase is left out because its fees leave nothing to tune.
 - **Shards.** The night's folds are split over several pods by strategy and exchange; the last pod to finish runs the scoring steps once and writes the night's run row.
 - **Budget and carry-over.** After `WF_BUDGET_S` (4.5 h) a run starts no new fold, records the run with `folds_left`, and the next night picks up where it stopped. A change that touches every fold's fingerprint (a new freqtrade version, new stress scenarios) puts every fold back in the queue, which takes several nights to drain.
 - **How the tuner runs.** A strategy that declares its own parameters gets `WF_EPOCHS` (150) tries; one that declares none only has ROI and stoploss to tune, so it gets `WF_EPOCHS_ROI` (60). Hyperopt stops after `WF_EARLY_STOP` (40) tries with no better result. Each fold row keeps its hyperopt and backtest seconds apart (`hyperopt_s`, `backtest_s`), so the expensive step is measured.
@@ -145,7 +145,7 @@ Reference: [Cohorts](../README.md#cohorts), [Watcher](../README.md#watcher).
 |---|---|
 | Minutes | Drop the file in `user_data/strategies/`, add its class to `lab/families.toml`, check it loads (see [Adding a strategy](../README.md#adding-a-strategy)), merge. The image bump deploys it |
 | The next night | Analysis backtests its whole history on every exchange and runs the bias checks. It appears on the leaderboard |
-| When chosen | It becomes a walk-forward candidate only when it is in the league, suggested, or among the best on a venue. Then each exchange needs its 12 months of folds, spread over nights by the budget |
+| When chosen | It becomes a walk-forward candidate only when it is in the league, suggested, or among the best on a venue. Then each exchange needs a fold for every month since its first training span, spread over nights by the budget, newest first |
 | Weeks to months | It needs 250 tuned out-of-sample trades, 6 or more months mostly positive, and enough out-of-sample years for its Sharpe |
 | 30 days or more after it starts paper trading | The dry-run gate, and only if BTC fell 10% or more in that time and a stop fired |
 
