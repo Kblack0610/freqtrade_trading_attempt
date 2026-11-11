@@ -6,6 +6,7 @@ The repo README is the reference for layout, the analysis and the site. These pa
 - [Architecture](architecture.md): components, data flow and storage boundaries.
 - [Standards](standards.md): contributor checks and their scope.
 - [Deployment](operations/deploy.md): image promotion to home-k3s, verification and rollback.
+- [Pipeline](pipeline.md): the research pipeline step by step in plain words: price data, nightly analysis, walk-forward, scoring, the paper league, where the time goes and troubleshooting.
 
 ## Live
 
