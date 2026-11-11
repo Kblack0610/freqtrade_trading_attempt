@@ -38,6 +38,7 @@ A backtest is only as good as its candles. A candle is one time bar of a pair: o
 
 - `lab/backfill.py` keeps, per exchange, pair and timeframe (1m to 1d), every candle the exchange will give, prepended back to a floor per timeframe, and writes what it holds to `data_coverage`.
 - Kraken's past comes from its published archive and its present from the newest candles each hour, because Kraken's API only serves recent candles.
+- OKX 1m history comes from OKX's monthly files, minutes instead of the day its API would take. Coinbase serves no 4h, so 4h is built from its 1h.
 - **The coverage guard.** An exchange and timeframe joins the analysis only when every pair on its whitelist is filled back to its oldest candle. A half-filled exchange would quietly compare strategies on different histories. Until then the run's `skipped` list says "not fully backfilled".
 - **The pair list is survivor-only.** Whitelists are today's most traded pairs, so coins that died are missing from history. `/book` flags this per venue.
 
