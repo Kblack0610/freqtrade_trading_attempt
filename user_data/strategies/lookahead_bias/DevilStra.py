@@ -22,7 +22,7 @@ import talib.abstract as ta
 import random
 from freqtrade.strategy import CategoricalParameter, IStrategy
 
-from numpy.lib import math
+import math
 from pandas import DataFrame
 
 # ########################## SETTINGS ##############################
