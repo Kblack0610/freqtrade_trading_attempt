@@ -124,9 +124,7 @@ def backfill_date(v, job: str, conn, fs, root: str, d: dt.date, floor: float, pe
         fs.create_dir(key.rsplit("/", 1)[0], recursive=True)
     todo, rows = spans(conn, v.name, floor, d), 0
     with pq.ParquetWriter(key, SCHEMAS[job], filesystem=fs, compression="zstd") as w:
-        for i, s in enumerate(todo):
-            if i:
-                v.api.sleep(v.api.gap)
+        for s in todo:
             for recs in ([v.bars(s, period_s)] if job == "bars" else v.trades(s)):
                 if recs:
                     w.write_table(table(v.name, recs, SCHEMAS[job]))

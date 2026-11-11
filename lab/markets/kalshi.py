@@ -2,8 +2,8 @@
 
 `/markets` pages by cursor, up to 1000 a page; combos (multivariate events) are left out with mve_filter=exclude.
 Prices come as dollar strings and sizes as fixed-point strings (docs/markets.md, Kalshi). An empty side shows as
-a bid of 0 or an ask of 1, and is stored as the venue sends it. Pages are spaced by `page_gap_s` from
-lab/markets.toml; markets/api.py backs off on a 429.
+a bid of 0 or an ask of 1, and is stored as the venue sends it. Requests are paced and backed off by
+lab/markets/api.py from `page_gap_s` and `budget_rps` in lab/markets.toml.
 
 History (docs/markets.md, Kalshi): `/historical/cutoff` splits each record kind between the live endpoints and
 `/historical/*`; a record lives on exactly one side. A settled-market walk reads the live side, then the historical
@@ -80,7 +80,6 @@ class Kalshi:
             yield body.get(key) or [], dt.datetime.now(dt.timezone.utc), cursor
             if not cursor:
                 return
-            self.api.sleep(self.api.gap)
 
     def open_markets(self) -> Iterator[list[Quote]]:
         for markets, ts, _ in self._walk({"status": "open", "mve_filter": "exclude"}):
@@ -120,8 +119,6 @@ class Kalshi:
             body = self.api.get(path, {"start_ts": start, "end_ts": stop, "period_interval": period_s // 60})
             out += [bar(span.market_id, c, period_s) for c in body.get("candlesticks") or []]
             start = stop
-            if start < end:
-                self.api.sleep(self.api.gap)
         return out
 
     def trades(self, span: Span) -> Iterator[list[Trade]]:
