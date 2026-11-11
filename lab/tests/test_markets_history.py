@@ -218,7 +218,7 @@ def test_kalshi_bars_split_a_long_market_into_5000_candle_requests():
     s, slept = Session((200, "kalshi_cutoff.json"), (200, empty), (200, empty), (200, empty)), []
     Kalshi(kcfg(), s, sleep=slept.append).bars(span, 3600)
     windows = [(p["end_ts"] - p["start_ts"]) // 3600 for _, p in s.calls[1:]]
-    assert windows == [5000, 5000, 2000] and slept == [0.5, 0.5]
+    assert windows == [5000, 5000, 2000] and slept == [0.5, 0.5, 0.5]  # every request after the cutoff call
 
 
 def test_kalshi_trades_read_each_side_the_market_can_have_trades_on():

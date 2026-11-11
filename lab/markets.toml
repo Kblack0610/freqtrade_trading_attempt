@@ -28,8 +28,8 @@ bars_venues = ["kalshi", "polymarket_us", "polymarket"]
 trades_venues = ["kalshi"]
 
 [history.kalshi]
-# 0.5 s paces the recorder's list sweep; history makes one call a market, and 0.15 s keeps it with the recorder
-# under the Basic tier's 20 requests/s.
+# One call a market, so each job's own gap is shorter than the recorder's 0.5 s; what every Kalshi caller together
+# may send is [venues.kalshi] budget_rps, so jobs that overlap share it instead of adding up.
 page_gap_s = 0.15
 # Kalshi settles about 70k markets a day and 80% trade under 100 contracts: those never reach bars or trades.
 settled_min_volume = 100
@@ -61,6 +61,8 @@ base_url = "https://api.elections.kalshi.com/trade-api/v2"
 page_limit = 1000
 # An unpaced count of /markets drew 429s; 0.5 s between pages was clean (docs/markets.md, Rate limits).
 page_gap_s = 0.5
+# Requests a second across every process on our IP: 60% of the Basic tier's 20 (200 read tokens/s, 10 a request).
+budget_rps = 12
 retries = 6
 timeout_s = 30
 
@@ -72,6 +74,8 @@ base_url = "https://gateway.polymarket.us"
 # The list caps a page at 500. The public gateway allows 20 requests/s per IP (docs/markets.md, Polymarket US).
 page_limit = 500
 page_gap_s = 0.1
+# Across every process, 60% of the gateway's 20 a second.
+budget_rps = 12
 retries = 6
 timeout_s = 30
 
@@ -84,6 +88,8 @@ base_url = "https://gamma-api.polymarket.com"
 # /markets/keyset caps a page at 100; Gamma /markets allows 300 requests per 10 s.
 page_limit = 100
 page_gap_s = 0.1
+# Across every process, Gamma and the data API together: half of Gamma's 30 a second.
+budget_rps = 15
 retries = 6
 timeout_s = 30
 
@@ -92,8 +98,9 @@ title = "PredictIt"
 kind = "exchange"
 url = "https://www.predictit.org"
 base_url = "https://www.predictit.org/api"
-# One request a sweep; the snapshot refreshes about once a minute, so poll no faster.
+# One request a sweep; the snapshot refreshes about once a minute, so poll no faster. No published limit.
 page_gap_s = 1
+budget_rps = 1
 retries = 4
 timeout_s = 30
 
@@ -105,6 +112,8 @@ base_url = "https://api.manifold.markets"
 # search-markets caps a page at 1000; 500 requests/min per IP.
 page_limit = 1000
 page_gap_s = 0.2
+# Across every process, 60% of 500 a minute.
+budget_rps = 5
 retries = 6
 timeout_s = 60
 
@@ -119,6 +128,8 @@ base_url = "https://api.the-odds-api.com"
 sports = ["basketball_nba"]
 regions = "us"
 page_gap_s = 1
+# The plan limits credits, not rate; one request a second across every process.
+budget_rps = 1
 retries = 4
 timeout_s = 30
 
