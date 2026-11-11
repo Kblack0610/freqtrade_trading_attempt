@@ -1,6 +1,8 @@
 # Anytime-valid paper gates (proposed design)
 
-Status: proposed 2026-11-11. Ask K21YCW was answered "a" by the fleet judge the same day, and the human can override it. Nothing in `lab/` or `lab/suggest.toml` has changed yet: the build is its own queued item. This is phase 8 of the plan `magical-stargazing-owl`.
+Status: built 2026-11-11 (task tr-180) as option a. Ask K21YCW was answered "a" by the fleet judge the same day, and the human can override it. This is phase 8 of the plan `magical-stargazing-owl`.
+
+What differs from the design below: both sequences use the betting confidence sequence (`metrics.confidence_sequence`), not the empirical-Bernstein boundary for drift, so there is one method to test; the alpha split is Bonferroni over the bots live now; drift gaps are now stored per trade (`drift.gaps`, migration 040), so the "no recompute" line holds only for returns. Bounds (`drift_bound`, `live_return_bounds`) and alpha are in `[confidence]` of `lab/suggest.toml`; removed keys: `min_drift_trades`, `min_live_trades`.
 
 ## What it would replace
 
