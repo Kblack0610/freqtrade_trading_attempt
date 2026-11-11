@@ -426,3 +426,11 @@ def test_a_crashed_shard_is_recorded_and_the_run_still_finishes(wlab, monkeypatc
     assert wf.main(FakeRunner(), TODAY) == 1
     ok, raw = wlab.execute("SELECT ok, raw FROM runs WHERE kind = 'walkforward' AND name = 'crash'").fetchone()
     assert not ok and "RuntimeError: db gone" in raw["error"]
+
+
+def test_a_freqai_strategy_is_no_candidate(wlab):
+    wlab.execute("INSERT INTO strategies (name, file, file_hash, timeframe) VALUES "
+                 "('MLLightGBMBaseline', 'user_data/strategies/ml/MLLightGBMBaseline.py', 'h', '1h')")
+    wlab.execute("INSERT INTO strategy_windows (strategy, exchange, win, days, trades, expectancy_lo) "
+                 "VALUES ('MLLightGBMBaseline', 'binanceus', '365d', 365, 100, 0.05)")
+    assert "MLLightGBMBaseline" not in [c["name"] for c in wf.candidates(wlab)]

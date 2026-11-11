@@ -60,7 +60,7 @@ Status is `scanned` (in `user_data/strategies/`, backtested nightly, a counted t
 | Pairs, long leg | scanned | RatioRevert (new): buy a coin cheap against BTC. Unhedged, so it carries the market as well |
 | Candlestick and count patterns | scanned | PatternRecognition, TDSequential; `user_data/strategies/candles/`, 47 bullish TA-Lib patterns with a fixed exit |
 | Time based | scanned | HourBasedStrategy |
-| FreqAI ML | staged | `lab/families/ml/` LightGBM: needs the ML image and purged walk-forward folds (README, Staged families) |
+| FreqAI ML | scanned | `user_data/strategies/ml/` LightGBM, over the last `ML_DAYS` on the trader-ml image (a load failure on the plain one); no walk-forward or bias check yet (README, Staged families) |
 | Pairs, market neutral | blocked | the short leg needs margin or futures; `lab/league.py` runs spot only |
 | Funding carry and basis | blocked | long spot, short perpetual: needs a futures short. Funding is recorded (`funding_rates`, `lab/futures.py`), so carry can be measured offline |
 | Shorts on a trend or a bust | blocked | futures; research only in `lab/research/` (BustShort, DonchianLongShort, docs/short-bust.md) |
