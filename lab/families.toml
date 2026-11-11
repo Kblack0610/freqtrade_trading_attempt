@@ -13,6 +13,7 @@ breakout = "Buys a price pushing through a level."
 candlestick-pattern = "Enters on a candle or count pattern."
 chart-pattern = "Enters on numeric chart patterns: confirmed swing pivots or a flag breakout."
 time-based = "Enters by the clock."
+ml = "A FreqAI model, retrained on a rolling window, predicts the move; it enters on a confident prediction."
 grid = "Buys layers on a ladder under a range and sells each one a step higher."
 dca = "Averages down: a base order, then larger safety orders lower, one take profit on the average."
 relative-value = "Buys a coin cheap against another (its ratio to BTC), the long leg of a pair trade."
@@ -66,6 +67,7 @@ Freqtrade_backtest_validation_freqtrade1 = { family = "trend", inputs = ["ohlcv"
 Low_BB = { family = "mean-reversion", inputs = ["ohlcv"] }
 MACDStrategy = { family = "momentum", inputs = ["ohlcv"], note = "MACD over its signal while CCI is low: half momentum, half dip." }
 MACDStrategy_crossed = { family = "momentum", inputs = ["ohlcv"], note = "MACD crossing its signal while CCI is low: half momentum, half dip." }
+MLLightGBMBaseline = { family = "ml", inputs = ["ohlcv"], note = "LightGBM predicts the mean close of the next 24 hourly candles; long above 1%. Runs only on the trader-ml image." }
 MultiRSI = { family = "mean-reversion", inputs = ["ohlcv"] }
 Quickie = { family = "mean-reversion", inputs = ["ohlcv"] }
 ReinforcedAverageStrategy = { family = "trend", inputs = ["ohlcv"] }
