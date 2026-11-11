@@ -13,7 +13,12 @@
    many short compounding runs chained by their daily returns, not one run that compounds for years.
    Then setup overlays (lab/variants.toml): each strategy x exchange again under every overlay, the overlay's
    config in its cache key, up to [sweep] max_chunks a night, best 365-day Sharpe low end first.
-3. Bias: lookahead-analysis and recursive-analysis per strategy, rerun when its file hash changes.
+   A FreqAI strategy (a freqai.json beside its file) runs as-is only, over the last ML_DAYS from the first of that
+   month, with that file as its config and a model identifier per venue, chunk and file version, so FreqAI reuses
+   only models trained for that chunk (user_data/models/<identifier>). On an image without lightgbm (the plain
+   trader image) it is recorded with load_error NEEDS_ML and runs nothing.
+3. Bias: lookahead-analysis and recursive-analysis per strategy, rerun when its file hash changes. A FreqAI
+   strategy gets none yet: lookahead-analysis would retrain per signal, and which check stands in is open.
 4. Derived, rebuilt in one transaction from the stored trades: daily returns, metrics over 30d, 90d,
    180d, 365d and all (with bootstrap intervals and the deflated Sharpe across every strategy x
    exchange), Monte Carlo estimates, BTC regimes, and correlation with the strategies the league runs.
@@ -36,6 +41,7 @@ check and prints one BIAS_RESULT line; the main run calls it as a subprocess per
 
 import datetime as dt
 import hashlib
+import importlib.util
 import json
 import math
 import os
@@ -86,6 +92,9 @@ FAIL_SHARE = 0.10
 TASK_BASE_GB, GB_PER_MCANDLE = 0.4, 0.69
 BIAS_LOAD = 2  # lookahead-analysis keeps the full frame and a sliced copy per signal
 NO_DATA = "no candles in this period"
+ML_DAYS = int(os.environ.get("ML_DAYS", "365"))  # a FreqAI strategy's window: every 7-day window fits a model per pair
+FREQAI = importlib.util.find_spec("lightgbm") is not None  # only the trader-ml image (freqtrade's _freqai base) has it
+NEEDS_ML = "needs the trader-ml image"
 
 
 def sha256(data: bytes) -> str:
@@ -113,6 +122,34 @@ def whitelist(exchange: str) -> frozenset[str]:
 def overlay_config(exchange: str, params: dict | None) -> dict | None:
     """The freqtrade config an overlay layers over this venue's two files; None for the strategy as it stands."""
     return variants.config(params, list(pair_list(exchange))) if params else None
+
+
+@cache
+def freqai_fragment(file: str) -> dict | None:
+    """The FreqAI config of a strategy (file relative to REPO): the freqai.json beside it; None for a plain strategy."""
+    p = (REPO / file).parent / "freqai.json"
+    return json.loads(p.read_text()) if p.exists() else None
+
+
+def ml_chunks(since: dt.date, today: dt.date) -> list[tuple[dt.date, dt.date]]:
+    """A FreqAI strategy's chunks: calendar years over the last ML_DAYS, from the first of that month. FreqAI anchors
+    its training windows at a chunk's start, so a start that moves monthly, not nightly, keeps its models reusable."""
+    lo = max(since, ml_start(today))
+    return [(max(a, lo), b) for a, b in chunks(lo, today)]
+
+
+def ml_start(today: dt.date) -> dt.date:
+    return (today - dt.timedelta(days=ML_DAYS)).replace(day=1)
+
+
+def chunk_config(s: dict, exchange: str, start: dt.date, params: dict | None = None) -> dict | None:
+    """The config a chunk of strategy row s layers over the venue's two files: a FreqAI strategy's fragment with its
+    own identifier, else overlay_config()'s."""
+    frag = freqai_fragment(s["file"])
+    if not frag:
+        return overlay_config(exchange, params)
+    digest = sha256((s["file_hash"] + json.dumps(frag, sort_keys=True)).encode())[:8]
+    return {**frag, "freqai": {**frag["freqai"], "identifier": f"{s['name']}-{exchange}-{start:%Y%m%d}-{digest}"}}
 
 
 def pair_count(exchange: str) -> int:
@@ -250,16 +287,19 @@ class Cli:
             loc = Path(o["location"])
             cls = o.get("class")
             name = o.get("name") or loc.stem
-            out.append({"name": name, "file": str(loc.relative_to(REPO)),
+            file = str(loc.relative_to(REPO))
+            error = "failed to import" if not cls else NEEDS_ML if freqai_fragment(file) and not FREQAI \
+                else load_error(loc.read_text(encoding="utf-8"), name)
+            out.append({"name": name, "file": file,
                         "file_hash": sha256(loc.read_bytes()),
                         "timeframe": getattr(cls, "timeframe", None) if cls else None,
                         "startup_candle_count": getattr(cls, "startup_candle_count", None) if cls else None,
-                        "load_error": load_error(loc.read_text(encoding="utf-8"), name) if cls else "failed to import"})
+                        "load_error": error})
         return out
 
     def backtest(self, strategy: str, exchange: str, start: dt.date, end: dt.date, overlay: dict | None = None,
                  strategy_path: Path | None = None, detail: str | None = None) -> dict:
-        """overlay (overlay_config()'s) is layered last, over both config files. strategy_path puts a folder ahead of
+        """overlay (chunk_config()'s) is layered last, over both config files. strategy_path puts a folder ahead of
         the repo's, so its copy of the strategy (and params file) loads."""
         from freqtrade.data.btanalysis import load_backtest_data, load_backtest_stats
 
@@ -450,9 +490,10 @@ def plan(conn, found: list[dict], first: dict, today: dt.date, ft_version: str, 
                 continue
             if (ex, s["timeframe"]) not in digests:
                 digests[ex, s["timeframe"]] = candle_digests(ex, s["timeframe"])
-            for oid, o in [("", None), *(overlays or {}).items()]:
-                cfg = overlay_config(ex, o and o["params"])
-                for start, end in chunks(since.date(), today):
+            ml = freqai_fragment(s["file"]) is not None
+            for oid, o in [("", None), *([] if ml else (overlays or {}).items())]:
+                for start, end in (ml_chunks if ml else chunks)(since.date(), today):
+                    cfg = chunk_config(s, ex, start, o and o["params"])
                     candles = digests[ex, s["timeframe"]].get(start.year, "")
                     key = chunk_key(s["file_hash"], ex, start, end, ft_version, candles, cfg)
                     prior = done.get((s["name"], ex, oid, start))
@@ -472,13 +513,21 @@ def plan(conn, found: list[dict], first: dict, today: dt.date, ft_version: str, 
     return todo + over[:max_overlay], cached, skipped, max(len(over) - max_overlay, 0)
 
 
+def prune_ml(conn, found: list[dict], today: dt.date) -> None:
+    """A FreqAI strategy's chunks that start before its window: the window moved on, and they would overlap its new first chunk."""
+    names = [s["name"] for s in found if freqai_fragment(s["file"])]
+    conn.execute("DELETE FROM backtest_chunks WHERE strategy = ANY(%s) AND chunk_start < %s", (names, ml_start(today)))
+
+
 def bias_todo(conn, found: list[dict], first: dict) -> list[tuple[str, str, str]]:
+    """The checks to run; none for a FreqAI strategy (module docstring, step 3)."""
     have = {(s, k): (h, err, at) for s, k, h, err, at in conn.execute(
         "SELECT strategy, kind, file_hash, error, checked_at FROM bias_checks")}
     week_ago = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=7)
     out = []
     for s in found:
-        if s["load_error"] or (ONLY and s["name"] not in ONLY) or (BIAS_EXCHANGE, s["timeframe"]) not in first:
+        if s["load_error"] or (ONLY and s["name"] not in ONLY) or (BIAS_EXCHANGE, s["timeframe"]) not in first \
+                or freqai_fragment(s["file"]):
             continue
         for kind in ("lookahead", "recursive"):
             prior = have.get((s["name"], kind))
@@ -767,6 +816,7 @@ def main(runner: Runner | None = None, today: dt.date | None = None) -> int:
         try:
             found = runner.discover()
             sync_strategies(conn, found)
+            prune_ml(conn, found, today)
             overlays, sweep = variants.load()
             sync_overlays(conn, overlays)
             version = runner.version()

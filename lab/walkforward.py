@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Weekly walk-forward test: do hyperopt's parameters hold on months it never saw?
 
-Candidates, lookahead-clean and loadable, up to WF_LIMIT: the league's strategies, then the open promote and
+Candidates, lookahead-clean, loadable and not FreqAI, up to WF_LIMIT: the league's strategies, then the open promote and
 watch suggestions, then the best 365-day expectancy low end on each venue in turn. Each runs on every venue in
 WF_EXCHANGES whose candles for its timeframe are fully backfilled (coinbase is left out: its 2.4% round trip
 leaves nothing to tune). For each of the last WF_FOLDS whole calendar months (a trade the backtest force-closes at a span's end
@@ -14,6 +14,9 @@ A fold is cached by strategy file, configs, Freqtrade version, dates, hyperopt s
 candles from its training start to its test end, so a weekly run adds the newest month and whatever a changed
 file, a changed candle or a new candidate needs. Folds share a memory budget
 (WF_MEMORY_GB) by their estimated size, like analyze's chunks, so wide venues do not all hyperopt at once.
+
+A FreqAI strategy (analyze.freqai_fragment) is left out: hyperopt over a fold's training span would fit a model per pair
+for every 7-day window in it, each fold anew, far past WF_BUDGET_S.
 
 Hyperopt runs on a copy of the strategy's folder in a temporary userdir, so its params file never lands
 next to the real strategy, where every nightly backtest would load it.
@@ -182,7 +185,8 @@ def candidates(conn) -> list[dict]:
           AND NOT EXISTS (SELECT 1 FROM bias_checks c WHERE c.strategy = s.name AND c.kind = 'lookahead' AND c.has_bias)
         GROUP BY 1, 2, 3, 4 ORDER BY 5, 6 DESC NULLS LAST, 7 NULLS LAST, 8 DESC NULLS LAST, 1""",
         (EXCHANGES,)).fetchall()
-    out = [{"name": n, "file": f, "file_hash": h, "timeframe": tf} for n, f, h, tf, *_ in rows if not ONLY or n in ONLY]
+    out = [{"name": n, "file": f, "file_hash": h, "timeframe": tf} for n, f, h, tf, *_ in rows
+           if (not ONLY or n in ONLY) and not analyze.freqai_fragment(f)]
     return out[:LIMIT]
 
 
