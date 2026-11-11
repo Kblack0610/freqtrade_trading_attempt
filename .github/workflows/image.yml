@@ -99,6 +99,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       digest: ${{ steps.build.outputs.digest }}
+      ml-digest: ${{ steps.build-ml.outputs.digest }}
     permissions:
       contents: read
       packages: write
@@ -134,7 +135,8 @@ jobs:
           tags: |
             type=sha,format=short
             type=raw,value=latest
-      - uses: docker/build-push-action@v6
+      - id: build-ml
+        uses: docker/build-push-action@v6
         with:
           context: .
           push: true
@@ -146,8 +148,8 @@ jobs:
           cache-from: type=gha,scope=ml
           cache-to: type=gha,mode=max,scope=ml
 
-  # Opens the home-config PR that pins this build's trader digest
-  # (apps/freqtrade/kustomization.yaml, images: trader) and closes the one it
+  # Opens the home-config PR that pins this build's trader and trader-ml digests
+  # (apps/freqtrade/kustomization.yaml, images: trader and trader-ml) and closes the one it
   # supersedes. Merging that PR on Forgejo is the deploy.
   bump-home-config:
     needs: publish
@@ -160,6 +162,7 @@ jobs:
         env:
           FORGEJO_TOKEN: ${{ secrets.FORGEJO_DEPLOY_TOKEN }}
           DIGEST: ${{ needs.publish.outputs.digest }}
+          ML_DIGEST: ${{ needs.publish.outputs.ml-digest }}
           SUBJECT: ${{ github.event.head_commit.message }}
         run: |
           if [ -z "$FORGEJO_TOKEN" ]; then

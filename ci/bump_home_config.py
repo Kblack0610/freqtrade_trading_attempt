@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
-"""Open the home-config PR that pins a new trader image digest.
+"""Open the home-config PR that pins a new trader and trader-ml image digest.
 
-CI runs this after `publish` on each master push. It rewrites the `trader`
-entry under `images:` in apps/freqtrade/kustomization.yaml through the Forgejo
+CI runs this after `publish` on each master push. It rewrites the `trader` and
+`trader-ml` entries under `images:` in apps/freqtrade/kustomization.yaml (the
+analysis job runs trader-ml, so both move together) through the Forgejo
 API (no clone), pushes it as branch trader-sha-<7>, opens the PR, and closes
 any older open trader-sha-* PR it supersedes, then squash-merges it. That merge
 is the deploy: Flux rolls the bots onto the new digest. The image already
 passed this repo's test gate before publish, and home-config's own PR checks
 never exercise a digest line, so the merge does not wait on them.
 
-Env: DIGEST (sha256:...), GITHUB_SHA, SUBJECT (commit message),
+Env: DIGEST and ML_DIGEST (sha256:...), GITHUB_SHA, SUBJECT (commit message),
 FORGEJO_TOKEN (write:repository on home-config; no issue scope needed), DRY_RUN=1 to print only.
 """
 import base64
@@ -28,21 +29,21 @@ PREFIX = "trader-sha-"
 DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 
-def bump(text, digest, tag):
-    """Return text with the trader image's digest line set to digest  # tag."""
+def bump(text, digest, tag, name="trader"):
+    """Return text with image name's digest line set to digest  # tag."""
     if not DIGEST_RE.match(digest):
         raise ValueError(f"not a digest: {digest!r}")
     lines = text.split("\n")
-    in_trader = False
+    in_entry = False
     for i, line in enumerate(lines):
         stripped = line.strip()
         if stripped.startswith("- name:"):
-            in_trader = stripped == "- name: trader"
-        elif in_trader and stripped.startswith("digest:"):
+            in_entry = stripped == f"- name: {name}"
+        elif in_entry and stripped.startswith("digest:"):
             indent = line[: len(line) - len(line.lstrip())]
             lines[i] = f"{indent}digest: {digest}  # {tag}"
             return "\n".join(lines)
-    raise ValueError(f"no digest line under '- name: trader' in {FILE}")
+    raise ValueError(f"no digest line under '- name: {name}' in {FILE}")
 
 
 def call(method, path, body=None, ok_404=False):
@@ -76,7 +77,7 @@ def main():
 
     current = call("GET", f"/repos/{REPO}/contents/{FILE}?ref={BASE}")
     old = base64.b64decode(current["content"]).decode()
-    new = bump(old, digest, tag)
+    new = bump(bump(old, digest, tag), os.environ["ML_DIGEST"], tag, "trader-ml")
     if new == old:
         print(f"{FILE} already pins {digest}; nothing to do")
         return
@@ -104,7 +105,7 @@ def main():
             "head": branch,
             "title": title,
             "body": (
-                f"Pins `ghcr.io/kblack0610/trader` to `{digest}` ({tag}), built from "
+                f"Pins `ghcr.io/kblack0610/trader` to `{digest}` and `trader-ml` to `{os.environ['ML_DIGEST']}` ({tag}), built from "
                 f"Kblack0610/freqtrade_trading_attempt@{tag.removeprefix('sha-')}. "
                 "Opened by that repo's image workflow; it merges this PR itself, which restarts the bots on the new image."
             ),
