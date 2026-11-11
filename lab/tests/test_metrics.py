@@ -149,7 +149,7 @@ def test_window_metrics_on_a_known_series():
     assert m["expectancy_lo"] < m["expectancy"] < m["expectancy_hi"]
     assert math.isclose(m["gross_expectancy"], m["expectancy"] + FEE) and math.isclose(m["fee_per_trade"], FEE)
     assert m["gross_expectancy_lo"] < m["gross_expectancy"] < m["gross_expectancy_hi"]
-    assert math.isclose(m["exposure"], 30 * 6 / (60 * 24))
+    assert math.isclose(m["exposure"], 30 * 6 / (60 * 24)) and m["median_hold_hours"] == 6
     assert m == metrics.window_metrics(daily, t, 5)
 
 

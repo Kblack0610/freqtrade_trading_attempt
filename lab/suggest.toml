@@ -244,3 +244,17 @@ block = 10
 pbo_blocks = 8
 # Mixtures listed on /book, best interval low end first, after the baseline.
 show = 10
+
+[diversity]
+# lab/diversity.py: the diversity archive behind /coverage and the diverse cohort (docs/strategy-coverage.md,
+# Diversity). A cell is family x holding period x climate x venue x trade frequency; its elite is the strategy with
+# the highest low end of the Sharpe interval in `window`. The families left out are the strategies cohort's
+# skip_families (lab/cohorts.toml). Judgment calls, not evidence.
+window = "365d"
+min_trades = 30
+# Holding-period bucket edges in hours of the median trade: under 1 h, 1 h to 1 day, 1 to 7 days, over 7 days.
+hold_hours = [1, 24, 168]
+# Trade frequency is cut into this many equal-count buckets across the archive's strategies.
+freq_buckets = 3
+# Two strategies whose daily returns correlate above this are one, whatever cells they sit in.
+max_rho = 0.5
