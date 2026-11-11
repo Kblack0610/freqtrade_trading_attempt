@@ -46,12 +46,14 @@ def load_config(path: Path = CONFIG) -> dict:
     return tomllib.loads(path.read_text())
 
 
-def state(conn, venue: str) -> tuple[dict, dict]:
-    """The stored market metadata and outcome books, keyed the way a sweep looks them up."""
+def state(conn, venue: str, market_ids: list[str]) -> tuple[dict, dict]:
+    """Read only the current API page; historical venue state can exceed the pod's memory."""
     meta = {r[0]: tuple(r[1:]) for r in conn.execute(
-        f"SELECT market_id, {', '.join(META)} FROM markets WHERE venue = %s", (venue,))}
+        f"SELECT market_id, {', '.join(META)} FROM markets WHERE venue = %s AND market_id = ANY(%s)",
+        (venue, market_ids))}
     book = {(r[0], r[1]): tuple(r[2:]) for r in conn.execute(
-        f"SELECT market_id, outcome, {', '.join(BOOK)} FROM outcomes WHERE venue = %s", (venue,))}
+        f"SELECT market_id, outcome, {', '.join(BOOK)} FROM outcomes WHERE venue = %s AND market_id = ANY(%s)",
+        (venue, market_ids))}
     return meta, book
 
 
@@ -69,14 +71,15 @@ def write_quotes(fs: pafs.FileSystem, root: str, venue: str, started: dt.datetim
 def sweep(v: Venue, vcfg: dict, conn, fs: pafs.FileSystem, root: str, lookback: dt.timedelta,
           now: dt.datetime | None = None) -> dict:
     started = now or dt.datetime.now(dt.timezone.utc)
-    meta, book = state(conn, v.name)
-    seen, new_meta, changed = 0, {}, []
+    seen, new_markets, new_meta, changed = 0, 0, {}, []
     for page in v.open_markets():
+        meta, book = state(conn, v.name, list({q.market_id for q in page}))
         for q in page:
             seen += 1
             m = tuple(getattr(q, f) for f in META)
             if meta.get(q.market_id) != m and q.market_id not in new_meta:
                 new_meta[q.market_id] = q
+                new_markets += q.market_id not in meta
             if book.get((q.market_id, q.outcome)) != tuple(getattr(q, f) for f in BOOK):
                 changed.append(q)
 
@@ -107,7 +110,7 @@ def sweep(v: Venue, vcfg: dict, conn, fs: pafs.FileSystem, root: str, lookback: 
             [(v.name, r.market_id, r.result, r.value, r.settled_at, r.volume) for r in resolved])
         cur.executemany("UPDATE markets SET status = 'settled', updated_at = %s WHERE venue = %s AND market_id = %s "
                         "AND status <> 'settled'", [(r.settled_at, v.name, r.market_id) for r in resolved])
-        stats = {"seen": seen, "new_markets": sum(1 for k in new_meta if k not in meta), "changes": len(changed),
+        stats = {"seen": seen, "new_markets": new_markets, "changes": len(changed),
                  "resolved": len(resolved), "object_key": key}
         cur.execute("INSERT INTO market_sweeps (venue, started_at, finished_at, seen, new_markets, changes, resolved, "
                     "object_key, ok) VALUES (%s, %s, now(), %s, %s, %s, %s, %s, true)",
