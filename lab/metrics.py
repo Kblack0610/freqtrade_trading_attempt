@@ -412,7 +412,7 @@ def drift(live: pd.DataFrame, bt: pd.DataFrame, tolerance: pd.Timedelta) -> dict
            "live_expectancy": float(lc["profit_ratio"].mean()) if len(lc) else None,
            "bt_expectancy": float(bc["profit_ratio"].mean()) if len(bc) else None,
            "live_profit": float(lc["profit_abs"].sum()) if len(lc) else 0.0,
-           "bt_profit": float(bc["profit_abs"].sum()) if len(bc) else 0.0, "gap": None, "gap_trades": 0}
+           "bt_profit": float(bc["profit_abs"].sum()) if len(bc) else 0.0, "gap": None, "gap_trades": 0, "gaps": []}
     if not len(live) or not len(bt):
         return out
     side = bt[["pair", "open_date", "profit_ratio", "exit_reason"]].rename(
@@ -425,6 +425,43 @@ def drift(live: pd.DataFrame, bt: pd.DataFrame, tolerance: pd.Timedelta) -> dict
                       tolerance=tolerance, direction="nearest")
     hit = m[m["bt_open"].notna()]
     both = hit[~hit["is_open"].astype(bool) & (hit["bt_exit"] != "force_exit")]
-    out.update(matched=len(hit), gap_trades=len(both),
-               gap=float((both["profit_ratio"] - both["bt_ratio"]).mean()) if len(both) else None)
+    gaps = (both["profit_ratio"] - both["bt_ratio"]).astype(float)
+    out.update(matched=len(hit), gap_trades=len(both), gap=float(gaps.mean()) if len(both) else None, gaps=gaps.tolist())
     return out
+
+
+def confidence_sequence(x, lo: float, hi: float, alpha: float, grid: int = 400) -> tuple[np.ndarray, np.ndarray]:
+    """Anytime-valid interval for the mean of values bounded in [lo, hi]: entry t of each array bounds the true mean
+    after the first t+1 values, and with probability 1 - alpha no entry ever excludes it, however often it is read
+    (Ville's inequality).
+
+    The betting confidence sequence of Waudby-Smith and Ramdas (JRSS B 2024), hedged over both signs, with the
+    predictable plug-in bet that adapts to the running variance. A candidate mean m is out once either capital
+    process, bet against m, has ever reached 1/alpha; the bounds are the surviving grid cells, one cell wider on each
+    side. Values outside [lo, hi] are clipped, so the bounds assume the range holds."""
+    y = (np.clip(np.asarray(x, dtype=float), lo, hi) - lo) / (hi - lo)
+    n = len(y)
+    m = np.linspace(0.0, 1.0, grid + 1)[1:-1]
+    if not n:
+        return np.empty(0), np.empty(0)
+    logk_up, logk_dn = np.zeros(len(m)), np.zeros(len(m))
+    peak = np.zeros(len(m))
+    bar, c = np.log(2 / alpha), 0.5
+    out_lo, out_hi = np.empty(n), np.empty(n)
+    mean, var = 0.5, 0.25
+    for t in range(n):
+        lam = min(np.sqrt(2 * np.log(2 / alpha) / (max(var, 1e-6) * (t + 1) * np.log(t + 2))), 1e6)
+        d = y[t] - m
+        logk_up += np.log1p(np.clip(np.minimum(lam, c / m) * d, -0.999999, None))
+        logk_dn += np.log1p(np.clip(-np.minimum(lam, c / (1 - m)) * d, -0.999999, None))
+        peak = np.maximum(peak, np.maximum(logk_up, logk_dn))
+        alive = np.flatnonzero(peak < bar)
+        if len(alive):
+            first, last = alive[0], alive[-1]
+            out_lo[t], out_hi[t] = (m[first - 1] if first else 0.0), (m[last + 1] if last + 1 < len(m) else 1.0)
+        else:
+            out_lo[t] = out_hi[t] = float(np.mean(y[: t + 1]))
+        mean = (0.5 + y[: t + 1].sum()) / (t + 2)
+        var = (0.25 + ((y[: t + 1] - mean) ** 2).sum()) / (t + 2)
+    out_lo, out_hi = np.maximum.accumulate(out_lo), np.minimum.accumulate(out_hi)
+    return lo + (hi - lo) * out_lo, lo + (hi - lo) * np.maximum(out_hi, out_lo)

@@ -552,7 +552,7 @@ def drift_todo(conn, found: list[dict], today: dt.date) -> list[dict]:
 
 DRIFT_COLS = ["bot", "strategy", "exchange", "since", "bt_start", "bt_end", "live_entries", "bt_entries", "matched",
               "live_closed", "bt_closed", "live_expectancy", "bt_expectancy", "live_profit", "bt_profit", "gap",
-              "gap_trades", "error"]
+              "gap_trades", "gaps", "error"]
 
 
 def store_drift(conn, task: dict, res: dict) -> None:

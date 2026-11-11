@@ -305,6 +305,46 @@ def test_detail_candles_invalidate_fold_cache(wlab, monkeypatch):
     assert len(runner.calls) == 3  # Only the newest test month includes the changed October candle.
 
 
+def test_shards_split_the_folds_and_the_last_one_records_the_run_once(wlab, monkeypatch):
+    monkeypatch.setattr(wf, "EXCHANGES", ["binanceus", "okx"])
+    backfilled(wlab, "okx", "2019-09-01")
+    whole = FakeRunner()
+    monkeypatch.setattr(wf, "JOB", "whole")
+    assert wf.main(whole, TODAY) == 0
+    wlab.execute("TRUNCATE walkforward, walkforward_trades")
+    post = []
+    monkeypatch.setattr(wf.suggest, "run", lambda c: post.append(1) or {})
+    monkeypatch.setattr(wf, "SHARDS", 3)
+    monkeypatch.setattr(wf, "JOB", "split")
+    parts = []
+    for i in range(3):
+        monkeypatch.setattr(wf, "SHARD", i)
+        parts.append(FakeRunner())
+        assert wf.main(parts[i], TODAY) == 0
+        rows = wlab.execute("SELECT count(*) FROM runs WHERE kind = 'walkforward' AND name = 'split'").fetchone()[0]
+        assert rows == (1 if i == 2 else 0), "only the last shard to finish records the run"
+    groups = [{(c[0], c[3]) for c in p.calls} for p in parts]
+    assert sum(len(g) for g in groups) == len(set().union(*groups)), "a strategy x venue runs in one shard"
+    assert sorted(c for p in parts for c in p.calls) == sorted(whole.calls)
+    assert post == [1], "the post steps run once per run"
+    raw = wlab.execute("SELECT raw FROM runs WHERE kind = 'walkforward' AND name = 'split'").fetchone()[0]
+    assert raw["shards"] == 3 and raw["folds_run"] == len(whole.calls)
+    assert raw["candidates"] == wlab.execute(
+        "SELECT raw->'candidates' FROM runs WHERE kind = 'walkforward' AND name = 'whole'").fetchone()[0]
+
+
+def test_a_crashed_shard_is_recorded_and_the_run_still_finishes(wlab, monkeypatch):
+    monkeypatch.setattr(wf, "SHARDS", 2)
+    monkeypatch.setattr(wf, "JOB", "crash")
+    monkeypatch.setattr(wf, "SHARD", 0)
+    assert wf.main(FakeRunner(), TODAY) == 0
+    monkeypatch.setattr(wf, "SHARD", 1)
+    monkeypatch.setattr(wf, "candidates", lambda c: (_ for _ in ()).throw(RuntimeError("db gone")))
+    assert wf.main(FakeRunner(), TODAY) == 1
+    ok, raw = wlab.execute("SELECT ok, raw FROM runs WHERE kind = 'walkforward' AND name = 'crash'").fetchone()
+    assert not ok and "RuntimeError: db gone" in raw["error"]
+
+
 def test_a_freqai_strategy_is_no_candidate(wlab):
     wlab.execute("INSERT INTO strategies (name, file, file_hash, timeframe) VALUES "
                  "('MLLightGBMBaseline', 'user_data/strategies/ml/MLLightGBMBaseline.py', 'h', '1h')")

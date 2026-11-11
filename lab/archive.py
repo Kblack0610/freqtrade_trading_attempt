@@ -1,4 +1,10 @@
-"""Kraken's published OHLCVT archive: the history its API will not serve.
+"""Exchanges' published candle archives: history their APIs will not serve, or serve too slowly.
+
+Kraken's OHLCVT archive is all the past it has: its API gives only the newest 720 candles.
+OKX's monthly 1m files cover what its API pages at 100 candles a call (about 25 hours for our 22 pairs
+back to the 1m floor); okx_candles() reads them instead, once per series (lab/backfill.py).
+
+Kraken:
 
 The API gives only the newest 720 candles per timeframe, so anything older comes from these zips.
 They are read by HTTP range, one member at a time: the full archive is about 10 GB in five parts and
@@ -10,10 +16,16 @@ trades. Candles with no trades are left out. The archive has no 30m, so that is 
 
 A quarterly file covers what the full archive stops short of. Run it once by hand, between backfills:
     python lab/archive.py https://assets.kraken.com/marketing/institutions/Kraken_OHLCVT_2026Q4.zip
+
+OKX: one zip per pair and month (months in UTC+8, so each starts 8 hours before the UTC one), a CSV with a
+header; the listing call takes at most 10 months per request. The current month is not published yet,
+so the API append fills it.
 """
 
 import io
+import json
 import sys
+import urllib.parse
 import urllib.request
 import zipfile
 
@@ -26,6 +38,9 @@ MINUTES = {"1m": 1, "5m": 5, "15m": 15, "30m": 15, "1h": 60, "4h": 240, "1d": 14
 HEADERS = {"User-Agent": "trader-lab-backfill"}
 TIMEOUT = 300
 COLS = ["date", "open", "high", "low", "close", "volume"]
+OKX_LIST = "https://www.okx.com/api/v5/public/market-data-history"
+OKX_WINDOW = pd.DateOffset(months=9)  # the listing refuses a span over 10 months
+OKX_FROM = "20170101"  # before OKX's first spot listing in its files
 
 
 class RangeFile:
@@ -81,9 +96,51 @@ def candles(z: zipfile.ZipFile, pair: str, timeframe: str, floor: str | None = N
     if floor:
         df = df[df["date"] >= pd.Timestamp(floor, tz="UTC")]
     if timeframe == "30m":
-        df = df.set_index("date").resample("30min").agg(
-            {"open": "first", "high": "max", "low": "min", "close": "last", "volume": "sum"}).dropna().reset_index()
+        df = resample(df, "30m")
     return df.reset_index(drop=True)
+
+
+def resample(df: pd.DataFrame, timeframe: str) -> pd.DataFrame:
+    """Candles at a longer timeframe, each bucket built from the shorter candles it has; an empty one stays empty."""
+    return df.set_index("date").resample(pd.Timedelta(timeframe)).agg(
+        {"open": "first", "high": "max", "low": "min", "close": "last", "volume": "sum"}).dropna().reset_index()
+
+
+def _get(url: str) -> bytes:
+    with urllib.request.urlopen(urllib.request.Request(url, headers=HEADERS), timeout=TIMEOUT) as r:
+        return r.read()
+
+
+def okx_months(inst_id: str, start: pd.Timestamp, end: pd.Timestamp) -> list[str]:
+    """The URLs of every monthly 1m file OKX publishes for one instrument between start and end."""
+    urls: set[str] = set()
+    while start < end:
+        stop = min(start + OKX_WINDOW, end)
+        query = urllib.parse.urlencode({"module": 2, "instType": "SPOT", "instIdList": inst_id, "dateAggrType": "monthly",
+                                        "begin": int(start.timestamp() * 1000), "end": int(stop.timestamp() * 1000)})
+        body = json.loads(_get(f"{OKX_LIST}?{query}"))
+        if body["code"] != "0":
+            raise RuntimeError(f"okx market-data-history {body['code']}: {body['msg']}")
+        urls.update(g["url"] for d in body["data"] for det in d["details"] for g in det["groupDetails"])
+        start = stop
+    return sorted(urls)
+
+
+def okx_candles(pair: str, floor: str | None = None) -> pd.DataFrame | None:
+    """One pair's 1m candles from OKX's monthly files, from floor to the last published month; None if it has none."""
+    start = pd.Timestamp(floor or OKX_FROM, tz="UTC")
+    frames = []
+    for url in okx_months(pair.replace("/", "-"), start, pd.Timestamp.now(tz="UTC")):
+        z = zipfile.ZipFile(io.BytesIO(_get(url)))
+        for name in z.namelist():
+            df = pd.read_csv(io.BytesIO(z.read(name)), usecols=["open_time", "open", "high", "low", "close", "vol", "confirm"])
+            frames.append(df[df["confirm"] == 1])
+    if not frames:
+        return None
+    df = pd.concat(frames).rename(columns={"open_time": "date", "vol": "volume"})
+    df["date"] = pd.to_datetime(df["date"], unit="ms", utc=True)
+    df = df[df["date"] >= start]
+    return df[COLS].sort_values("date").drop_duplicates("date").reset_index(drop=True)
 
 
 def main() -> int:

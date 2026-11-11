@@ -1,9 +1,12 @@
 """Helpers every lab job shares: one way to read a timestamp, one way to drop a number Postgres or JSON cannot hold."""
 import math
 import numbers
+import os
+from urllib.parse import urlparse
 
 import numpy as np
 import pandas as pd
+from pyarrow import fs as pafs
 
 
 def utc(value) -> pd.Timestamp | None:
@@ -28,3 +31,10 @@ def finite(v):
     if isinstance(v, (list, tuple)):
         return [finite(x) for x in v]
     return v
+
+
+def s3_from_env() -> pafs.FileSystem:
+    """The object store (MinIO) from S3_ENDPOINT, S3_ACCESS_KEY and S3_SECRET_KEY."""
+    url = urlparse(os.environ["S3_ENDPOINT"])
+    return pafs.S3FileSystem(access_key=os.environ["S3_ACCESS_KEY"], secret_key=os.environ["S3_SECRET_KEY"],
+                             endpoint_override=url.netloc, scheme=url.scheme or "https", region="us-east-1")

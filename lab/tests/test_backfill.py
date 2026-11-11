@@ -1,6 +1,8 @@
 import datetime as dt
 import io
+import json
 import zipfile
+from pathlib import Path
 
 import pandas as pd
 import pytest
@@ -23,9 +25,11 @@ def candles(start: dt.datetime, end: dt.datetime, freq: str, drop: int = 0) -> p
 class FakeExchange:
     """Stands in for freqtrade download-data: every pair is listed at LISTED and trades up to NOW."""
 
-    def __init__(self, supported=("1h", "1d"), fail=False, zipped=None):
+    def __init__(self, supported=("1h", "1d"), fail=False, zipped=None, bulked=None):
         self.supported = list(supported)
         self.zipped = zipped
+        self.bulked = bulked  # what bulk() returns, or raises
+        self.bulks: list[tuple[str, str]] = []
         self.opened = 0
         self.fail = fail
         self.calls: list[list[str]] = []
@@ -46,6 +50,12 @@ class FakeExchange:
             raise self.zipped
         return self.zipped
 
+    def bulk(self, exchange, pair, timeframe):
+        self.bulks.append((pair, timeframe))
+        if isinstance(self.bulked, Exception):
+            raise self.bulked
+        return self.bulked
+
     def download(self, exchange, args):
         self.calls.append(args)
         if self.fail:
@@ -58,7 +68,8 @@ class FakeExchange:
                 f = backfill.series_file(exchange, pair, tf)
                 freq = {"1h": "1h", "1d": "1D"}[tf]
                 if "--prepend" in args:
-                    candles(LISTED, NOW, freq).to_feather(f)
+                    old = pd.read_feather(f) if f.exists() else None  # what a bulk import left: kept
+                    pd.concat([candles(LISTED, NOW if old is None else old["date"].min(), freq), old]).to_feather(f)
                 elif not f.exists():
                     candles(NOW - dt.timedelta(days=1), NOW, freq).to_feather(f)
         return True
@@ -102,9 +113,52 @@ def test_a_timeframe_floor_bounds_its_prepend(conn, lab, monkeypatch):
 
 def test_unsupported_timeframe_is_skipped(conn, lab):
     ex = FakeExchange(supported=("1h",))
-    assert backfill.backfill_exchange(ex, conn, "coinbase", ["BTC/USD"], ["1h", "1d"])
-    assert set(coverage(conn, "coinbase")) == {("BTC/USD", "1h")}
-    assert not any("1d" in c for c in ex.calls)
+    assert backfill.backfill_exchange(ex, conn, "coinbase", ["BTC/USD"], ["1h", "30m"])
+    assert set(coverage(conn, "coinbase")) == {("BTC/USD", "1h")}, "nothing served is short enough to build 30m from"
+    assert not any("30m" in c for c in ex.calls)
+
+
+def test_unserved_timeframe_is_built_from_a_shorter_one(conn, lab):
+    ex = FakeExchange(supported=("1h",))
+    assert backfill.backfill_exchange(ex, conn, "coinbase", ["BTC/USD"], ["1h", "4h"])
+    assert not any("4h" in c for c in ex.calls)
+    first, last, rows, gaps, _, done = coverage(conn, "coinbase")[("BTC/USD", "4h")]
+    assert (first, last, rows, gaps, done) == (LISTED, NOW - dt.timedelta(hours=4), 12, 0, False)
+    df = pd.read_feather(backfill.series_file("coinbase", "BTC/USD", "4h"))
+    assert set(df["volume"]) == {4.0}, "four 1h candles in each"
+
+    backfill.backfill_exchange(ex, conn, "coinbase", ["BTC/USD"], ["1h", "4h"])
+    assert coverage(conn, "coinbase")[("BTC/USD", "4h")][-1] is True, "done when its source is"
+
+
+def test_an_unfinished_last_bucket_is_left_out(lab):
+    backfill.datadir("coinbase").mkdir(parents=True)
+    candles(LISTED, LISTED + dt.timedelta(hours=7), "1h").to_feather(backfill.series_file("coinbase", "BTC/USD", "1h"))
+    backfill.derive("coinbase", "BTC/USD", "1h", "4h")
+    df = pd.read_feather(backfill.series_file("coinbase", "BTC/USD", "4h"))
+    assert list(df["date"]) == [LISTED], "00:00-04:00 is whole; 04:00 has only three of its four hours"
+
+
+def test_source_of():
+    assert backfill.source_of("4h", ["1m", "5m", "1h", "1d"]) == "1h"
+    assert backfill.source_of("30m", ["1h"]) is None
+
+
+def test_bulk_history_fills_a_new_series_before_the_prepend(conn, lab):
+    ex = FakeExchange(bulked=candles(LISTED, NOW - dt.timedelta(hours=12), "1h"))
+    assert backfill.backfill_exchange(ex, conn, "okx", ["BTC/USDT"], ["1h"])
+    first, *_ = coverage(conn, "okx")[("BTC/USDT", "1h")]
+    assert first == LISTED and ex.bulks == [("BTC/USDT", "1h")]
+
+    backfill.backfill_exchange(ex, conn, "okx", ["BTC/USDT"], ["1h"])
+    assert ex.bulks == [("BTC/USDT", "1h")], "a series that has candles pages the rest from the API"
+    assert coverage(conn, "okx")[("BTC/USDT", "1h")][-1] is True
+
+
+def test_bulk_failure_falls_back_to_the_prepend(conn, lab):
+    ex = FakeExchange(bulked=OSError("no route"))
+    assert backfill.backfill_exchange(ex, conn, "okx", ["BTC/USDT"], ["1h"])
+    assert coverage(conn, "okx")[("BTC/USDT", "1h")][0] == LISTED
 
 
 def test_forward_exchange_merges_the_newest_candles(conn, lab, monkeypatch):
@@ -190,6 +244,55 @@ def test_archive_builds_30m_from_15m():
     df = archive.candles(zipped({"XBTUSD_15.csv": times}), "BTC/USD", "30m")
     assert list(df["date"]) == [LISTED, LISTED + dt.timedelta(minutes=30), LISTED + dt.timedelta(hours=2)]
     assert list(df["volume"]) == [20, 10, 10]
+
+
+def okx_zip(month: str, times_ms: list[int], confirm: int = 1) -> bytes:
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr(f"BTC-USDT-candlesticks-{month}.csv",
+                   "instrument_name,open,high,low,close,vol,vol_ccy,vol_quote,open_time,confirm\n"
+                   + "".join(f"BTC-USDT,1,3,0.5,2,10,20,20,{t},{confirm}\n" for t in times_ms))
+    return buf.getvalue()
+
+
+def test_okx_candles_from_monthly_files(monkeypatch):
+    start = LISTED - dt.timedelta(minutes=2)
+    ms = [int(start.timestamp() * 1000) + i * 60_000 for i in range(5)]
+    files = {"http://cdn/1.zip": okx_zip("2026-01", ms), "http://cdn/2.zip": okx_zip("2026-02", ms[-1:] + [ms[-1] + 60_000])}
+    windows = []
+
+    def get(url):
+        if url in files:
+            return files[url]
+        q = dict(p.split("=") for p in url.split("?", 1)[1].split("&"))
+        windows.append((int(q["begin"]), int(q["end"])))
+        groups = [{"url": u} for u in files] if len(windows) == 1 else []
+        return json.dumps({"code": "0", "msg": "", "data": [{"details": [{"groupDetails": groups}]}]}).encode()
+
+    monkeypatch.setattr(archive, "_get", get)
+    df = archive.okx_candles("BTC/USDT", LISTED.strftime("%Y%m%d"))
+    assert list(df.columns) == ["date", "open", "high", "low", "close", "volume"]
+    assert df["date"].iloc[0] == LISTED and len(df) == 4, "older than the floor dropped, the overlap kept once"
+    assert df["volume"].iloc[0] == 10, "vol is the base-currency volume freqtrade stores"
+    assert all(b - a <= 300 * 86400_000 for a, b in windows) and len(windows) > 1, "the listing pages under 10 months"
+
+
+def test_okx_listing_error_is_raised(monkeypatch):
+    monkeypatch.setattr(archive, "_get", lambda url: b'{"code":"50077","msg":"too long","data":[]}')
+    with pytest.raises(RuntimeError, match="50077"):
+        archive.okx_candles("BTC/USDT", "20260101")
+
+
+@pytest.mark.skipif(not (backfill.REPO / "user_data" / "strategies").is_dir(), reason="runs in the image")
+def test_the_image_has_every_userdir_folder(monkeypatch):
+    """freqtrade's check-then-create races across parallel processes, so none may be left for it to create."""
+    from freqtrade.configuration import directory_operations
+
+    def mkdir(self, *a, **k):
+        raise AssertionError(f"{self} is missing from the image (Dockerfile create-userdir)")
+    monkeypatch.setattr(Path, "mkdir", mkdir)
+    monkeypatch.setattr(directory_operations, "chown_user_directory", lambda d: None)  # sudo chown in docker
+    directory_operations.create_userdata_dir(str(backfill.REPO / "user_data"))
 
 
 def test_range_file_reads_a_zip_split_across_urls(monkeypatch):

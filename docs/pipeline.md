@@ -19,13 +19,14 @@ roster --> paper bots (the league) --ingest--> Postgres --> drift, watcher, deca
 
 ## The nightly clock
 
-All times UTC. Every lab job runs on razer-laptop, because the candle files live on the `freqtrade-lab` volume there.
+All times UTC. Backfill and analysis run on razer-laptop, because the candle files live on the `freqtrade-lab` volume there. Walk-forward runs as several pods on any amd64 node except hp-victus, from a copy of the candles in MinIO.
 
 | When | Job | What it does | Typical length |
 |---|---|---|---|
 | every 5 min | `freqtrade-ingest` | Copies every paper bot's trades and a snapshot into Postgres | seconds |
 | hourly at :20 | `freqtrade-backfill` | New candles for the league exchanges | about 2 minutes |
 | hourly at :50 | `freqtrade-backfill-research` | New and older candles for okx and kucoin | about 1 minute once caught up |
+| 00:45 | `freqtrade-candles-publish` | Copies the changed candle files to MinIO for the walk-forward pods | minutes |
 | 01:00 | `freqtrade-walkforward` | Tunes and tests strategies month by month | up to the 4.5 h budget, 8 h hard limit |
 | 02:45 | `freqtrade-analysis` | Backtests everything, then scores everything | under an hour on a normal night, hours after a big change |
 | 05:35 | `freqtrade-futures` | Funding rates and open interest | under a minute |
@@ -38,6 +39,7 @@ A backtest is only as good as its candles. A candle is one time bar of a pair: o
 
 - `lab/backfill.py` keeps, per exchange, pair and timeframe (1m to 1d), every candle the exchange will give, prepended back to a floor per timeframe, and writes what it holds to `data_coverage`.
 - Kraken's past comes from its published archive and its present from the newest candles each hour, because Kraken's API only serves recent candles.
+- OKX 1m history comes from OKX's monthly files, minutes instead of the day its API would take. Coinbase serves no 4h, so 4h is built from its 1h.
 - **The coverage guard.** An exchange and timeframe joins the analysis only when every pair on its whitelist is filled back to its oldest candle. A half-filled exchange would quietly compare strategies on different histories. Until then the run's `skipped` list says "not fully backfilled".
 - **The pair list is survivor-only.** Whitelists are today's most traded pairs, so coins that died are missing from history. `/book` flags this per venue.
 
@@ -73,6 +75,7 @@ A backtest of a strategy as written says nothing about tuning it, and hyperopt (
 
 - **A fold.** Take one whole month. Tune the strategy on the 180 days before it, stopping 7 days short so no trade spans the gap (the embargo). Then backtest the month as written and with the tuned settings. The tuned result on that month is out of sample: the tuner never saw it.
 - **How many.** Up to `WF_LIMIT` candidate strategies, on each walk-forward exchange (binanceus, okx, kucoin), for each of the last `WF_FOLDS` (12) months before the lockbox. Coinbase is left out because its fees leave nothing to tune.
+- **Shards.** The night's folds are split over several pods by strategy and exchange; the last pod to finish runs the scoring steps once and writes the night's run row.
 - **Budget and carry-over.** After `WF_BUDGET_S` (4.5 h) a run starts no new fold, records the run with `folds_left`, and the next night picks up where it stopped. A change that touches every fold's fingerprint (a new freqtrade version, new stress scenarios) puts every fold back in the queue, which takes several nights to drain.
 - **Stress scenarios.** Each tuned month is replayed with entries one candle late, each numeric parameter nudged 10% up and down, and fills checked on 1m candles. A strategy whose edge vanishes under any of these is fragile.
 - **Reading it.** Walk-forward efficiency is tuned return out of sample over tuned return in sample. Near 1, the tuning carries over; near 0 or below, the tuner fitted noise.
@@ -112,8 +115,8 @@ The confidence gates, from `lab/suggest.toml` `[confidence]`, and what each one 
 | cost stress | still positive with half the gross edge and 0.1 to 0.4% extra cost per round trip | compute |
 | stress scenarios | survives late entry, nudged parameters, 1m fills | compute |
 | venues agreeing | positive on at least 2 exchanges | compute and data |
-| drift | at least 20 paper trades matching the backtest | paper bot running, so time |
-| dry run | 90 days, 60 trades, through a BTC fall of 10% or more, at least one real stop ([anytime-valid replacement proposed](anytime-gates.md)) | time and the market |
+| drift | the gap sequence (paper minus backtest, per matched trade) sits inside the expectancy interval half width, anytime-valid at alpha 0.05 split over the live bots; fails early when it lies outside | paper bot running, so time |
+| dry run | the paper expectancy sequence low end above zero (anytime-valid, [design](anytime-gates.md)), after 30 days, through a BTC fall of 10% or more, with at least one real stop; fails early when its high end drops below zero | paper trades, and the market for the fall |
 | not decayed | the decay test has not fired on paper or live trades | time |
 | score | at least 90 | the above |
 
@@ -142,7 +145,7 @@ Reference: [Cohorts](../README.md#cohorts), [Watcher](../README.md#watcher).
 | The next night | Analysis backtests its whole history on every exchange and runs the bias checks. It appears on the leaderboard |
 | When chosen | It becomes a walk-forward candidate only when it is in the league, suggested, or among the best on a venue. Then each exchange needs its 12 months of folds, spread over nights by the budget |
 | Weeks to months | It needs 250 tuned out-of-sample trades, 6 or more months mostly positive, and enough out-of-sample years for its Sharpe |
-| 90 days or more after it starts paper trading | The dry-run gate, and only if BTC fell 10% or more in that time |
+| 30 days or more after it starts paper trading | The dry-run gate, and only if BTC fell 10% or more in that time and a stop fired |
 
 Writing the strategy is minutes; reaching a verdict is mostly waiting for months of evidence.
 
@@ -184,6 +187,8 @@ The `/confidence` page shows each strategy's gates and which ones it fails.
 | A strategy is missing from the leaderboard | It is in the run's `skipped` list. "Not fully backfilled" clears when backfill reaches the oldest candle; a load error needs the strategy fixed |
 | `folds_left` stays high for days | A fingerprint change requeued every fold. It drains at roughly one budget per night; check `folds_run` is not zero and the job is not hitting its deadline |
 | Analysis takes hours on a quiet night | Something changed every chunk's fingerprint: a strategy edit, a config or fee change, or a freqtrade bump |
-| The score is high but the strategy is not ready | Ready needs every gate. Time-based gates (dry run, drift, minimum backtest length) cannot pass early |
+| The score is high but the strategy is not ready | Ready needs every gate. Time-based gates (minimum backtest length, the dry run floor of 30 days, a BTC fall and a stop) cannot pass early; the drift and dry run sequences pass once enough paper trades say so |
 | `folds_run` is 0 and the night's walk-forward or analysis never started | The pod is Pending. `kubectl -n freqtrade describe pod` says `Insufficient cpu` when the job requests more than razer-laptop has free (it offers pods 4 CPUs); TraderLabPodUnschedulable fires after 30 minutes. The fix and the row for it are in home-config `apps/freqtrade/README.md` |
-| Every confidence row fails dry run and drift | Those gates need the strategy as a paper bot for 90 days and 20 matched trades; check it is in the roster |
+| The night has `walkforward_shard` rows but no `walkforward` row | A shard pod was killed (OOM, deadline) before it recorded itself, so no shard was last. `kubectl -n freqtrade get pods -l app=freqtrade-walkforward` shows which index failed; its folds run the next night |
+| A walk-forward pod exits at once, its log ending in a `snapshot.py fetch` error | The snapshot is missing or stale: check the last `freqtrade-candles-publish` job's log, which prints the manifest digest and the files uploaded |
+| Every confidence row fails dry run and drift | Those gates need the strategy as a paper bot with enough closed trades for the sequences (a 0.3 SD edge takes about 130; drift rows written before migration 040 carry no gaps until the next analysis run); check it is in the roster |

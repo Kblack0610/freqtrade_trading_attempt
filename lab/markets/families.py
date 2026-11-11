@@ -45,7 +45,8 @@ from lab.markets import backtest
 from lab.markets.backtest import Market, Order
 from lab.markets.history import _midnight
 from lab.markets.links import outcome_word
-from lab.markets.recorder import load_config, s3_from_env
+from lab.markets.recorder import load_config
+from lab.util import s3_from_env
 
 UTC = dt.timezone.utc
 COMMANDS = ("longshot", "calibration", "gap")

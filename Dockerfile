@@ -15,10 +15,11 @@ WORKDIR /repo
 # A job run as `python /repo/lab/<job>.py` also has lab/ first on sys.path, so no lab module shares a name
 # with an installed one; lab/tests/test_families.py checks that.
 ENV PYTHONPATH=/repo
-# The userdir subfolders .dockerignore leaves out. freqtrade creates missing ones itself, but its
+# Every userdir subfolder, from freqtrade's own list. freqtrade creates missing ones itself, but its
 # check-then-create races when several freqtrade processes start at once (lab/backfill.py runs one
-# per exchange) and the loser exits with "exists already and is not a directory".
-RUN mkdir -p user_data/logs user_data/data user_data/backtest_results user_data/hyperopt_results user_data/plot
+# per exchange, the analysis one per worker) and the loser exits with FileExistsError.
+# lab/tests/test_backfill.py checks the image has them all.
+RUN freqtrade create-userdir --userdir user_data
 # The site's shell (tokens, fonts, <kb-shell>) is the pinned web-kit: fetch_kit.py downloads it and checks every
 # file against web/kit.lock, so a bad checksum fails the build. Needs no pip package.
 RUN python web/fetch_kit.py

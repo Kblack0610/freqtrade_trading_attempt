@@ -17,7 +17,6 @@ import sys
 import tomllib
 import traceback
 from pathlib import Path
-from urllib.parse import urlparse
 
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -30,6 +29,7 @@ from lab.markets.odds import OddsApi
 from lab.markets.polymarket import Polymarket, PolymarketUS
 from lab.markets.predictit import PredictIt
 from lab.markets.venue import Quote, Venue
+from lab.util import s3_from_env
 
 CONFIG = Path(os.environ.get("MARKETS_CONFIG", Path(__file__).resolve().parents[1] / "markets.toml"))
 ADAPTERS = {a.name: a for a in (Kalshi, PolymarketUS, Polymarket, PredictIt, Manifold, OddsApi)}
@@ -44,12 +44,6 @@ SCHEMA = pa.schema([
 
 def load_config(path: Path = CONFIG) -> dict:
     return tomllib.loads(path.read_text())
-
-
-def s3_from_env() -> pafs.FileSystem:
-    url = urlparse(os.environ["S3_ENDPOINT"])
-    return pafs.S3FileSystem(access_key=os.environ["S3_ACCESS_KEY"], secret_key=os.environ["S3_SECRET_KEY"],
-                             endpoint_override=url.netloc, scheme=url.scheme or "https", region="us-east-1")
 
 
 def state(conn, venue: str) -> tuple[dict, dict]:
