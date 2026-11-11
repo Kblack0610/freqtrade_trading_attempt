@@ -3,16 +3,19 @@
 
 1. Strategies: every file the resolver finds under user_data/strategies, with its hash, into
    `strategies`.
-2. Backtests: each strategy x exchange over its whole history, one calendar year per chunk, run in
+2. Backtests: each strategy x exchange over its whole history, one chunk per past calendar year and per month of the
+   current year, run in
    parallel (up to ANALYZE_WORKERS freqtrade processes, fewer when their estimated memory would pass
    ANALYZE_MEMORY_GB: a year of 1m candles needs about four times a year of 5m). A chunk is cached by its cache_key (strategy file,
    config files, Freqtrade version, range, and a digest of that year's candles at the strategy's timeframe):
-   past years run once, again only when their candles change (Kraken's quarterly archive lands after its
-   year ends), and the current year reruns each night.
+   past years and past months run once, again only when their candles change (Kraken's quarterly archive lands after
+   its year ends), and only the current month reruns each night. On January 1 the year just ended becomes one chunk,
+   which replaces its months.
    Its trades go to `backtest_trades`. A chunk starts from the config's wallet, so a long history is
    many short compounding runs chained by their daily returns, not one run that compounds for years.
    Then setup overlays (lab/variants.toml): each strategy x exchange again under every overlay, the overlay's
-   config in its cache key, up to [sweep] max_chunks a night, best 365-day Sharpe low end first.
+   config in its cache key, up to [sweep] max_chunks a night, best 365-day Sharpe low end first, and only for a
+   strategy x exchange walk-forward has scored.
    A FreqAI strategy (a freqai.json beside its file) runs as-is only, over the last ML_DAYS from the first of that
    month, with that file as its config and a model identifier per venue, chunk and file version, so FreqAI reuses
    only models trained for that chunk (user_data/models/<identifier>). On an image without lightgbm (the plain
@@ -42,6 +45,7 @@ check and prints one BIAS_RESULT line; the main run calls it as a subprocess per
 import datetime as dt
 import hashlib
 import importlib.util
+import itertools
 import json
 import math
 import os
@@ -132,7 +136,7 @@ def freqai_fragment(file: str) -> dict | None:
 
 
 def ml_chunks(since: dt.date, today: dt.date) -> list[tuple[dt.date, dt.date]]:
-    """A FreqAI strategy's chunks: calendar years over the last ML_DAYS, from the first of that month. FreqAI anchors
+    """A FreqAI strategy's chunks: chunks() over the last ML_DAYS, from the first of that month. FreqAI anchors
     its training windows at a chunk's start, so a start that moves monthly, not nightly, keeps its models reusable."""
     lo = max(since, ml_start(today))
     return [(max(a, lo), b) for a, b in chunks(lo, today)]
@@ -200,9 +204,11 @@ def chunk_key(file_hash: str, exchange: str, start: dt.date, end: dt.date, ft_ve
     return sha256(json.dumps(parts + [overlay] if overlay else parts, sort_keys=True).encode())
 
 
-def candle_digests(exchange: str, timeframe: str, by: str = "year") -> dict:
-    """Per calendar year (by="day": per UTC date), a digest of the whitelisted pairs' candles at this
-    timeframe. Informative timeframes a strategy also loads are not covered."""
+def candle_digests(exchange: str, timeframe: str, by: str, today: dt.date | None = None) -> dict:
+    """A digest of the whitelisted pairs' candles at this timeframe per chunks() chunk, keyed by its start date
+    (by="chunk", which needs today: each past year whole, then each month of today's year), or per UTC date
+    (by="day"). A past year's digest is the one its chunk was stored with before months, so those keys did not move.
+    Informative timeframes a strategy also loads are not covered."""
     from freqtrade.misc import pair_to_filename
 
     out = {}
@@ -211,8 +217,17 @@ def candle_digests(exchange: str, timeframe: str, by: str = "year") -> dict:
         if not path.exists():
             continue
         df = pd.read_feather(path)
-        for k, rows in df.groupby(df["date"].dt.year if by == "year" else df["date"].dt.date):
-            out.setdefault(int(k) if by == "year" else k, hashlib.sha256()).update(
+        d = df["date"].dt
+        if by == "day":
+            groups = iter(df.groupby(d.date))
+        else:
+            assert by == "chunk" and today is not None, 'by="chunk" needs today'
+            past = d.year < today.year
+            groups = itertools.chain(
+                ((dt.date(int(y), 1, 1), rows) for y, rows in df[past].groupby(d.year[past])),
+                ((dt.date(today.year, int(m), 1), rows) for m, rows in df[~past].groupby(d.month[~past])))
+        for k, rows in groups:
+            out.setdefault(k, hashlib.sha256()).update(
                 pair.encode() + pd.util.hash_pandas_object(rows, index=False).values.tobytes())
     return {k: h.hexdigest() for k, h in out.items()}
 
@@ -240,11 +255,20 @@ def span_digest(days: dict[dt.date, str], start: dt.date, end: dt.date) -> str:
     return sha256("".join(f"{d}{h}" for d, h in sorted(days.items()) if start <= d < end).encode())
 
 
+def digest_key(start: dt.date, today: dt.date) -> dt.date:
+    """The candle_digests(by="chunk") key of a chunk starting at start: its year's for a past year (a FreqAI chunk may
+    start inside it), else its month's."""
+    return dt.date(start.year, 1, 1) if start.year < today.year else start.replace(day=1)
+
+
 def chunks(first: dt.date, today: dt.date) -> list[tuple[dt.date, dt.date]]:
-    """Calendar years from the first candle's year up to today; the current year ends today."""
-    out = []
-    for y in range(first.year, today.year + 1):
-        start, end = dt.date(y, 1, 1), min(dt.date(y + 1, 1, 1), today)
+    """Calendar years from the first candle's year up to last year, then each month of the current year from the
+    first candle's month, the current month ending today. Only the current month's key moves each night, so a night
+    reruns about a month per series instead of the year to date."""
+    out = [(dt.date(y, 1, 1), dt.date(y + 1, 1, 1)) for y in range(first.year, today.year)]
+    for m in range(first.month if first.year == today.year else 1, today.month + 1):
+        start = dt.date(today.year, m, 1)
+        end = min(dt.date(today.year + m // 12, m % 12 + 1, 1), today)
         if end > start:
             out.append((start, end))
     return out
@@ -404,8 +428,11 @@ def store_chunk(conn, task: dict, res: dict, run_id: int) -> None:
     attempts = MAX_ATTEMPTS if res.get("no_data") else task["attempts"] + 1 if not res["ok"] else 1
     with conn.transaction():
         overlay = task.get("overlay", "")
+        # every stored chunk of the series this one overlaps: its own last result, the year-to-date chunk its month
+        # replaces, or the months a finished year replaces, so no day of the series is counted twice
         conn.execute("DELETE FROM backtest_chunks WHERE strategy = %s AND exchange = %s AND overlay = %s"
-                     " AND chunk_start = %s", (task["strategy"], task["exchange"], overlay, task["start"]))
+                     " AND chunk_start < %s AND chunk_end > %s",
+                     (task["strategy"], task["exchange"], overlay, task["end"], task["start"]))
         trades = res.get("trades")
         chunk_id = conn.execute(
             "INSERT INTO backtest_chunks (strategy, exchange, overlay, chunk_start, chunk_end, cache_key, ok, attempts,"
@@ -470,14 +497,16 @@ def coverage(conn) -> dict[tuple[str, str], dt.datetime]:
 def plan(conn, found: list[dict], first: dict, today: dt.date, ft_version: str, overlays: dict[str, dict] | None = None,
          max_overlay: int = 0) -> tuple[list[dict], int, list[str], int]:
     """The chunks to run this time, how many are cached, why some strategy x exchange is skipped, and how many
-    overlay chunks wait for a later night. As-is chunks come first; then up to max_overlay overlay chunks: those
-    never run, best prior score (the as-is 365-day Sharpe low end) first and each series' newest year first, then
+    overlay chunks wait for a later night. As-is chunks come first; then up to max_overlay overlay chunks, only for a
+    strategy x exchange walk-forward has scored (`confidence.score`), since no gate reads an overlay of one it has not:
+    those never run, best prior score (the as-is 365-day Sharpe low end) first and each series' newest chunk first, then
     stored ones whose key moved, the one stored longest ago first, so refreshing the current year rotates through
     every series instead of holding the cap on the best few."""
     done = {(s, e, o, c): (k, ok, n, at) for s, e, o, c, k, ok, n, at in conn.execute(
         "SELECT strategy, exchange, overlay, chunk_start, cache_key, ok, attempts, chunk_end FROM backtest_chunks")}
     score = {(s, e): lo for s, e, lo in conn.execute(
         "SELECT strategy, exchange, sharpe_lo FROM strategy_windows WHERE win = '365d' AND sharpe_lo IS NOT NULL")}
+    scored = {(s, e) for s, e in conn.execute("SELECT strategy, exchange FROM confidence WHERE score IS NOT NULL")}
     todo, over, cached, skipped = [], [], 0, []
     digests: dict[tuple[str, str], dict[int, str]] = {}
     for s in found:
@@ -489,12 +518,12 @@ def plan(conn, found: list[dict], first: dict, today: dt.date, ft_version: str, 
                 skipped.append(f"{s['name']} on {ex}: {s['timeframe']} not fully backfilled")
                 continue
             if (ex, s["timeframe"]) not in digests:
-                digests[ex, s["timeframe"]] = candle_digests(ex, s["timeframe"])
+                digests[ex, s["timeframe"]] = candle_digests(ex, s["timeframe"], "chunk", today)
             ml = freqai_fragment(s["file"]) is not None
-            for oid, o in [("", None), *([] if ml else (overlays or {}).items())]:
+            for oid, o in [("", None), *([] if ml or (s["name"], ex) not in scored else (overlays or {}).items())]:
                 for start, end in (ml_chunks if ml else chunks)(since.date(), today):
                     cfg = chunk_config(s, ex, start, o and o["params"])
-                    candles = digests[ex, s["timeframe"]].get(start.year, "")
+                    candles = digests[ex, s["timeframe"]].get(digest_key(start, today), "")
                     key = chunk_key(s["file_hash"], ex, start, end, ft_version, candles, cfg)
                     prior = done.get((s["name"], ex, oid, start))
                     if prior and prior[0] == key and (prior[1] or prior[2] >= MAX_ATTEMPTS):
@@ -505,11 +534,11 @@ def plan(conn, found: list[dict], first: dict, today: dt.date, ft_version: str, 
                         {"strategy": s["name"], "exchange": ex, "start": start, "end": end, "key": key,
                          "attempts": attempts, "candles": candles, "overlay": oid, "config": cfg,
                          "stored": prior and prior[3]})
-    # the newest years first: they feed every window, so a run cut short still updates the page
-    todo.sort(key=lambda t: (-t["start"].year, t["strategy"], t["exchange"]))
+    # the newest chunks first: they feed every window, so a run cut short still updates the page
+    todo.sort(key=lambda t: (-t["start"].toordinal(), t["strategy"], t["exchange"]))
     over.sort(key=lambda t: (t["stored"] is not None, t["stored"] or dt.date.min,
                              -score.get((t["strategy"], t["exchange"]), -math.inf), t["strategy"], t["exchange"],
-                             t["overlay"], -t["start"].year))
+                             t["overlay"], -t["start"].toordinal()))
     return todo + over[:max_overlay], cached, skipped, max(len(over) - max_overlay, 0)
 
 
@@ -813,6 +842,15 @@ def main(runner: Runner | None = None, today: dt.date | None = None) -> int:
         run_id = conn.execute("INSERT INTO runs (kind, name, raw, started_at) VALUES ('analysis', %s, '{}', %s) RETURNING id",
                               (started.strftime("%Y-%m-%d %H:%M:%S"), started)).fetchone()[0]
         ok = False
+        stage_s: dict[str, float] = {}  # wall seconds per step, so a cut shows where the night went
+        summary["stage_s"] = stage_s
+        clock = time.monotonic()
+
+        def lap(name: str) -> None:
+            nonlocal clock
+            stage_s[name] = round(time.monotonic() - clock, 1)
+            clock = time.monotonic()
+
         try:
             found = runner.discover()
             sync_strategies(conn, found)
@@ -825,6 +863,7 @@ def main(runner: Runner | None = None, today: dt.date | None = None) -> int:
             bias = bias_todo(conn, found, first)
             drifts = drift_todo(conn, found, today)
             hashes = {s["name"]: s["file_hash"] for s in found}
+            lap("plan")
             summary.update(freqtrade=version, strategies=len(found), load_failed=sum(bool(s["load_error"]) for s in found),
                            chunks_cached=cached, chunks_run=len(todo), skipped=skipped, bias_run=len(bias),
                            drift_run=len(drifts), overlays=len(overlays), overlay_chunks_run=sum(bool(t["overlay"]) for t in todo),
@@ -869,26 +908,24 @@ def main(runner: Runner | None = None, today: dt.date | None = None) -> int:
                             failed += 1
                             if len(failures) < 100:
                                 failures.append(f"{task['strategy']} {task['exchange']}{' ' + task['overlay'] if task.get('overlay') else ''}"
-                                                f" {task['start'].year}: {res['error']}")
+                                                f" {task['start']}: {res['error']}")
                         if done % 25 == 0 or done == len(todo):
                             print(f"analyze: {done}/{len(todo)} chunks, {failed} failed, {empty} with no candles", flush=True)
                 except BaseException:
                     # leaving the with block waits for every queued task, hours of work whose results cannot be stored
                     pool.shutdown(cancel_futures=True)
                     raise
+            lap("backtests")
             summary.update(chunks_failed=failed, chunks_empty=empty, failures=failures, bias_failed=conn.execute(
                 "SELECT count(*) FROM bias_checks WHERE has_bias IS NULL").fetchone()[0])
             summary.update(derive(conn))
+            lap("derive")
             cfg = suggest.load_config()
             summary.update(volatility.run(conn, vol_files(first, cfg["volatility"]["timeframe"]), cfg))
-            summary.update(vol_target.run(conn))
-            summary.update(suggest.run(conn))
-            summary.update(confidence.run(conn))
-            summary.update(book.run(conn))
-            summary.update(mixtures.run(conn))
-            summary.update(scorecard.run(conn))
-            summary.update(horizon.run(conn))
-            summary.update(loop.run(conn))
+            lap("volatility")
+            for step in (vol_target, suggest, confidence, book, mixtures, scorecard, horizon, loop):
+                summary.update(step.run(conn))
+                lap(step.__name__.removeprefix("lab."))
             ok = failed <= FAIL_SHARE * max(len(todo), 1)
             print(f"analyze: done: {json.dumps({k: v for k, v in summary.items() if k not in ('failures', 'skipped')})}",
                   flush=True)

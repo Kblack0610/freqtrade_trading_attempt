@@ -88,21 +88,23 @@ def capital_exposure(trades: pd.DataFrame, start: pd.Timestamp, end: pd.Timestam
     return min(1.0, float((trades["share"] * held).sum() / span))
 
 
-def block_indices(n: int, block: int, samples: int, rng: np.random.Generator, length: int | None = None) -> np.ndarray:
-    """Circular block bootstrap: `samples` rows of `length` indices into a series of n, drawn in
-    runs of `block` consecutive days so volatility clusters and streaks survive the resample."""
+def block_sample(x: np.ndarray, block: int, samples: int, rng: np.random.Generator, length: int | None = None) -> np.ndarray:
+    """Circular block bootstrap: `samples` rows of `length` values of x, drawn in runs of `block` consecutive days so
+    volatility clusters and streaks survive the resample. The runs are read as windows over x with its first values
+    appended, so no index array is built (the profile's top cost); block_sample(np.arange(n), ...) gives the indices."""
+    x = np.asarray(x)
+    n = len(x)
     length = length or n
-    blocks = -(-length // block)
-    starts = rng.integers(0, n, size=(samples, blocks))
-    idx = (starts[:, :, None] + np.arange(block)[None, None, :]) % n
-    return idx.reshape(samples, -1)[:, :length]
+    starts = rng.integers(0, n, size=(samples, -(-length // block)))
+    windows = np.lib.stride_tricks.sliding_window_view(np.concatenate([x, np.resize(x, block - 1)]), block)
+    return windows[starts].reshape(samples, -1)[:, :length]
 
 
 def sharpe_ci(ret: np.ndarray, seed: int, samples: int = 1000, block: int = 10, level: float = 0.90):
     r = np.asarray(ret, dtype=float)
     if len(r) < 2 * block:
         return None, None
-    res = r[block_indices(len(r), block, samples, np.random.default_rng(seed))]
+    res = block_sample(r, block, samples, np.random.default_rng(seed))
     sd = res.std(axis=1, ddof=1)
     ok = sd > 0
     if not ok.any():
@@ -129,7 +131,7 @@ def block_mean_ci(x: np.ndarray, seed: int, samples: int = 1000, block: int = 10
     x = np.asarray(x, dtype=float)
     if len(x) < 2 * block:
         return None, None
-    means = x[block_indices(len(x), block, samples, np.random.default_rng(seed))].mean(axis=1)
+    means = block_sample(x, block, samples, np.random.default_rng(seed)).mean(axis=1)
     lo, hi = np.quantile(means, [(1 - level) / 2, (1 + level) / 2])
     return float(lo), float(hi)
 
@@ -180,7 +182,7 @@ def hold_excess(daily: pd.DataFrame, close: pd.Series, capital: float, seed: int
     if len(both) < 2 * block:
         return None, None, None
     x = (both["ret"] - capital * both["btc"]).to_numpy(dtype=float)
-    means = x[block_indices(len(x), block, samples, np.random.default_rng(seed))].mean(axis=1)
+    means = block_sample(x, block, samples, np.random.default_rng(seed)).mean(axis=1)
     lo, hi = np.quantile(means, [(1 - level) / 2, (1 + level) / 2])
     return float(x.mean() * YEAR), float(lo * YEAR), float(hi * YEAR)
 
@@ -350,7 +352,7 @@ def trades_needed(x: np.ndarray, z: float = 1.645) -> int | None:
 def _paths(ret: np.ndarray, horizon: int, seed: int, paths: int, block: int) -> tuple[np.ndarray, np.ndarray]:
     """Each bootstrapped path's total return and its deepest drawdown over `horizon` steps."""
     r = np.asarray(ret, dtype=float)
-    res = r[block_indices(len(r), block, paths, np.random.default_rng(seed), horizon)]
+    res = block_sample(r, block, paths, np.random.default_rng(seed), horizon)
     eq = np.cumprod(1.0 + res, axis=1)
     peak = np.maximum.accumulate(np.concatenate([np.ones((paths, 1)), eq], axis=1), axis=1)[:, 1:]
     return eq[:, -1] - 1.0, np.max(1.0 - eq / peak, axis=1)

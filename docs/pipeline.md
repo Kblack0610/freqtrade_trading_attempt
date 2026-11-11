@@ -49,10 +49,10 @@ Reference: [Price data](../README.md#price-data), [Venues](../README.md#venues).
 
 A backtest replays a strategy over past candles as if it had traded, with the exchange's real fee plus a slippage guess.
 
-- **Chunks.** Each strategy on each exchange is backtested one calendar year at a time, each year from the same 1000 USD wallet. A chunk is remembered by a fingerprint of everything that could change its result: the strategy file, the configs, the freqtrade version, the dates and the candles. A past year therefore runs once; a normal night only redoes the current year. Editing a strategy reruns all its years.
+- **Chunks.** Each strategy on each exchange is backtested one past calendar year at a time, then one month at a time for the current year, each chunk from the same 1000 USD wallet. A chunk is remembered by a fingerprint of everything that could change its result: the strategy file, the configs, the freqtrade version, the dates and the candles. A past year or month therefore runs once; a normal night only redoes the current month. On January 1 the year just ended runs once more as one chunk and replaces its months. Editing a strategy reruns all its chunks.
 - **Bias checks.** Lookahead bias means the strategy peeked at the future; such a strategy ranks last and is never suggested. Recursive bias means an indicator still shifts at the strategy's startup candle count; that is a warning.
 - **Windows.** The chunks are joined into one daily return series and measured over the last 30, 90, 180 and 365 days and the whole history.
-- **Setup overlays.** The same strategy is also backtested with different account settings from `lab/variants.toml` (open-trade slots, stake, stoploss, fewer pairs). At most `[sweep] max_chunks` overlay chunks run a night; the rest wait, and the run's `overlay_chunks_waiting` counts them. Every overlay is a counted trial (see Step 5).
+- **Setup overlays.** The same strategy is also backtested with different account settings from `lab/variants.toml` (open-trade slots, stake, stoploss, fewer pairs). Overlays run only for a strategy and exchange that walk-forward has scored, at most `[sweep] max_chunks` overlay chunks a night; the rest wait, and the run's `overlay_chunks_waiting` counts them. Every overlay is a counted trial (see Step 5).
 
 What the numbers mean:
 
@@ -175,6 +175,7 @@ for kind in ('analysis', 'walkforward'):
 |---|---|
 | `chunks_run`, `chunks_cached` | Backtests done tonight against those reused. Many runs on a quiet night mean something changed every fingerprint |
 | `overlay_chunks_waiting` | Overlay backlog. Divide by `[sweep] max_chunks` for the nights it takes to drain |
+| `stage_s` | Wall seconds per analysis step (plan, backtests, derive, then each step after it), so a slow night shows which step took the time |
 | `folds_run`, `folds_left` | Walk-forward done and still queued. `folds_left` should fall night over night |
 | `skipped` | Strategies and venues left out, with the reason (usually "not fully backfilled") |
 | `trial_register` | Things tried so far. It only grows, and it raises the deflated Sharpe and minimum backtest length bars |

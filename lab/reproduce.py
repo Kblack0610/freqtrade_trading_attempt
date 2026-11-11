@@ -41,8 +41,9 @@ def trade_rows(rows) -> list[tuple]:
     return sorted(out, key=lambda t: (t[1], t[0], t[2]))
 
 
-def chunk_sample(conn, rng: random.Random, n: int, ft_version: str) -> list[dict]:
+def chunk_sample(conn, rng: random.Random, n: int, ft_version: str, today: dt.date | None = None) -> list[dict]:
     """Up to n stored, ok chunks, as-is or under a setup overlay, whose cache key their inputs still give."""
+    today = today or dt.datetime.now(dt.timezone.utc).date()
     rows = conn.execute("""
         SELECT c.id, c.strategy, c.exchange, c.chunk_start, c.chunk_end, c.cache_key, c.final_balance,
                s.name, s.file, s.file_hash, s.timeframe, c.overlay, o.params
@@ -55,9 +56,10 @@ def chunk_sample(conn, rng: random.Random, n: int, ft_version: str) -> list[dict
         if len(out) >= n:
             break
         if (ex, tf) not in digests:
-            digests[ex, tf] = analyze.candle_digests(ex, tf)
+            digests[ex, tf] = analyze.candle_digests(ex, tf, "chunk", today)
         cfg = analyze.chunk_config({"name": name, "file": file, "file_hash": file_hash}, ex, start, overlay)
-        if analyze.chunk_key(file_hash, ex, start, end, ft_version, digests[ex, tf].get(start.year, ""), cfg) == key:
+        candles = digests[ex, tf].get(analyze.digest_key(start, today), "")
+        if analyze.chunk_key(file_hash, ex, start, end, ft_version, candles, cfg) == key:
             out.append({"id": cid, "strategy": strategy, "exchange": ex, "start": start, "end": end,
                         "final_balance": final, "overlay": oid, "config": cfg})
     return out
