@@ -102,9 +102,9 @@ def load(conn, cfg: dict, now: dt.datetime | None = None) -> dict:
         oos.setdefault((s, e), {})[pd.Timestamp(day)] = ret
     facts["oos"] = {k: pd.Series(v, dtype=float) for k, v in oos.items()}
     facts["drift"] = {}
-    for s, e, gap, n in conn.execute("SELECT strategy, exchange, gap, gap_trades FROM drift WHERE gap IS NOT NULL "
-                                     "ORDER BY gap_trades"):
-        facts["drift"][(s, e)] = {"gap": gap, "trades": n}  # most trades last, so that bot's gap stands
+    for s, e, gap, n, gaps in conn.execute("SELECT strategy, exchange, gap, gap_trades, gaps FROM drift "
+                                           "WHERE gap IS NOT NULL ORDER BY gap_trades"):
+        facts["drift"][(s, e)] = {"gap": gap, "trades": n, "gaps": gaps or []}  # most trades last, so that bot's gap stands
     facts["live"] = {(s, e): {"since": since, "closed": closed, "stopouts": stops}
                      for s, e, since, closed, stops in conn.execute(LIVE)}
     facts["live_returns"] = {}
@@ -185,17 +185,46 @@ def regime_spread(daily: pd.Series | None, trend: pd.Series, cfg: dict) -> tuple
     return ", ".join(f"{k} {v:+.0%}" for k, v in by.items()) or None, bool(ok)
 
 
-def live_gate(live: dict | None, close: pd.Series, now: dt.datetime, c: dict) -> dict:
-    need = (f">= {c['min_live_days']} days, {c['min_live_trades']} trades, BTC down {c['min_live_btc_drop']:.0%}, "
-            f"{c['min_live_stopouts']} stop-out")
+def league_alpha(facts: dict, c: dict) -> float:
+    """The anytime-valid level for one sequence: alpha split by Bonferroni over the paper bots live now, so the
+    league-wide false pass rate stays at alpha however often the nightly job reads them."""
+    return c["anytime_alpha"] / max(1, len(facts["live"]))
+
+
+def expectancy_bound(returns, alpha: float, c: dict) -> tuple[float | None, float | None]:
+    """The anytime-valid interval of the mean paper return per closed trade, as of the last one."""
+    if not len(returns):
+        return None, None
+    lo, hi = metrics.confidence_sequence(returns, *c["live_return_bounds"], alpha)
+    return float(lo[-1]), float(hi[-1])
+
+
+def live_gate(live: dict | None, returns, close: pd.Series, now: dt.datetime, c: dict, alpha: float) -> dict:
+    need = (f"paper expectancy sequence low > 0 at alpha {alpha:.4f}; >= {c['min_live_days']} days, "
+            f"BTC down {c['min_live_btc_drop']:.0%}, {c['min_live_stopouts']} stop-out")
     if not live:
         return gate("dry run", "no bot", need, False)
     days = (now - live["since"]).days
     seen = close[close.index >= live["since"].date()]
     drop = metrics.max_drawdown(seen.pct_change().dropna().to_numpy()) if len(seen) > 1 else 0.0
-    return gate("dry run", f"{days} days, {live['closed']} trades, BTC down {drop:.0%}, {live['stopouts']} stop-outs", need,
-                days >= c["min_live_days"] and live["closed"] >= c["min_live_trades"]
+    lo, hi = expectancy_bound(returns, alpha, c)
+    seq = "no trades" if lo is None else f"expectancy {lo:+.4f} to {hi:+.4f}" + (" (failed early)" if hi < 0 else "")
+    return gate("dry run", f"{days} days, {live['closed']} trades, {seq}, BTC down {drop:.0%}, {live['stopouts']} stop-outs",
+                need, lo is not None and lo > 0 and days >= c["min_live_days"]
                 and drop >= c["min_live_btc_drop"] and live["stopouts"] >= c["min_live_stopouts"])
+
+
+def drift_gate(d: dict | None, width: float | None, alpha: float, c: dict) -> dict:
+    """The paper-minus-backtest gap sequence sits inside the expectancy interval's half width: an equivalence test."""
+    need = f"gap sequence inside +-the expectancy interval half width at alpha {alpha:.4f}"
+    if d is None or width is None or not d.get("gaps"):
+        return gate("drift", None if d is None else d["gap"], need, False)
+    b = c["drift_bound"]
+    lo, hi = metrics.confidence_sequence(d["gaps"], -b, b, alpha)
+    lo, hi = float(lo[-1]), float(hi[-1])
+    note = " (failed early)" if lo > width or hi < -width else ""
+    return gate("drift", f"{d['gap']:+.4f}, sequence {lo:+.4f} to {hi:+.4f} over {len(d['gaps'])} trades{note}", need,
+                lo >= -width and hi <= width)
 
 
 def decay(live, ev: dict, c: dict) -> dict | None:
@@ -305,6 +334,7 @@ def gates(pair: tuple, facts: dict, ev: dict | None, score: float | None, trials
     fee = venue_fee(exchange)
     stressed = None if ev["mean"] is None or paid is None else (ev["mean"] + paid) * c["stress_gross_share"] - paid
     d = facts["drift"].get(pair)
+    alpha = league_alpha(facts, c)
     width = None if ev["lo"] is None else (ev["hi"] - ev["lo"]) / 2
     bias = [k for k in ("lookahead", "recursive") if s[k] is not False]
     stage = cfg["book"]["stages"][0]
@@ -339,9 +369,8 @@ def gates(pair: tuple, facts: dict, ev: dict | None, score: float | None, trials
         gate("without its best pair", rest, "> 0", rest is not None and rest > 0),
         gate("venues agreeing", f"{venues[0]} of {venues[1]}", f">= {c['min_venues_agreeing']}",
              venues[0] >= c["min_venues_agreeing"]),
-        gate("drift", None if d is None else d["gap"], f"inside the interval, >= {c['min_drift_trades']} trades",
-             d is not None and width is not None and d["trades"] >= c["min_drift_trades"] and abs(d["gap"]) <= width),
-        live_gate(facts["live"].get(pair), facts["close"], facts["now"], c),
+        drift_gate(d, width, alpha, c),
+        live_gate(facts["live"].get(pair), facts["live_returns"].get(pair, []), facts["close"], facts["now"], c, alpha),
         decay_gate(decay(facts["live_returns"].get(pair, []), ev, c), c),
         gate("score", score, f">= {c['ready_score']}", score is not None and score >= c["ready_score"]),
     ]

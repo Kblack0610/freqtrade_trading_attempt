@@ -114,8 +114,8 @@ The confidence gates, from `lab/suggest.toml` `[confidence]`, and what each one 
 | cost stress | still positive with half the gross edge and 0.1 to 0.4% extra cost per round trip | compute |
 | stress scenarios | survives late entry, nudged parameters, 1m fills | compute |
 | venues agreeing | positive on at least 2 exchanges | compute and data |
-| drift | at least 20 paper trades matching the backtest | paper bot running, so time |
-| dry run | 90 days, 60 trades, through a BTC fall of 10% or more, at least one real stop ([anytime-valid replacement proposed](anytime-gates.md)) | time and the market |
+| drift | the gap sequence (paper minus backtest, per matched trade) sits inside the expectancy interval half width, anytime-valid at alpha 0.05 split over the live bots; fails early when it lies outside | paper bot running, so time |
+| dry run | the paper expectancy sequence low end above zero (anytime-valid, [design](anytime-gates.md)), after 30 days, through a BTC fall of 10% or more, with at least one real stop; fails early when its high end drops below zero | paper trades, and the market for the fall |
 | not decayed | the decay test has not fired on paper or live trades | time |
 | score | at least 90 | the above |
 
@@ -144,7 +144,7 @@ Reference: [Cohorts](../README.md#cohorts), [Watcher](../README.md#watcher).
 | The next night | Analysis backtests its whole history on every exchange and runs the bias checks. It appears on the leaderboard |
 | When chosen | It becomes a walk-forward candidate only when it is in the league, suggested, or among the best on a venue. Then each exchange needs its 12 months of folds, spread over nights by the budget |
 | Weeks to months | It needs 250 tuned out-of-sample trades, 6 or more months mostly positive, and enough out-of-sample years for its Sharpe |
-| 90 days or more after it starts paper trading | The dry-run gate, and only if BTC fell 10% or more in that time |
+| 30 days or more after it starts paper trading | The dry-run gate, and only if BTC fell 10% or more in that time and a stop fired |
 
 Writing the strategy is minutes; reaching a verdict is mostly waiting for months of evidence.
 
@@ -186,8 +186,8 @@ The `/confidence` page shows each strategy's gates and which ones it fails.
 | A strategy is missing from the leaderboard | It is in the run's `skipped` list. "Not fully backfilled" clears when backfill reaches the oldest candle; a load error needs the strategy fixed |
 | `folds_left` stays high for days | A fingerprint change requeued every fold. It drains at roughly one budget per night; check `folds_run` is not zero and the job is not hitting its deadline |
 | Analysis takes hours on a quiet night | Something changed every chunk's fingerprint: a strategy edit, a config or fee change, or a freqtrade bump |
-| The score is high but the strategy is not ready | Ready needs every gate. Time-based gates (dry run, drift, minimum backtest length) cannot pass early |
+| The score is high but the strategy is not ready | Ready needs every gate. Time-based gates (minimum backtest length, the dry run floor of 30 days, a BTC fall and a stop) cannot pass early; the drift and dry run sequences pass once enough paper trades say so |
 | `folds_run` is 0 and the night's walk-forward or analysis never started | The pod is Pending. `kubectl -n freqtrade describe pod` says `Insufficient cpu` when the job requests more than razer-laptop has free (it offers pods 4 CPUs); TraderLabPodUnschedulable fires after 30 minutes. The fix and the row for it are in home-config `apps/freqtrade/README.md` |
 | The night has `walkforward_shard` rows but no `walkforward` row | A shard pod was killed (OOM, deadline) before it recorded itself, so no shard was last. `kubectl -n freqtrade get pods -l app=freqtrade-walkforward` shows which index failed; its folds run the next night |
-| A walk-forward pod fails in its `candles` init container | The snapshot is missing or stale: check the last `freqtrade-candles-publish` job's log, which prints the manifest digest and the files uploaded |
-| Every confidence row fails dry run and drift | Those gates need the strategy as a paper bot for 90 days and 20 matched trades; check it is in the roster |
+| A walk-forward pod exits at once, its log ending in a `snapshot.py fetch` error | The snapshot is missing or stale: check the last `freqtrade-candles-publish` job's log, which prints the manifest digest and the files uploaded |
+| Every confidence row fails dry run and drift | Those gates need the strategy as a paper bot with enough closed trades for the sequences (a 0.3 SD edge takes about 130; drift rows written before migration 040 carry no gaps until the next analysis run); check it is in the roster |
