@@ -1,5 +1,5 @@
 """The FreqAI family in user_data/strategies/ml/. The train-and-predict tests need lightgbm, so they run
-only in the ML image (the trader image built on freqtrade 2026.9_freqai, FREQTRADE_IMAGE); the plain image
+only in the ML image (the trader image built on freqtrade 2026.10_freqai, FREQTRADE_IMAGE); the plain image
 skips them and checks the strategy is recorded as needing that image."""
 
 import datetime as dt
