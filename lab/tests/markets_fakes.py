@@ -11,8 +11,8 @@ def fixture(name):
 
 
 class Resp:
-    def __init__(self, status, body=None):
-        self.status_code, self.body = status, body
+    def __init__(self, status, body=None, headers=None):
+        self.status_code, self.body, self.headers = status, body, headers or {}
 
     def json(self):
         return self.body
@@ -23,12 +23,15 @@ class Resp:
 
 
 class Session:
-    """Answers each GET from a queue of (status, fixture name or body) and records the URL and params sent."""
+    """Answers each GET from a queue of (status, fixture name or body), or a Resp as is, and records what was sent."""
 
     def __init__(self, *answers):
         self.answers, self.calls = list(answers), []
 
     def get(self, url, params, timeout):
         self.calls.append((url, dict(params)))
-        status, body = self.answers.pop(0)
+        answer = self.answers.pop(0)
+        if isinstance(answer, Resp):
+            return answer
+        status, body = answer
         return Resp(status, fixture(body) if isinstance(body, str) else body)

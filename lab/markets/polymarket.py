@@ -71,7 +71,6 @@ class PolymarketUS:
             if len(markets) < self.api.limit:
                 return
             offset += self.api.limit
-            self.api.sleep(self.api.gap)
 
     def settled(self, cursor: str | None) -> Iterator[tuple[list[Settled], str | None]]:
         """Offset paging, so a market resolving mid-walk shifts the list down: a page may repeat, none is skipped."""
@@ -130,7 +129,7 @@ class Polymarket:
 
     def __init__(self, cfg: dict, session=None, sleep=None):
         self.api = Api(self.name, cfg, session, sleep)
-        self.data = Api(self.name, {**cfg, "base_url": DATA_API}, session, sleep)
+        self.data = Api(self.name, {**cfg, "base_url": DATA_API}, session, sleep, budget=self.api.budget)
 
     def _walk(self, params: dict, cursor: str | None = None) -> Iterator[tuple[list[dict], dt.datetime, str | None]]:
         while True:
@@ -141,7 +140,6 @@ class Polymarket:
             yield markets, dt.datetime.now(dt.timezone.utc), cursor or None
             if not cursor:
                 return
-            self.api.sleep(self.api.gap)
 
     def open_markets(self) -> Iterator[list[Quote]]:
         for markets, ts, _ in self._walk({}):  # closed omitted means open
@@ -160,7 +158,6 @@ class Polymarket:
         start, end = _span(span)
         params, out = {"token_id": tokens[0], "start": start, "end": end, "bucket_seconds": period_s}, []
         while True:
-            self.api.sleep(self.api.gap)
             body = self.data.get("/v2/prices-history", params)
             out += [Bar(market_id=span.market_id, ts=epoch_s(h["timestamp"]), period_s=period_s, bid=None, ask=None,
                         open=None, high=None, low=None, close=num(h.get("price")), volume=None, open_interest=None)

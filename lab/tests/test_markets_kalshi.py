@@ -26,7 +26,7 @@ def test_a_429_backs_off_exponentially_then_retries():
     s, slept = Session((429, None), (429, None), (200, "kalshi_open_page2.json")), []
     pages = list(Kalshi(CFG, s, sleep=slept.append).open_markets())
     assert [len(p) for p in pages] == [2]
-    assert slept == [1.0, 2.0]
+    assert slept == [1.0, 1.0, 2.0, 2.0]  # each back-off, then the gap it doubled
 
 
 def test_a_429_past_the_retries_raises():
