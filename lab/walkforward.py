@@ -4,8 +4,9 @@
 Candidates, lookahead-clean, loadable and not FreqAI, up to WF_LIMIT: the league's strategies, then the open promote and
 watch suggestions, then the best 365-day expectancy low end on each venue in turn. Each runs on every venue in
 WF_EXCHANGES whose candles for its timeframe are fully backfilled (coinbase is left out: its 2.4% round trip
-leaves nothing to tune). For each of the last WF_FOLDS whole calendar months (a trade the backtest force-closes at a span's end
-straddles the fold boundary, so `stats` purges it from every span's result):
+leaves nothing to tune). For every whole calendar month before the lockbox whose WF_TRAIN_DAYS training span starts on
+or after the venue's first candle, or only the last WF_FOLDS of them when that is set (a trade the backtest force-closes
+at a span's end straddles the fold boundary, so `stats` purges it from every span's result):
 - the month is backtested with the strategy as it is (base);
 - hyperopt tunes it on the WF_TRAIN_DAYS before the month, with a seeded random state, stopping WF_EMBARGO_DAYS
   short of the month so no training trade is still open when the test begins (embargo);
@@ -59,7 +60,7 @@ from lab import analyze, book, confidence, horizon, metrics, mixtures, robustnes
 from lab.db import connect
 
 EXCHANGES = os.environ.get("WF_EXCHANGES", "binanceus").split()
-FOLDS = int(os.environ.get("WF_FOLDS", "6"))
+FOLDS = int(os.environ.get("WF_FOLDS", "0"))  # 0: every month back to the venue's first TRAIN_DAYS
 TRAIN_DAYS = int(os.environ.get("WF_TRAIN_DAYS", "180"))
 EPOCHS = int(os.environ.get("WF_EPOCHS", "150"))
 EPOCHS_ROI = int(os.environ.get("WF_EPOCHS_ROI", "60"))  # a strategy with no parameters of its own: ROI and stoploss only
@@ -82,13 +83,18 @@ MAX_ATTEMPTS = analyze.MAX_ATTEMPTS
 FAIL_SHARE = analyze.FAIL_SHARE
 
 
-def folds(today: dt.date, n: int | None = None, train_days: int | None = None,
-          lockbox: dt.date | None = None) -> list[tuple[dt.date, dt.date, dt.date]]:
-    """(train_start, test_start, test_end) for the last n (FOLDS) whole months before the lockbox, oldest first."""
-    n, train_days = n or FOLDS, train_days or TRAIN_DAYS
+def folds(today: dt.date, n: int | None = None, train_days: int | None = None, lockbox: dt.date | None = None,
+          since: dt.date | None = None) -> list[tuple[dt.date, dt.date, dt.date]]:
+    """(train_start, test_start, test_end) for the whole months before the lockbox whose training starts on or after
+    since (the venue's first candle), oldest first: the last n (FOLDS) of them, or all when n is 0."""
+    n, train_days = FOLDS if n is None else n, train_days or TRAIN_DAYS
+    if not n and since is None:
+        raise ValueError("every fold back to the first candle needs that candle's date")
     out, end = [], min(today.replace(day=1), lockbox or today)
-    for _ in range(n):
+    while not n or len(out) < n:
         start = (end - dt.timedelta(days=1)).replace(day=1)
+        if since is not None and start - dt.timedelta(days=train_days) < since:
+            break
         out.append((start - dt.timedelta(days=train_days), start, end))
         end = start
     return out[::-1]
@@ -265,7 +271,7 @@ def candidates(conn) -> list[dict]:
 
 def plan(conn, found: list[dict], first: dict, today: dt.date, ft_version: str) -> tuple[list[dict], int, list[str]]:
     """The folds to run, how many are cached, and why a strategy x venue or a fold is skipped. A venue runs once
-    its candles are fully backfilled (analyze.coverage), and a fold only when its training span has candles."""
+    its candles are fully backfilled (analyze.coverage), its folds reaching back to its first candle."""
     done = {(s, e, f): (k, ok, n) for s, e, f, k, ok, n in conn.execute(
         "SELECT strategy, exchange, fold_start, cache_key, ok, attempts FROM walkforward")}
     todo, cached, skipped = [], 0, []
@@ -279,10 +285,7 @@ def plan(conn, found: list[dict], first: dict, today: dt.date, ft_version: str) 
             if since is None:
                 skipped.append(f"{s['name']} on {ex}: {s['timeframe']} not fully backfilled")
                 continue
-            for fold in folds(today, lockbox=lockbox):
-                if fold[0] < since.date():
-                    skipped.append(f"{s['name']} on {ex} {fold[1]:%Y-%m}: training starts before its first candle")
-                    continue
+            for fold in folds(today, lockbox=lockbox, since=since.date()):
                 candles = fold_candles(ex, s["timeframe"], fold, days)
                 seed = metrics.seed_of(s["name"], ex, fold[1])
                 tune = tuning(s["file"], seed)
