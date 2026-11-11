@@ -8,7 +8,7 @@ import pytest
 
 pytest.importorskip("freqtrade")
 
-from lab import analyze, reproduce  # noqa: E402
+from lab import analyze, reproduce, walkforward  # noqa: E402
 from test_analyze import REPO  # noqa: E402
 from test_families import synthetic_candles  # noqa: E402
 
@@ -125,3 +125,24 @@ def test_an_overlay_reaches_freqtrade_and_changes_the_backtest(golden):
     assert len(res["trades"]) and as_bytes(res) != as_bytes(base)
     # the overlay's roi and stop, not the strategy's 2% and 3%, close every trade
     assert res["trades"]["profit_ratio"].between(-0.02, 0.01).all()
+
+
+def test_a_walkforward_fold_runs_real_hyperopt_with_its_sampler_and_times_each_step(golden, monkeypatch):
+    """GoldenCross declares no parameters, so it tunes ROI and stoploss only; an unknown sampler failing proves
+    the fold's sampler reaches freqtrade."""
+    _, strategies = golden
+    monkeypatch.setattr(analyze, "REPO", strategies.parent)
+    monkeypatch.setattr(walkforward, "EPOCHS_ROI", 8)
+    monkeypatch.setattr(walkforward, "EARLY_STOP", 4)
+    monkeypatch.setattr(walkforward, "MIN_TRADES", 1)
+    fold = (dt.date(2026, 1, 3), dt.date(2026, 2, 10), dt.date(2026, 2, 28))
+    monkeypatch.setattr(walkforward, "SAMPLERS", ["NoSuchSampler"])
+    bad = walkforward.Cli().fold("GoldenCross", "strategies/GoldenCross.py", EX, fold, 7)
+    assert not bad["ok"] and "NoSuchSampler" in bad["error"] and bad["hyperopt_s"] > 0
+    monkeypatch.setattr(walkforward, "SAMPLERS", ["TPESampler"])
+    res = walkforward.Cli().fold("GoldenCross", "strategies/GoldenCross.py", EX, fold, 7)
+    assert res["ok"], res["error"]
+    assert {"roi", "stoploss"} <= set(res["params"]) and not {"buy", "sell"} & set(res["params"])
+    assert 4 <= res["epochs_run"] <= 8
+    assert res["hyperopt_s"] > 0 and res["backtest_s"] > 0
+    assert res["duration_s"] == pytest.approx(res["hyperopt_s"] + res["backtest_s"])
