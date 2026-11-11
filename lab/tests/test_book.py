@@ -43,7 +43,7 @@ def test_a_steady_loser_shows_a_loss_and_a_fall():
 
 def test_monte_carlo_is_unchanged_by_the_shared_paths():
     r = np.random.default_rng(3).normal(0.001, 0.02, 200)
-    res = r[metrics.block_indices(200, 10, 500, np.random.default_rng(9), 90)]
+    res = metrics.block_sample(r, 10, 500, np.random.default_rng(9), 90)
     assert abs(metrics.monte_carlo(r, 90, 9, paths=500)["p50"] - np.median(np.cumprod(1 + res, axis=1)[:, -1] - 1)) < 1e-12
 
 

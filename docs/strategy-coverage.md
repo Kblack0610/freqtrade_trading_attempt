@@ -34,7 +34,7 @@ On binanceus the cohort needs about 16 GiB of memory in use, 13 GiB requested, a
 
 ### What dry run adds
 
-Dry run adds no trial: a strategy file in the repo is a trial whether or not a bot runs it, and the nightly analysis reruns each strategy's current year every night, so every strategy is already tested on candles that did not exist when it was written. What a bot adds is what the backtest leaves out: live fills, fees on real order books, candles arriving late. The `drift` table compares the two, and it needs weeks of trades per bot. That is the reason to run every strategy: drift per strategy. Edge still comes from the backtests.
+Dry run adds no trial: a strategy file in the repo is a trial whether or not a bot runs it, and the nightly analysis reruns each strategy's current month every night, so every strategy is already tested on candles that did not exist when it was written. What a bot adds is what the backtest leaves out: live fills, fees on real order books, candles arriving late. The `drift` table compares the two, and it needs weeks of trades per bot. That is the reason to run every strategy: drift per strategy. Edge still comes from the backtests.
 
 ### Recommendation and what was built
 
