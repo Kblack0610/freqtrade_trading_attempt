@@ -67,9 +67,47 @@ Status is `scanned` (in `user_data/strategies/`, backtested nightly, a counted t
 | Cross-venue spread | blocked | needs inventory on two exchanges and two legs at once; a freqtrade bot trades one exchange. The event-contract version is `lab/markets/` cross-venue gaps |
 | Market making | blocked by the backtester | freqtrade fills a limit order when price touches it, with no queue position, so a maker's edge cannot be measured; it would read as free money |
 
+## Diversity: what "different" means here
+
+The catalogue above says which mechanisms exist. A strategy's label does not prove it behaves differently, so diversity is defined by what each strategy does in its own results. The model is a quality-diversity archive (MAP-Elites, Mouret and Clune 2015): a few descriptor axes cut the space into cells, each cell keeps its best strategy (its elite), and an empty cell is a gap to fill in backtest. Every axis is read from tables the nightly analysis already writes.
+
+| Axis | Buckets | Read from |
+|---|---|---|
+| Mechanism | the family in `lab/families.toml` | the family tag, checked against returns (below) |
+| Holding period | median trade under 1 h, 1 h to 1 day, 1 to 7 days, over 7 days | trade durations |
+| Climate it earns in | each BTC trend bucket (up, down, flat) by volatility tercile where the interval's low end is above 0 | `lab/scorecard.py`, /book "By market climate" |
+| Venue | binanceus, coinbase, kraken, okx, kucoin | the backtest's exchange |
+| Trade frequency | trades a month, in terciles across the scanned strategies | trade counts |
+
+- **A cell's elite** is the strategy x venue x overlay with the highest low end of the 365-day Sharpe interval among those in the cell, the same score `aggressive` ranks by.
+- **Two strategies are one** when their daily returns correlate at |rho| over 0.5 (the correlation matrix behind the `max_rho` promote gate), whatever cells they sit in. A family tag that disagrees with that, such as a "trend" strategy at rho 0.9 with a mean-reversion one, is fixed in `lab/families.toml`.
+- **A diverse pick** is greedy: the best elite first, then each next elite whose largest |rho| to those already picked is 0.5 or under.
+
+### Search wide, forward-test few
+
+New variants go into the backtest, where they are counted trials. Bots are the scarce part: one roster row each, about 320 MiB, a PVC, and a share of the venue's candle budget. So "more of everything" means more strategies, timeframes and venues backtested to fill empty cells, and "more cohorts" means a few cohorts, each answering one question.
+
+Every cohort in `lab/cohorts.toml` states its question, pick rule, bot count and candle budget:
+
+| Cohort | Question it answers | Pick rule | Bots |
+|---|---|---|---|
+| `league` | how do the hand-picked starters run live | by hand | 12 |
+| `aggressive` | do the near-misses hold up live | top 4 by Sharpe low end, best overlay each, on 3 venues | 12 |
+| `mixture` | does the best 1/N mixture hold up live | the best ungated 1/N mixture by low end, one bot per sleeve | 2 |
+| `strategies` | what does every strategy leave out of its backtest (fills, fees, live candles) | every tradable strategy on binanceus | 49 |
+| `diverse` (planned) | does each different way of making money hold up live | one diverse pick per filled cell, 1 h or slower, at most 16 | up to 16 |
+
+Each cohort's roster names start with its first three letters, so `lab/cohorts.py` refuses two cohorts that share them.
+
+### The strategy card
+
+What a strategy's page should answer at a glance: expected return a year with its 90% interval, win rate, trades a month, median holding time, timeframe, the climates where its low end is above 0, walk-forward months out of sample, and which gates it passes or misses. Each field comes from a table above. A missing input reads as missing ("no out-of-sample months"), never as a blank or a zero.
+
 ## Every added strategy raises the bar
 
 Each strategy added here is a trial, and so is each venue it runs on. The deflated Sharpe compares every strategy with the best Sharpe luck alone would give across the effective number of strategies tried, so six new families on five venues add about 30 series to the 251 behind the 365-day window. The effective count (12.1 on 2026-11-09) grows by less than that, since the count discounts correlated series. That is the cost of coverage, and it is why the trial register (922 rows) keeps every trial even after its file is gone.
+
+How fast the bar rises: the best Sharpe luck gives grows about as the square root of 2 ln N over N effective trials, so 2.23 standard errors at an effective count of 12, 2.80 at 50 and 3.26 at 200. Going from 12 to 200 raises the bar by about 46%. A near-copy of a strategy already scanned barely moves the effective count, and it also finds nothing new, so a new strategy earns its place by filling an empty cell.
 
 ## Control set (tr-67)
 
