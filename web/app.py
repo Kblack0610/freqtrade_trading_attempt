@@ -28,7 +28,7 @@ from starlette.concurrency import run_in_threadpool
 
 from lab import book as book_lab
 from lab import live as live_lab
-from lab import db, metrics, suggest, universe
+from lab import db, diversity, metrics, suggest, universe
 from web import auth, charts, exporter, nav
 
 HERE = Path(__file__).resolve().parent
@@ -592,7 +592,34 @@ def strategy(request: Request, name: str, exchange: str = ""):
         correlations=rows("SELECT * FROM correlations WHERE strategy = %s AND exchange = %s ORDER BY abs(rho) DESC", key),
         chunks=rows("SELECT * FROM backtest_chunks WHERE strategy = %s AND exchange = %s AND overlay = '' "
                     "ORDER BY chunk_start DESC", key),
-        trades=rows(STRATEGY_TRADES, key))
+        trades=rows(STRATEGY_TRADES, key),
+        card=card(rows("SELECT * FROM strategy_windows WHERE strategy = %s AND exchange = %s AND win = %s",
+                       (*key, diversity.config()["window"])),
+                  rows("SELECT * FROM confidence WHERE strategy = %s AND exchange = %s", key),
+                  rows("SELECT cell, lo FROM climate_scorecard WHERE kind = 'strategy' AND name = %s AND exchange = %s",
+                       key),
+                  walkforward_by_pair("WHERE strategy = %s AND exchange = %s", key).get(key, [])))
+
+
+def card(window: list[dict], conf: list[dict], climates: list[dict], folds: list[dict]) -> dict:
+    """Pure: the strategy card (docs/strategy-coverage.md, The strategy card) for one strategy x exchange. A field
+    with no input is None, and the template says why it is missing."""
+    w = window[0] if window else None
+    c = conf[0] if conf else None
+    earns = {}
+    for r in climates:
+        if r["lo"] is not None and r["lo"] > 0:
+            earns[r["cell"]] = max(earns.get(r["cell"], 0.0), r["lo"])
+    return {
+        "window": w and w["win"], "cagr": w and w["cagr"], "sharpe_lo": w and w["sharpe_lo"], "sharpe_hi": w and w["sharpe_hi"],
+        "expectancy": w and w["expectancy"], "expectancy_lo": w and w["expectancy_lo"],
+        "expectancy_hi": w and w["expectancy_hi"], "winrate": w and w["winrate"], "trades": w and w["trades"],
+        "per_month": w["trades"] / w["days"] * diversity.DAYS_A_MONTH if w and w["days"] else None,
+        "median_hold_hours": w and w.get("median_hold_hours"),
+        "climates": sorted(earns, key=CLIMATE_ORDER.index), "climates_tested": bool(climates),
+        "oos_months": len({(f["fold_start"].year, f["fold_start"].month) for f in folds if f["ok"]}),
+        "passed": c and c["passed"], "gates": c and len(c["gates"] or []), "ready": c and c["ready"],
+        "missed": [g["gate"] for g in (c["gates"] or []) if not g["pass"]] if c else []}
 
 
 def pooled(folds: list[dict]) -> dict:
@@ -752,7 +779,10 @@ def coverage(request: Request):
     toml = suggest.load_config(FAMILIES)
     board = coverage_board(toml["strategies"], list(toml["families"]), strategy_classes(),
                            {kind: rows(sql) for kind, sql in COVER.items()})
-    return page(request, "coverage.html", untagged=UNTAGGED, **board, families={
+    dcfg = diversity.config()
+    archive = diversity.build(rows(diversity.ROWS, (dcfg["window"], dcfg["min_trades"])), rows(diversity.CLIMATE_ROWS),
+                              {n: t["family"] for n, t in toml["strategies"].items()}, dcfg)
+    return page(request, "coverage.html", untagged=UNTAGGED, **board, archive=archive, families={
         **toml["families"], UNTAGGED: "On disk, no line in lab/families.toml.", GONE: "In the results only, not on disk."})
 
 

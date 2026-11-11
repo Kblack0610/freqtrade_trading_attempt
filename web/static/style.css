@@ -51,5 +51,8 @@ a.tile:hover { text-decoration: none; border-color: var(--accent); }
 .card h3 { margin: 0 0 0.25rem; font-size: 1rem; }
 .card p { margin: 0.25rem 0 0.5rem; }
 .card details > summary { cursor: pointer; margin: 0.5rem 0; }
+dl.card { display: grid; grid-template-columns: max-content 1fr; gap: 0.25rem 1rem; }
+dl.card dt { color: var(--muted); }
+dl.card dd { margin: 0; }
 pre { margin: 0; padding: 0.5rem 0.75rem; overflow-x: auto; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; font-size: 0.85rem; }
 code { font-size: 0.9em; }

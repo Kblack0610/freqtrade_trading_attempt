@@ -104,6 +104,29 @@ The site's Markets pages read the same tables, behind the same sign-in. `/market
 
 The exporter adds `trader_markets_*` and `trader_paper_*` (README, Metrics). home-config alerts on them in `apps/monitoring/prometheus-rules-freqtrade.yaml`: a venue's last good sweep over 15 minutes old, three or more failed sweeps of one venue in an hour, and a paper account down `[book] hard_stop` (15%) of its capital from its 30-day peak. The Grafana dashboard "Freqtrade league and lab" has a Markets row over the same series.
 
+## Rate limits
+
+Every venue call goes through `Api.get` (`lab/markets/api.py`), which paces it two ways; adapters do not sleep on their own.
+
+- Shared budget: `budget_rps` in each `[venues.<v>]` table is how many requests a second every process on our egress IP may send that venue together. It is one row of `venue_budgets` (migration 041, `lab/markets/budget.py`): each request takes the next slot, `1/budget_rps` after the last one handed out, in one statement against the database clock, and sleeps until its slot. The recorder, the three history jobs and anything else calling a venue queue on that row, so jobs that overlap share the rate instead of adding up. The budget keeps its own autocommit connection, so a caller's open transaction never holds the row.
+- Own gap: `page_gap_s` is the least time between one process's requests (`[history.<v>] page_gap_s` replaces it for history). A 429 or 5xx doubles that process's gap for the rest of its run, up to 30 s, and each success takes 0.01 s off it until it is back at `page_gap_s`.
+- Retries: up to `retries`, each waiting the `Retry-After` the venue sends (seconds or a date), else `page_gap_s * 2^n`, at least 0.5 s and at most 60 s. A retry also holds the shared budget that long, so every process pauses, not only the one that got the 429.
+
+Budgets, about 60% of each venue's published limit:
+
+| Venue | Published limit | `budget_rps` |
+|---|---|---|
+| Kalshi | Basic tier 200 read tokens/s, 10 tokens a request: 20 requests/s | 12 |
+| Polymarket US | 20 requests/s per IP on the public gateway | 12 |
+| Polymarket global | Gamma `/markets` 300 per 10 s; the data API shares the budget | 15 |
+| Manifold | 500 requests/min per IP | 5 |
+| PredictIt | none published | 1 |
+| The Odds API | credits per month, no rate | 1 |
+
+Kalshi (doc, https://docs.kalshi.com/getting_started/rate_limits, rechecked 2026-11-11): a 429 carries no `Retry-After` or `X-RateLimit-*` header, and "there is no penalty or cooldown": the next request succeeds once the bucket refills. Before the shared budget, on 2026-11-11 the history jobs (settled every 3 h, bars and trades an hour and two after it) ran past `budget_min` into each other, three at about 6.7 requests/s each beside the recorder, over the 20/s limit: 950 to 1002 `HTTP 429` lines a settled run, about 530 a bars or trades run, 30 to 50 in a recorder run, and three recorder runs that ran out of retries. Why the history jobs overrun is tr-181. `lab/markets/research/kalshi_calibration.py` is run by hand from a workstation and keeps its own limiter.
+
+To check a run: `kubectl -n freqtrade logs <pod> | grep -c 'HTTP 429'`.
+
 ## Kalshi
 
 API (doc, https://docs.kalshi.com/getting_started/api_environments.md):
@@ -113,7 +136,7 @@ API (doc, https://docs.kalshi.com/getting_started/api_environments.md):
 - `/markets` pages by cursor, up to 1000 a page, and filters by `status`, `series_ticker`, `event_ticker`, `mve_filter` and the `min/max_*_ts` fields. Prices are dollar strings (`yes_bid_dollars`) and sizes fixed-point strings (`volume_fp`); `liquidity_dollars` was removed 2026-10-01 (doc, changelog).
 - Candlesticks: `period_interval` 1, 60 or 1440 minutes, with bid, ask and trade OHLC, volume and open interest.
 
-Rate limits (doc, https://docs.kalshi.com/getting_started/rate_limits): Basic tier 200 reads/s and 100 writes/s, with most requests costing 10 tokens. A 429 has no `Retry-After`, so back off exponentially. We got 429s on an unpaced count of `/markets`; a 0.5 s gap between pages was clean. Websocket: 200 connections up to Expert.
+Rate limits: Basic tier 200 read and 100 write tokens a second, 10 tokens a request (see Rate limits). We got 429s on an unpaced count of `/markets`; a 0.5 s gap between pages was clean. Websocket: 200 connections up to Expert.
 
 Fees (secondary, quoting the fee schedule PDF effective 2026-07-07; the PDF itself returned 429):
 - Taker: `ceil(M * 0.07 * C * P * (1 - P))`, M = 1 by default. Example: 100 contracts at 50c costs $1.75; at 10c or 90c, $0.63.

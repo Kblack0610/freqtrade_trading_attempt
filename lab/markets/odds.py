@@ -72,9 +72,7 @@ class OddsApi:
             raise RuntimeError(f"odds_api: HTTP {e.response.status_code} on {path}") from None
 
     def open_markets(self) -> Iterator[list[Quote]]:
-        for i, sport in enumerate(self.sports):
-            if i:
-                self.api.sleep(self.api.gap)
+        for sport in self.sports:
             events = self._get(f"/v4/sports/{sport}/odds", {"regions": self.regions, "markets": "h2h",
                                                              "oddsFormat": "decimal", "dateFormat": "iso"})
             ts = dt.datetime.now(dt.timezone.utc)
@@ -83,9 +81,7 @@ class OddsApi:
     def resolutions(self, since: dt.datetime) -> Iterator[Resolution]:
         days = (dt.datetime.now(dt.timezone.utc) - since).total_seconds() / 86400
         days_from = min(3, max(1, math.ceil(days)))  # the API takes 1 to 3
-        for i, sport in enumerate(self.sports):
-            if i:
-                self.api.sleep(self.api.gap)
+        for sport in self.sports:
             for e in self._get(f"/v4/sports/{sport}/scores", {"daysFrom": days_from, "dateFormat": "iso"}):
                 if (r := resolution(e)) is not None:  # every finished game in the window; storing one is idempotent
                     yield r

@@ -6,6 +6,20 @@
 
 {% if exchanges %}<nav class="tabs">{% for e in exchanges %}<a href="/strategies/{{ s.name }}?exchange={{ e }}" {% if e == exchange %}aria-current="page"{% endif %}>{{ e }}</a>{% endfor %}</nav>{% endif %}
 
+<h2>At a glance on {{ exchange or "-" }}</h2>
+{% if card.window %}
+<dl class="card">
+  <dt>Return a year, {{ card.window }}</dt><dd class="{{ card.cagr | tone }}">{{ card.cagr | pct }} <span class="muted">Sharpe 90% interval {{ card.sharpe_lo | num(2) }} to {{ card.sharpe_hi | num(2) }}; per trade {{ card.expectancy | pct(2) }} ({{ card.expectancy_lo | pct(2) }} to {{ card.expectancy_hi | pct(2) }})</span></dd>
+  <dt>Win rate</dt><dd>{{ card.winrate | pct(0) }} <span class="muted">of {{ card.trades }} trades</span></dd>
+  <dt>Trades a month</dt><dd>{{ card.per_month | num(1) }}</dd>
+  <dt>Median hold</dt><dd>{% if card.median_hold_hours is none %}<span class="muted">not measured yet: the next nightly analysis fills it</span>{% elif card.median_hold_hours < 48 %}{{ card.median_hold_hours | num(1) }} h{% else %}{{ (card.median_hold_hours / 24) | num(1) }} days{% endif %}</dd>
+  <dt>Timeframe</dt><dd>{{ s.timeframe or "-" }}</dd>
+  <dt>Earns in</dt><dd>{% if card.climates %}{{ card.climates | join(", ") }}{% elif card.climates_tested %}<span class="muted">no climate where the out-of-sample low end is above 0</span>{% else %}<span class="muted">no climate scorecard: it needs walk-forward</span>{% endif %}</dd>
+  <dt>Out of sample</dt><dd>{% if card.oos_months %}{{ card.oos_months }} walk-forward months{% else %}<span class="muted">no out-of-sample months</span>{% endif %}</dd>
+  <dt>Gates</dt><dd>{% if card.gates %}{{ card.passed }} of {{ card.gates }}{% if card.ready %} <span class="up">ready</span>{% else %}, misses <span class="down">{{ card.missed | join(", ") }}</span>{% endif %}{% else %}<span class="muted">not scored: it needs walk-forward</span>{% endif %}</dd>
+</dl>
+{% else %}<p class="muted">No recent-year result on this venue yet.</p>{% endif %}
+
 {% if suggestions %}
 <h2>Suggestions</h2>
 {% for sg in suggestions %}{% include "_suggestion.html" %}{% endfor %}

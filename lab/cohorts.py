@@ -7,7 +7,10 @@ for it, one row per venue; lookahead-biased or unloadable strategies are left ou
 mixture cohort (`kind = "mixture"`) is the sleeves of the best mixture lab/mixtures.py scored that bots can run as
 specified, one row per sleeve on its own exchange. An all cohort (`kind = "all"`) is every lookahead-clean, loadable
 strategy outside its skipped families, one row per venue, refused when its candle calls would pass the venue's
-budget. The promote gates are not applied: a cohort forward-tests near-misses. Nothing here edits the roster: ci/cohort_roster.py turns the rows into a home-config PR that a person
+budget. An archive cohort (`kind = "archive"`) is one elite per filled cell of the diversity archive (lab/diversity.py)
+on its venues and timeframe floor, best Sharpe low end first, skipping any whose daily returns correlate past
+`[diversity] max_rho` with one already picked, up to `max_bots`. The promote gates are not applied: a cohort
+forward-tests near-misses. Nothing here edits the roster: ci/cohort_roster.py turns the rows into a home-config PR that a person
 merges.
 """
 
@@ -21,7 +24,10 @@ from pathlib import Path
 
 from freqtrade.exchange import timeframe_to_minutes
 
-from lab import analyze, variants
+import pandas as pd
+from psycopg.rows import dict_row
+
+from lab import analyze, diversity, variants
 from lab.db import connect
 
 PATH = Path(os.environ.get("COHORTS_CONFIG", Path(__file__).with_name("cohorts.toml")))
@@ -121,6 +127,61 @@ def pick_all(rows: list[tuple], cfg: dict, family: dict[str, str], pairs: dict[s
     return [f"{cfg['prefix']}-{v}-{s.lower()} {v} {s} {cfg['cohort']} {BASE}" for s, _ in keep for v in cfg["venues"]]
 
 
+def archive_elites(conn, cfg: dict, dcfg: dict, family: dict[str, str]) -> list[dict]:
+    """The elite of every archive cell on the cohort's venues among strategies at its timeframe floor or slower. The
+    cells are described over every strategy first, so the frequency buckets match /coverage."""
+    cur = conn.cursor(row_factory=dict_row)
+    described = diversity.describe(cur.execute(diversity.ROWS, (dcfg["window"], dcfg["min_trades"])).fetchall(), family,
+                                   diversity.best_climates(cur.execute(diversity.CLIMATE_ROWS).fetchall()), dcfg)
+    floor = timeframe_to_minutes(cfg["min_timeframe"])
+    return list(diversity.elites([r for r in described if r["exchange"] in cfg["venues"] and r["timeframe"]
+                                  and timeframe_to_minutes(r["timeframe"]) >= floor]).values())
+
+
+def daily_rows(conn, keys: list[tuple[str, str]]) -> list[tuple]:
+    """(strategy, exchange, day, ret) of the given strategy x exchange series."""
+    if not keys:
+        return []
+    return list(conn.execute("SELECT strategy, exchange, day, ret FROM strategy_daily "
+                             "WHERE (strategy, exchange) IN (SELECT * FROM unnest(%s::text[], %s::text[]))",
+                             ([k[0] for k in keys], [k[1] for k in keys])))
+
+
+def returns_frame(rows: list[tuple]) -> pd.DataFrame:
+    """Pure: each series' daily return over its last analyze.CORR_DAYS days, one column per (strategy, exchange), as
+    the nightly correlations are measured."""
+    if not rows:
+        return pd.DataFrame()
+    frame = pd.DataFrame(rows, columns=["strategy", "exchange", "day", "ret"])
+    wide = frame.pivot_table(index="day", columns=["strategy", "exchange"], values="ret").sort_index()
+    return pd.DataFrame({col: wide[col].dropna().iloc[-analyze.CORR_DAYS:] for col in wide.columns})
+
+
+def pick_archive(elites: list[dict], returns: pd.DataFrame, cfg: dict, pairs: dict[str, int]) -> list[str]:
+    """Pure: the greedy diverse pick. Elites in order of Sharpe low end (then name), each joining when its daily
+    returns correlate at |rho| cfg["max_rho"] or under with every one already picked, until cfg["max_bots"]. A pair
+    with under analyze.CORR_MIN_DAYS shared days counts as different. One row per pick on its own venue, base
+    overlay. Raises ValueError when a venue's candle calls would pass its budget."""
+    rho = returns.corr(min_periods=analyze.CORR_MIN_DAYS) if not returns.empty else pd.DataFrame()
+    picked: list[dict] = []
+    for e in sorted(elites, key=lambda e: (-e["sharpe_lo"], e["strategy"], e["exchange"])):
+        if len(picked) == cfg["max_bots"]:
+            break
+        key = (e["strategy"], e["exchange"])
+        keys = [(p["strategy"], p["exchange"]) for p in picked]
+        if key in rho.columns and any(k in rho.columns and abs(rho.loc[key, k]) > cfg["max_rho"] for k in keys):
+            continue
+        picked.append(e)
+    for v in cfg["venues"]:
+        mine = [e for e in picked if e["exchange"] == v]
+        calls = sum(calls_per_minute(e["timeframe"], pairs[v]) for e in mine)
+        if calls > cfg["budget"][v]:
+            raise ValueError(f"{cfg['cohort']}: {len(mine)} bots on {v} make {calls:.1f} candle calls a minute, "
+                             f"over its budget of {cfg['budget'][v]}")
+    return [f"{cfg['prefix']}-{e['exchange']}-{e['strategy'].lower()} {e['exchange']} {e['strategy']} {cfg['cohort']} {BASE}"
+            for e in picked]
+
+
 def families() -> dict[str, str]:
     return {s: t["family"] for s, t in tomllib.loads(FAMILIES.read_text())["strategies"].items()}
 
@@ -143,6 +204,16 @@ def main(argv: list[str]) -> int:
         if cfg.get("kind") == "all":
             try:
                 lines = pick_all(strategy_rows(conn), cfg, families(), {v: len(analyze.pair_list(v)) for v in cfg["venues"]})
+            except ValueError as e:
+                print(e, file=sys.stderr)
+                return 1
+        elif cfg.get("kind") == "archive":
+            dcfg = diversity.config()
+            elites = archive_elites(conn, cfg, dcfg, families())
+            returns = returns_frame(daily_rows(conn, [(e["strategy"], e["exchange"]) for e in elites]))
+            try:
+                lines = pick_archive(elites, returns, {**cfg, "max_rho": dcfg["max_rho"]},
+                                     {v: len(analyze.pair_list(v)) for v in cfg["venues"]})
             except ValueError as e:
                 print(e, file=sys.stderr)
                 return 1

@@ -40,3 +40,20 @@ skip_families = ["template", "exit-example", "biased-control", "short"]
 # allows 1200 request weight a minute per IP and a klines call weighs 2, so 600 calls; this is half, leaving the rest
 # to the other cohorts and the backfill job, which share the cluster's one address. A pick over budget fails.
 binanceus = 300
+
+[diverse]
+# One forward test per different way of making money: the elite of each filled cell of the diversity archive
+# (lab/diversity.py, docs/strategy-coverage.md Diversity) on `venues`, best Sharpe low end first, skipping any whose
+# daily returns correlate past `[diversity] max_rho` (lab/suggest.toml) with one already picked, up to `max_bots`.
+# Strategies faster than `min_timeframe` are left out to keep the candle calls small. One bot per pick, base overlay.
+# The promote gates are ignored, as for aggressive. Grow `max_bots` only by a human decision: about 320 MiB and a
+# PVC each.
+kind = "archive"
+venues = ["binanceus"]
+min_timeframe = "1h"
+max_bots = 16
+
+[diverse.budget]
+# OHLCV calls a minute this cohort may make on a venue (see [strategies.budget]). 16 bots on 1h with 10 pairs make
+# under 3.
+binanceus = 10

@@ -55,7 +55,6 @@ class Manifold:
             if len(markets) < self.api.limit:
                 return
             before = markets[-1]["createdTime"]
-            self.api.sleep(self.api.gap)
 
     def resolutions(self, since: dt.datetime) -> Iterator[Resolution]:
         offset = 0
@@ -69,7 +68,6 @@ class Manifold:
             if len(markets) < self.api.limit:
                 return
             offset += self.api.limit
-            self.api.sleep(self.api.gap)
 
     def settled(self, cursor: str | None) -> Iterator[tuple[list[Settled], str | None]]:
         before = cursor
@@ -80,4 +78,3 @@ class Manifold:
                    and m.get("isResolved") and (r := resolution(m)) is not None], before
             if not before:
                 return
-            self.api.sleep(self.api.gap)
