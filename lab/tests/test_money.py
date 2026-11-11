@@ -247,6 +247,7 @@ MONEY_MAP = {
     ("lab/ingest.py", "http_fetch"): Client("none", why="our dry-run bots' API; its one POST is stopentry"),
     ("lab/healthcheck.py", "healthy"): Client("none", why="our own pod's health endpoint"),
     ("lab/archive.py", "RangeFile"): Client("none", why="public candle archives"),
+    ("lab/archive.py", "_get"): Client("none", why="public candle archives (OKX monthly files)"),
     ("lab/futures.py", "Ccxt"): Client("none", why="public funding and open interest through ccxt, no key"),
     ("web/fetch_kit.py", "fetch"): Client("none", why="build-time download of the pinned web-kit files from GitHub, checked against web/kit.lock"),
     ("lab/backfill.py", "Cli"): Client("none", why="public candles through ccxt, no key"),
