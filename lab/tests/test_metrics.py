@@ -48,9 +48,19 @@ def test_exposure_merges_overlapping_trades():
 
 
 def test_block_bootstrap_keeps_runs_and_wraps():
-    idx = metrics.block_indices(7, 3, 50, np.random.default_rng(1), 9)
+    idx = metrics.block_sample(np.arange(7), 3, 50, np.random.default_rng(1), 9)
     assert idx.shape == (50, 9) and idx.min() >= 0 and idx.max() < 7
     assert all((idx[:, 1] - idx[:, 0]) % 7 == 1)
+
+
+@pytest.mark.parametrize("n, block, length", [(400, 10, None), (200, 10, 90), (7, 3, 9), (2, 5, 12), (30, 1, None)])
+def test_block_bootstrap_draws_what_the_index_form_drew(n, block, length):
+    """The windowed draw is the old modulo-index one, value for value, so every stored interval stays as it was."""
+    x = np.random.default_rng(3).normal(0, 1, n)
+    rng = np.random.default_rng(9)
+    starts = rng.integers(0, n, size=(50, -(-(length or n) // block)))
+    want = x[((starts[:, :, None] + np.arange(block)) % n).reshape(50, -1)[:, :length or n]]
+    assert np.array_equal(metrics.block_sample(x, block, 50, np.random.default_rng(9), length), want)
 
 
 def test_intervals_and_monte_carlo_repeat_for_a_seed():

@@ -1,4 +1,5 @@
 import datetime as dt
+import hashlib
 import json
 import os
 import threading
@@ -102,14 +103,15 @@ def test_full_history_in_yearly_chunks_then_cached(lab):
     found = [strat("Good"), strat("Other"), strat("Planted"), strat("Scalper", "1m"), strat("Broken", None, "failed to import")]
     r = FakeRunner(found, biased={"Planted"})
     assert analyze.main(r, TODAY) == 0
-    # binanceus 2024, 2025, 2026 and coinbase 2025, 2026, for each of the three 5m strategies
-    assert len(r.backtests) == 15 and ("Good", "binanceus", dt.date(2024, 1, 1)) in r.backtests
+    # binanceus 2024, 2025 and coinbase 2025, then 11 months of 2026 on each, for each of the three 5m strategies
+    assert len(r.backtests) == 75 and ("Good", "binanceus", dt.date(2024, 1, 1)) in r.backtests
     assert len(r.checks) == 6
-    assert one(lab, "SELECT count(*) FROM backtest_chunks WHERE ok") == 15
-    assert one(lab, "SELECT chunk_end FROM backtest_chunks WHERE chunk_start = '2026-01-01' LIMIT 1") == TODAY
+    assert one(lab, "SELECT count(*) FROM backtest_chunks WHERE ok") == 75
+    assert one(lab, "SELECT chunk_end FROM backtest_chunks WHERE chunk_start = '2026-11-01' LIMIT 1") == TODAY
     assert one(lab, "SELECT count(*) FROM backtest_trades") > 0
     raw = one(lab, "SELECT raw FROM runs WHERE kind = 'analysis'")
-    assert raw["chunks_run"] == 15 and raw["load_failed"] == 1
+    assert raw["chunks_run"] == 75 and raw["load_failed"] == 1
+    assert {"plan", "backtests", "derive", "confidence", "loop"} <= set(raw["stage_s"])
     assert sorted(raw["universe"]) == ["binanceus", "coinbase"]
     assert all(u["source"] == "current-listing" and u["pairs"] > 0 for u in raw["universe"].values())
     assert sorted(raw["skipped"]) == ["Scalper on binanceus: 1m not fully backfilled", "Scalper on coinbase: 1m not fully backfilled"]
@@ -142,7 +144,34 @@ def test_full_history_in_yearly_chunks_then_cached(lab):
     r3 = FakeRunner(found, biased={"Planted"})
     assert analyze.main(r3, TODAY + dt.timedelta(days=1)) == 0
     assert sorted({s for s, _, _ in r3.backtests}) == ["Good", "Other", "Planted"]
-    assert {start for _, _, start in r3.backtests} == {dt.date(2026, 1, 1)}
+    assert {start for _, _, start in r3.backtests} == {dt.date(2026, 11, 1)} and len(r3.backtests) == 6
+
+
+def test_the_current_month_reruns_and_a_finished_year_replaces_its_months(lab):
+    """The first night over a stored year-to-date chunk, a month end, and January 1: no day is ever counted twice."""
+    found = [strat("Good")]
+    lab.execute("DELETE FROM bots")  # no drift backtest in the nights counted
+
+    def series(today):
+        days = one(lab, "SELECT count(*) FROM strategy_daily WHERE strategy = 'Good' AND exchange = 'binanceus'")
+        assert days == (today - dt.date(2024, 1, 1)).days
+        return lab.execute("SELECT chunk_start, chunk_end FROM backtest_chunks WHERE exchange = 'binanceus' "
+                           "ORDER BY chunk_start").fetchall()
+
+    # a year-to-date chunk stored before months: the month starting with it replaces it, the others overlap it
+    lab.execute("INSERT INTO backtest_chunks (strategy, exchange, chunk_start, chunk_end, cache_key, ok) "
+                "VALUES ('Good', 'binanceus', '2026-01-01', '2026-10-30', 'old', true)")
+    assert analyze.main(FakeRunner(found), TODAY) == 0
+    assert len(series(TODAY)) == 13
+    r = FakeRunner(found)
+    assert analyze.main(r, dt.date(2026, 12, 1)) == 0
+    assert sorted(r.backtests) == [("Good", ex, dt.date(2026, 11, 1)) for ex in ("binanceus", "coinbase")]
+    assert series(dt.date(2026, 12, 1))[-1] == (dt.date(2026, 11, 1), dt.date(2026, 12, 1))
+    r = FakeRunner(found)
+    assert analyze.main(r, dt.date(2027, 1, 2)) == 0
+    assert ("Good", "binanceus", dt.date(2026, 1, 1)) in r.backtests and len(r.backtests) == 4
+    assert series(dt.date(2027, 1, 2)) == [(dt.date(y, 1, 1), dt.date(y + 1, 1, 1)) for y in (2024, 2025, 2026)] + [
+        (dt.date(2027, 1, 1), dt.date(2027, 1, 2))]
 
 
 def test_each_league_bot_is_set_against_a_backtest_of_its_own_period(lab):
@@ -166,7 +195,7 @@ def test_a_changed_file_reruns_its_chunks_and_bias(lab):
     assert analyze.main(FakeRunner([strat("Good")]), TODAY) == 0
     r = FakeRunner([strat("Good", rev="2")])
     assert analyze.main(r, TODAY) == 0
-    assert len(r.backtests) == 5 and len(r.checks) == 2
+    assert len(r.backtests) == 25 and len(r.checks) == 2
 
 
 def test_candles_added_to_a_past_year_rerun_only_that_year(lab):
@@ -194,7 +223,7 @@ def test_failed_chunks_retry_three_times_and_fail_the_run(lab):
         r = FakeRunner(found, fail={"Flaky"})
         codes.append(analyze.main(r, TODAY))
         calls.append(len(r.backtests))
-    assert calls == [10, 5, 5, 0] and codes == [1, 1, 1, 0]
+    assert calls == [50, 25, 25, 0] and codes == [1, 1, 1, 0]
     assert one(lab, "SELECT max(attempts) FROM backtest_chunks WHERE strategy = 'Flaky'") == 3
     assert one(lab, "SELECT count(*) FROM backtest_chunks WHERE strategy = 'Flaky' AND ok") == 0
     assert one(lab, "SELECT count(*) FROM strategy_windows WHERE strategy = 'Flaky'") == 0
@@ -228,11 +257,29 @@ def test_strategy_filter_limits_the_run(lab, monkeypatch):
     assert {s for s, _, _ in r.backtests} == {"Good"} and {s for _, s in r.checks} == {"Good"}
 
 
-def test_chunks_are_calendar_years_to_today():
+def test_chunks_are_past_years_then_this_years_months_to_today():
     assert analyze.chunks(dt.date(2024, 6, 3), TODAY) == [
-        (dt.date(2024, 1, 1), dt.date(2025, 1, 1)), (dt.date(2025, 1, 1), dt.date(2026, 1, 1)),
-        (dt.date(2026, 1, 1), TODAY)]
+        (dt.date(2024, 1, 1), dt.date(2025, 1, 1)), (dt.date(2025, 1, 1), dt.date(2026, 1, 1))] + [
+        (dt.date(2026, m, 1), dt.date(2026, m + 1, 1)) for m in range(1, 11)] + [(dt.date(2026, 11, 1), TODAY)]
     assert analyze.chunks(dt.date(2026, 1, 1), dt.date(2026, 1, 1)) == []
+    assert analyze.chunks(dt.date(2026, 9, 20), dt.date(2026, 12, 31)) == [
+        (dt.date(2026, 9, 1), dt.date(2026, 10, 1)), (dt.date(2026, 10, 1), dt.date(2026, 11, 1)),
+        (dt.date(2026, 11, 1), dt.date(2026, 12, 1)), (dt.date(2026, 12, 1), dt.date(2026, 12, 31))]
+    assert analyze.chunks(dt.date(2025, 3, 1), dt.date(2026, 1, 1)) == [(dt.date(2025, 1, 1), dt.date(2026, 1, 1))]
+
+
+def test_a_past_years_chunk_digest_is_the_one_it_was_stored_with(lab):
+    """The yearly digest the chunks used before months, so moving to months moved no stored key of a past year."""
+    path = analyze.RESULTS / "data" / "binanceus" / "BTC_USD-5m.feather"
+    path.parent.mkdir(parents=True)
+    df = pd.DataFrame({"date": pd.date_range("2024-03-01", "2026-11-03", freq="h", tz="UTC"), "close": 1.0})
+    df.to_feather(path)
+    chunk = analyze.candle_digests("binanceus", "5m", "chunk", TODAY)
+    for y in (2024, 2025):
+        rows = df[df["date"].dt.year == y]
+        old = hashlib.sha256(b"BTC/USD" + pd.util.hash_pandas_object(rows, index=False).values.tobytes()).hexdigest()
+        assert chunk[dt.date(y, 1, 1)] == old
+    assert sorted(k for k in chunk if k.year == 2026) == [dt.date(2026, m, 1) for m in range(1, 12)]
 
 
 DATA = Path(os.environ.get("LAB_RESULTS", "/lab")) / "data" / "binanceus" / "BTC_USD-5m.feather"
@@ -338,6 +385,22 @@ def test_a_task_above_the_budget_runs_alone():
     assert b.used == 0
 
 
+def scored(conn, monkeypatch, *pairs) -> None:
+    """Walk-forward has scored these strategy x exchange pairs, now and after each night's confidence rebuild."""
+    rebuild = analyze.confidence.run
+
+    def score() -> None:
+        for s, e in pairs:
+            conn.execute("INSERT INTO confidence (strategy, exchange, score, ready, passed, oos_trades, gates) "
+                         "VALUES (%s, %s, 60, false, 0, 40, '{}') ON CONFLICT (strategy, exchange) DO UPDATE SET score = 60",
+                         (s, e))
+
+    monkeypatch.setattr(analyze.confidence, "run", lambda conn: (rebuild(conn), score())[0])
+    score()
+
+
+EVERY = [(s, e) for s in ("Good", "Other") for e in ("binanceus", "coinbase")]
+
 TOY = """
 [sweep]
 max_chunks = {max_chunks}
@@ -350,8 +413,9 @@ pairs = [3]
 """
 
 
-def test_overlays_run_as_counted_trials_and_cache_like_any_chunk(lab, tmp_path):
+def test_overlays_run_as_counted_trials_and_cache_like_any_chunk(lab, tmp_path, monkeypatch):
     lab.execute("DELETE FROM trials WHERE variant LIKE 'overlay:%%'")  # the fixture keeps trials' seeded rows
+    scored(lab, monkeypatch, *EVERY)
     found = [strat("Good"), strat("Other")]
     assert analyze.main(FakeRunner(found), TODAY) == 0
     base_keys = lab.execute("SELECT id, cache_key FROM backtest_chunks ORDER BY id").fetchall()
@@ -361,8 +425,8 @@ def test_overlays_run_as_counted_trials_and_cache_like_any_chunk(lab, tmp_path):
     (tmp_path / "variants.toml").write_text(TOY.format(max_chunks=1000))
     r = FakeRunner(found)
     assert analyze.main(r, TODAY) == 0
-    # 3 overlays x 2 strategies x 5 chunk-years (binanceus 2024-2026, coinbase 2025-2026); no as-is chunk reruns
-    assert len(r.backtests) == 30 and all(len(b) == 4 for b in r.backtests)
+    # 3 overlays x 2 strategies x 25 chunks (binanceus 2024, 2025, coinbase 2025, 11 months each); no as-is chunk reruns
+    assert len(r.backtests) == 150 and all(len(b) == 4 for b in r.backtests)
     assert lab.execute("SELECT id, cache_key FROM backtest_chunks WHERE overlay = '' ORDER BY id").fetchall() == base_keys
     assert {b[3].get("exchange", {}).get("pair_whitelist", [None])[-1] for b in r.backtests if "exchange" in b[3]} == \
         {analyze.pair_list("binanceus")[2], analyze.pair_list("coinbase")[2]}
@@ -372,7 +436,7 @@ def test_overlays_run_as_counted_trials_and_cache_like_any_chunk(lab, tmp_path):
     assert one(lab, "SELECT count(DISTINCT (strategy, exchange, overlay)) FROM overlay_windows") == 12
     assert one(lab, "SELECT trials_raw FROM strategy_windows WHERE win = '365d' LIMIT 1") == dsr * 4
     assert one(lab, "SELECT count(*) FROM overlays") == 3
-    assert one(lab, "SELECT raw->'overlay_chunks_run' FROM runs WHERE kind = 'analysis' ORDER BY id DESC LIMIT 1") == 30
+    assert one(lab, "SELECT raw->'overlay_chunks_run' FROM runs WHERE kind = 'analysis' ORDER BY id DESC LIMIT 1") == 150
 
     r2 = FakeRunner(found)
     assert analyze.main(r2, TODAY) == 0
@@ -385,7 +449,8 @@ def test_overlays_run_as_counted_trials_and_cache_like_any_chunk(lab, tmp_path):
     assert one(lab, "SELECT count(*) FROM trials") - trials == 12
 
 
-def test_overlay_chunks_are_capped_a_night_best_prior_score_first(lab, tmp_path):
+def test_overlay_chunks_are_capped_a_night_best_prior_score_first(lab, tmp_path, monkeypatch):
+    scored(lab, monkeypatch, *EVERY)
     found = [strat("Good"), strat("Other")]
     assert analyze.main(FakeRunner(found), TODAY) == 0
     best = lab.execute("SELECT strategy, exchange FROM strategy_windows WHERE win = '365d' "
@@ -394,13 +459,26 @@ def test_overlay_chunks_are_capped_a_night_best_prior_score_first(lab, tmp_path)
     r = FakeRunner(found)
     assert analyze.main(r, TODAY) == 0
     assert len(r.backtests) == 2 and {b[:2] for b in r.backtests} == {tuple(best)}
-    # the series' newest year first
-    assert r.backtests[0][2].year == TODAY.year or r.backtests[1][2].year == TODAY.year
+    # the series' newest chunk first
+    assert dt.date(2026, 11, 1) in {r.backtests[0][2], r.backtests[1][2]}
     raw = one(lab, "SELECT raw FROM runs WHERE kind = 'analysis' ORDER BY id DESC LIMIT 1")
-    assert raw["overlay_chunks_run"] == 2 and raw["overlay_chunks_waiting"] == 28
+    assert raw["overlay_chunks_run"] == 2 and raw["overlay_chunks_waiting"] == 148
 
 
-def test_refreshing_the_current_year_rotates_through_every_overlay_series(lab, tmp_path):
+def test_overlays_run_only_on_series_walk_forward_scored(lab, tmp_path, monkeypatch):
+    scored(lab, monkeypatch, ("Good", "binanceus"))
+    (tmp_path / "variants.toml").write_text(TOY.format(max_chunks=1000))
+    r = FakeRunner([strat("Good"), strat("Other")])
+    assert analyze.main(r, TODAY) == 0
+    # 3 overlays x 13 binanceus chunks of the one scored series; the as-is chunks of all four still run
+    over = [b for b in r.backtests if len(b) == 4]
+    assert len(over) == 39 and {b[:2] for b in over} == {("Good", "binanceus")}
+    assert len(r.backtests) - len(over) == 50
+    assert one(lab, "SELECT raw->'overlay_chunks_waiting' FROM runs ORDER BY id DESC LIMIT 1") == 0
+
+
+def test_refreshing_the_current_year_rotates_through_every_overlay_series(lab, tmp_path, monkeypatch):
+    scored(lab, monkeypatch, *EVERY)
     found = [strat("Good"), strat("Other")]
     (tmp_path / "variants.toml").write_text(TOY.format(max_chunks=1000))
     assert analyze.main(FakeRunner(found), TODAY) == 0
@@ -410,7 +488,7 @@ def test_refreshing_the_current_year_rotates_through_every_overlay_series(lab, t
         r = FakeRunner(found)
         assert analyze.main(r, TODAY + dt.timedelta(days=day)) == 0
         nights.append({b[:2] + (json.dumps(b[3], sort_keys=True),) for b in r.backtests if len(b) == 4})
-    # 12 overlay series each have a stale current year; 4 a night, none twice in three nights
+    # 12 overlay series each have a stale current month; 4 a night, none twice in three nights
     assert all(len(n) == 4 for n in nights) and len(nights[0] | nights[1] | nights[2]) == 12
 
 
