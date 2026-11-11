@@ -46,21 +46,22 @@ Run every tradable strategy on binanceus only, one bot each, under its own setti
 
 ## Strategy families
 
-Status is `scanned` (in `user_data/strategies/`, backtested nightly, a counted trial), `staged` (in `lab/families/`, loads and is checked but adds no trials) or `blocked`. The family of each scanned class is in `lab/families.toml`.
+Status is `scanned` (in `user_data/strategies/`, backtested nightly, a counted trial), `staged` (in `lab/families/`, loads and is checked but adds no trials; none today) or `blocked`. The generated families run each strategy on a timeframe ladder (15m, 1h, 4h, 1d) for the holding-period axis below; the candlestick family stays on 1h, as it is already the largest. The family of each scanned class is in `lab/families.toml`.
 
 | Family | Status | In the repo |
 |---|---|---|
-| Trend | scanned, staged | 10 scanned (MA crosses, Supertrend, ADX); `lab/families/trend/` Donchian ensemble, staged |
-| Breakout | scanned | Diamond, SqueezeBreakout (new) |
-| Chart patterns | scanned | `user_data/strategies/chart/`, 5 long signals from the causal numeric detector in `lab/patterns.py` |
-| Mean reversion | scanned, staged | 24 scanned (RSI, Bollinger, CCI dips); `lab/families/range/` flat-climate z-score, staged |
+| Trend | scanned | 10 hand-written (MA crosses, Supertrend, ADX); `user_data/strategies/trend/` Donchian ensemble, 2 settings on 4 timeframes |
+| Breakout | scanned | Diamond, SqueezeBreakout; `user_data/strategies/breakout/` ATR, Keltner and squeeze breakouts on 4 timeframes (squeeze on all but 1h, where SqueezeBreakout is) |
+| Chart patterns | scanned | `user_data/strategies/chart/`, 5 long signals from the causal numeric detector in `lab/patterns.py`, on 4 timeframes |
+| Mean reversion | scanned | 24 hand-written (RSI, Bollinger, CCI dips); `user_data/strategies/range/` flat-climate z-score, 2 windows on 4 timeframes |
 | Momentum | scanned | 8 MACD-style; TSMomentum and XSMomentumRotation (new): time-series and cross-sectional |
 | Grid | scanned | GridLadder (new): layers a step apart under a 72-hour mean, each sold a step up |
 | DCA as a strategy | scanned | DCASafetyOrders (new): base order, four scaled safety orders, one take profit on the average. Plain buy-every-week DCA has no exit, so it is not a trade strategy; the book scores holding BTC instead |
 | Pairs, long leg | scanned | RatioRevert (new): buy a coin cheap against BTC. Unhedged, so it carries the market as well |
 | Candlestick and count patterns | scanned | PatternRecognition, TDSequential; `user_data/strategies/candles/`, 47 bullish TA-Lib patterns with a fixed exit |
-| Time based | scanned | HourBasedStrategy |
-| FreqAI ML | scanned | `user_data/strategies/ml/` LightGBM, over the last `ML_DAYS` on the trader-ml image (a load failure on the plain one); no walk-forward or bias check yet (README, Staged families) |
+| Time based | scanned | HourBasedStrategy; `user_data/strategies/clock/` a set UTC hour (20:00, held 8 h) and the weekend (Saturday 00:00, held 48 h), each on the timeframes whose candles close then |
+| Volume flow | scanned | `user_data/strategies/flow/` a volume surge on an up close and on-balance volume at a new high before the close, on 4 timeframes |
+| FreqAI ML | scanned | `user_data/strategies/ml/` LightGBM, over the last `ML_DAYS` on the trader-ml image (a load failure on the plain one); no walk-forward or bias check yet (README, Generated families) |
 | Pairs, market neutral | blocked | the short leg needs margin or futures; `lab/league.py` runs spot only |
 | Funding carry and basis | blocked | long spot, short perpetual: needs a futures short. Funding is recorded (`funding_rates`, `lab/futures.py`), so carry can be measured offline |
 | Shorts on a trend or a bust | blocked | futures; research only in `lab/research/` (BustShort, DonchianLongShort, docs/short-bust.md) |

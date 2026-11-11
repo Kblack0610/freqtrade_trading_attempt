@@ -78,6 +78,8 @@ WORKERS = int(os.environ.get("ANALYZE_WORKERS", "6"))
 MEMORY_GB = float(os.environ.get("ANALYZE_MEMORY_GB", "10"))
 BIAS_EXCHANGE = os.environ.get("BIAS_EXCHANGE", "binanceus")
 LOOKAHEAD_DAYS = int(os.environ.get("LOOKAHEAD_DAYS", "120"))
+# A slow timeframe's window grows to this many candles: 120 daily candles hold too few entries for the check.
+LOOKAHEAD_CANDLES = int(os.environ.get("LOOKAHEAD_CANDLES", "900"))
 RECURSIVE_DAYS = int(os.environ.get("RECURSIVE_DAYS", "30"))
 RECURSIVE_TOL = float(os.environ.get("RECURSIVE_TOL", "0.001"))  # relative indicator change still called converged
 REGIME_EXCHANGE = os.environ.get("REGIME_EXCHANGE", "coinbase")
@@ -158,6 +160,12 @@ def chunk_config(s: dict, exchange: str, start: dt.date, params: dict | None = N
 
 def pair_count(exchange: str) -> int:
     return len(whitelist(exchange))
+
+
+def lookahead_days(timeframe: str | None) -> int:
+    from freqtrade.exchange import timeframe_to_seconds
+
+    return max(LOOKAHEAD_DAYS, math.ceil(LOOKAHEAD_CANDLES * timeframe_to_seconds(timeframe or "5m") / 86400))
 
 
 def task_gb(exchange: str, timeframe: str | None, days: int, load: float = 1) -> float:
@@ -385,10 +393,12 @@ def bias_one(kind: str, strategy: str, strategy_path: str | None) -> dict:
     from freqtrade.resolvers import StrategyResolver
     from freqtrade.util.progress_tracker import get_progress_tracker
 
+    def since(days: int) -> str:
+        return (dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=days)).strftime("%Y%m%d") + "-"
+
     days = LOOKAHEAD_DAYS if kind == "lookahead" else RECURSIVE_DAYS
-    since = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=days)).strftime("%Y%m%d")
     argv = [f"{kind}-analysis", "--userdir", str(USER_DATA), "--recursive-strategy-search", *[a for p in config_files(BIAS_EXCHANGE) for a in ("-c", str(p))],
-            "--datadir", str(RESULTS / "data" / BIAS_EXCHANGE), "--strategy", strategy, "--timerange", f"{since}-"]
+            "--datadir", str(RESULTS / "data" / BIAS_EXCHANGE), "--strategy", strategy, "--timerange", since(days)]
     if strategy_path:
         argv += ["--strategy-path", strategy_path]
     try:
@@ -399,6 +409,9 @@ def bias_one(kind: str, strategy: str, strategy_path: str | None) -> dict:
                 if o["name"] == strategy]
         if not objs:
             return {"has_bias": None, "error": "strategy not found"}
+        if kind == "lookahead":  # the window is in candles once the strategy's timeframe is known
+            days = lookahead_days(getattr(objs[0]["class"], "timeframe", None))
+            cfg["timerange"] = since(days)
         with get_progress_tracker() as progress:
             if kind == "lookahead":
                 inst = helper.initialize_single_lookahead_analysis(cfg, objs[0], progress)
@@ -882,7 +895,7 @@ def main(runner: Runner | None = None, today: dt.date | None = None) -> int:
                 return held, gb, runner.backtest, t["strategy"], t["exchange"], t["start"], t["end"], t.get("config")
 
             with ThreadPoolExecutor(max_workers=WORKERS) as pool:
-                futs = {pool.submit(held, task_gb(BIAS_EXCHANGE, tf.get(s), LOOKAHEAD_DAYS if kind == "lookahead"
+                futs = {pool.submit(held, task_gb(BIAS_EXCHANGE, tf.get(s), lookahead_days(tf.get(s)) if kind == "lookahead"
                                                   else RECURSIVE_DAYS, BIAS_LOAD), runner.bias, kind, s):
                         ("bias", (s, kind, h)) for s, kind, h in bias}
                 futs.update({pool.submit(*bt(t)): ("drift", t) for t in drifts})

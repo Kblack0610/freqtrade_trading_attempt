@@ -1,0 +1,30 @@
+# The calendar family: enter at a set UTC time and leave on a time stop, so the result is the market's drift over
+# that window and nothing else. The times are set in advance, not fitted to the data. Each strategy runs only on the
+# timeframes whose candles close at its hour, and keeps its hold time on every rung (scale_exit = false).
+# Signals are lab/channels.py clock. Long only, spot.
+# lab/families/generate.py writes the strategy files from this file: edit here, then rerun it.
+kind = "signal"
+module = "channels"
+title = "Calendar"
+prefix = "Clock"
+timeframe = "1h"
+scale_exit = false
+startup_candle_count = 2
+
+[exit]
+minimal_roi = { "0" = 100 }  # no take profit: the time stop closes the trade
+stoploss = -0.1
+time_stop_hours = 8
+
+# 20:00 UTC: the US afternoon into the Asian morning, held 8 hours.
+[strategies.Evening]
+call = "clock"
+args = { hour = 20 }
+timeframes = ["15m", "1h", "4h"]
+
+# Saturday 00:00 UTC, held over the weekend.
+[strategies.Weekend]
+call = "clock"
+args = { hour = 0, weekdays = [5] }
+timeframes = ["1h", "4h", "1d"]
+exit = { time_stop_hours = 48 }

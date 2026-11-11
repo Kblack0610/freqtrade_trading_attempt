@@ -74,10 +74,10 @@ jobs:
           docker run --rm --network host --entrypoint bash \
             -e DATABASE_URL=postgresql://postgres:test@localhost:5432/trader trader:ci \
             -c "python lab/migrate.py && python lab/migrate.py | grep -q '0 new' && $test_command"
-      - name: Every strategy loads, the staged families in lab/families too
+      - name: Every strategy loads
         run: |
           docker run --rm --entrypoint freqtrade trader:ci list-strategies --recursive-strategy-search \
-            --strategy-path /repo/lab/families --userdir /repo/user_data -c /repo/user_data/config.base.json -c /repo/user_data/exchanges/binanceus.json \
+            --userdir /repo/user_data -c /repo/user_data/config.base.json -c /repo/user_data/exchanges/binanceus.json \
             | tee strategies.txt
           ! grep -E 'LOAD FAILED|DUPLICATE' strategies.txt
 
