@@ -40,3 +40,20 @@ skip_families = ["template", "exit-example", "biased-control", "short"]
 # allows 1200 request weight a minute per IP and a klines call weighs 2, so 600 calls; this is half, leaving the rest
 # to the other cohorts and the backfill job, which share the cluster's one address. A pick over budget fails.
 binanceus = 300
+
+[diverse]
+# One bot per different way of making money: the elite of each filled cell of the diversity archive (lab/diversity.py,
+# docs/strategy-coverage.md, Diversity) among strategies on `venues` at `min_timeframe` or slower, taken best low end
+# first while its daily returns stay within [diversity] max_rho of those taken, until `max_bots`. Base overlay. The
+# promote gates are ignored, as for aggressive. Grow `max_bots` only by a human decision: each bot is about 320 MiB.
+kind = "archive"
+# binanceus only: coinbase fees end almost every backtest in ruin and kraken has no backtest history (aggressive).
+venues = ["binanceus"]
+# 1 h or slower keeps 16 bots on 10 pairs at about 3 candle calls a minute; on 5m they would make 32.
+min_timeframe = "1h"
+max_bots = 16
+
+[diverse.budget]
+# Candle calls a minute, as [strategies.budget]: the strategies cohort holds 300 of binanceus' 600, so this is a small
+# slice of the rest. A pick over it fails.
+binanceus = 10

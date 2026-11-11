@@ -175,3 +175,74 @@ def test_two_cohorts_sharing_a_roster_prefix_are_refused_and_the_shipped_ones_ar
         cohorts.prefixes({"strategies": {}, "strategic": {}})
     shipped = cohorts.load()
     assert cohorts.prefixes(shipped) == {name: name[:3] for name in shipped}
+
+
+DIV = {"prefix": "div", "cohort": "diverse", "venues": ["binanceus"], "min_timeframe": "1h", "max_bots": 16,
+       "max_rho": 0.5, "budget": {"binanceus": 10}}
+DAYS = [f"d{i:03}" for i in range(120)]
+
+
+def cell(strategy, lo, family="trend", timeframe="1h", exchange="binanceus", hold="1h to 24h"):
+    return {"strategy": strategy, "exchange": exchange, "sharpe_lo": lo, "timeframe": timeframe, "family": family,
+            "hold": hold, "climate": "none", "freq": "mid"}
+
+
+def series(seed):
+    """A deterministic daily return series; seeds far apart are near uncorrelated, a scaled copy is rho 1."""
+    import random
+    rnd = random.Random(seed)
+    return {d: rnd.gauss(0, 0.01) for d in DAYS}
+
+
+def test_an_archive_cohort_takes_each_cells_elite_greedily_while_decorrelated():
+    a = series(1)
+    described = [cell("A", 0.9), cell("A2", 0.5),  # same cell: A is the elite, A2 never competes
+                 cell("B", 0.8, family="range"), cell("C", 0.7, family="breakout"), cell("D", 0.6, family="clock")]
+    daily = {("A", "binanceus"): a, ("B", "binanceus"): {d: 2 * r for d, r in a.items()},  # B copies A
+             ("C", "binanceus"): series(3), ("D", "binanceus"): {d: r for d, r in list(series(4).items())[:30]}}
+    lines = cohorts.pick_archive(described, daily, DIV, {"binanceus": 10})
+    # B is rho 1 with A and is dropped; D shares too few days to be scored, so it passes as the max_rho gate does
+    assert lines == ["div-binanceus-a binanceus A diverse base", "div-binanceus-c binanceus C diverse base",
+                     "div-binanceus-d binanceus D diverse base"]
+    assert cohorts.rho(a, daily[("B", "binanceus")]) == pytest.approx(1.0)
+    assert cohorts.rho(a, daily[("D", "binanceus")]) is None
+
+
+def test_an_archive_cohort_runs_only_slow_enough_strategies_on_its_venues_up_to_its_cap():
+    described = [cell("Fast", 0.9, timeframe="5m"), cell("Slow", 0.1, timeframe="4h"),
+                 cell("Okx", 0.8, family="range", exchange="okx")]
+    # the fast elite gives way to the cell's best slow strategy; a research venue never gets a bot
+    assert cohorts.pick_archive(described, {}, DIV, {"binanceus": 10}) == ["div-binanceus-slow binanceus Slow diverse base"]
+    many = [cell(f"S{i}", i / 100, family=f"f{i}") for i in range(30)]
+    lines = cohorts.pick_archive(many, {}, DIV, {"binanceus": 10})
+    assert len(lines) == 16 and lines[0].split()[2] == "S29"
+
+
+def test_an_archive_cohort_over_its_venue_budget_is_refused_not_trimmed():
+    many = [cell(f"S{i}", i / 100, family=f"f{i}") for i in range(16)]
+    with pytest.raises(ValueError, match="16 bots on binanceus make 2.7 candle calls a minute, over its budget of 2"):
+        cohorts.pick_archive(many, {}, {**DIV, "budget": {"binanceus": 2}}, {"binanceus": 10})
+
+
+def test_the_shipped_diverse_cohort_fits_its_budget_at_its_cap_and_league_accepts_its_rows(tmp_path):
+    cfg = {"prefix": cohorts.prefixes(cohorts.load())["diverse"], "cohort": "diverse", **cohorts.load()["diverse"],
+           "max_rho": 0.5}
+    assert cfg["kind"] == "archive"
+    many = [cell(f"S{i}", i / 100, family=f"f{i}", timeframe=cfg["min_timeframe"]) for i in range(40)]
+    lines = cohorts.pick_archive(many, {}, cfg, {v: len(analyze.pair_list(v)) for v in cfg["venues"]})
+    assert len(lines) == cfg["max_bots"]
+    roster = tmp_path / "roster.tsv"
+    roster.write_text("\n".join(lines))
+    assert {r.cohort for r in league.roster_rows(roster)} == {"diverse"}
+
+
+def test_daily_rows_are_the_newest_corr_days_of_the_asked_series(conn):
+    import datetime
+    start = datetime.date(2025, 1, 1)
+    for s in ("A", "B"):
+        for i in range(analyze.CORR_DAYS + 5):
+            conn.execute("INSERT INTO strategy_daily (strategy, exchange, day, ret, pnl, trades) "
+                         "VALUES (%s, 'binanceus', %s, %s, 0, 0)", (s, start + datetime.timedelta(days=i), i))
+    got = cohorts.daily_rows(conn, [("A", "binanceus")])
+    assert list(got) == [("A", "binanceus")] and len(got[("A", "binanceus")]) == analyze.CORR_DAYS
+    assert min(got[("A", "binanceus")].values()) == 5

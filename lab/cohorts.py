@@ -7,8 +7,10 @@ for it, one row per venue; lookahead-biased or unloadable strategies are left ou
 mixture cohort (`kind = "mixture"`) is the sleeves of the best mixture lab/mixtures.py scored that bots can run as
 specified, one row per sleeve on its own exchange. An all cohort (`kind = "all"`) is every lookahead-clean, loadable
 strategy outside its skipped families, one row per venue, refused when its candle calls would pass the venue's
-budget. The promote gates are not applied: a cohort forward-tests near-misses. Nothing here edits the roster: ci/cohort_roster.py turns the rows into a home-config PR that a person
-merges.
+budget. An archive cohort (`kind = "archive"`) is one elite per filled cell of the diversity archive
+(lab/diversity.py) on a slow enough timeframe, kept greedily while its daily returns stay decorrelated from those
+already kept. The promote gates are not applied: a cohort forward-tests near-misses. Nothing here edits the roster:
+ci/cohort_roster.py turns the rows into a home-config PR that a person merges.
 """
 
 import json
@@ -21,7 +23,9 @@ from pathlib import Path
 
 from freqtrade.exchange import timeframe_to_minutes
 
-from lab import analyze, variants
+from psycopg.rows import dict_row
+
+from lab import analyze, diversity, variants
 from lab.db import connect
 
 PATH = Path(os.environ.get("COHORTS_CONFIG", Path(__file__).with_name("cohorts.toml")))
@@ -113,12 +117,83 @@ def pick_all(rows: list[tuple], cfg: dict, family: dict[str, str], pairs: dict[s
     untagged one runs). Raises ValueError when a venue's candle calls would pass its budget: shrink the cohort or
     raise the budget in the toml, never trim it silently."""
     keep = sorted((s, tf) for s, tf in rows if family.get(s) not in cfg["skip_families"])
-    for v in cfg["venues"]:
-        calls = sum(calls_per_minute(tf, pairs[v]) for _, tf in keep)
-        if calls > cfg["budget"][v]:
-            raise ValueError(f"{cfg['cohort']}: {len(keep)} bots on {v} make {calls:.0f} candle calls a minute, "
-                             f"over its budget of {cfg['budget'][v]}")
+    check_budget(cfg, {v: [tf for _, tf in keep] for v in cfg["venues"]}, pairs)
     return [f"{cfg['prefix']}-{v}-{s.lower()} {v} {s} {cfg['cohort']} {BASE}" for s, _ in keep for v in cfg["venues"]]
+
+
+def check_budget(cfg: dict, timeframes: dict[str, list[str]], pairs: dict[str, int]) -> None:
+    """Raises ValueError when a venue's candle calls (its bots' timeframes) would pass its budget in the toml."""
+    for v, tfs in timeframes.items():
+        calls = sum(calls_per_minute(tf, pairs[v]) for tf in tfs)
+        if calls > cfg["budget"][v]:
+            raise ValueError(f"{cfg['cohort']}: {len(tfs)} bots on {v} make {round(calls, 1):g} candle calls a minute, "
+                             f"over its budget of {cfg['budget'][v]}")
+
+
+def daily_rows(conn, keys: list[tuple[str, str]]) -> dict[tuple[str, str], dict]:
+    """(strategy, exchange) -> {day: return} over the newest CORR_DAYS of each series, the span the max_rho gate's
+    correlations use (lab/analyze.py)."""
+    out: dict[tuple[str, str], dict] = {}
+    for s, e, day, ret in conn.execute(
+            "SELECT strategy, exchange, day, ret FROM ("
+            " SELECT strategy, exchange, day, ret, row_number() OVER (PARTITION BY strategy, exchange ORDER BY day DESC) n"
+            " FROM strategy_daily WHERE (strategy, exchange) IN (SELECT * FROM unnest(%s::text[], %s::text[]))) d "
+            "WHERE n <= %s", ([k[0] for k in keys], [k[1] for k in keys], analyze.CORR_DAYS)):
+        out.setdefault((s, e), {})[day] = ret
+    return out
+
+
+def rho(a: dict, b: dict) -> float | None:
+    """Pearson correlation of two daily return series over their shared days; None under CORR_MIN_DAYS shared days
+    or when either is flat, as the max_rho gate leaves such a pair unscored."""
+    days = sorted(a.keys() & b.keys())
+    if len(days) < analyze.CORR_MIN_DAYS:
+        return None
+    x, y = [a[d] for d in days], [b[d] for d in days]
+    if len(set(x)) < 2 or len(set(y)) < 2:
+        return None
+    return statistics.correlation(x, y)
+
+
+def archive_elites(described: list[dict], cfg: dict) -> list[dict]:
+    """Pure: the elite of each filled cell among the strategies a bot of this cohort can run (a venue in `venues`,
+    a timeframe of `min_timeframe` or slower), best low end first. Filtering before electing keeps a cell whose
+    fastest strategy is too fast for the candle budget."""
+    floor = timeframe_to_minutes(cfg["min_timeframe"])
+    runnable = [r for r in described if r["exchange"] in cfg["venues"] and r["timeframe"]
+                and timeframe_to_minutes(r["timeframe"]) >= floor]
+    return sorted(diversity.elites(runnable).values(), key=lambda r: (-r["sharpe_lo"], r["strategy"], r["exchange"]))
+
+
+def pick_archive(described: list[dict], daily: dict[tuple[str, str], dict], cfg: dict, pairs: dict[str, int]) -> list[str]:
+    """Pure: roster lines, base overlay, for the archive's elites taken greedily by low end: each next one joins only
+    when its largest |rho| to those taken is `max_rho` or under (a pair with too few shared days is unscored and
+    passes, as in the max_rho gate), one row per strategy, until `max_bots`. Raises ValueError over the budget."""
+    taken: list[dict] = []
+    for r in archive_elites(described, cfg):
+        if len(taken) == cfg["max_bots"]:
+            break
+        if any(t["strategy"] == r["strategy"] for t in taken):
+            continue
+        mine = daily.get((r["strategy"], r["exchange"]), {})
+        rhos = [rho(mine, daily.get((t["strategy"], t["exchange"]), {})) for t in taken]
+        if all(x is None or abs(x) <= cfg["max_rho"] for x in rhos):
+            taken.append(r)
+    by_venue: dict[str, list[str]] = {}
+    for r in taken:
+        by_venue.setdefault(r["exchange"], []).append(r["timeframe"])
+    check_budget(cfg, by_venue, pairs)
+    return [f"{cfg['prefix']}-{r['exchange']}-{r['strategy'].lower()} {r['exchange']} {r['strategy']} {cfg['cohort']} {BASE}"
+            for r in taken]
+
+
+def archive_described(conn) -> list[dict]:
+    """The diversity archive's rows with their five descriptors, as /coverage builds them."""
+    dcfg = diversity.config()
+    cur = conn.cursor(row_factory=dict_row)
+    rows = cur.execute(diversity.ROWS, (dcfg["window"], dcfg["min_trades"])).fetchall()
+    climates = cur.execute(diversity.CLIMATE_ROWS).fetchall()
+    return diversity.describe(rows, families(), diversity.best_climates(climates), dcfg)
 
 
 def families() -> dict[str, str]:
@@ -143,6 +218,16 @@ def main(argv: list[str]) -> int:
         if cfg.get("kind") == "all":
             try:
                 lines = pick_all(strategy_rows(conn), cfg, families(), {v: len(analyze.pair_list(v)) for v in cfg["venues"]})
+            except ValueError as e:
+                print(e, file=sys.stderr)
+                return 1
+        elif cfg.get("kind") == "archive":
+            cfg["max_rho"] = diversity.config()["max_rho"]
+            described = archive_described(conn)
+            keys = [(r["strategy"], r["exchange"]) for r in archive_elites(described, cfg)]
+            try:
+                lines = pick_archive(described, daily_rows(conn, keys), cfg,
+                                     {v: len(analyze.pair_list(v)) for v in cfg["venues"]})
             except ValueError as e:
                 print(e, file=sys.stderr)
                 return 1

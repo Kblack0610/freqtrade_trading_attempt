@@ -95,7 +95,7 @@ Every cohort in `lab/cohorts.toml` states its question, pick rule, bot count and
 | `aggressive` | do the near-misses hold up live | top 4 by Sharpe low end, best overlay each, on 3 venues | 12 |
 | `mixture` | does the best 1/N mixture hold up live | the best ungated 1/N mixture by low end, one bot per sleeve | 2 |
 | `strategies` | what does every strategy leave out of its backtest (fills, fees, live candles) | every tradable strategy on binanceus | 49 |
-| `diverse` (planned) | does each different way of making money hold up live | one diverse pick per filled cell, 1 h or slower, at most 16 | up to 16 |
+| `diverse` | does each different way of making money hold up live | one diverse pick per filled cell, binanceus, 1 h or slower, at most 16 | up to 16 |
 
 Each cohort's roster names start with its first three letters, so `lab/cohorts.py` refuses two cohorts that share them.
 
