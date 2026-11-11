@@ -46,19 +46,20 @@ def chunk_sample(conn, rng: random.Random, n: int, ft_version: str, today: dt.da
     today = today or dt.datetime.now(dt.timezone.utc).date()
     rows = conn.execute("""
         SELECT c.id, c.strategy, c.exchange, c.chunk_start, c.chunk_end, c.cache_key, c.final_balance,
-               s.file_hash, s.timeframe, c.overlay, o.params
+               s.name, s.file, s.file_hash, s.timeframe, c.overlay, o.params
         FROM backtest_chunks c JOIN strategies s ON s.name = c.strategy LEFT JOIN overlays o ON o.id = c.overlay
         WHERE c.ok AND s.load_error IS NULL ORDER BY c.id""").fetchall()
     rng.shuffle(rows)
     digests: dict[tuple[str, str], dict] = {}
     out = []
-    for cid, strategy, ex, start, end, key, final, file_hash, tf, oid, overlay in rows:
+    for cid, strategy, ex, start, end, key, final, name, file, file_hash, tf, oid, overlay in rows:
         if len(out) >= n:
             break
         if (ex, tf) not in digests:
             digests[ex, tf] = analyze.candle_digests(ex, tf, "chunk", today)
-        cfg = analyze.overlay_config(ex, overlay)
-        if analyze.chunk_key(file_hash, ex, start, end, ft_version, digests[ex, tf].get(start, ""), cfg) == key:
+        cfg = analyze.chunk_config({"name": name, "file": file, "file_hash": file_hash}, ex, start, overlay)
+        candles = digests[ex, tf].get(analyze.digest_key(start, today), "")
+        if analyze.chunk_key(file_hash, ex, start, end, ft_version, candles, cfg) == key:
             out.append({"id": cid, "strategy": strategy, "exchange": ex, "start": start, "end": end,
                         "final_balance": final, "overlay": oid, "config": cfg})
     return out

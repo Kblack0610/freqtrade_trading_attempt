@@ -1,9 +1,9 @@
 """A FreqAI LightGBM baseline: predict the mean close over the next 24 hourly candles, go long when
 the prediction clears 1% and FreqAI marks the candle in-distribution (do_predict == 1).
 
-Staged: it needs the ML image (the trader image built from freqtrade's _freqai tag) and the FreqAI
-settings in lab/families/ml/freqai.json. Walk-forward now purges trades across fold boundaries and
-embargoes the days before each test month (WF_EMBARGO_DAYS), since a 24-candle label spills into the next fold. The label's shift(-24) is FreqAI's
+It needs the ML image (the trader image built from freqtrade's _freqai tag); lab/analyze.py layers the
+FreqAI settings in freqai.json beside this file and backtests it over the last ML_DAYS. Walk-forward leaves it
+out (lab/walkforward.py). The label's shift(-24) is FreqAI's
 target, used only to train; predictions come from models fit on earlier windows.
 """
 

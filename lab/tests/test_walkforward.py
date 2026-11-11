@@ -108,7 +108,7 @@ def test_then_each_venues_best_year_in_turn_up_to_the_limit(wlab, monkeypatch):
 def test_every_backfilled_venue_gets_its_own_folds(wlab, monkeypatch):
     monkeypatch.setattr(wf, "EXCHANGES", ["binanceus", "okx", "kucoin"])
     monkeypatch.setattr(wf, "ONLY", {"Live"})
-    backfilled(wlab, "okx", "2026-03-01")  # the oldest fold trains from 2026-02-02, so it is skipped there
+    backfilled(wlab, "okx", "2026-03-01")  # the oldest fold would train from 2026-02-02, so okx has two
     runner = FakeRunner()
     assert wf.main(runner, TODAY) == 0
     assert sorted((c[3], c[1]) for c in runner.calls) == [
@@ -120,7 +120,29 @@ def test_every_backfilled_venue_gets_its_own_folds(wlab, monkeypatch):
     assert raw["exchanges"] == ["binanceus", "okx", "kucoin"]
     assert sorted(raw["universe"]) == ["binanceus", "kucoin", "okx"] and raw["universe"]["okx"]["source"] == "current-listing"
     assert "Live on kucoin: 5m not fully backfilled" in raw["skipped"]
-    assert "Live on okx 2026-08: training starts before its first candle" in raw["skipped"]
+    assert not any("okx" in r for r in raw["skipped"]), "a month before a venue's first training span is no fold, not a skip"
+
+
+def test_full_history_reaches_back_to_the_first_training_span_and_stops_at_the_lockbox():
+    got = wf.folds(TODAY, 0, 180, lockbox=dt.date(2026, 9, 1), since=dt.date(2025, 11, 15))
+    assert [f[1] for f in got] == [dt.date(2026, 6, 1), dt.date(2026, 7, 1), dt.date(2026, 8, 1)]
+    assert got[0][0] >= dt.date(2025, 11, 15) > (dt.date(2026, 5, 1) - dt.timedelta(days=180))
+    assert wf.folds(TODAY, 2, 180, since=dt.date(2025, 11, 15)) == wf.folds(TODAY, 0, 180, since=dt.date(2025, 11, 15))[-2:]
+    with pytest.raises(ValueError):
+        wf.folds(TODAY, 0, 180)
+
+
+def test_a_full_history_run_tests_every_month_since_each_venues_first_candles(wlab, monkeypatch):
+    monkeypatch.setattr(wf, "FOLDS", 0)
+    monkeypatch.setattr(wf, "EXCHANGES", ["binanceus", "okx"])
+    monkeypatch.setattr(wf, "ONLY", {"Live"})
+    wlab.execute("UPDATE data_coverage SET first_ts = '2025-12-01' WHERE exchange = 'binanceus'")
+    backfilled(wlab, "okx", "2026-03-01")
+    runner = FakeRunner()
+    assert wf.main(runner, TODAY) == 0
+    months = {ex: sorted(c[1] for c in runner.calls if c[3] == ex) for ex in ("binanceus", "okx")}
+    assert months["binanceus"] == [dt.date(2026, m, 1) for m in range(6, 11)]
+    assert months["okx"] == [dt.date(2026, 9, 1), dt.date(2026, 10, 1)]
 
 
 def test_a_run_stores_each_fold_and_the_next_run_reuses_it(wlab):
@@ -404,3 +426,11 @@ def test_a_crashed_shard_is_recorded_and_the_run_still_finishes(wlab, monkeypatc
     assert wf.main(FakeRunner(), TODAY) == 1
     ok, raw = wlab.execute("SELECT ok, raw FROM runs WHERE kind = 'walkforward' AND name = 'crash'").fetchone()
     assert not ok and "RuntimeError: db gone" in raw["error"]
+
+
+def test_a_freqai_strategy_is_no_candidate(wlab):
+    wlab.execute("INSERT INTO strategies (name, file, file_hash, timeframe) VALUES "
+                 "('MLLightGBMBaseline', 'user_data/strategies/ml/MLLightGBMBaseline.py', 'h', '1h')")
+    wlab.execute("INSERT INTO strategy_windows (strategy, exchange, win, days, trades, expectancy_lo) "
+                 "VALUES ('MLLightGBMBaseline', 'binanceus', '365d', 365, 100, 0.05)")
+    assert "MLLightGBMBaseline" not in [c["name"] for c in wf.candidates(wlab)]

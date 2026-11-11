@@ -507,3 +507,36 @@ def test_detail_requires_complete_candles_for_every_whitelisted_pair(tmp_path, m
     assert 'incomplete' in analyze.detail_coverage('venue', '1m', start, end)
     (data / 'ETH_USD-1m.feather').unlink()
     assert 'missing' in analyze.detail_coverage('venue', '1m', start, end)
+
+
+def test_a_freqai_strategy_runs_its_window_as_is_with_its_fragment_and_a_model_per_chunk(lab, tmp_path, monkeypatch):
+    ml_dir = tmp_path / "repo" / "user_data" / "strategies" / "ml"
+    ml_dir.mkdir(parents=True)
+    (ml_dir / "freqai.json").write_text(json.dumps({"freqaimodel": "LightGBMRegressor", "freqai": {"enabled": True, "identifier": "x"}}))
+    monkeypatch.setattr(analyze, "REPO", tmp_path / "repo")
+    analyze.freqai_fragment.cache_clear()
+    (tmp_path / "variants.toml").write_text(TOY.format(max_chunks=1000))
+    ml = {**strat("ML"), "file": "user_data/strategies/ml/ML.py"}
+    r = FakeRunner([ml])
+    assert analyze.main(r, TODAY) == 0
+    # the last 365 days from the first of that month, 2025-11-01, cut at the year, then this year's months; no overlay, no bias check
+    months = [dt.date(2025, 11, 1), *(dt.date(2026, m, 1) for m in range(1, 12))]
+    assert sorted((ex, start) for _, ex, start, _ in r.backtests) == [(ex, m) for ex in ("binanceus", "coinbase") for m in months]
+    idents = {b[3]["freqai"]["identifier"] for b in r.backtests}
+    assert len(idents) == 24 and all(i.startswith("ML-") for i in idents) and r.checks == []
+    assert all(b[3]["freqaimodel"] == "LightGBMRegressor" for b in r.backtests)
+    assert one(lab, "SELECT count(*) FROM overlay_windows WHERE strategy = 'ML'") == 0
+    assert one(lab, "SELECT count(*) FROM trials WHERE strategy = 'ML' AND variant = 'as-is'") == 2
+
+    r2 = FakeRunner([ml])
+    assert analyze.main(r2, TODAY) == 0 and r2.backtests == []  # cached, models and all
+    # a month on, the window starts 2025-12-01: the November chunks go, the new first chunk runs
+    r3 = FakeRunner([ml])
+    assert analyze.main(r3, dt.date(2026, 12, 4)) == 0
+    assert one(lab, "SELECT min(chunk_start) FROM backtest_chunks WHERE strategy = 'ML'") == dt.date(2025, 12, 1)
+
+
+def test_without_lightgbm_a_freqai_strategy_is_a_load_failure(monkeypatch):
+    monkeypatch.setattr(analyze, "FREQAI", False)
+    ml = {s["name"]: s for s in analyze.Cli().discover()}["MLLightGBMBaseline"]
+    assert ml["load_error"] == analyze.NEEDS_ML
