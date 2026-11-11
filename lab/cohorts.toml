@@ -40,3 +40,25 @@ skip_families = ["template", "exit-example", "biased-control", "short"]
 # allows 1200 request weight a minute per IP and a klines call weighs 2, so 600 calls; this is half, leaving the rest
 # to the other cohorts and the backfill job, which share the cluster's one address. A pick over budget fails.
 binanceus = 300
+
+[diverse]
+# One forward test per different way of making money: the elite of each filled cell of the diversity archive
+# (lab/diversity.py, docs/strategy-coverage.md Diversity) on `venues`, best Sharpe low end first. A pick must also
+# (1) show a positive mean edge before fees on a `replicate_on` venue in the archive window, so a one-venue quirk is
+# not forward-tested; (2) have BTC-residual daily returns at |rho| `[diversity] max_rho` or under with every pick
+# before it; (3) lift the picks' effective count (participation ratio on residuals) by `min_neff_lift`. Measured on
+# 2026-11-11 (tr-211 blind review): 47 candlestick strategies were worth 6.1 effective ones, and 10 of 541 rows had
+# agreeing venues. Strategies faster than `min_timeframe` are left out to keep candle calls small. One bot per pick,
+# base overlay. Grow `max_bots` only by a human decision: about 320 MiB and a PVC each. Judgment calls; revisit
+# when residual N_eff passes 50.
+kind = "archive"
+venues = ["binanceus"]
+replicate_on = ["okx", "kucoin"]
+min_neff_lift = 0.5
+min_timeframe = "1h"
+max_bots = 16
+
+[diverse.budget]
+# OHLCV calls a minute this cohort may make on a venue (see [strategies.budget]). 16 bots on 1h with 10 pairs make
+# under 3.
+binanceus = 10

@@ -1,6 +1,9 @@
+import datetime as dt
 import importlib.util
 import pathlib
 
+import numpy as np
+import pandas as pd
 import pytest
 
 from lab import analyze, cohorts, league, variants
@@ -175,3 +178,69 @@ def test_two_cohorts_sharing_a_roster_prefix_are_refused_and_the_shipped_ones_ar
         cohorts.prefixes({"strategies": {}, "strategic": {}})
     shipped = cohorts.load()
     assert cohorts.prefixes(shipped) == {name: name[:3] for name in shipped}
+
+
+DIV = {"prefix": "div", "cohort": "diverse", "venues": ["binanceus"], "max_rho": 0.5, "min_neff_lift": 0.5,
+       "max_bots": 16, "budget": {"binanceus": 10}}
+
+
+def elite(name, lo, tf="1h", exchange="binanceus"):
+    return {"strategy": name, "exchange": exchange, "sharpe_lo": lo, "timeframe": tf}
+
+
+def daily_frame(seed_cols: dict, btc: pd.Series, days: int = 200):
+    rng = np.random.default_rng(7)
+    noise = {k: rng.normal(0, 0.01, days) for k in set(seed_cols.values())}
+    idx = btc.index[:days]
+    return [(name, "binanceus", d, float(noise[src][i] + 0.8 * btc.iloc[i])) for name, src in seed_cols.items()
+            for i, d in enumerate(idx)]
+
+
+def test_a_diverse_pick_skips_a_copy_on_residuals_an_unreplicated_edge_and_stops_at_max_bots():
+    btc = pd.Series(np.random.default_rng(1).normal(0, 0.03, 200),
+                    index=[dt.date(2026, 1, 1) + dt.timedelta(days=i) for i in range(200)])
+    # A and Copy share their residual source; B and C are their own. Every series carries 0.8 x BTC, which alone
+    # would make them all correlate: the residual cut must see through it.
+    rows = daily_frame({"A": "a", "Copy": "a", "B": "b", "C": "c", "Lone": "d"}, btc)
+    resid = cohorts.residuals(rows, btc)
+    elites = [elite("A", 0.9), elite("Copy", 0.8), elite("Lone", 0.7), elite("B", 0.5), elite("C", 0.3)]
+    lines = cohorts.pick_archive(elites, resid, {"A", "Copy", "B", "C"}, DIV, {"binanceus": 10})
+    assert [l.split()[2] for l in lines] == ["A", "B", "C"]
+    assert lines[0] == "div-binanceus-a binanceus A diverse base"
+    assert len(cohorts.pick_archive(elites, resid, {"A", "Copy", "B", "C"}, {**DIV, "max_bots": 2}, {"binanceus": 10})) == 2
+    # Negative control: on raw returns the market makes everything correlate, so the cut would keep only one.
+    raw = pd.DataFrame(rows, columns=["strategy", "exchange", "day", "ret"]).pivot_table(
+        index="day", columns=["strategy", "exchange"], values="ret")
+    assert len(cohorts.pick_archive(elites, raw, {"A", "Copy", "B", "C"}, DIV, {"binanceus": 10})) == 1
+
+
+def test_a_diverse_pick_over_its_candle_budget_is_refused_not_trimmed():
+    with pytest.raises(ValueError, match="2 bots on binanceus make 20.0 candle calls a minute, over its budget of 10"):
+        cohorts.pick_archive([elite("A", 0.9, "1m"), elite("B", 0.5, "1m")], pd.DataFrame(), {"A", "B"}, DIV,
+                             {"binanceus": 10})
+
+
+def test_the_shipped_diverse_cohort_fits_its_budget_at_max_bots(tmp_path):
+    cfg = {"prefix": "div", "cohort": "diverse", **cohorts.load()["diverse"], "max_rho": 0.5}
+    elites = [elite(f"S{i}", 1.0 - i / 100, cfg["min_timeframe"]) for i in range(cfg["max_bots"] + 4)]
+    lines = cohorts.pick_archive(elites, pd.DataFrame(), {e["strategy"] for e in elites}, cfg,
+                                 {v: len(analyze.pair_list(v)) for v in cfg["venues"]})
+    assert len(lines) == cfg["max_bots"]
+    roster = tmp_path / "roster.tsv"
+    roster.write_text("\n".join(lines))
+    assert {r.cohort for r in league.roster_rows(roster)} == {"diverse"}
+
+
+def test_archive_elites_keep_the_timeframe_floor_and_venue(conn):
+    conn.execute("INSERT INTO strategies (name, file, file_hash, timeframe) VALUES ('Slow', 'f', 'h', '4h'), "
+                 "('Fast', 'f', 'h', '5m')")  # one discovery: one seen_at
+    for name in ("Slow", "Fast"):
+        for ex in ("binanceus", "okx"):
+            conn.execute("INSERT INTO strategy_windows (strategy, exchange, win, days, trades, sharpe_lo, gross_expectancy) "
+                         "VALUES (%s, %s, '365d', 365, 60, 0.4, 0.001)", (name, ex))
+    dcfg = {"window": "365d", "min_trades": 30, "hold_hours": [1, 24, 168], "freq_buckets": 3, "max_rho": 0.5,
+            "skip_families": []}
+    got = cohorts.archive_elites(conn, {"venues": ["binanceus"], "min_timeframe": "1h"}, dcfg, {})
+    assert [(e["strategy"], e["exchange"]) for e in got] == [("Slow", "binanceus")]
+    assert cohorts.replicated(conn, "365d", ["okx"]) == {"Slow", "Fast"}
+    assert cohorts.replicated(conn, "365d", ["kucoin"]) == set()

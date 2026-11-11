@@ -81,7 +81,7 @@ The catalogue above says which mechanisms exist. A strategy's label does not pro
 
 - **A cell's elite** is the strategy x venue with the highest low end of the 365-day Sharpe interval among those in the cell, the same score `aggressive` ranks by. `lab/diversity.py` builds the cells from `[diversity]` in `lab/suggest.toml`; /coverage shows them folded onto family x holding period and family x climate, a dash for each gap.
 - **Two strategies are one** when their daily returns correlate at |rho| over 0.5 (the correlation matrix behind the `max_rho` promote gate), whatever cells they sit in. A family tag that disagrees with that, such as a "trend" strategy at rho 0.9 with a mean-reversion one, is fixed in `lab/families.toml`.
-- **A diverse pick** is greedy: the best elite first, then each next elite whose largest |rho| to those already picked is 0.5 or under.
+- **A diverse pick** is greedy: the best elite first, then each next elite whose edge before fees also shows on okx or kucoin, whose BTC-residual daily returns have |rho| 0.5 or under to every one already picked, and that lifts the picks' effective count by at least 0.5 (`[diverse]` in `lab/cohorts.toml`). BTC is taken out first because it is the one source most strategies share: on 2026-11-09 the first principal component of the binanceus 365-day matrix was 28% of the variance at rho 0.84 with BTC, the effective count was 10.9, and 27.6 once BTC was removed (tr-211).
 
 ### Search wide, forward-test few
 
@@ -95,7 +95,7 @@ Every cohort in `lab/cohorts.toml` states its question, pick rule, bot count and
 | `aggressive` | do the near-misses hold up live | top 4 by Sharpe low end, best overlay each, on 3 venues | 12 |
 | `mixture` | does the best 1/N mixture hold up live | the best ungated 1/N mixture by low end, one bot per sleeve | 2 |
 | `strategies` | what does every strategy leave out of its backtest (fills, fees, live candles) | every tradable strategy on binanceus | 49 |
-| `diverse` (planned) | does each different way of making money hold up live | one diverse pick per filled cell, 1 h or slower, at most 16 | up to 16 |
+| `diverse` | does each different way of making money hold up live | `kind = "archive"`: one diverse pick per filled cell on binanceus, 1 h or slower, at most 16 | up to 16 |
 
 Each cohort's roster names start with its first three letters, so `lab/cohorts.py` refuses two cohorts that share them.
 
