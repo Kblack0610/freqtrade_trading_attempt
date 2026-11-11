@@ -22,6 +22,9 @@ images:
   - name: trader
     newName: ghcr.io/kblack0610/trader
     digest: {OLD}  # sha-1111111
+  - name: trader-ml
+    newName: ghcr.io/kblack0610/trader-ml
+    digest: {OLD}  # sha-1111111
   - name: after
     digest: {OLD}
 """
@@ -30,8 +33,15 @@ images:
 def test_bump_sets_only_the_trader_digest():
     out = bump(KUSTOMIZATION, NEW, "sha-2222222")
     assert f"    digest: {NEW}  # sha-2222222" in out.split("\n")
-    assert out.count(OLD) == 2
+    assert out.count(OLD) == 3
     assert out.replace(f"{NEW}  # sha-2222222", f"{OLD}  # sha-1111111") == KUSTOMIZATION
+
+
+def test_bump_sets_the_trader_ml_digest_by_name():
+    out = bump(KUSTOMIZATION, NEW, "sha-2222222", "trader-ml")
+    lines = out.split("\n")
+    assert lines[lines.index("  - name: trader-ml") + 2] == f"    digest: {NEW}  # sha-2222222"
+    assert out.count(OLD) == 3
 
 
 def test_bump_is_a_no_op_when_already_pinned():
@@ -43,7 +53,7 @@ def test_bump_refuses_a_bad_digest_or_a_missing_entry():
     with pytest.raises(ValueError):
         bump(KUSTOMIZATION, "latest", "sha-2222222")
     with pytest.raises(ValueError):
-        bump(KUSTOMIZATION.replace("name: trader", "name: trader-ml"), NEW, "sha-2222222")
+        bump(KUSTOMIZATION.replace("name: trader\n", "name: trader-x\n"), NEW, "sha-2222222")
 
 
 def test_superseded_prs_close_with_a_note_and_no_issue_comment(monkeypatch):

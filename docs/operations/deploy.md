@@ -6,7 +6,7 @@ This runbook describes the repo's delivery path to home-k3s. The cluster's manif
 
 [image.yml](../../.github/workflows/image.yml) runs on PRs and master pushes. Its checks cover secrets, typecheck, lint, migrations, unit/database tests, strategy loading and the FreqAI image. Only master pushes publish to `ghcr.io/kblack0610/trader` and `ghcr.io/kblack0610/trader-ml`, with commit and latest tags. The standard image's published digest is the deployment input.
 
-After publish, [ci/bump_home_config.py](../../ci/bump_home_config.py) updates the `trader` image entry in home-config's `apps/freqtrade/kustomization.yaml`. It opens a Forgejo PR, closes superseded bump PRs and squash-merges its own bump. Flux reconciles that merge to home-k3s. The bump skips a superseded master commit; a missing `FORGEJO_DEPLOY_TOKEN` warns and skips promotion, and a failed merge leaves a PR for review. [README CI](../../README.md#ci) owns the token setup and exact workflow commands.
+After publish, [ci/bump_home_config.py](../../ci/bump_home_config.py) updates the `trader` and `trader-ml` image entries in home-config's `apps/freqtrade/kustomization.yaml`. It opens a Forgejo PR, closes superseded bump PRs and squash-merges its own bump. Flux reconciles that merge to home-k3s. The bump skips a superseded master commit; a missing `FORGEJO_DEPLOY_TOKEN` warns and skips promotion, and a failed merge leaves a PR for review. [README CI](../../README.md#ci) owns the token setup and exact workflow commands.
 
 Merging this repo can therefore trigger deployment through that integration. Building an image locally or opening a PR does not promote it. Changes to roster membership, schedules or workload resources belong in home-config rather than this repo.
 
