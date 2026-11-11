@@ -17,6 +17,24 @@
 </table>
 </div>
 {% if not exchanges %}<p class="muted">No results yet: the nightly analysis, the weekly walk-forward and the confidence run fill these in.</p>{% endif %}
+<h2>Diversity archive</h2>
+<p class="muted">Each cell is family x holding period x climate x venue x trade frequency (docs/strategy-coverage.md, Diversity), from the {{ archive.window }} window: cells filled: {{ archive.cells | length }}, from {{ archive.strategies }} strategy x venue results. A cell's elite is its highest Sharpe low end. These two tables fold the cells onto one axis each: the elite shown is the best across the folded axes, and a dash is a gap, a way of trading nothing in that family has been backtested to do.</p>
+{% for title, table, values in [("By holding period", archive.by_hold, archive.holds), ("By climate it earns in", archive.by_climate, archive.climates)] %}
+<h3>{{ title }}</h3>
+<div class="scroll">
+<table>
+  <thead><tr><th>Family</th>{% for v in values %}<th>{{ v }}</th>{% endfor %}<th class="n">Gaps</th></tr></thead>
+  <tbody>
+  {% for f in table %}
+  <tr><td>{{ f.family }}</td>
+    {% for c in f.by %}<td>{% if c.best %}<a href="/strategies/{{ c.best.strategy }}?exchange={{ c.best.exchange }}">{{ c.best.strategy }}</a><br><span class="muted">{{ c.best.exchange }}, Sharpe low {{ c.best.sharpe_lo | num(2) }}{% if c.cells > 1 %}, {{ c.cells }} cells{% endif %}</span>{% else %}<span class="muted">-</span>{% endif %}</td>{% endfor %}
+    <td class="n">{{ f.gaps }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endfor %}
+{% if not archive.cells %}<p class="muted">No archive yet: it needs the nightly analysis on the {{ archive.window }} window.</p>{% endif %}
 <h2>Strategies</h2>
 <p class="muted">Untagged means a strategy file under <code>user_data/strategies</code> with no line in <code>lab/families.toml</code>: add one. Gone means a name only the results still hold, such as a deleted strategy, whose trials still count. Best gates is the venue that passes the most confidence gates.</p>
 <div class="scroll">

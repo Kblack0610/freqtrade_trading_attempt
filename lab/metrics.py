@@ -237,6 +237,8 @@ def window_metrics(daily: pd.DataFrame, trades: pd.DataFrame, seed: int) -> dict
         "winrate": float((trades["profit_abs"] > 0).mean()) if len(trades) else None,
         "exposure": exposure(trades, start, end) if n else 0.0,
         "worst_open": worst_open(trades),
+        "median_hold_hours": float((pd.to_datetime(trades["close_date"]) - pd.to_datetime(trades["open_date"]))
+                                   .median() / pd.Timedelta(hours=1)) if len(trades) else None,
         "months_profitable": float((months > 0).mean()) if len(months) else None,
         "trades_needed": trades_needed(trades["profit_ratio"].to_numpy()) if len(trades) else None,
         # inputs to the deflated Sharpe, which needs every trial in the window first
