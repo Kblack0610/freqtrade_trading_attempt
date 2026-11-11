@@ -9,6 +9,7 @@ from lab import walkforward as wf
 from test_analyze import REPO
 
 TODAY = dt.date(2026, 11, 4)
+TUNE = {"spaces": "default", "epochs": 150, "early_stop": 40, "sampler": "NSGAIIISampler"}
 
 
 class FakeRunner:
@@ -31,7 +32,8 @@ class FakeRunner:
             d = dt.datetime(fold[1].year, fold[1].month, 1, tzinfo=dt.timezone.utc)
             dated = [("BTC/USDT", d + dt.timedelta(days=i), d + dt.timedelta(days=i, hours=2), p / n) for i in range(n)]
             return {"trades": n, "profit": p, "expectancy": p / n, "returns": [p / n] * n, "dated": dated}
-        out = {"ok": True, "error": None, "duration_s": 2.0, "base": side(0.01, 10), "params": None}
+        out = {"ok": True, "error": None, "duration_s": 2.0, "hyperopt_s": 1.5, "backtest_s": 0.5, "epochs_run": 70,
+               "base": side(0.01, 10), "params": None}
         if strategy in self.untuned:
             return {**out, "error": "no hyperopt epoch reached 10 training trades"}
         return {**out, "params": {"roi": {"0": 0.03}, "stoploss": -0.08}, "tuned": side(0.04, 12), "is": side(0.2, 70)}
@@ -215,9 +217,9 @@ def test_the_embargo_is_part_of_the_cache_key(monkeypatch):
     fold = wf.folds(TODAY, 1, 180)[0]
     monkeypatch.setattr(analyze, "config_files", lambda ex: [])
     monkeypatch.setattr(wf, "EMBARGO_DAYS", 7)
-    a = wf.fold_key("h", "binanceus", fold, "v", "candles")
+    a = wf.fold_key("h", "binanceus", fold, "v", "candles", TUNE)
     monkeypatch.setattr(wf, "EMBARGO_DAYS", 3)
-    assert a != wf.fold_key("h", "binanceus", fold, "v", "candles")
+    assert a != wf.fold_key("h", "binanceus", fold, "v", "candles", TUNE)
 
 
 def test_a_changed_candle_reruns_only_the_folds_whose_span_holds_it(wlab, monkeypatch, tmp_path):
@@ -285,10 +287,10 @@ def test_a_spent_budget_starts_no_more_folds_and_still_records_the_run(wlab, mon
 
 def test_robustness_configuration_invalidates_cached_folds(monkeypatch):
     cfg = wf.suggest.load_config()
-    first = wf.fold_key('h', 'binanceus', (TODAY, TODAY, TODAY), 'v', 'candles')
+    first = wf.fold_key('h', 'binanceus', (TODAY, TODAY, TODAY), 'v', 'candles', TUNE)
     monkeypatch.setattr(wf.suggest, 'load_config', lambda: {**cfg, 'confidence': {
         **cfg['confidence'], 'entry_delay_candles': cfg['confidence']['entry_delay_candles'] + 1}})
-    assert wf.fold_key('h', 'binanceus', (TODAY, TODAY, TODAY), 'v', 'candles') != first
+    assert wf.fold_key('h', 'binanceus', (TODAY, TODAY, TODAY), 'v', 'candles', TUNE) != first
 
 
 def test_detail_candles_invalidate_fold_cache(wlab, monkeypatch):
@@ -303,3 +305,62 @@ def test_detail_candles_invalidate_fold_cache(wlab, monkeypatch):
     runner = FakeRunner()
     wf.main(runner, TODAY)
     assert len(runner.calls) == 3  # Only the newest test month includes the changed October candle.
+
+
+def test_a_strategy_without_parameters_tunes_roi_and_stoploss_with_fewer_epochs(monkeypatch):
+    monkeypatch.setattr(analyze, "REPO", REPO)
+    monkeypatch.setattr(wf, "SAMPLERS", ["NSGAIIISampler"])
+    assert wf.tuning("user_data/strategies/Diamond.py", 1) == {
+        "spaces": "default", "epochs": wf.EPOCHS, "early_stop": wf.EARLY_STOP, "sampler": "NSGAIIISampler"}
+    assert wf.tuning("user_data/strategies/BreakEven.py", 1)["spaces"] == "roi stoploss"
+    assert wf.tuning("user_data/strategies/BreakEven.py", 1)["epochs"] == wf.EPOCHS_ROI
+    assert wf.has_parameters("user_data/strategies/Missing.py"), "an unreadable file gets the full search"
+
+
+def test_parameters_in_an_imported_sibling_count(tmp_path, monkeypatch):
+    monkeypatch.setattr(analyze, "REPO", tmp_path)
+    (tmp_path / "Base.py").write_text("from freqtrade.strategy import IntParameter\nx = IntParameter(1, 5, default=2)\n")
+    (tmp_path / "Child.py").write_text("from Base import Base\n")
+    (tmp_path / "Alone.py").write_text("from freqtrade.strategy import IStrategy\n")
+    assert wf.has_parameters("Child.py") and not wf.has_parameters("Alone.py")
+
+
+def test_every_fold_draws_a_sampler_arm_from_its_seed(monkeypatch):
+    monkeypatch.setattr(wf, "SAMPLERS", ["NSGAIIISampler", "TPESampler"])
+    arms = {wf.tuning("missing.py", metrics.seed_of("S", "binanceus", m))["sampler"] for m in range(1, 13)}
+    assert arms == {"NSGAIIISampler", "TPESampler"}
+
+
+def test_the_tuning_settings_are_part_of_the_cache_key(monkeypatch):
+    monkeypatch.setattr(analyze, "config_files", lambda ex: [])
+    fold = wf.folds(TODAY, 1, 180)[0]
+    keys = {wf.fold_key("h", "binanceus", fold, "v", "candles", {**TUNE, k: v})
+            for k, v in (("spaces", "roi stoploss"), ("epochs", 60), ("early_stop", 0), ("sampler", "TPESampler"))}
+    assert len(keys | {wf.fold_key("h", "binanceus", fold, "v", "candles", TUNE)}) == 5
+
+
+def test_the_sampler_override_sets_only_generate_estimator():
+    class Plain:
+        pass
+
+    class Custom:
+        class HyperOpt:
+            @staticmethod
+            def roi_space():
+                return ["kept"]
+
+    for name, cls in (("Plain", Plain), ("Custom", Custom)):
+        exec(wf.sampler_override(name, "TPESampler"), {name: cls})
+        assert cls.HyperOpt.generate_estimator(dimensions=[], random_state=1) == "TPESampler"
+    assert Custom.HyperOpt.roi_space() == ["kept"]
+
+
+def test_folds_store_their_step_seconds_and_the_arms_report_compares_them(wlab, monkeypatch):
+    monkeypatch.setattr(wf, "SAMPLERS", ["NSGAIIISampler", "TPESampler"])
+    assert wf.main(FakeRunner(), TODAY) == 0
+    rows = wlab.execute("SELECT hyperopt_s, backtest_s, epochs_run, spaces, epochs, sampler FROM walkforward").fetchall()
+    assert len(rows) == 9 and {r[:5] for r in rows} == {(1.5, 0.5, 70, "default", 150)}
+    raw = wlab.execute("SELECT raw FROM runs WHERE kind = 'walkforward'").fetchone()[0]
+    arms = {a["sampler"]: a for a in raw["arms"]}
+    assert sum(a["folds"] for a in arms.values()) == 9 and set(arms) == {r[5] for r in rows}
+    assert all(a["hyperopt_s"] == 1.5 and a["oos_uplift"] == pytest.approx(0.04 / 12 - 0.001) for a in arms.values())
