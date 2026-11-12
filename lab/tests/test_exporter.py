@@ -2,8 +2,6 @@ import datetime as dt
 
 from prometheus_client import CollectorRegistry, generate_latest
 
-NOW = dt.datetime.now(dt.timezone.utc)
-
 
 def scrape(collector) -> dict[str, float]:
     registry = CollectorRegistry()
@@ -19,6 +17,8 @@ def scrape(collector) -> dict[str, float]:
 def test_metrics_read_the_newest_state(conn):
     from lab import db
     from web.exporter import TraderCollector
+
+    NOW = dt.datetime.now(dt.timezone.utc)  # at the test, not at import: the ages below are read against the clock
 
     conn.execute("INSERT INTO bots (name, exchange, strategy, cohort) VALUES ('a', 'kraken', 'S', 'league'), "
                  "('b', 'kraken', 'S', 'aggressive')")

@@ -146,3 +146,25 @@ def test_a_walkforward_fold_runs_real_hyperopt_with_its_sampler_and_times_each_s
     assert 4 <= res["epochs_run"] <= 8
     assert res["hyperopt_s"] > 0 and res["backtest_s"] > 0
     assert res["duration_s"] == pytest.approx(res["hyperopt_s"] + res["backtest_s"])
+
+
+def test_hyperopt_with_the_same_random_state_tunes_the_same_parameters(golden, monkeypatch):
+    """A fold's seed is its whole randomness: the same seed twice gives the same parameters, another seed does not,
+    so a cached fold can be reproduced and a changed result means a changed input."""
+    _, strategies = golden
+    monkeypatch.setattr(analyze, "REPO", strategies.parent)
+    monkeypatch.setattr(walkforward, "EPOCHS_ROI", 8)
+    monkeypatch.setattr(walkforward, "EARLY_STOP", 0)  # off: freqtrade refuses --early-stop 0, so it is not passed
+    monkeypatch.setattr(walkforward, "MIN_TRADES", 1)
+    monkeypatch.setattr(walkforward, "SAMPLERS", ["TPESampler"])
+    monkeypatch.setattr(walkforward.robustness, "run", lambda *a, **k: {})
+    fold = (dt.date(2026, 1, 3), dt.date(2026, 2, 10), dt.date(2026, 2, 28))
+
+    def params(seed: int) -> dict:
+        res = walkforward.Cli().fold("GoldenCross", "strategies/GoldenCross.py", EX, fold, seed)
+        assert res["ok"] and res["params"], res["error"]
+        return res["params"]
+
+    first = params(7)
+    assert params(7) == first
+    assert params(8) != first

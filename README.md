@@ -194,7 +194,7 @@ A backtest of a strategy as it is says nothing about tuning it, and hyperopt's b
 | `WF_EMBARGO_DAYS` | `7` | Days between the end of training and the test month; longer than any trade's hold |
 | `WF_EPOCHS` | `150` | Hyperopt epochs per fold |
 | `WF_EPOCHS_ROI` | `60` | Hyperopt epochs for a strategy with no parameters of its own (ROI and stoploss only) |
-| `WF_EARLY_STOP` | `40` | Stop hyperopt after this many epochs without a better loss; 0 turns it off |
+| `WF_EARLY_STOP` | `40` | Stop hyperopt after this many epochs without a better loss; 0 turns it off, and freqtrade raises a value under 20 to 20 |
 | `WF_SAMPLERS` | `NSGAIIISampler TPESampler` | Optuna sampler arms; each fold takes one by its seed (the A/B in the run report's `arms`) |
 | `WF_LOSS` | `SharpeHyperOptLossDaily` | Hyperopt loss |
 | `WF_MIN_TRADES` | `10` | Training trades an epoch needs to count |
