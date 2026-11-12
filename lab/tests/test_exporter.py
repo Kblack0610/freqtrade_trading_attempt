@@ -148,6 +148,15 @@ def test_market_metrics(conn):
     assert m['trader_paper_open_positions{account="paper-a"}'] == 4
     assert 290 < m['trader_paper_marked_age_seconds{account="paper-a"}'] < 320
     assert not any('account="paper-new"' in k for k in m)  # never marked: no equity to alert on yet
+    assert not any(k.startswith("trader_shadow_marked_age") for k in m)  # no mark yet: nothing to call stale
+    conn.execute("INSERT INTO shadow_accounts (account, strategy, exchange, cohort, capital, promoted_on, entry, state) "
+                 "VALUES ('shadow-a', 'A', 'kraken', 'short', 1000, %s, '{}', 'trial'), "
+                 "('shadow-b', 'B', 'kraken', 'short', 1000, %s, '{}', 'trial')", (now.date(), now.date()))
+    conn.execute("INSERT INTO shadow_marks (account, day, ret, equity) VALUES ('shadow-a', %s, 0, 1000)",
+                 (now.date() - dt.timedelta(days=2),))
+    m = scrape(TraderCollector(db.connect))
+    assert m['trader_shadow_accounts{cohort="short",state="trial"}'] == 2
+    assert 86400 <= m["trader_shadow_marked_age_seconds"] < 2 * 86400
     assert m['trader_broker_equity{broker="alpaca_paper"}'] == 100000  # the good read, not the failed newer one
     assert 590 < m['trader_broker_read_age_seconds{broker="alpaca_paper"}'] < 620
     # a real account exports its read age, never its balance

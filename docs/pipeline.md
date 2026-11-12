@@ -139,7 +139,7 @@ Reference: [Suggestions](../README.md#suggestions), [Confidence](../README.md#co
 
 ## Step 6: the research loop and sync
 
-`lab/loop.py`, the last step of the analysis, compares tonight's climate scorecard cells whose low end is above zero, promote suggestions and retune fits with last night's and writes what changed as `research_events`. At 10:00 UTC `ci/research_sync.py` on the fleet machine files one board row a night for the changes and opens a home-config roster PR for each promotion. A person merges it; nothing promotes itself. Reference: [Nightly research loop](../README.md#nightly-research-loop).
+`lab/loop.py`, the last step of the analysis, compares tonight's climate scorecard cells whose low end is above zero, promote suggestions and retune fits with last night's and writes what changed as `research_events`. At 10:00 UTC `ci/research_sync.py` on the fleet machine files one board row a night for the changes and a row for each promotion. `lab/shadow.py`, just before the loop, opens shadow paper accounts (database rows, no pod) for walk-forward-qualified, uncorrelated strategies, marks them forward from their promotion day and retires them by rule, toward 50 winners; `/accounts` ranks them. A pod is still a person's pick (`ci/cohort_roster.py`). Reference: [Nightly research loop](../README.md#nightly-research-loop).
 
 ## Step 7: the paper league
 

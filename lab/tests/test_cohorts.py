@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from lab import analyze, cohorts, diversity, league, variants
+from lab import analyze, cohorts, diversity, league, suggest, variants
 
 _spec = importlib.util.spec_from_file_location(
     "cohort_roster", pathlib.Path(__file__).resolve().parents[2] / "ci" / "cohort_roster.py")
@@ -257,3 +257,20 @@ def test_archive_elites_keep_the_timeframe_floor_and_venue(conn):
     assert cohorts.edges(conn, "90d") == set()
     conn.execute("INSERT INTO strategy_daily VALUES ('Slow', 'binanceus', '2026-01-01', 0.01, 0, 1)")
     assert cohorts.daily_rows(conn, [("Slow", "binanceus")]) == [("Slow", "binanceus", dt.date(2026, 1, 1), 0.01)]
+
+
+LOOP_ROSTER = "# name exchange strategy\n\nkraken-sample        kraken     SampleStrategy\nkraken-b  kraken  B\n"
+LOOP_STS = "spec:\n  serviceName: x\n  replicas: 2  # rows\n  template: {}\n"
+
+
+def test_the_roster_gains_one_row_and_replicas_follow():
+    line = suggest.roster_line("Good", "kraken")
+    roster, sts = cohort_roster.roster_change(LOOP_ROSTER, LOOP_STS, line)
+    assert roster.endswith(line + "\n") and cohort_roster.rows_of(roster)[:2] == cohort_roster.rows_of(LOOP_ROSTER)
+    assert "  replicas: 3  # rows\n" in sts and sts.replace("3  #", "2  #") == LOOP_STS
+    assert cohort_roster.roster_change(roster, sts, line) is None
+
+
+def test_the_roster_refuses_a_statefulset_already_out_of_step():
+    with pytest.raises(ValueError, match="replicas 5 for 2 roster rows"):
+        cohort_roster.roster_change(LOOP_ROSTER, LOOP_STS.replace("2  #", "5  #"), suggest.roster_line("Good", "kraken"))

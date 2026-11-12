@@ -66,6 +66,9 @@ MARKOUTS = ("SELECT bot, horizon_min, count(net) AS n, avg(net) AS net, avg(null
 RECONCILE = ("SELECT bot, kind, count(*) AS n, avg(delay_s) AS delay_s, avg(price_gap) AS price, avg(fee_gap) AS fee, "
              "avg(profit_gap) AS profit FROM reconcile GROUP BY 1, 2")
 PAPER = "SELECT account, capital, equity, open_positions, marked_at FROM paper_accounts WHERE marked_at IS NOT NULL"
+# lab/shadow.py: accounts per cohort and state, and the newest day marked (a day's mark lands after it ends).
+SHADOW = "SELECT cohort, state, count(*) AS n FROM shadow_accounts GROUP BY 1, 2"
+SHADOW_MARKED = "SELECT max(day) + 1 AS newest FROM shadow_marks"
 BROKERS = "SELECT DISTINCT ON (broker) broker, paper, equity, read_at FROM broker_balances WHERE error IS NULL ORDER BY broker, read_at DESC"
 
 
@@ -103,6 +106,8 @@ class TraderCollector:
                 last_sweep = cur.execute(LAST_SWEEP).fetchall()
                 links = cur.execute(LINKS).fetchall()
                 paper = cur.execute(PAPER).fetchall()
+                shadow = cur.execute(SHADOW).fetchall()
+                shadow_marked = cur.execute(SHADOW_MARKED).fetchone()["newest"]
                 brokers = cur.execute(BROKERS).fetchall()
                 marks = cur.execute(MARKOUTS).fetchall()
                 rec = cur.execute(RECONCILE).fetchall()
@@ -128,6 +133,7 @@ class TraderCollector:
                      "clears zero at its low end", ["regime", "kind"], (([c["cell"], c["kind"]], c["n"]) for c in climate))
         yield from market_metrics(now, sweeps, last_sweep, links)
         yield from paper_metrics(now, paper)
+        yield from shadow_metrics(now, shadow, shadow_marked)
         yield from broker_metrics(now, brokers)
         yield from markout_metrics(marks, rec)
         yield from calibration_metrics(calibration)
@@ -235,6 +241,14 @@ def paper_metrics(now, paper):
                  (([p["account"]], p["open_positions"]) for p in paper))
     yield family("trader_paper_marked_age_seconds", "Seconds since the paper league last marked the account",
                  ["account"], (([p["account"]], age(now, p["marked_at"])) for p in paper))
+
+
+def shadow_metrics(now, shadow, newest):
+    yield family("trader_shadow_accounts", "Shadow paper accounts by cohort (short, long) and state (trial, winning, "
+                 "retired)", ["cohort", "state"], (([r["cohort"], r["state"]], r["n"]) for r in shadow))
+    end = None if newest is None else dt.datetime.combine(newest, dt.time(), dt.timezone.utc)
+    yield family("trader_shadow_marked_age_seconds", "Seconds since the end of the newest day any shadow account was "
+                 "marked", [], [([], age(now, end))])
 
 
 def broker_metrics(now, brokers):

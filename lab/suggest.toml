@@ -293,3 +293,36 @@ signal_ic = 0.04
 edges = [0.01, 0.02, 0.04]
 per_edge = 4
 nulls = 8
+
+[shadow]
+# lab/shadow.py: shadow paper accounts, database rows with paper capital and no pod, promoted, marked and retired
+# nightly by the rule below (docs/pipeline.md, Shadow accounts). Judgment calls, not evidence.
+capital = 1000
+# The backtest window the entry and the diversity pick read.
+window = "365d"
+# Entry: enough trades in the backtest window and out of sample that the edges mean something, and both above zero:
+# the low end of the backtest expectancy interval and the walk-forward mean profit per trade (confidence).
+min_backtest_trades = 30
+expectancy_lo_above = 0.0
+min_oos_trades = 30
+oos_expectancy_above = 0.0
+# Two strategies whose BTC-residual daily returns correlate above this are one; a cohort holds only one of them.
+max_rho = 0.5
+# A median trade held under this many hours is the short cohort, otherwise long ([diversity] hold_hours' middle edge).
+hold_edge_hours = 24
+# The block-bootstrap interval on the mean daily return: blocks of this many days, at this level.
+block = 10
+level = 0.90
+
+[shadow.short]
+# Open accounts at once; judged after min_days, retired at max_days unless winning, or past max_drawdown any day.
+max_active = 60
+min_days = 30
+max_days = 60
+max_drawdown = 0.20
+
+[shadow.long]
+max_active = 60
+min_days = 90
+max_days = 180
+max_drawdown = 0.30

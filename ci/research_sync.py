@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Carry the nightly research loop's changes to the agent board, and a promotion to a roster PR.
+"""Carry the nightly research loop's changes to the agent board.
 
 Runs on the fleet machine after the nightly analysis (the agentctl runner `trader-research-sync`), from this repo's
 origin/master, never from a checkout. It reads the events lab/loop.py wrote that are not yet reported, through
@@ -7,53 +7,22 @@ the deployed image (`kubectl exec deploy/trader-web -- python -m lab.loop pendin
 
 - climate changes: one agent-board row per night listing each strategy or mixture that entered or left a market
   climate's passing set (`notes ptask trader --agent add`);
-- a promotion that enters: a home-config PR that appends its dry-run roster row to apps/freqtrade/roster.tsv and
-  raises the StatefulSet's replicas to the row count, plus a board row to review it. Paper only: league.py refuses
-  anything but key-less spot dry run, and the PR is opened, never merged (approved 2026-11-05, tr-17);
-- a promotion that leaves: a board row, so an open roster PR for it is closed by a person;
+- a promotion that enters or leaves: a board row. Forward testing is lab/shadow.py's shadow accounts, database rows
+  with no pod; a pod is a person's pick through ci/cohort_roster.py, so this sync opens no roster PR;
 - a monthly retune fit entering or leaving qualification: a review row with its parameter artifact. Parameters
   are never saved to a strategy or applied to a bot by this sync.
 
 Each event is acked (`python -m lab.loop ack`, in deploy/freqtrade-watcher: the site's role cannot write) once its
 row is filed, so a failed night retries the rest.
 
-Env: FORGEJO_TOKEN (repo scope on home-config), KUBE_CONTEXT (default home-k3s), DRY_RUN=1 to print only.
+Env: KUBE_CONTEXT (default home-k3s), DRY_RUN=1 to print only.
 """
-import base64
 import json
 import os
-import re
 import subprocess
 import sys
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from bump_home_config import BASE, REPO, call  # noqa: E402
-
-ROSTER = "apps/freqtrade/roster.tsv"
-STATEFULSET = "apps/freqtrade/statefulset.yaml"
-REPLICAS = re.compile(r"^(\s*replicas:\s*)(\d+)(.*)$", re.M)
 MOST_DETAILS = 40  # a board row past this many detail lines points at /book instead
-
-
-def rows_of(roster: str) -> list[str]:
-    return [line for line in roster.splitlines() if line.strip() and not line.lstrip().startswith("#")]
-
-
-def roster_change(roster: str, statefulset: str, line: str) -> tuple[str, str] | None:
-    """Pure: roster.tsv with line appended and statefulset.yaml with replicas set to the new row count; None when
-    a row of that bot name is already there. Refuses a StatefulSet whose replicas already disagree with the roster."""
-    name = line.split()[0]
-    rows = rows_of(roster)
-    if any(r.split()[0] == name for r in rows):
-        return None
-    found = REPLICAS.findall(statefulset)
-    if len(found) != 1:
-        raise ValueError(f"{STATEFULSET}: expected one replicas line, found {len(found)}")
-    if int(found[0][1]) != len(rows):
-        raise ValueError(f"{STATEFULSET} has replicas {found[0][1]} for {len(rows)} roster rows; fix that first")
-    return (roster.rstrip("\n") + "\n" + line + "\n",
-            REPLICAS.sub(lambda m: f"{m[1]}{len(rows) + 1}{m[3]}", statefulset, count=1))
 
 
 def label(e: dict) -> str:
@@ -97,35 +66,6 @@ def board(text: str, details: list[str]) -> None:
         raise SystemExit(f"notes ptask add exited {code}")
 
 
-def roster_pr(e: dict) -> str:
-    """Open (or find) the home-config PR adding e's roster row; returns its URL, or a note when the row exists."""
-    line, name = e["action"], e["action"].split()[0]
-    branch = f"trader-roster-{name}"
-    open_prs = call("GET", f"/repos/{REPO}/pulls?state=open&limit=50")
-    mine = next((p for p in open_prs if p["head"]["ref"] == branch), None)
-    if mine:
-        return mine["html_url"]
-    files = {path: call("GET", f"/repos/{REPO}/contents/{path}?ref={BASE}") for path in (ROSTER, STATEFULSET)}
-    old = {path: base64.b64decode(f["content"]).decode() for path, f in files.items()}
-    new = roster_change(old[ROSTER], old[STATEFULSET], line)
-    if new is None:
-        return f"{name} is already a roster row"
-    title = f"freqtrade: dry-run league adds {name} ({e['name']} on {e['exchange']})"
-    if call("GET", f"/repos/{REPO}/branches/{branch}", ok_404=True) is None:
-        call("POST", f"/repos/{REPO}/contents", {
-            "branch": BASE, "new_branch": branch, "message": title,
-            "files": [{"operation": "update", "path": path, "sha": files[path]["sha"],
-                       "content": base64.b64encode(text.encode()).decode()}
-                      for path, text in zip((ROSTER, STATEFULSET), new)]})
-    pr = call("POST", f"/repos/{REPO}/pulls", {
-        "base": BASE, "head": branch, "title": title,
-        "body": (f"Appends `{line}` to `{ROSTER}` and raises replicas to the row count. {e['name']} on {e['exchange']} "
-                 "cleared every lab/suggest.toml [promote] gate in the nightly analysis "
-                 "(https://trader.kblab.me/suggestions). Dry run only: lab/league.py refuses anything else. "
-                 "Opened by Kblack0610/freqtrade_trading_attempt ci/research_sync.py; a person merges it.")})
-    return pr["html_url"]
-
-
 def main() -> int:
     dry = os.environ.get("DRY_RUN") == "1"
     events = json.loads(kubectl_research("pending"))
@@ -142,13 +82,12 @@ def main() -> int:
             done += [e["id"] for e in climate]
     for e in (e for e in events if e["signal"] == "promote"):
         if e["change"] == "enters":
-            url = "(dry run)" if dry else roster_pr(e)
-            text = (f"check(trader): review the paper roster PR promoting {e['name']} on {e['exchange']} to the "
-                    "dry-run league #size/s")
-            details = [url, f"roster row: {e['action']}"]
+            text = (f"check(trader): {e['name']} on {e['exchange']} cleared the promote gates; its shadow account "
+                    "forward-tests it on /accounts, and a pod is a person's pick (ci/cohort_roster.py) #size/s")
+            details = ["https://trader.kblab.me/accounts", f"roster row if picked: {e['action']}"]
         else:
-            text = (f"check(trader): {e['name']} on {e['exchange']} no longer clears the promote gates; close its "
-                    "roster PR if it is still open #size/s")
+            text = (f"check(trader): {e['name']} on {e['exchange']} no longer clears the promote gates; retire "
+                    "its bot if a person rostered one #size/s")
             details = ["https://trader.kblab.me/suggestions"]
         print(text, *details, sep="\n  ")
         if not dry:

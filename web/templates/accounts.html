@@ -48,6 +48,17 @@
 </tbody></table></div>
 {% else %}<p class="muted">No dry-run bots have been ingested yet.</p>{% endif %}
 
+<h2 id="shadow">Shadow paper accounts</h2>
+<p class="muted">Database rows with paper capital and no pod (<code>lab/shadow.py</code>). A strategy and venue that clears the walk-forward and backtest entry gates opens one, and each night adds the backtest's days after its promotion, replayed on candles, not filled on a book. It wins when it is up with the interval's low end above zero after its cohort's minimum days; it retires past the drawdown limit, below zero, or at the day limit (<code>lab/suggest.toml [shadow]</code>). Short: median trade under a day; long: a day or more.</p>
+<p>Active short {{ shadow.active.short }}, active long {{ shadow.active.long }}, winning {{ shadow.winning }}, retired {{ shadow.retired }}.</p>
+{% if shadow.rows %}
+<div class="scroll"><table><thead><tr><th>Account</th><th>Cohort</th><th>State</th><th class="n">Days</th><th class="n">Return</th><th class="n">Drawdown</th><th>Promoted</th><th>Retired</th></tr></thead><tbody>
+{% for a in shadow.rows %}
+<tr><td><a href="/strategies/{{ a.strategy | urlencode }}?exchange={{ a.exchange | urlencode }}">{{ a.account }}</a></td><td>{{ a.cohort }}</td><td>{% if a.state == "winning" %}<span class="up">Winning</span>{% elif a.state == "retired" %}Retired{% else %}Trial{% endif %}</td><td class="n">{{ a.days or 0 }}</td><td class="n">{{ "%+.1f%%" | format((a.equity / a.capital - 1) * 100) }}</td><td class="n">{{ "%.1f%%" | format((1 - a.equity / a.peak) * 100) }}</td><td>{{ a.promoted_on }}</td><td>{% if a.retired_on %}{{ a.retired_on }}: {{ a.retired_why }}{% else %}-{% endif %}</td></tr>
+{% endfor %}
+</tbody></table></div>
+{% else %}<p class="muted">No shadow account yet: the nightly analysis opens them once a strategy clears the entry gates on /confidence.</p>{% endif %}
+
 <h2>Prediction-market paper accounts</h2>
 {% if paper_accounts %}
 <div class="scroll"><table><thead><tr><th>Account</th><th>Strategy family</th><th>Venue</th><th>Mode</th><th>Last observation</th><th class="n">Equity (USD)</th><th>Status</th></tr></thead><tbody>
