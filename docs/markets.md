@@ -113,6 +113,17 @@ Every third-party HTTP call in `lab/` goes through `Api.request` (`lab/markets/a
 - Retries: up to `retries`, each waiting the `Retry-After` the venue sends (seconds or a date), else `page_gap_s * 2^n`, at least 0.5 s and at most 60 s. A retry also holds the shared budget that long, so every process pauses, not only the one that got the 429.
 - What is retried depends on the method. A 429 is retried for every method: the provider did not act on it. A 5xx is retried only for GET, HEAD, OPTIONS, PUT and DELETE (the only DELETEs cancel an order by id). A POST or PATCH that drew a 5xx may have been carried out, an order placed, so it comes back to the caller at once. A timeout or a dropped connection is raised at once for every method. Signed headers and a signed query are built again for each attempt, so a retry carries a fresh timestamp.
 
+Measured after #130 deployed (`kubectl -n freqtrade logs <pod> | grep -c 'HTTP 429'`, Kalshi pods, 2026-11-12 07:55 UTC):
+
+| Job | 429s before | 429s after |
+|---|---|---|
+| history-settled (3 runs) | 950-1002 a run | 0 each (Kalshi already `done`) |
+| history-bars (one run, 64 min so far) | about 530 | 54, still running |
+| history-trades (first 4 min) | about 530 | 12, still running |
+| recorder (4 sweeps) | 30-50 a sweep | 3, 3, 5, 3 a sweep |
+
+Settled is clean and the rest is cut by about 10x, not to zero: the recorder's `/markets` pages still draw 3 to 5 429s a sweep, each retried and the gap doubled to 7.6 s by the fifth. The budget stays at 12 req/s, so the Kalshi limit is probably tighter than the published 20 on the history and market-list reads; a lower `budget_rps` for Kalshi is the lever if the count matters.
+
 Budgets, about 60% of each venue's published limit:
 
 | Venue | Published limit | `budget_rps` |

@@ -46,7 +46,7 @@ A missed 01:00 or 02:45 slot shows as a `*-manual-<MMDD>` Job (`freqtrade-analys
 
 A backtest is only as good as its candles. A candle is one time bar of a pair: open, high, low, close and volume.
 
-- `lab/backfill.py` keeps, per exchange, pair and timeframe (1m to 1d), every candle the exchange will give, prepended back to a floor per timeframe, and writes what it holds to `data_coverage`.
+- `lab/backfill.py` keeps, per exchange, pair and timeframe (1m to 1d), every candle the exchange will give, prepended back to a floor per timeframe, less the flat zero-volume padding an exchange serves for a suspended market (binanceus 1d across its 2023-07 to 2025-02 USD suspension), and writes what it holds to `data_coverage`.
 - Kraken's past comes from its published archive and its present from the newest candles each hour, because Kraken's API only serves recent candles.
 - OKX 1m history comes from OKX's monthly files, minutes instead of the day its API would take. Coinbase serves no 4h, so 4h is built from its 1h.
 - **The coverage guard.** An exchange and timeframe joins the analysis only when every pair on its whitelist is filled back to its oldest candle. A half-filled exchange would quietly compare strategies on different histories. Until then the run's `skipped` list says "not fully backfilled".
