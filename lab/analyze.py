@@ -56,6 +56,7 @@ import tempfile
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from collections.abc import Iterable
 from contextlib import contextmanager
 from functools import cache
 from pathlib import Path
@@ -524,12 +525,15 @@ def plan(conn, found: list[dict], first: dict, today: dt.date, ft_version: str, 
     strategy x exchange walk-forward has scored (`confidence.score`), since no gate reads an overlay of one it has not:
     those never run, best prior score (the as-is 365-day Sharpe low end) first and each series' newest chunk first, then
     stored ones whose key moved, the one stored longest ago first, so refreshing the current year rotates through
-    every series instead of holding the cap on the best few."""
+    every series instead of holding the cap on the best few. An overlay series with an open shadow account
+    (lab/shadow.py) runs uncapped like an as-is one: its account is marked from the days its current chunk adds."""
     done = {(s, e, o, c): (k, ok, n, at) for s, e, o, c, k, ok, n, at in conn.execute(
         "SELECT strategy, exchange, overlay, chunk_start, cache_key, ok, attempts, chunk_end FROM backtest_chunks")}
     score = {(s, e): lo for s, e, lo in conn.execute(
         "SELECT strategy, exchange, sharpe_lo FROM strategy_windows WHERE win = '365d' AND sharpe_lo IS NOT NULL")}
     scored = {(s, e) for s, e in conn.execute("SELECT strategy, exchange FROM confidence WHERE score IS NOT NULL")}
+    shadowed = set(conn.execute("SELECT strategy, exchange, overlay FROM shadow_accounts "
+                                "WHERE overlay <> '' AND state <> 'retired'").fetchall())
     todo, over, cached, skipped = [], [], 0, []
     digests: dict[tuple[str, str], dict[int, str]] = {}
     for s in found:
@@ -556,7 +560,7 @@ def plan(conn, found: list[dict], first: dict, today: dt.date, ft_version: str, 
                         cached += 1
                         continue
                     attempts = prior[2] if prior and prior[0] == key and not prior[1] else 0
-                    (over if oid else todo).append(
+                    (over if oid and (s["name"], ex, oid) not in shadowed else todo).append(
                         {"strategy": s["name"], "exchange": ex, "start": start, "end": end, "key": key,
                          "attempts": attempts, "candles": candles, "overlay": oid, "config": cfg,
                          "stored": prior and prior[3]})
@@ -837,8 +841,8 @@ def regime_rows(close: pd.Series, cfg: dict) -> list[dict]:
     return [finite(row) for row in metrics.regimes(close, c["trend_band"], c["vol_min_days"]).to_dict("records")]
 
 
-def insert_many(conn, table: str, rows: list[dict], cols: list[str]) -> None:
-    if not rows:
+def insert_many(conn, table: str, rows: Iterable[dict], cols: list[str]) -> None:
+    if not rows:  # a generator is always truthy and streams
         return
     with conn.cursor().copy(f"COPY {table} ({', '.join(cols)}) FROM STDIN") as cp:
         for r in rows:
@@ -861,16 +865,20 @@ def derive(conn) -> dict:
     close = daily_close("BTC")
     series, windows = measured(conn, close)
     daily = [{"strategy": s, "exchange": e, **r} for (s, e), d in series.items() for r in d.to_dict("records")]
-    overlaid = measured(conn, close, overlays=True)[1]
+    overlay_series, overlaid = measured(conn, close, overlays=True)
+    # a generator: overlay series outnumber as-is ones as the grid fills in, so their days are never held as dicts
+    overlay_daily = ({"strategy": s, "exchange": e, "overlay": o, **r} for (s, e, o), d in overlay_series.items()
+                     for r in d.to_dict("records"))
     deflate(windows + overlaid)
     estimates = estimate_rows(series)
     bench = book.benchmark_rows(close, daily_close("ETH"), suggest.load_config())
     corr, reg, overfit = correlation_rows(series, league), regime_rows(close, suggest.load_config()), overfit_rows(series)
     members, venues = cluster_rows(series, close, suggest.load_config()["diversity"]["max_rho"])
     with conn.transaction():
-        conn.execute("TRUNCATE strategy_daily, strategy_windows, overlay_windows, estimates, correlations, regimes, overfit,"
+        conn.execute("TRUNCATE strategy_daily, overlay_daily, strategy_windows, overlay_windows, estimates, correlations, regimes, overfit,"
                      " benchmarks, residual_clusters, residual_venues")
         insert_many(conn, "strategy_daily", daily, ["strategy", "exchange", "day", "ret", "pnl", "trades"])
+        insert_many(conn, "overlay_daily", overlay_daily, ["strategy", "exchange", "overlay", "day", "ret", "pnl", "trades"])
         insert_many(conn, "strategy_windows", windows, WINDOW_COLS)
         insert_many(conn, "overlay_windows", overlaid, ["overlay", *WINDOW_COLS])
         insert_many(conn, "estimates", estimates, ESTIMATE_COLS)
@@ -883,6 +891,7 @@ def derive(conn) -> dict:
         insert_many(conn, "residual_venues", venues, ["exchange", "series", "clusters", "neff"])
     return {"series": len(series), "daily_rows": len(daily), "windows": len(windows),
             "overlay_series": len({(r["strategy"], r["exchange"], r["overlay"]) for r in overlaid}),
+            "overlay_daily_rows": sum(len(d) for d in overlay_series.values()),
             "overlay_windows": len(overlaid), "estimates": len(estimates),
             "correlations": len(corr), "regime_days": len(reg), "overfit": len(overfit), "benchmarks": len(bench),
             "residual_clusters": sum(v["clusters"] for v in venues)}

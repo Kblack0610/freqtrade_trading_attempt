@@ -11,10 +11,17 @@
 #   minimal_roi      a table of minutes -> ratio, for example { "0" = 0.05 }
 #   pairs            trade only the first N pairs of the venue's whitelist, in its file order
 # Anything else, dry_run and exchange keys included, is refused (lab/variants.py ALLOWED).
+#
+# The grid is also the spawn of shadow paper accounts (lab/shadow.py): every overlay series with a 365-day window is a
+# candidate, so a group added here widens what the loop can promote. Keep every overlay already run: one taken out
+# takes its stored chunks with it (lab/analyze.py sync_overlays), and an id is its content, so editing a value is a
+# removal plus an addition.
 
 [sweep]
 # Overlay chunks run per night, after every as-is chunk, best prior score first (the strategy x venue's 365-day
-# Sharpe low end); the rest wait for the next night. The memory budget (ANALYZE_MEMORY_GB) applies as for any chunk.
+# Sharpe low end); the rest wait for the next night, so a wide grid is walked a slice a night (the run's
+# overlay_chunks_waiting / max_chunks is the nights left). An overlay series holding an open shadow account reruns
+# outside this cap. The memory budget (ANALYZE_MEMORY_GB) applies as for any chunk.
 max_chunks = 100
 
 [overlays.slots]
@@ -28,3 +35,23 @@ stoploss = [-0.05, -0.15]
 
 [overlays.majors]
 pairs = [3]
+
+# Fewer pairs, fewer slots: concentrated books whose returns move less with the venue's whole whitelist.
+[overlays.focus]
+max_open_trades = [1, 3]
+pairs = [3, 5]
+
+# Stops from tight to loose, beside the strategy's own exit logic.
+[overlays.risk]
+stoploss = [-0.03, -0.08, -0.25]
+
+# Take-profit exits: a quick target shortens the hold (the short cohort), each under a tight and a wide stop.
+[overlays.exits]
+take = [{ minimal_roi = { "0" = 0.01 } }, { minimal_roi = { "0" = 0.03 } }, { minimal_roi = { "0" = 0.08 } }]
+stoploss = [-0.05, -0.10]
+
+# No take-profit (a 1000% target never fills): the strategy's exit signal or the stop closes, which lengthens the hold
+# (the long cohort).
+[overlays.ride]
+ride = { minimal_roi = { "0" = 10 } }
+stoploss = [-0.10, -0.20]
