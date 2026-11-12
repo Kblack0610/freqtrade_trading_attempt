@@ -4,6 +4,8 @@
 <h1>Accounts</h1>
 <p>Read only. Real-money guard: {% if guard_lifted %}<span class="down">lifted</span>{% else %}<span class="up">on</span>{% endif %} (<code>lab/live.py</code>). Nothing on this site can place an order or move money: each table is the newest read a job wrote with a read-only key, a public key or a paper account.</p>
 
+{% include "_venues.html" %}
+
 <h2>Broker accounts</h2>
 <p class="muted">The newest read of each broker account: Alpaca paper money, and read-only reads of real accounts (Robinhood Crypto, Fidelity through SnapTrade). Nothing here can place a real order.</p>
 {% if brokers %}

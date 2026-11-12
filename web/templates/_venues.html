@@ -1,0 +1,13 @@
+<h2>Venues</h2>
+<p class="muted">One row per venue (<code>web/venues.toml</code>): connected when each of its reads or drills wrote a row recently with no error. When one is missing, the last column says what you do to connect it.</p>
+<table>
+  <thead><tr><th>Venue</th><th>Money</th><th>State</th><th>Checks</th><th>To connect</th></tr></thead>
+  <tbody>
+  {% for v in venues %}
+  <tr><td>{{ v.name }}</td><td>{{ v.money }}</td>
+    <td>{% if v.status == "connected" %}<span class="up">connected</span>{% else %}<span class="down">{{ v.status }}</span>{% endif %}</td>
+    <td>{% for c in v.checks %}{{ c.source }} {{ c.match }}: {{ c.status }}{% if c.at %}, {{ c.at | ago }}{% endif %}{% if c.error %} <code class="down">{{ c.error }}</code>{% endif %}{% if not loop.last %}<br>{% endif %}{% else %}-{% endfor %}</td>
+    <td>{% if v.status != "connected" %}{{ v.human }}{% else %}-{% endif %}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>

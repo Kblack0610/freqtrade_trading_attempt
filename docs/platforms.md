@@ -102,6 +102,7 @@ Freqtrade's official spot list includes Kraken, OKX, Kucoin and others. Binance.
 - Risk controls: IP allowlist (doc), `CancelAllOrdersAfter`, key expiry and subaccounts (snippet). Ours: the `lab/live.py` checks, including stoploss on exchange.
 - Cost: no API fee found. Perps charge 0.25% of notional to open and to close (doc, product unclear). Spot fee tiers: Not verified here; calm-lagoon quotes a 0.8 to 1.6% round trip.
 - Paper: the dry-run league already runs Kraken bots.
+- Read path: `KrakenRead` in `lab/broker.py`. `python -m lab.broker read` writes one `broker_balances` row named `kraken`: cash is the ZUSD balance, equity is `TradeBalance` `eb` (Kraken's own USD value of the whole account), positions the other assets held. Every private call is a POST, so the client sends only to `/0/private/Balance` and `/0/private/TradeBalance` and refuses any other path before sending; `lab/tests/test_money.py` pins those two. The body is JSON, and the nonce is in nanoseconds because the `kraken-read` key had already seen nanosecond nonces and Kraken refuses any lower one (measured 2026-11-12). Keys: `KRAKEN_API_KEY`, `KRAKEN_API_SECRET` in the `trader-brokers` Secret.
 - Verified: 2026-11-06. Sources: https://docs.kraken.com/exchange/guides/rest/api-keys, https://docs.kraken.com/api/docs/guides/spot-rest-ratelimits, https://www.kraken.com/features/fee-schedule, https://blog.kraken.com/product/kraken-derivatives/announcing-cftc-regulated-us-perps.
 
 ### Binance.US

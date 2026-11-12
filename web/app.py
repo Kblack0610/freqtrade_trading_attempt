@@ -29,7 +29,7 @@ from starlette.concurrency import run_in_threadpool
 from lab import book as book_lab
 from lab import live as live_lab
 from lab import db, diversity, metrics, suggest, universe
-from web import auth, charts, exporter, nav
+from web import auth, charts, exporter, nav, venues
 
 HERE = Path(__file__).resolve().parent
 TZ = ZoneInfo(os.environ.get("TRADER_WEB_TZ", "UTC"))
@@ -846,4 +846,4 @@ def accounts(request: Request):
     """Every account we hold or paper-trade, read only: the newest read of each, and the watcher's kill-switch state."""
     user_of(request)
     return page(request, "accounts.html", guard_lifted=live_lab.GUARD_LIFTED, brokers=rows(BROKERS), wallets=rows(WALLETS),
-                watch=rows(KILL_SWITCH))
+                watch=rows(KILL_SWITCH), venues=venues.rows(rows))

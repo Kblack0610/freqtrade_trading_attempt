@@ -1,4 +1,4 @@
-# Broker accounts read by lab/broker.py: Alpaca paper, and Robinhood Crypto and SnapTrade (Fidelity) read only.
+# Broker accounts read by lab/broker.py: Alpaca paper, and Robinhood Crypto, SnapTrade (Fidelity) and Kraken read only.
 # Keys are not here: they come from env, named in lab/broker.py. Every request goes through lab/markets/api.py Api:
 # page_gap_s between one process's requests, retries on a 429 (and a 5xx for a GET or DELETE), and budget_rps, the
 # requests a second every process on the same key may send together (lab/markets/budget.py), about 60% of the limit.
@@ -32,5 +32,14 @@ base_url = "https://api.snaptrade.com"   # the client refuses any other host and
 # https://docs.snaptrade.com/docs/ratelimiting). We call only /accounts, once a run. 60% of 4.2 a second.
 page_gap_s = 1
 budget_rps = 2.5
+retries = 3
+timeout_s = 30
+
+[kraken]
+base_url = "https://api.kraken.com"   # the client refuses any other host and any path but its two balance reads
+# Published limit: a counter per key, +1 a call, max 15 decaying 0.33 a second on the Starter tier (read 2026-11-12,
+# https://docs.kraken.com/api/docs/guides/spot-rest-ratelimits). Two calls a run. 60% of 0.33 a second.
+page_gap_s = 1
+budget_rps = 0.2
 retries = 3
 timeout_s = 30

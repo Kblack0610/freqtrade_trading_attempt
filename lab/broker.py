@@ -10,9 +10,11 @@ Sources, each with its own env:
 - Robinhood Crypto (ROBINHOOD_API_KEY, ROBINHOOD_PRIVATE_KEY: the base64 Ed25519 seed). A real account, read only.
 - SnapTrade (SNAPTRADE_CLIENT_ID, SNAPTRADE_CONSUMER_KEY: a Personal API key). Reads the accounts the person
   connected with a read connection, Fidelity first. A real account, read only.
+- Kraken (KRAKEN_API_KEY, KRAKEN_API_SECRET: a Query Funds key). A real account, read only.
 
-The two real-account clients have no order method and send only GET, so a key that could trade still cannot from
-here. A live order would come in behind lab/live.py's guard (docs/live.md), never by widening these. A source with no
+The real-account clients have no order method. Robinhood and SnapTrade send only GET. Kraken's private API takes POST
+for every call, reads included, so KrakenRead sends POST to its READS paths only (Balance, TradeBalance) and refuses
+any other path before a request leaves; a key that could trade still cannot from here. A live order would come in behind lab/live.py's guard (docs/live.md), never by widening these. A source with no
 keys is skipped; with none set, `read` prints that and exits 0, as lab/wallet.py does with no accounts, so its job can
 exist before the keys do.
 
@@ -235,6 +237,69 @@ class SnapTrade:
         return rows
 
 
+class KrakenRead:
+    """Kraken spot balances with a Query Funds key. Every private call is a POST signed with API-Sign, the base64
+    HMAC-SHA512 under the base64-decoded secret of path + SHA256(nonce + body), the body JSON with a nonce in
+    nanoseconds that rises on every request, retries included (docs.kraken.com/api/docs/guides/spot-rest-auth)."""
+
+    venue = "kraken"
+    host = "api.kraken.com"
+    # The only paths this client sends, both reads: Balance for cash and holdings, TradeBalance for the account valued
+    # in USD (eb, every asset at Kraken's own price). An order path is not here, so it raises before it is sent.
+    READS = frozenset({"/0/private/Balance", "/0/private/TradeBalance"})
+    FIAT = "ZUSD"
+
+    def __init__(self, cfg: dict, api_key: str, secret_b64: str, session=None, clock=None, sleep=None):
+        https_host(cfg, self.host)
+        self.api_key, self.secret = api_key, base64.b64decode(secret_b64)
+        self.api = Api(self.venue, cfg, session, sleep)
+        self.clock = clock or time.time
+        self.nonce = 0
+
+    def post(self, path: str, fields: dict | None = None) -> dict:
+        if path not in self.READS:
+            raise ValueError(f"refusing {path}: this client reads {sorted(self.READS)} only")
+        sent: dict = {}
+
+        def body():
+            # Nanoseconds: Kraken refuses a nonce under the highest the key has seen, and kraken-read had already
+            # been used at nanosecond scale (2026-11-12), so a millisecond nonce is refused for good.
+            self.nonce = max(self.nonce + 1, int(self.clock() * 1_000_000_000))
+            sent["body"] = {"nonce": str(self.nonce), **(fields or {})}
+            return sent["body"]
+
+        def headers(_):
+            data = json.dumps(sent["body"])  # the bytes requests sends for json=
+            digest = hashlib.sha256((sent["body"]["nonce"] + data).encode()).digest()
+            sig = hmac.new(self.secret, path.encode() + digest, hashlib.sha512).digest()
+            return {"API-Key": self.api_key, "API-Sign": base64.b64encode(sig).decode()}
+
+        r = self.api.request("POST", path, body=body, headers=headers)
+        if r.status_code >= 400:
+            raise RuntimeError(f"kraken POST {path}: HTTP {r.status_code}: {str(r.text)[:300]}")
+        out = r.json()
+        if out.get("error"):
+            raise RuntimeError(f"kraken POST {path}: {', '.join(out['error'])[:300]}")
+        return out["result"]
+
+    def read(self) -> list[dict]:
+        """One row: cash is the USD balance, equity Kraken's own USD valuation of the whole account, positions the
+        other assets held."""
+        row = blank_row(self.venue, False)
+        try:
+            held = {k: num(v) for k, v in self.post("/0/private/Balance").items() if num(v)}
+            total = self.post("/0/private/TradeBalance", {"asset": self.FIAT})
+            row.update(status="open", currency="USD", cash=held.get(self.FIAT, 0.0), equity=num(total["eb"]),
+                       positions=len([k for k in held if k != self.FIAT]))
+        except RuntimeError as e:
+            row["error"] = str(e)
+        except KeyError as e:
+            row["error"] = f"kraken: no field {e}"
+        except requests.RequestException as e:
+            row["error"] = f"kraken: {type(e).__name__}"
+        return [row]
+
+
 def read(client: AlpacaPaper) -> dict:
     row = blank_row(client.venue, True)
     try:
@@ -270,6 +335,9 @@ def sources(session=None, sleep=None) -> list:
     if env("SNAPTRADE_CLIENT_ID") and env("SNAPTRADE_CONSUMER_KEY"):
         out.append(SnapTrade(cfg["snaptrade"], env("SNAPTRADE_CLIENT_ID"), env("SNAPTRADE_CONSUMER_KEY"), session,
                              sleep=sleep).read)
+    if env("KRAKEN_API_KEY") and env("KRAKEN_API_SECRET"):
+        out.append(KrakenRead(cfg["kraken"], env("KRAKEN_API_KEY"), env("KRAKEN_API_SECRET"), session,
+                              sleep=sleep).read)
     return out
 
 
@@ -290,7 +358,7 @@ def main(argv: list[str] | None = None, session=None, sleep=None) -> int:
         return 0 if row["error"] is None else 1
     found = sources(session, sleep)
     if not found:
-        print("broker: no broker keys set (Alpaca paper, Robinhood, SnapTrade)", flush=True)
+        print("broker: no broker keys set (Alpaca paper, Robinhood, SnapTrade, Kraken)", flush=True)
         return 0
     rows = [r for src in found for r in src()]
     now = dt.datetime.now(dt.timezone.utc).replace(microsecond=0)
