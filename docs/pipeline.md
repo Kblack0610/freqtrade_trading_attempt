@@ -35,6 +35,7 @@ All times UTC. Backfill and analysis run on razer-laptop, because the candle fil
 | 01:00 | `freqtrade-walkforward` | Tunes and tests strategies month by month | 5.2 h to 6.1 h (2026-11-10 and 11); a run the 8 h limit ended, or with failed fold pods, shows Failed (2026-11-07, 09 and 12) |
 | 02:45 | `freqtrade-analysis` | Backtests everything, then scores everything | 1.6 h on 2026-11-10; 7.1 h on 2026-11-09 and 7.7 h on 2026-11-11 after big changes. Not "under an hour" |
 | 05:35 | `freqtrade-futures` | Funding rates and open interest | under a minute (0.01 h) |
+| Saturday 10:00 | `freqtrade-calibration` | Gate calibration: null and planted-edge strategies through the whole pipeline on synthetic candles, resumed week to week | not measured yet |
 | 10:00 | `trader-research-sync` (fleet machine) | Turns the night's changes into board rows and roster PRs | minutes |
 | Sunday 02:50 | `freqtrade-lab-backup` | Tars the lab volume to the NAS | 0.11 h (2026-11-08) |
 
@@ -208,7 +209,7 @@ The tests check that each stage gives the right answer on inputs whose answer is
 - **Scoring.** `test_confidence.py` has the known answers: pure noise clears the score and the interval under 5% of the time, a market lifting every strategy does not lift the score, and an edge planted among noise strategies scores ready. Each trial-register statement adds exactly its count on a fixture.
 - **Paper.** The drift and dry run gates are anytime-valid sequences ([design](anytime-gates.md)), so reading them every night does not inflate their error rate. `test_metrics.py` checks each reconciliation split on hand-built trades. `test_markouts.py` checks BTC hedged on itself leaves exactly minus the fee, random entries sit on the null and the null near minus the fee, and a planted jump after each entry clears the null.
 
-Not covered yet: a run of null and planted-edge strategies through the whole pipeline, which would give each gate's false-positive rate and power.
+- **The whole stack.** `lab/calibration.py` runs weekly: null strategies (random entries) and strategies with a planted edge go through the real analysis, walk-forward and confidence code on seeded synthetic candles, and `calibration` holds each gate's false pass rate (edge 0) and power (edge above 0) at 12 and 60 test months. `test_calibration.py` checks the candles carry the configured volatility, fat tails and signal and nothing from the hour itself, each strategy reads the signal at its edge, one small universe runs end to end without touching the production tables, and SPA and StepM find one real edge among noise and none in noise alone. Reference: [Calibration](../README.md#calibration).
 
 ## Troubleshooting
 

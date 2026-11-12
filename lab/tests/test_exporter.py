@@ -153,3 +153,17 @@ def test_market_metrics(conn):
     # a real account exports its read age, never its balance
     assert 'trader_broker_equity{broker="robinhood_crypto"}' not in m
     assert 590 < m['trader_broker_read_age_seconds{broker="robinhood_crypto"}'] < 620
+
+
+def test_calibration_metrics(conn):
+    from lab import db
+    from web.exporter import TraderCollector
+
+    conn.execute("INSERT INTO calibration (gate, edge, oos_months, runs, n, passed, rate) VALUES "
+                 "('stack', 0, 60, 1, 8, 0, 0), ('stack', 0.02, 60, 1, 4, 3, 0.75), ('bias', 0.01, 12, 1, 4, 4, 1)")
+    conn.execute("INSERT INTO runs (kind, name, raw, started_at, finished_at, ok) VALUES ('calibration', 'x', '{}', now(), now(), true)")
+    m = scrape(TraderCollector(db.connect))
+    assert m['trader_calibration_fpr{gate="stack",oos_months="60"}'] == 0
+    assert m['trader_calibration_power{edge="0.02",gate="stack",oos_months="60"}'] == 0.75
+    assert m['trader_calibration_power{edge="0.01",gate="bias",oos_months="12"}'] == 1
+    assert 'trader_run_last_ok_timestamp_seconds{kind="calibration"}' in m

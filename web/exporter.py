@@ -13,7 +13,7 @@ from psycopg.rows import dict_row
 
 from lab.db import connect
 
-RUN_KINDS = ("analysis", "walkforward", "reproduce")
+RUN_KINDS = ("analysis", "walkforward", "reproduce", "calibration")
 
 BOTS = """
 SELECT DISTINCT ON (s.bot) s.bot, b.cohort, s.ts, s.dry_run, s.error, s.open_trades, s.closed_trades,
@@ -57,6 +57,8 @@ LAST_SWEEP = """
 SELECT DISTINCT ON (venue) venue, seen, changes, extract(epoch FROM finished_at - started_at) AS took
 FROM market_sweeps WHERE ok AND started_at > now() - interval '7 days' ORDER BY venue, started_at DESC
 """
+# lab/calibration.py: each gate's pass rate on the synthetic nulls (edge 0) and planted edges.
+CALIBRATION = "SELECT gate, edge, oos_months, rate FROM calibration"
 LINKS = "SELECT split_part(source, ':', 1) AS source, status, count(*) AS n FROM market_links GROUP BY 1, 2"
 # lab/markouts.py and metrics.reconcile: per bot, the mean markout against its random-entry null, and the shortfall.
 MARKOUTS = ("SELECT bot, horizon_min, count(net) AS n, avg(net) AS net, avg(null_net) AS null_net, avg(fill_slip) AS slip "
@@ -104,6 +106,7 @@ class TraderCollector:
                 brokers = cur.execute(BROKERS).fetchall()
                 marks = cur.execute(MARKOUTS).fetchall()
                 rec = cur.execute(RECONCILE).fetchall()
+                calibration = cur.execute(CALIBRATION).fetchall()
         except Exception:  # noqa: BLE001 - any failure is reported as the db being unreadable
             up.add_metric([], 0)
             yield up
@@ -127,6 +130,7 @@ class TraderCollector:
         yield from paper_metrics(now, paper)
         yield from broker_metrics(now, brokers)
         yield from markout_metrics(marks, rec)
+        yield from calibration_metrics(calibration)
 
 
 def family(name: str, doc: str, labels: list[str], items) -> GaugeMetricFamily:
@@ -178,6 +182,15 @@ def run_metrics(runs):
                  (([r["kind"]], None if r["ok"] is None else int(r["ok"])) for r in runs))
     yield family("trader_run_last_ok_timestamp_seconds", "End of the newest successful run of each kind", ["kind"],
                  (([r["kind"]], ts(r["last_ok_at"])) for r in runs))
+
+
+def calibration_metrics(rows):
+    yield family("trader_calibration_fpr", "Share of synthetic null strategies (no edge) a gate passed; gate stack: all "
+                 "research gates together", ["gate", "oos_months"],
+                 (([r["gate"], str(r["oos_months"])], r["rate"]) for r in rows if r["edge"] == 0))
+    yield family("trader_calibration_power", "Share of synthetic strategies with a planted edge (correlation with the "
+                 "next hour's return) a gate passed", ["gate", "edge", "oos_months"],
+                 (([r["gate"], f"{r['edge']:g}", str(r["oos_months"])], r["rate"]) for r in rows if r["edge"] > 0))
 
 
 def candle_metrics(now, candles):
