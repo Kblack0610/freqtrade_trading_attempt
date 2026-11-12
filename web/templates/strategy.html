@@ -2,6 +2,13 @@
 {% block title %}{{ s.name }}{% endblock %}
 {% block body %}
 <h1>{{ s.name }}</h1>
+<section class="card" aria-label="Strategy method">
+  <h2>Method: {{ method.family }}</h2>
+  <p>{{ method.description }}</p>
+  <p class="muted">Family-level description. Inputs: {{ method.inputs | join(", ") or "Not classified" }}.</p>
+  {% if method.note %}<p>{{ method.note }}</p>{% endif %}
+  <a href="/accounts">Compare in a research setup</a>
+</section>
 <p class="muted">{{ (s.timeframe ~ " timeframe") if s.timeframe else "No timeframe" }}, {{ s.startup_candle_count or 0 }} startup candles, in {{ s.file }}{% if s.load_error %}, <span class="down">fails to load: {{ s.load_error }}</span>{% endif %}</p>
 
 {% if exchanges %}<nav class="tabs">{% for e in exchanges %}<a href="/strategies/{{ s.name }}?exchange={{ e }}" {% if e == exchange %}aria-current="page"{% endif %}>{{ e }}</a>{% endfor %}</nav>{% endif %}

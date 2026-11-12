@@ -48,6 +48,8 @@ jobs:
         run: npm run typecheck
       - name: Lint
         run: npm run lint
+      - name: Research setup validation
+        run: npm run test:web
 
   test:
     runs-on: ubuntu-latest

@@ -10,7 +10,7 @@ The [Dockerfile](../Dockerfile) layers this repo and `lab/requirements.txt` onto
 2. `lab/ingest.py` reads bot APIs into Postgres. `lab/backfill.py` collects candles and records coverage. Analysis and walk-forward jobs read those candles, run Freqtrade and store results through `lab/db.py`.
 3. Confidence, book, mixture and research-loop modules derive decisions from stored trials and results. `ci/research_sync.py` carries research events into review work and roster PRs; it does not merge roster promotions.
 4. `lab/markets/` records venue data, backfills history, links contracts and scores paper trades in separate market tables. Wallet and broker modules maintain their own balance and paper-execution records.
-5. `web/app.py` reads Postgres using a SELECT-only deployment role. FastAPI renders Jinja templates, HTMX refreshes fragments, and `web/auth.py` handles Forgejo OAuth and signed cookies. The site exposes no trade controls.
+5. `web/app.py` reads Postgres using a SELECT-only deployment role. FastAPI renders Jinja templates, HTMX refreshes fragments, and `web/auth.py` handles Forgejo OAuth and signed cookies. The site exposes no trade controls. Accounts keeps editable research preferences in browser storage; [the site guide](../README.md#the-site) describes their scope and usage.
 
 ## Storage and boundaries
 

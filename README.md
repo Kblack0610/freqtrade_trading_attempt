@@ -361,6 +361,10 @@ The first run fetches full history (5m since 2019 on binanceus is the long pole)
 
 `web/app.py` reads the `trader` database through a role that only has SELECT, and has no trade controls. Every page but `/healthz` needs a Forgejo sign-in: `/login` sends the browser to Forgejo's OAuth2 authorize page, `/oauth/callback` swaps the code for the Forgejo login, and only logins in `ALLOWED_USERS` get a 30-day cookie signed with `SESSION_KEY`. The site keeps no session store, so a restart signs nobody out and rotating `SESSION_KEY` signs everyone out.
 
+Accounts shows connected balances, dry-run bots, prediction-market paper accounts and kill-switch observations. Under Research setups, choose Create setup, name it, select a strategy and venue, and enter a hypothetical USD budget and drawdown preference. An account reference is optional. Save setup keeps these choices in this browser for the signed-in login; Edit and Delete manage them. Other browsers do not share the setups. The editor stores no balances or credentials and changes no running account or bot.
+
+The method explanation comes from [the strategy family catalog](lab/families.toml). Historical evidence uses the selected strategy and venue's 365-day summary, with its dates and bias/confidence checks. A drawdown warning compares past observations with the preference; it is no enforcement or prediction of a future loss limit. The budget does not rerun a backtest or change displayed account balances. `npm run test:web` checks setup validation and storage conflict detection without a browser; CI runs it alongside static checks.
+
 | Env | What it is |
 |---|---|
 | `DATABASE_URL` | The read-only role's connection string |
@@ -436,6 +440,11 @@ The event-contract paper league's accounts (`paper-<family>-<variant>`) get watc
 
 | Symptom | Cause | Fix |
 |---|---|---|
+| Research setup cannot be saved | Browser storage is unavailable or full | Keep the editor open to inspect the unsaved setup; allow site storage or free space before saving |
+| Research setups show invalid saved data | The browser's saved setup data cannot be read or validated | Use the explicit remove-saved-data action to discard it, then create a setup again |
+| Saving asks you to reload current setups | Storage could not be read initially, or another tab changed the saved setups | Keep any unsaved choices separately, then reload before saving to preserve the current saved data |
+| A setup has no historical evidence or an unavailable selection | That strategy/venue has no 365-day summary yet, or a saved choice has left the catalog | Choose an available pair or keep the setup for reference; check Runs for analysis progress |
+| An account observation is stale | The newest ingested snapshot is older than the site's stale interval | Check the ingest or paper job; changing a research setup does not refresh account data |
 | A `watch` row has `error` set and `seen_at` falling behind | That bot's API did not answer, or an open trade has no price so `profit_all_coin` is NaN | The row clears on the next good read; TraderWatchBotBlind fires after 5 minutes |
 | A master build went green but no home-config PR appeared | `FORGEJO_DEPLOY_TOKEN` is unset (the `bump-home-config` log warns), or master moved on and the newer build owns the bump | Set the secret (see CI) and re-run the job; a 401 or 403 in its log means the token expired or lost write on home-config |
 | `migrate: 00N_x.sql changed after it was applied` | An applied migration file was edited | Revert the edit and put the change in the next numbered file |

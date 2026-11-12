@@ -4,10 +4,61 @@
 <h1>Accounts</h1>
 <p>Read only. Real-money guard: {% if guard_lifted %}<span class="down">lifted</span>{% else %}<span class="up">on</span>{% endif %} (<code>lab/live.py</code>). Nothing on this site can place an order or move money: each table is the newest read a job wrote with a read-only key, a public key or a paper account.</p>
 
+<section id="research-setups" aria-labelledby="research-heading">
+<h2 id="research-heading">Research setups</h2>
+<p>Choose a strategy and a hypothetical budget to compare with its historical results. Saved setups do not change running accounts, orders, or kill switches.</p>
+<noscript><p class="alert">Enable JavaScript to edit browser-local research setups. Account observations below remain available.</p></noscript>
+{% if not research.strategies %}<p class="muted">No strategies have been analyzed yet. The editor can save a setup once analysis records a strategy and venue.</p>{% endif %}
+<div id="setup-editor" hidden>
+<p id="setup-status" role="status" aria-live="polite"></p>
+<button id="remove-saved-setups" type="button" hidden>Remove saved data</button>
+<div class="scroll"><table id="saved-setups"><caption>Setups saved in this browser</caption><thead><tr><th>Name</th><th>Strategy</th><th>Venue</th><th>Actions</th></tr></thead><tbody id="setup-rows"></tbody></table></div>
+<p id="setup-empty" class="muted">No setups saved in this browser. Create one to compare a strategy with your research preferences.</p>
+<p><button id="create-setup" type="button">Create setup</button></p>
+<form id="setup-form" class="card" novalidate>
+<h3 id="setup-form-heading">Create setup</h3>
+<div class="setup-fields">
+<label for="setup-name">Setup name<input id="setup-name" name="name" maxlength="80" required autocomplete="off"></label>
+<label for="setup-account">Observed account (optional)<select id="setup-account" name="account"><option value="">No account reference</option></select></label>
+<label for="setup-strategy">Strategy<select id="setup-strategy" name="strategy" required><option value="">Choose a strategy</option></select></label>
+<label for="setup-exchange">Venue<select id="setup-exchange" name="exchange" required><option value="">Choose a venue</option></select></label>
+<label for="setup-budget">Hypothetical budget (USD)<input id="setup-budget" name="budget" type="number" min="0" step="any" required inputmode="decimal"></label>
+<label for="setup-drawdown">Maximum acceptable drawdown (%)<input id="setup-drawdown" name="drawdown" type="number" min="0" max="100" step="any" required inputmode="decimal"></label>
+</div>
+<p id="setup-errors" class="down" role="alert"></p>
+<button id="save-setup" type="submit">Save setup</button>
+<p class="muted">Saved in this browser. Does not change running accounts. The budget is a research preference; it does not run a backtest.</p>
+</form>
+<div id="setup-method" class="card" hidden><h3>Strategy method</h3><p id="setup-description"></p><p id="setup-inputs" class="muted"></p><p id="setup-note"></p><a id="setup-strategy-link">View strategy evidence</a></div>
+<div class="card"><h3>Historical evidence</h3><p id="setup-evidence" aria-live="polite">Choose a strategy and venue to see historical results.</p><p id="setup-risk" class="down"></p><p class="muted">Historical results do not predict future returns. Your drawdown preference does not cap losses.</p></div>
+</div>
+<script id="research-data" type="application/json">{{ research | tojson }}</script>
+<script src="/static/account-setups.js" defer></script>
+</section>
+
+<h2>Dry-run bots</h2>
+<p class="muted">Current strategy assignments and the newest observed balances. Research setups above never change these assignments.</p>
+{% if bots %}
+<div class="scroll"><table><thead><tr><th>Bot</th><th>Strategy</th><th>Venue</th><th>Mode</th><th>Last observation</th><th class="n">Equity</th><th>Currency</th><th>Status</th></tr></thead><tbody>
+{% for b in bots %}
+<tr><td><a href="/bots/{{ b.name | urlencode }}">{{ b.name }}</a></td><td><a href="/strategies/{{ b.strategy | urlencode }}?exchange={{ b.exchange | urlencode }}">{{ b.strategy }}</a></td><td>{{ b.exchange }}</td><td>{{ "dry run" if b.dry_run else ("not dry run" if b.dry_run is false else "not observed") }}</td><td>{{ b.ts | local }}</td><td class="n">{{ b.balance_total | num(2) }}</td><td>{{ b.balance_currency or "Unknown reported units" }}</td><td>{% if b.error %}<span class="down">{{ b.error }}</span>{% elif not b.ts %}Not observed{% elif b.ts < stale_before %}<span class="down">Stale observation</span>{% else %}Observed{% endif %}</td></tr>
+{% endfor %}
+</tbody></table></div>
+{% else %}<p class="muted">No dry-run bots have been ingested yet.</p>{% endif %}
+
+<h2>Prediction-market paper accounts</h2>
+{% if paper_accounts %}
+<div class="scroll"><table><thead><tr><th>Account</th><th>Strategy family</th><th>Venue</th><th>Mode</th><th>Last observation</th><th class="n">Equity (USD)</th><th>Status</th></tr></thead><tbody>
+{% for a in paper_accounts %}
+<tr><td><a href="/markets/book">{{ a.account }}</a></td><td>{{ a.family }}</td><td>{{ a.venue }}</td><td>paper</td><td>{{ a.marked_at | local }}</td><td class="n">{{ a.equity | num(2) }}</td><td>{% if a.stopped_at %}<span class="down">Stopped</span>{% elif a.breached_at %}<span class="down">Loss limit hit</span>{% elif not a.marked_at %}Not observed{% elif a.marked_at < stale_before %}<span class="down">Stale observation</span>{% else %}{{ a.state or "Observed" }}{% endif %}</td></tr>
+{% endfor %}
+</tbody></table></div>
+{% else %}<p class="muted">No prediction-market paper accounts have been recorded yet.</p>{% endif %}
+
 <h2>Broker accounts</h2>
 <p class="muted">The newest read of each broker account: Alpaca paper money, and read-only reads of real accounts (Robinhood Crypto, Fidelity through SnapTrade). Nothing here can place a real order.</p>
 {% if brokers %}
-<table>
+<div class="scroll"><table>
   <thead><tr><th>Broker</th><th>Money</th><th>Read</th><th>Status</th><th class="n">Equity</th><th class="n">Cash</th><th class="n">Positions</th><th>Error</th></tr></thead>
   <tbody>
   {% for b in brokers %}
@@ -15,13 +66,13 @@
     <td class="n">{{ b.positions if b.positions is not none else "-" }}</td><td>{% if b.error %}<code class="down">{{ b.error }}</code>{% endif %}</td></tr>
   {% endfor %}
   </tbody>
-</table>
+</table></div>
 {% else %}<p class="muted">No broker read yet.</p>{% endif %}
 
 <h2>Wallets</h2>
 <p class="muted">The newest watch-only read of each self-custody account, from its public key (<code>lab/wallet.py</code>). The key cannot sign, so nothing here can spend.</p>
 {% if wallets %}
-<table>
+<div class="scroll"><table>
   <thead><tr><th>Account</th><th>Coin</th><th>Read</th><th class="n">Confirmed</th><th class="n">Unconfirmed</th><th class="n">Addresses used</th><th>Error</th></tr></thead>
   <tbody>
   {% for w in wallets %}
@@ -31,13 +82,13 @@
     <td class="n">{{ w.used_addresses if w.used_addresses is not none else "-" }}</td><td>{% if w.error %}<code class="down">{{ w.error }}</code>{% endif %}</td></tr>
   {% endfor %}
   </tbody>
-</table>
+</table></div>
 {% else %}<p class="muted">No wallet read yet.</p>{% endif %}
 
 <h2>Kill switch</h2>
 <p class="muted">The watcher's state for each dry-run bot and paper account (<code>lab/watcher.py</code>): a bot that hits its daily loss limit, or is drilled, stops entries for the rest of the UTC day. Stopped and breached rows come first.</p>
 {% if watch %}
-<table>
+<div class="scroll"><table>
   <thead><tr><th>Bot</th><th>Dry run</th><th>State</th><th class="n">Equity</th><th class="n">Day open</th><th>Day limit hit</th><th>Stopped</th><th>Last read</th><th>Error</th></tr></thead>
   <tbody>
   {% for w in watch %}
@@ -48,6 +99,6 @@
     <td>{{ w.seen_at | local }}</td><td>{% if w.error %}<code class="down">{{ w.error }}</code>{% endif %}</td></tr>
   {% endfor %}
   </tbody>
-</table>
+</table></div>
 {% else %}<p class="muted">The watcher has not run yet.</p>{% endif %}
 {% endblock %}

@@ -60,7 +60,7 @@ COVER = {
 BOTS = """
 SELECT b.name, b.exchange, b.strategy, b.cohort, b.overlay, o.params AS overlay_params, s.ts, s.dry_run,
        s.closed_trades, s.open_trades, s.profit_all_pct, s.profit_all_abs, s.winrate_pct, s.max_drawdown_pct,
-       s.balance_total, s.error, d.matched, d.live_entries, d.bt_entries
+       s.balance_total, s.raw->'balance'->>'stake' AS balance_currency, s.error, d.matched, d.live_entries, d.bt_entries
 FROM bots b
 LEFT JOIN LATERAL (SELECT * FROM bot_snapshots WHERE bot = b.name ORDER BY ts DESC LIMIT 1) s ON true
 LEFT JOIN drift d ON d.bot = b.name
@@ -581,7 +581,7 @@ def strategy(request: Request, name: str, exchange: str = ""):
         r["sharpe"] = r["mean"] / r["sd"] * math.sqrt(365) if r["sd"] else None
         r["annual"] = (1 + r["mean"]) ** 365 - 1 if r["mean"] is not None and r["mean"] > -1 else None
     return page(
-        request, "strategy.html", s=found[0], exchange=exchange, exchanges=exchanges,
+        request, "strategy.html", s=found[0], exchange=exchange, exchanges=exchanges, method=strategy_method(name),
         windows=sorted(rows("SELECT * FROM strategy_windows WHERE strategy = %s AND exchange = %s", key),
                        key=lambda w: WINDOWS.index(w["win"])),
         chart=charts.line(equity_points(daily), label=f"{name} on {exchange} cumulative return", fmt="%Y-%m-%d"),
@@ -844,6 +844,59 @@ def markets_book(request: Request):
 @app.get("/accounts", response_class=HTMLResponse)
 def accounts(request: Request):
     """Every account we hold or paper-trade, read only: the newest read of each, and the watcher's kill-switch state."""
+    user = user_of(request)
+    brokers, wallets, bots, paper = rows(BROKERS), rows(WALLETS), rows(BOTS), rows(PAPER_ACCOUNTS)
+    refs = [{"id": f"broker:{b['broker']}", "label": f"Broker: {b['broker']}"} for b in brokers]
+    refs += [{"id": f"wallet:{w['coin']}:{w['account']}", "label": f"Wallet: {w['account']} ({w['coin']})"} for w in wallets]
+    refs += [{"id": f"bot:{b['name']}", "label": f"Bot: {b['name']}"} for b in bots]
+    refs += [{"id": f"paper:{a['account']}", "label": f"Paper: {a['account']}"} for a in paper]
+    catalog = research_catalog()
+    methods = suggest.load_config(FAMILIES)
+    research = {"user": user, "accounts": refs,
+                "strategies": [{"name": name, **strategy_method(name, methods), "venues": venues}
+                               for name, venues in catalog.items()]}
+    return page(request, "accounts.html", guard_lifted=live_lab.GUARD_LIFTED, brokers=brokers, wallets=wallets,
+                watch=rows(KILL_SWITCH), bots=bots, paper_accounts=paper, research=research,
+                stale_before=dt.datetime.now(dt.timezone.utc) - STALE)
+
+
+def strategy_method(name: str, config: dict | None = None) -> dict:
+    config = config if config is not None else suggest.load_config(FAMILIES)
+    tag = config["strategies"].get(name, {})
+    family = tag.get("family", "Not classified")
+    return {"family": family, "description": config["families"].get(family, "Not classified"),
+            "inputs": tag.get("inputs", []), "note": tag.get("note", "")}
+
+
+def research_catalog() -> dict[str, list[str]]:
+    """Known strategy/venue pairs, including bots waiting for their first backtest."""
+    found = rows("SELECT s.name, p.exchange FROM strategies s LEFT JOIN ("
+                 "SELECT strategy, exchange FROM strategy_windows UNION "
+                 "SELECT strategy, exchange FROM backtest_chunks UNION "
+                 "SELECT strategy, exchange FROM bots) p ON p.strategy = s.name ORDER BY s.name, p.exchange")
+    catalog: dict[str, list[str]] = {}
+    for r in found:
+        venues = catalog.setdefault(r["name"], [])
+        if r["exchange"]:
+            venues.append(r["exchange"])
+    return catalog
+
+
+@app.get("/accounts/evidence")
+def account_evidence(request: Request, strategy: str, exchange: str):
     user_of(request)
-    return page(request, "accounts.html", guard_lifted=live_lab.GUARD_LIFTED, brokers=rows(BROKERS), wallets=rows(WALLETS),
-                watch=rows(KILL_SWITCH))
+    if exchange not in research_catalog().get(strategy, []):
+        raise HTTPException(404, "Unknown strategy and venue. Choose a pair listed on Accounts.")
+    result = rows("SELECT start_day, end_day, days, trades, total_return, max_drawdown, computed_at "
+                  "FROM strategy_windows WHERE strategy = %s AND exchange = %s AND win = '365d'", (strategy, exchange))
+    checks = rows("SELECT * FROM (" + BIAS + ") b WHERE strategy = %s", (strategy,))
+    bias = checks[0]["biased"] if checks else None
+    unstable = checks[0]["unstable"] if checks else None
+    confidence = rows("SELECT ready FROM confidence WHERE strategy = %s AND exchange = %s", (strategy, exchange))
+    return {"strategy": strategy, "exchange": exchange, "window": "365d", "available": bool(result),
+            "start_day": None, "end_day": None, "days": None, "trades": None, "total_return": None,
+            "max_drawdown": None, "computed_at": None, **(result[0] if result else {}),
+            "bias": "not checked" if bias is None else "biased" if bias else "clean",
+            "stability": "not checked" if unstable is None else "unstable" if unstable else "stable",
+            "confidence": ("ready" if confidence[0]["ready"] else "not ready") if confidence else "not checked",
+            **strategy_method(strategy)}
