@@ -28,7 +28,7 @@ Tier is the highest rung we can use: **API** (an official API covers the job), *
 | Polymarket global | data only | prediction market | API | never (US is close-only) | n/a | none |
 | PredictIt | data only | prediction market | API (one feed) | person | none | none |
 | Manifold | data, order drill built | play money | API | API, bots allowed | the venue is play money | key (tr-118) |
-| DraftKings, FanDuel | candidate | sportsbook | Odds API | person | backtest engine only | Odds API key (sheet row) |
+| DraftKings, FanDuel | candidate | sportsbook | Odds API | person | backtest engine only | none: odds recorded every 6 h since 2026-11-12 |
 | ProphetX, Novig | candidate | exchange-style sports venue (CFTC) | API | API (ProphetX terms allow bots) | ProphetX sandbox | when a strategy needs it |
 
 ## Shared rails
@@ -482,12 +482,12 @@ We read sportsbook odds through The Odds API ([markets.md](markets.md), adapter 
 
 #### Odds read
 
-The read is built and tested on fixtures; it is not running, because no key exists (sheet row "get a free The Odds API key, rbw add trading/odds-api").
+The read is live since 2026-11-12: home-config CronJob `trader-markets-recorder-odds-api` runs `python -m lab.markets.recorder odds_api` at :07 every 6 hours with `ODDS_API_KEY` from SOPS Secret `trader-odds-api` (rbw `trading/odds-api`). The first sweep recorded 154 quotes and used 3 credits.
 
 - Pricing (doc, https://the-odds-api.com, 2026-11-06): free for 500 credits/month ("most bookmakers"); $30 for 20K, $59 for 100K, $119 for 5M, $249 for 15M, all bookmakers.
 - Credits (doc, v4 guide): `/odds` costs 1 per market per region; `/scores` with `daysFrom` costs 2. One sweep of `[venues.odds_api]` as configured (one sport, h2h, region `us`) is 3 credits.
 - Cadence by tier: the free tier covers one sport every 6 hours (4 runs a day, about 360 credits a month). Hourly needs the $30 tier (about 2,200 a month); every 5 min is about 26,000 a month, past the $30 tier.
-- The default 5-min recorder must not run it: `odds_api` stays out of `[recorder] default_venues`. It is live once the person adds the key to rbw (`trading/odds-api`) and a SOPS Secret as `ODDS_API_KEY`, a home-config CronJob runs `python -m lab.markets.recorder odds_api` every 6 hours, and `SELECT started_at, seen, ok FROM market_sweeps WHERE venue = 'odds_api' ORDER BY id DESC LIMIT 3;` shows an ok sweep. A paid tier and a faster cadence are the person's money call.
+- The default 5-min recorder must not run it: `odds_api` stays out of `[recorder] default_venues`. Every 6 hours is about 360 credits a month of the free 500. Check it with `SELECT started_at, seen, ok FROM market_sweeps WHERE venue = 'odds_api' ORDER BY id DESC LIMIT 3;`; credits left are in the `x-requests-remaining` response header. A paid tier and a faster cadence are the person's money call.
 - The key rides in the query string (doc), so the adapter re-raises HTTP errors without the URL.
 
 ### Exchange-style sports venues
