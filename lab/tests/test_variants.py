@@ -28,9 +28,17 @@ def test_a_grid_expands_every_axis_and_names_each_overlay_by_its_content(tmp_pat
     assert variants.load(tmp_path / "w.toml")[0].keys() == overlays.keys()
 
 
-def test_the_shipped_toml_loads():
+# Overlays the nightly sweep had run by 2026-11-12: dropping one deletes its stored chunks (analyze.sync_overlays).
+RUN = {"bca857b8", "89287667", "98de77f2", "dba07a1d", "76524a07", "e90ae5ce"}
+
+
+def test_the_shipped_grid_keeps_every_overlay_already_run_and_spawns_wider_than_one_axis_at_a_time():
     overlays, sweep = variants.load()
-    assert overlays and sweep["max_chunks"] > 0
+    assert RUN <= overlays.keys() and sweep["max_chunks"] > 0
+    assert len(overlays) >= 20
+    # the spawn crosses settings: overlays that set more than one, and take-profit exits both short and absent
+    assert sum(len(o["params"]) > 1 for o in overlays.values()) >= 10
+    assert {o["params"]["minimal_roi"]["0"] for o in overlays.values() if "minimal_roi" in o["params"]} >= {0.01, 10}
 
 
 @pytest.mark.parametrize("params", [{"dry_run": False}, {"exchange": {"key": "k"}}, {"timeframe": "1h"},

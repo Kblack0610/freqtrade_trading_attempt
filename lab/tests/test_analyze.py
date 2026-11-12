@@ -433,6 +433,12 @@ def test_overlays_run_as_counted_trials_and_cache_like_any_chunk(lab, tmp_path, 
     assert one(lab, "SELECT count(*) FROM trials") - trials == 12
     assert one(lab, "SELECT count(*) FROM trials WHERE variant LIKE 'overlay:%%'") == 12
     assert one(lab, "SELECT count(DISTINCT (strategy, exchange, overlay)) FROM overlay_windows") == 12
+    # each overlay series' daily returns are stored like the as-is ones, every day of its chunks
+    assert one(lab, "SELECT count(DISTINCT (strategy, exchange, overlay)) FROM overlay_daily") == 12
+    assert one(lab, "SELECT count(*) FROM overlay_daily WHERE overlay = %s", next(iter(variants.load()[0]))) == \
+        one(lab, "SELECT count(*) FROM strategy_daily")
+    assert one(lab, "SELECT raw->'overlay_daily_rows' FROM runs WHERE kind = 'analysis' ORDER BY id DESC LIMIT 1") == \
+        one(lab, "SELECT count(*) FROM overlay_daily")
     assert one(lab, "SELECT trials_raw FROM strategy_windows WHERE win = '365d' LIMIT 1") == dsr * 4
     assert one(lab, "SELECT count(*) FROM overlays") == 3
     assert one(lab, "SELECT raw->'overlay_chunks_run' FROM runs WHERE kind = 'analysis' ORDER BY id DESC LIMIT 1") == 150
@@ -462,6 +468,26 @@ def test_overlay_chunks_are_capped_a_night_best_prior_score_first(lab, tmp_path,
     assert dt.date(2026, 11, 1) in {r.backtests[0][2], r.backtests[1][2]}
     raw = one(lab, "SELECT raw FROM runs WHERE kind = 'analysis' ORDER BY id DESC LIMIT 1")
     assert raw["overlay_chunks_run"] == 2 and raw["overlay_chunks_waiting"] == 148
+
+
+def test_an_overlay_series_with_an_open_shadow_account_runs_past_the_nightly_cap(lab, tmp_path, monkeypatch):
+    scored(lab, monkeypatch, *EVERY)
+    found = [strat("Good"), strat("Other")]
+    assert analyze.main(FakeRunner(found), TODAY) == 0
+    (tmp_path / "variants.toml").write_text(TOY.format(max_chunks=0))
+    oid = next(iter(variants.load()[0]))
+    for overlay, state in ((oid, "trial"), ("", "trial")):
+        lab.execute("INSERT INTO shadow_accounts (account, strategy, exchange, overlay, cohort, capital, promoted_on, entry, "
+                    "state) VALUES (%s, 'Other', 'coinbase', %s, 'short', 1000, %s, '{}', %s)",
+                    (f"a{overlay}", overlay, TODAY, state))
+    lab.execute("INSERT INTO shadow_accounts (account, strategy, exchange, overlay, cohort, capital, promoted_on, entry, "
+                "state) VALUES ('gone', 'Good', 'coinbase', %s, 'short', 1000, %s, '{}', 'retired')", (oid, TODAY))
+    r = FakeRunner(found)
+    assert analyze.main(r, TODAY) == 0
+    # the open account's 12 coinbase chunks run; a retired account's series waits with the rest
+    assert {b[:2] for b in r.backtests} == {("Other", "coinbase")} and len(r.backtests) == 12
+    raw = one(lab, "SELECT raw FROM runs WHERE kind = 'analysis' ORDER BY id DESC LIMIT 1")
+    assert raw["overlay_chunks_run"] == 12 and raw["overlay_chunks_waiting"] == 138
 
 
 def test_overlays_run_only_on_series_walk_forward_scored(lab, tmp_path, monkeypatch):

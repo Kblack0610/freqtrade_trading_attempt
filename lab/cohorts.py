@@ -149,13 +149,13 @@ def daily_rows(conn, keys: list[tuple[str, str]]) -> list[tuple]:
                              ([k[0] for k in keys], [k[1] for k in keys])))
 
 
-def returns_frame(rows: list[tuple]) -> pd.DataFrame:
-    """Pure: each series' daily return over its last analyze.CORR_DAYS days, one column per (strategy, exchange), as
-    the nightly correlations are measured."""
+def returns_frame(rows: list[tuple], key: tuple[str, ...] = ("strategy", "exchange")) -> pd.DataFrame:
+    """Pure: each series' daily return over its last analyze.CORR_DAYS days, one column per series (rows are
+    (*key, day, ret)), as the nightly correlations are measured."""
     if not rows:
         return pd.DataFrame()
-    frame = pd.DataFrame(rows, columns=["strategy", "exchange", "day", "ret"])
-    wide = frame.pivot_table(index="day", columns=["strategy", "exchange"], values="ret").sort_index()
+    frame = pd.DataFrame(rows, columns=[*key, "day", "ret"])
+    wide = frame.pivot_table(index="day", columns=list(key), values="ret").sort_index()
     return pd.DataFrame({col: wide[col].dropna().iloc[-analyze.CORR_DAYS:] for col in wide.columns})
 
 
