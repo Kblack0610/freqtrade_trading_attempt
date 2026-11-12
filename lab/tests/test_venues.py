@@ -29,13 +29,13 @@ def test_every_venue_is_one_row_and_a_venue_with_no_read_is_missing_with_the_per
 
 def test_a_venue_is_connected_only_when_every_check_is_fresh_and_clean():
     rows = by_name(venues.rows(fake(
-        broker=[{"key": "alpaca_paper", "at": NOW - H, "error": None},
-                {"key": "kraken", "at": NOW - 5 * H, "error": None},
-                {"key": "fidelity_individual_1234", "at": NOW - H, "error": None},
-                {"key": "fidelity_roth_ira_5678", "at": NOW - H, "error": "snaptrade: no total balance"}],
-        drill=[{"key": "alpaca_paper", "at": NOW - 2 * H, "error": "RuntimeError: order o1 is new after the cancel"},
-               {"key": "kalshi_demo", "at": NOW - 20 * H, "error": None}],
-        paper=[{"key": "kalshi", "at": NOW - dt.timedelta(minutes=5), "error": None}]), NOW))
+        broker=[{"account": "alpaca_paper", "at": NOW - H, "error": None},
+                {"account": "kraken", "at": NOW - 5 * H, "error": None},
+                {"account": "fidelity_individual_1234", "at": NOW - H, "error": None},
+                {"account": "fidelity_roth_ira_5678", "at": NOW - H, "error": "snaptrade: no total balance"}],
+        drill=[{"account": "alpaca_paper", "at": NOW - 2 * H, "error": "RuntimeError: order o1 is new after the cancel"},
+               {"account": "kalshi_demo", "at": NOW - 20 * H, "error": None}],
+        paper=[{"account": "kalshi", "at": NOW - dt.timedelta(minutes=5), "error": None}]), NOW))
     assert rows["Kalshi"]["status"] == "connected"
     assert rows["Alpaca"]["status"] == "error" and "after the cancel" in rows["Alpaca"]["checks"][1]["error"]
     assert rows["Kraken"]["status"] == "stale"  # hourly read, 5 h old
