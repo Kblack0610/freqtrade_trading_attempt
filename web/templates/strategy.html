@@ -11,6 +11,8 @@
 <dl class="card">
   <dt>Return a year, {{ card.window }}</dt><dd class="{{ card.cagr | tone }}">{{ card.cagr | pct }} <span class="muted">Sharpe 90% interval {{ card.sharpe_lo | num(2) }} to {{ card.sharpe_hi | num(2) }}; per trade {{ card.expectancy | pct(2) }} ({{ card.expectancy_lo | pct(2) }} to {{ card.expectancy_hi | pct(2) }})</span></dd>
   <dt>Win rate</dt><dd>{{ card.winrate | pct(0) }} <span class="muted">of {{ card.trades }} trades</span></dd>
+  <dt>Payoff ratio</dt><dd>{% if card.payoff is not none %}{{ card.payoff | num(2) }} <span class="muted">average win over average loss</span>{% elif card.haircut is none %}<span class="muted">not measured yet: the next nightly analysis fills it</span>{% else %}<span class="muted">no losing trades</span>{% endif %}</dd>
+  <dt>Wins cut to {{ card.haircut_share | pct(0) }}</dt><dd>{% if card.haircut is none %}<span class="muted">not measured yet</span>{% else %}<span class="{{ card.haircut | tone }}">{{ card.haircut | pct(2) }}</span> <span class="muted">a trade, if every win were {{ card.haircut_share | pct(0) }} of its backtest size</span>{% endif %}</dd>
   <dt>Trades a month</dt><dd>{{ card.per_month | num(1) }}</dd>
   <dt>Median hold</dt><dd>{% if card.median_hold_hours is none %}<span class="muted">not measured yet: the next nightly analysis fills it</span>{% elif card.median_hold_hours < 48 %}{{ card.median_hold_hours | num(1) }} h{% else %}{{ (card.median_hold_hours / 24) | num(1) }} days{% endif %}</dd>
   <dt>Timeframe</dt><dd>{{ s.timeframe or "-" }}</dd>

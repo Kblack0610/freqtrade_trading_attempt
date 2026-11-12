@@ -540,3 +540,28 @@ def test_without_lightgbm_a_freqai_strategy_is_a_load_failure(monkeypatch):
     monkeypatch.setattr(analyze, "FREQAI", False)
     ml = {s["name"]: s for s in analyze.Cli().discover()}["MLLightGBMBaseline"]
     assert ml["load_error"] == analyze.NEEDS_ML
+
+
+def test_cluster_rows_cluster_each_venue_on_btc_residuals_and_skip_short_or_flat_series():
+    rng = np.random.default_rng(11)
+    days = [dt.date(2026, 1, 1) + dt.timedelta(days=i) for i in range(150)]
+    btc = rng.normal(0, 0.03, len(days))
+    close = pd.Series(80000 * np.cumprod(1 + np.r_[0.0, btc]), index=[days[0] - dt.timedelta(days=1)] + days)
+    own = rng.normal(0, 0.01, len(days))
+
+    def series(ret):
+        return pd.DataFrame({"day": days[:len(ret)], "ret": ret}), pd.DataFrame()
+
+    beta1, beta2 = 1.2 * btc + rng.normal(0, 0.01, len(days)), 0.8 * btc + rng.normal(0, 0.01, len(days))
+    found = {("Beta1", "x"): series(beta1), ("Beta2", "x"): series(beta2), ("Own1", "x"): series(own),
+             ("Own2", "x"): series(own + rng.normal(0, 0.002, len(days))), ("Flat", "x"): series(np.zeros(len(days))),
+             ("Short", "x"): series(own[:30]), ("Own1", "y"): series(own)}
+    members, venues = analyze.cluster_rows(found, close, 0.5)
+    got = {(m["strategy"], m["exchange"]): m["cluster"] for m in members}
+    assert set(got) == {("Beta1", "x"), ("Beta2", "x"), ("Own1", "x"), ("Own2", "x"), ("Own1", "y")}
+    assert got[("Own1", "x")] == got[("Own2", "x")] == 1
+    # Negative control: the Betas correlate on raw returns, but only through BTC, so on residuals they are two bets.
+    assert np.corrcoef(beta1, beta2)[0, 1] > 0.8 and len({got[("Beta1", "x")], got[("Beta2", "x")], 1}) == 3
+    assert {v["exchange"]: (v["series"], v["clusters"]) for v in venues} == {"x": (4, 3), "y": (1, 1)}
+    assert all(m["days"] == 150 for m in members)
+    assert analyze.cluster_rows(found, pd.Series(dtype=float), 0.5) == ([], [])

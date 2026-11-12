@@ -146,6 +146,7 @@ def test_window_metrics_on_a_known_series():
     m = metrics.window_metrics(daily, t, 5)
     assert m["days"] == 60 and m["trades"] == 30 and m["total_return"] > 0
     assert m["profit_factor"] == 200 / 50 and math.isclose(m["winrate"], 20 / 30)
+    assert m["avg_win"] > 0 and m["avg_loss"] > 0 and math.isclose(m["avg_win"] / m["avg_loss"], 2.0, rel_tol=0.05)
     assert m["expectancy_lo"] < m["expectancy"] < m["expectancy_hi"]
     assert math.isclose(m["gross_expectancy"], m["expectancy"] + FEE) and math.isclose(m["fee_per_trade"], FEE)
     assert m["gross_expectancy_lo"] < m["gross_expectancy"] < m["gross_expectancy_hi"]

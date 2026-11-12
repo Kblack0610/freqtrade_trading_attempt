@@ -574,6 +574,7 @@ def strategy(request: Request, name: str, exchange: str = ""):
                                              "ORDER BY exchange", (name,))]
     exchange = exchange or (exchanges[0] if exchanges else "")
     key = (name, exchange)
+    dcfg = diversity.config()
     daily = rows("SELECT day, ret FROM strategy_daily WHERE strategy = %s AND exchange = %s ORDER BY day", key)
     regimes = rows(REGIME_SPLIT, key)
     for r in regimes:
@@ -594,17 +595,19 @@ def strategy(request: Request, name: str, exchange: str = ""):
                     "ORDER BY chunk_start DESC", key),
         trades=rows(STRATEGY_TRADES, key),
         card=card(rows("SELECT * FROM strategy_windows WHERE strategy = %s AND exchange = %s AND win = %s",
-                       (*key, diversity.config()["window"])),
+                       (*key, dcfg["window"])),
                   rows("SELECT * FROM confidence WHERE strategy = %s AND exchange = %s", key),
                   rows("SELECT cell, lo FROM climate_scorecard WHERE kind = 'strategy' AND name = %s AND exchange = %s",
                        key),
-                  walkforward_by_pair("WHERE strategy = %s AND exchange = %s", key).get(key, [])))
+                  walkforward_by_pair("WHERE strategy = %s AND exchange = %s", key).get(key, []), dcfg["payoff_haircut"]))
 
 
-def card(window: list[dict], conf: list[dict], climates: list[dict], folds: list[dict]) -> dict:
+def card(window: list[dict], conf: list[dict], climates: list[dict], folds: list[dict], haircut: float) -> dict:
     """Pure: the strategy card (docs/strategy-coverage.md, The strategy card) for one strategy x exchange. A field
-    with no input is None, and the template says why it is missing."""
+    with no input is None, and the template says why it is missing. The payoff ratio is the average win over the
+    average loss; `haircut` is the per-trade expectancy with every win cut to that share of its size."""
     w = window[0] if window else None
+    win, loss, rate = (w.get("avg_win"), w.get("avg_loss"), w["winrate"]) if w else (None, None, None)
     c = conf[0] if conf else None
     earns = {}
     for r in climates:
@@ -613,7 +616,10 @@ def card(window: list[dict], conf: list[dict], climates: list[dict], folds: list
     return {
         "window": w and w["win"], "cagr": w and w["cagr"], "sharpe_lo": w and w["sharpe_lo"], "sharpe_hi": w and w["sharpe_hi"],
         "expectancy": w and w["expectancy"], "expectancy_lo": w and w["expectancy_lo"],
-        "expectancy_hi": w and w["expectancy_hi"], "winrate": w and w["winrate"], "trades": w and w["trades"],
+        "expectancy_hi": w and w["expectancy_hi"], "winrate": rate, "trades": w and w["trades"],
+        "payoff": win / loss if win is not None and loss else None, "haircut_share": haircut,
+        "haircut": rate * haircut * (win or 0.0) - (1 - rate) * (loss or 0.0)
+        if rate is not None and (win is not None or loss is not None) else None,
         "per_month": w["trades"] / w["days"] * diversity.DAYS_A_MONTH if w and w["days"] else None,
         "median_hold_hours": w and w.get("median_hold_hours"),
         "climates": sorted(earns, key=CLIMATE_ORDER.index), "climates_tested": bool(climates),
@@ -780,9 +786,12 @@ def coverage(request: Request):
     board = coverage_board(toml["strategies"], list(toml["families"]), strategy_classes(),
                            {kind: rows(sql) for kind, sql in COVER.items()})
     dcfg = diversity.config()
-    archive = diversity.build(rows(diversity.ROWS, (dcfg["window"], dcfg["min_trades"])), rows(diversity.CLIMATE_ROWS),
-                              {n: t["family"] for n, t in toml["strategies"].items()}, dcfg)
-    return page(request, "coverage.html", untagged=UNTAGGED, **board, archive=archive, families={
+    family = {n: t["family"] for n, t in toml["strategies"].items()}
+    found = rows(diversity.ROWS, (dcfg["window"], dcfg["min_trades"]))
+    clusters = diversity.cluster_table(rows("SELECT * FROM residual_clusters"), rows("SELECT * FROM residual_venues"),
+                                       family, {(r["strategy"], r["exchange"]): r["sharpe_lo"] for r in found})
+    archive = diversity.build(found, rows(diversity.CLIMATE_ROWS), family, dcfg)
+    return page(request, "coverage.html", untagged=UNTAGGED, **board, archive=archive, clusters=clusters, families={
         **toml["families"], UNTAGGED: "On disk, no line in lab/families.toml.", GONE: "In the results only, not on disk."})
 
 
