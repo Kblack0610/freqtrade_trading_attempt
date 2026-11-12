@@ -104,6 +104,36 @@ def test_the_drill_rests_one_contract_then_cancels_it(conn):
     assert s.calls[3][2] == {"market_ticker": "T-OK"}
 
 
+def test_the_drill_pages_past_empty_books_to_find_a_market(conn):
+    """Most demo markets ask 1.00 (no sellers), so the first page can hold none the drill can rest under."""
+    pages = {None: {"markets": [{"ticker": "T-EMPTY", "yes_ask_dollars": "1.0000"}], "cursor": "c2"},
+             "c2": {"markets": [{"ticker": "T-OK", "yes_ask_dollars": "0.4200"}], "cursor": "c3"}}
+
+    class Paged(Demo):
+        def request(self, method, url, params=None, json=None, headers=None, timeout=None):
+            if method == "GET" and url.endswith("/markets"):
+                self.calls.append((method, "/markets", params, json, headers))
+                return Resp(200, pages[(params or {}).get("cursor")])
+            return super().request(method, url, params=params, json=json, timeout=timeout, headers=headers)
+
+    s = Paged()
+    row = kalshi_trade.drill(conn, KalshiDemo({**DEMO, "market_pages": 3}, "k", pem(RSA), session=s), 0.01)
+    assert (row["ticker"], row["status"]) == ("T-OK", "canceled")
+    assert [c[2].get("cursor") for c in s.calls if c[1] == "/markets"] == [None, "c2"], "stops at the first hit"
+
+
+def test_no_restable_market_in_market_pages_fails_the_drill(conn):
+    class Empty(Demo):
+        def request(self, method, url, params=None, json=None, headers=None, timeout=None):
+            self.calls.append((method, "/markets", params, json, headers))
+            return Resp(200, {"markets": [{"ticker": "T-EMPTY", "yes_ask_dollars": "1.0000"}], "cursor": "more"})
+
+    s = Empty()
+    with pytest.raises(RuntimeError, match="in 2 pages"):
+        kalshi_trade.drill(conn, KalshiDemo({**DEMO, "market_pages": 2}, "k", pem(RSA), session=s), 0.01)
+    assert len(s.calls) == 2
+
+
 def test_a_failed_cancel_is_recorded_and_fails_the_drill(conn):
     s = Demo(cancel_works=False)
     row = kalshi_trade.drill(conn, KalshiDemo(DEMO, "k", pem(RSA), session=s, sleep=[].append), 0.01, ticker="T-OK")

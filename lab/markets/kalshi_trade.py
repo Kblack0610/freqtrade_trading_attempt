@@ -71,6 +71,7 @@ class KalshiDemo:
         self.sleep = sleep or time.sleep
         self.api = Api(self.venue, cfg, session, self.sleep)
         self.read_polls, self.read_poll_s = int(cfg["read_polls"]), float(cfg["read_poll_s"])
+        self.market_pages = int(cfg.get("market_pages", 1))
 
     def headers(self, method: str, path: str) -> dict:
         ts = str(int(self.clock() * 1000))
@@ -88,8 +89,15 @@ class KalshiDemo:
     def balance(self) -> dict:
         return self.call("GET", "/portfolio/balance")
 
-    def open_markets(self) -> list[dict]:
-        return self.call("GET", "/markets", {"status": "open", "mve_filter": "exclude", "limit": 200}).get("markets") or []
+    def open_markets(self):
+        """Pages of open markets, following the cursor for up to market_pages pages."""
+        cursor = None
+        for _ in range(self.market_pages):
+            q = {"status": "open", "mve_filter": "exclude", "limit": 200} | ({"cursor": cursor} if cursor else {})
+            page = self.call("GET", "/markets", q)
+            yield page.get("markets") or []
+            if not (cursor := page.get("cursor")):
+                return
 
     def place(self, ticker: str, price: float, count: int, client_id: str) -> dict:
         return self.call("POST", "/portfolio/events/orders", body={
@@ -125,9 +133,9 @@ def pick(markets: list[dict], price: float) -> str | None:
 
 def drill(conn, client: KalshiDemo, price: float, ticker: str | None = None, now=None) -> dict:
     """lab/markets/drill.py on a market that lets a post-only bid at `price` rest. Returns the demo_orders row."""
-    ticker = ticker or pick(client.open_markets(), price)
+    ticker = ticker or next((t for page in client.open_markets() if (t := pick(page, price))), None)
     if ticker is None:
-        raise RuntimeError(f"no open demo market with an ask above {price}")
+        raise RuntimeError(f"no open demo market with an ask above {price} in {client.market_pages} pages")
     return rest_and_cancel(conn, client, ticker, price, now)
 
 
