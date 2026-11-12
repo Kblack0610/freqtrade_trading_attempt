@@ -79,6 +79,9 @@ def seed(c):
               "VALUES ('binanceus', '365d', 2, 365, 16, 12870, 0.64)")
     c.execute("INSERT INTO estimates VALUES ('Strategy001', 'binanceus', 90, -0.05, 0.021, 0.09, 0.31, 0.06, 5000, 1, 365)")
     c.execute("INSERT INTO correlations VALUES ('Strategy001', 'binanceus', 'Strategy002', 0.83, 300)")
+    c.execute("INSERT INTO residual_clusters VALUES ('Strategy001', 'binanceus', 1, 300), ('Strategy002', 'binanceus', 1, 300), "
+              "('Lone', 'binanceus', 2, 300)")
+    c.execute("INSERT INTO residual_venues VALUES ('binanceus', 3, 2, 2.4)")
     c.execute("INSERT INTO bias_checks (strategy, kind, file_hash, has_bias, biased_indicators) VALUES "
               "('Planted', 'lookahead', 'h2', true, 'next_close'), ('Strategy001', 'lookahead', 'h1', false, NULL), "
               "('Strategy001', 'recursive', 'h1', NULL, NULL)")
@@ -202,9 +205,11 @@ def test_every_page_renders_with_data(conn, signed_in):
              "/strategies/Strategy001": ["binanceus", "<svg", "3.2%", "Strategy002: 0.83", "up", "ETH/USD",
                                          "exit 2: boom", "not checked", "clean", "31%", "1.45%", "0.25%", "20%", "12.3%",
                                          "-5.0%", "-27.1%", "4321", "At a glance on binanceus", "no out-of-sample months",
-                                         "not measured yet", "no climate scorecard", "not scored"],
+                                         "not measured yet", "no climate scorecard", "not scored", "Payoff ratio",
+                                         "Wins cut to 50%"],
              "/coverage": ["Diversity archive", "cells filled: 1, from 1 strategy", "/strategies/Strategy001?exchange=binanceus",
-                           "Sharpe low 0.40", "By climate it earns in", "untested"],
+                           "Sharpe low 0.40", "By climate it earns in", "untested", "Residual clusters",
+                           "3 strategies, 2 clusters, residual effective count 2.4", "1 strategies sit alone"],
              "/data": ["BTC/USD", "700,000", "2019-09-01", "Open interest", "<td>okx</td>", "2026-08-03"],
              "/runs": ["2026-11-04 03:00:00", "ok", "60 min"],
              "/runs/1": ["exit 2: boom", "binanceus: no 1m candles: Scalp", "4 strategies", "Strategy001"]}
@@ -449,12 +454,26 @@ def test_the_card_lists_climates_that_clear_zero_in_order_and_the_gates_missed()
     climates = [{"cell": "down/high", "lo": 0.2}, {"cell": "up/low", "lo": 0.1}, {"cell": "up/low", "lo": -0.1},
                 {"cell": "flat/mid", "lo": None}]
     gates = [{"gate": "bias", "pass": True}, {"gate": "costs", "pass": False}]
-    c = app_mod.card([w], [{"passed": 1, "ready": False, "gates": gates}], climates, [])
+    c = app_mod.card([w], [{"passed": 1, "ready": False, "gates": gates}], climates, [], 0.5)
     assert c["climates"] == ["up/low", "down/high"]
+    assert c["payoff"] is None and c["haircut"] is None  # a window from before avg_win and avg_loss were stored
     assert c["missed"] == ["costs"] and c["gates"] == 2
     assert round(c["per_month"], 1) == 10.0 and c["oos_months"] == 0
-    empty = app_mod.card([], [], [], [])
+    empty = app_mod.card([], [], [], [], 0.5)
     assert empty["window"] is None and empty["gates"] is None and not empty["climates_tested"]
+
+
+def test_the_card_payoff_ratio_and_its_haircut_can_turn_a_winner_into_a_loser():
+    from web import app as app_mod
+    w = {"win": "365d", "cagr": 0.1, "sharpe_lo": 0.1, "sharpe_hi": 1.0, "expectancy": 0.006, "expectancy_lo": 0.0,
+         "expectancy_hi": 0.01, "winrate": 0.4, "avg_win": 0.03, "avg_loss": 0.01, "trades": 100, "days": 365}
+    c = app_mod.card([w], [], [], [], 0.5)
+    assert round(c["payoff"], 6) == 3.0
+    # 0.4 x 1.5% - 0.6 x 1% = 0: half-size wins leave nothing; full size makes 0.6% a trade.
+    assert abs(c["haircut"]) < 1e-12 and round(0.4 * 0.03 - 0.6 * 0.01, 6) == 0.006
+    assert app_mod.card([{**w, "avg_win": 0.02}], [], [], [], 0.5)["haircut"] < 0
+    no_loss = app_mod.card([{**w, "winrate": 1.0, "avg_loss": None}], [], [], [], 0.5)
+    assert no_loss["payoff"] is None and round(no_loss["haircut"], 6) == 0.015
 
 
 def families():

@@ -201,6 +201,8 @@ def window_metrics(daily: pd.DataFrame, trades: pd.DataFrame, seed: int) -> dict
     mdd = max_drawdown(r) if n else 0.0
     wins = trades.loc[trades["profit_abs"] > 0, "profit_abs"].sum() if len(trades) else 0.0
     losses = -trades.loc[trades["profit_abs"] < 0, "profit_abs"].sum() if len(trades) else 0.0
+    won = trades.loc[trades["profit_abs"] > 0, "profit_ratio"] if len(trades) else pd.Series(dtype=float)
+    lost = trades.loc[trades["profit_abs"] < 0, "profit_ratio"] if len(trades) else pd.Series(dtype=float)
     exp_lo, exp_hi = mean_ci(trades["profit_ratio"].to_numpy(), seed_of(seed, "expectancy"))
     priced = trades[(trades["open_rate"] > 0) & trades["close_rate"].notna()] if len(trades) else trades
     gross = (priced["close_rate"] / priced["open_rate"] - 1.0).to_numpy(dtype=float) if len(priced) else np.array([])
@@ -235,6 +237,8 @@ def window_metrics(daily: pd.DataFrame, trades: pd.DataFrame, seed: int) -> dict
         "gross_expectancy_hi": gross_hi,
         "fee_per_trade": float((gross - priced["profit_ratio"].to_numpy(dtype=float)).mean()) if len(gross) else None,
         "winrate": float((trades["profit_abs"] > 0).mean()) if len(trades) else None,
+        "avg_win": float(won.mean()) if len(won) else None,
+        "avg_loss": float(-lost.mean()) if len(lost) else None,
         "exposure": exposure(trades, start, end) if n else 0.0,
         "worst_open": worst_open(trades),
         "median_hold_hours": float((pd.to_datetime(trades["close_date"]) - pd.to_datetime(trades["open_date"]))

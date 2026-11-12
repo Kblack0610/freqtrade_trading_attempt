@@ -774,6 +774,32 @@ def correlation_rows(series: dict, league: set[str]) -> list[dict]:
     return rows
 
 
+def cluster_rows(series: dict, close: pd.Series, max_rho: float) -> tuple[list[dict], list[dict]]:
+    """Per venue, each series' residual cluster (diversity.clusters) over its last CORR_DAYS days, and the venue's
+    series count, cluster count and residual effective count. Lazy import: diversity imports cohorts, which imports
+    this module."""
+    from lab import diversity
+
+    if close.empty:
+        return [], []
+    btc = close.pct_change().dropna()
+    members, venues = [], []
+    for e in sorted({k[1] for k in series}):
+        frame = pd.DataFrame({k: d.set_index("day")["ret"].iloc[-CORR_DAYS:] for k, (d, _) in series.items()
+                              if k[1] == e and not d.empty})
+        resid = diversity.residuals(frame, btc)
+        resid = resid.loc[:, resid.notna().sum() >= CORR_MIN_DAYS] if not resid.empty else resid
+        resid = resid.loc[:, resid.std() > 0] if not resid.empty else resid
+        if resid.empty:
+            continue
+        got = diversity.clusters(resid, max_rho, CORR_MIN_DAYS)
+        members += [{"strategy": s, "exchange": e, "cluster": c, "days": int(resid[(s, e)].notna().sum())}
+                    for (s, _), c in got.items()]
+        venues.append({"exchange": e, "series": len(got), "clusters": len(set(got.values())),
+                       "neff": metrics.effective_trials(resid, CORR_MIN_DAYS)})
+    return members, venues
+
+
 def daily_close(coin: str) -> pd.Series:
     path = RESULTS / "data" / REGIME_EXCHANGE / f"{coin}_USD-1d.feather"
     if not path.exists():
@@ -809,7 +835,7 @@ WINDOW_COLS = ["strategy", "exchange", "win", "days", "start_day", "end_day", "t
                "sharpe_lo", "sharpe_hi", "sortino", "calmar", "max_drawdown", "profit_factor", "expectancy",
                "expectancy_lo", "expectancy_hi", "gross_expectancy", "gross_expectancy_lo", "gross_expectancy_hi",
                "fee_per_trade", "winrate", "exposure", "worst_open", "capital_exposure", "hold_excess", "hold_excess_lo", "hold_excess_hi",
-               "months_profitable", "dsr", "trials", "trials_raw", "trades_needed", "median_hold_hours"]
+               "months_profitable", "dsr", "trials", "trials_raw", "trades_needed", "median_hold_hours", "avg_win", "avg_loss"]
 ESTIMATE_COLS = ["strategy", "exchange", "horizon_days", "p10", "p50", "p90", "prob_loss", "exp_max_drawdown", "paths",
                  "seed", "basis_days"]
 
@@ -828,9 +854,10 @@ def derive(conn) -> dict:
     bench = book.benchmark_rows(close, daily_close("ETH"), suggest.load_config())
     hold_columns(windows, series, close)
     corr, reg, overfit = correlation_rows(series, league), regime_rows(close, suggest.load_config()), overfit_rows(series)
+    members, venues = cluster_rows(series, close, suggest.load_config()["diversity"]["max_rho"])
     with conn.transaction():
         conn.execute("TRUNCATE strategy_daily, strategy_windows, overlay_windows, estimates, correlations, regimes, overfit,"
-                     " benchmarks")
+                     " benchmarks, residual_clusters, residual_venues")
         insert_many(conn, "strategy_daily", daily, ["strategy", "exchange", "day", "ret", "pnl", "trades"])
         insert_many(conn, "strategy_windows", windows, WINDOW_COLS)
         insert_many(conn, "overlay_windows", overlaid, ["overlay", *WINDOW_COLS])
@@ -840,10 +867,13 @@ def derive(conn) -> dict:
         insert_many(conn, "overfit", overfit, ["exchange", "win", "strategies", "days", "blocks", "splits", "pbo",
                                                "logit_median"])
         insert_many(conn, "benchmarks", bench, BENCHMARK_COLS)
+        insert_many(conn, "residual_clusters", members, ["strategy", "exchange", "cluster", "days"])
+        insert_many(conn, "residual_venues", venues, ["exchange", "series", "clusters", "neff"])
     return {"series": len(series), "daily_rows": len(daily), "windows": len(windows),
             "overlay_series": len({(r["strategy"], r["exchange"], r["overlay"]) for r in overlaid}),
             "overlay_windows": len(overlaid), "estimates": len(estimates),
-            "correlations": len(corr), "regime_days": len(reg), "overfit": len(overfit), "benchmarks": len(bench)}
+            "correlations": len(corr), "regime_days": len(reg), "overfit": len(overfit), "benchmarks": len(bench),
+            "residual_clusters": sum(v["clusters"] for v in venues)}
 
 
 def main(runner: Runner | None = None, today: dt.date | None = None) -> int:

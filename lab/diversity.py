@@ -7,7 +7,8 @@ median holding time, the climate where its out-of-sample interval clears zero by
 (climate_scorecard; "none" when no climate clears, "untested" when it has no walk-forward), its venue, and the
 bucket of its trades a month. Strategies sharing all five sit in one cell, and the cell's elite is the one with the
 highest low end of the Sharpe interval. /coverage shows the cells; the diverse cohort picks from the elites, and
-measures "different" on BTC-residual daily returns (`residuals`).
+measures "different" on BTC-residual daily returns (`residuals`). The nightly analysis groups those residual returns
+into clusters (`clusters`), which /coverage shows beside the family labels: a cluster is one bet, whatever its labels.
 Nothing here writes: it reads the tables the nightly analysis fills.
 """
 
@@ -15,7 +16,10 @@ import math
 import statistics
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
+from scipy.cluster.hierarchy import fcluster, linkage
+from scipy.spatial.distance import squareform
 
 from lab import cohorts, suggest
 
@@ -116,7 +120,7 @@ def build(rows: list[dict], climates: list[dict], family: dict[str, str], cfg: d
     cells = elites(described)
     fams = sorted({r["family"] for r in described})
     holds = hold_labels(cfg["hold_hours"]) + (["unknown"] if any(r["hold"] == "unknown" for r in described) else [])
-    return {"cells": cells, "strategies": len(described), "window": cfg["window"],
+    return {"cells": cells, "strategies": len(described), "window": cfg["window"], "max_rho": cfg["max_rho"],
             "by_hold": projection(cells, fams, "hold", holds), "holds": holds,
             "by_climate": projection(cells, fams, "climate", CLIMATES), "climates": CLIMATES}
 
@@ -138,3 +142,47 @@ def residuals(returns: pd.DataFrame, btc: pd.Series) -> pd.DataFrame:
         beta = both.iloc[:, 0].cov(both.iloc[:, 1]) / var if var > 0 else 0.0
         out[col] = r - beta * btc.reindex(r.index).fillna(0.0)
     return pd.DataFrame(out)
+
+
+def clusters(resid: pd.DataFrame, max_rho: float, min_days: int) -> dict:
+    """Pure: column -> its cluster, from average-linkage clustering on 1 - |rho| of the residual returns, cut at
+    1 - max_rho, so a cluster's members correlate at about max_rho or more on average, the same cut the diverse pick
+    makes. A pair with under min_days shared days counts as unrelated. Cluster 1 is the largest, then by first member."""
+    cols = list(resid.columns)
+    if len(cols) < 2:
+        return {c: 1 for c in cols}
+    rho = resid.corr(min_periods=min_days).to_numpy(dtype=float)
+    dist = 1.0 - np.abs(np.where(np.isfinite(rho), rho, 0.0))
+    np.fill_diagonal(dist, 0.0)
+    raw = fcluster(linkage(squareform(np.clip(dist, 0.0, None), checks=False), "average"), 1.0 - max_rho, "distance")
+    groups: dict[int, list] = {}
+    for c, g in zip(cols, raw):
+        groups.setdefault(int(g), []).append(c)
+    order = sorted(groups.values(), key=lambda m: (-len(m), str(m[0])))
+    return {c: i + 1 for i, m in enumerate(order) for c in m}
+
+
+def cluster_table(members: list[dict], venues: list[dict], family: dict[str, str], best: dict[tuple, float]) -> list[dict]:
+    """Pure: /coverage's residual clusters, per venue (from the residual_venues rows) its clusters of two or more
+    series, each with its family labels (count per family, most first) and its member with the highest Sharpe low end
+    in `best` ((strategy, exchange) -> sharpe_lo; any member when none is there). A venue counts its singletons."""
+    out = []
+    for v in sorted(venues, key=lambda v: v["exchange"]):
+        groups: dict[int, list[str]] = {}
+        for m in members:
+            if m["exchange"] == v["exchange"]:
+                groups.setdefault(m["cluster"], []).append(m["strategy"])
+        rows = []
+        for c, names in sorted(groups.items()):
+            if len(names) < 2:
+                continue
+            fams: dict[str, int] = {}
+            for n in names:
+                f = family.get(n, "untagged")
+                fams[f] = fams.get(f, 0) + 1
+            top = max(sorted(names), key=lambda n: best.get((n, v["exchange"]), -math.inf))
+            rows.append({"cluster": c, "size": len(names), "best": top, "best_lo": best.get((top, v["exchange"])),
+                         "families": sorted(fams.items(), key=lambda kv: (-kv[1], kv[0]))})
+        out.append({**v, "groups": rows, "singletons": sum(len(n) == 1 for n in groups.values()),
+                    "mixed": sum(len(r["families"]) > 1 for r in rows)})
+    return out

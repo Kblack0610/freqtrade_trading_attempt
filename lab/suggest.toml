@@ -258,3 +258,6 @@ hold_hours = [1, 24, 168]
 freq_buckets = 3
 # Two strategies whose daily returns correlate above this are one, whatever cells they sit in.
 max_rho = 0.5
+# The strategy card's haircut: per-trade expectancy again with every win cut to this share of its size, since a
+# backtest's wins tend to shrink out of sample (tr-211 review, payoff ratio beside win rate). Judgment, not evidence.
+payoff_haircut = 0.5

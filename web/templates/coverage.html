@@ -35,6 +35,26 @@
 </div>
 {% endfor %}
 {% if not archive.cells %}<p class="muted">No archive yet: it needs the nightly analysis on the {{ archive.window }} window.</p>{% endif %}
+<h2>Residual clusters</h2>
+<p class="muted">The family labels are weak (in the 2026-11-11 review, strategies of one family correlated at 0.28 on average, of different families at 0.19). These are the bets the returns say there are: per venue, BTC's part taken out of each strategy's last 365 days of daily returns, then strategies clustered so that a cluster's members correlate at about {{ archive.max_rho }} or more, the cut the diverse cohort picks with. The effective count is how many independent strategies the venue's residual returns are worth. Families shows the labels inside each cluster; a cluster with several is one bet under different names.</p>
+{% for v in clusters %}
+<h3>{{ v.exchange }}</h3>
+<p>{{ v.series }} strategies, {{ v.clusters }} clusters, residual effective count {{ v.neff | num(1) }}. <span class="muted">{{ v.singletons }} strategies sit alone; {{ v.mixed }} of {{ v.groups | length }} shared clusters mix families.</span></p>
+{% if v.groups %}
+<div class="scroll">
+<table>
+  <thead><tr><th class="n">Cluster</th><th class="n">Strategies</th><th>Families</th><th>Best Sharpe low end</th></tr></thead>
+  <tbody>
+  {% for g in v.groups %}
+  <tr><td class="n">{{ g.cluster }}</td><td class="n">{{ g.size }}</td><td>{% for f, n in g.families %}{{ f }} {{ n }}{% if not loop.last %}, {% endif %}{% endfor %}</td>
+    <td><a href="/strategies/{{ g.best }}?exchange={{ v.exchange }}">{{ g.best }}</a>{% if g.best_lo is not none %} <span class="muted">{{ g.best_lo | num(2) }}</span>{% endif %}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endif %}
+{% endfor %}
+{% if not clusters %}<p class="muted">No clusters yet: the nightly analysis fills them.</p>{% endif %}
 <h2>Strategies</h2>
 <p class="muted">Untagged means a strategy file under <code>user_data/strategies</code> with no line in <code>lab/families.toml</code>: add one. Gone means a name only the results still hold, such as a deleted strategy, whose trials still count. Best gates is the venue that passes the most confidence gates.</p>
 <div class="scroll">

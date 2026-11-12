@@ -84,3 +84,31 @@ def test_residuals_take_out_btc_by_its_beta_and_keep_what_is_left():
     assert abs(got[("S", "x")].corr(btc)) < 0.1
     assert got[("S", "x")].corr(got[("Flat", "x")]) > 0.95
     assert diversity.residuals(pd.DataFrame(), btc).empty
+
+
+def test_clusters_join_what_moves_together_and_keep_the_rest_apart():
+    rng = np.random.default_rng(7)
+    days = pd.date_range("2026-01-01", periods=200, freq="D")
+    a, b = rng.normal(0, 0.01, len(days)), rng.normal(0, 0.01, len(days))
+    resid = pd.DataFrame({("A1", "x"): a + rng.normal(0, 0.003, len(days)), ("A2", "x"): a + rng.normal(0, 0.003, len(days)),
+                          ("A3", "x"): -a + rng.normal(0, 0.003, len(days)), ("B", "x"): b,
+                          ("Short", "x"): pd.Series(a[:20], index=days[:20])}, index=days)
+    got = diversity.clusters(resid, 0.5, 60)
+    # A1, A2 and the mirror A3 are one bet (|rho| cut); B is its own; Short shares too few days to join anything.
+    assert got[("A1", "x")] == got[("A2", "x")] == got[("A3", "x")] == 1
+    assert len({got[("B", "x")], got[("Short", "x")], 1}) == 3
+    # Negative control: with the cut at 0.99 nothing is close enough, so every series is alone.
+    assert len(set(diversity.clusters(resid, 0.99, 60).values())) == 5
+    assert diversity.clusters(resid[[("B", "x")]], 0.5, 60) == {("B", "x"): 1}
+
+
+def test_cluster_table_shows_the_families_inside_each_shared_cluster():
+    members = [{"strategy": s, "exchange": "x", "cluster": c} for s, c in (("T1", 1), ("M1", 1), ("T2", 2), ("T3", 2), ("Lone", 3))]
+    members.append({"strategy": "T1", "exchange": "y", "cluster": 1})
+    venues = [{"exchange": "y", "series": 1, "clusters": 1, "neff": 1.0}, {"exchange": "x", "series": 5, "clusters": 3, "neff": 2.7}]
+    fam = {"T1": "trend", "T2": "trend", "T3": "trend", "M1": "mean-reversion"}
+    x, y = diversity.cluster_table(members, venues, fam, {("M1", "x"): 0.4, ("T1", "x"): 0.1})
+    assert y["exchange"] == "y" and y["groups"] == [] and y["singletons"] == 1
+    assert [g["cluster"] for g in x["groups"]] == [1, 2] and x["singletons"] == 1 and x["mixed"] == 1
+    assert x["groups"][0]["families"] == [("mean-reversion", 1), ("trend", 1)] and x["groups"][0]["best"] == "M1"
+    assert x["groups"][1]["families"] == [("trend", 2)] and x["groups"][1]["best_lo"] is None
