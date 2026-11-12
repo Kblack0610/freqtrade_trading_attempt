@@ -347,3 +347,19 @@ def test_scan_counts_gaps(tmp_path):
     r = backfill.scan(f, "1h")
     assert (r["rows"], r["gaps"], r["missing_candles"]) == (45, 1, 3)
     assert backfill.scan(tmp_path / "missing.feather", "1h")["rows"] == 0
+
+
+def test_a_halted_market_is_a_gap_and_a_quiet_one_is_kept(conn, lab):
+    """binanceus 1d pads its USD suspension with flat zero-volume days; a backtest would trade the frozen price."""
+    days = candles(LISTED - dt.timedelta(days=60), NOW, "1D")
+    flat = days["date"].between(LISTED - dt.timedelta(days=50), LISTED - dt.timedelta(days=41))  # 10 days
+    quiet = days["date"].between(LISTED - dt.timedelta(days=20), LISTED - dt.timedelta(days=19))  # 2 days
+    days.loc[flat | quiet, "volume"] = 0.0
+    backfill.datadir("binanceus").mkdir(parents=True)
+    days.to_feather(backfill.series_file("binanceus", "BTC/USD", "1d"))
+
+    assert backfill.backfill_exchange(FakeExchange(), conn, "binanceus", ["BTC/USD"], ["1d"])
+    _, _, rows, gaps, missing, _ = coverage(conn)[("BTC/USD", "1d")]
+    assert (rows, gaps, missing) == (len(days) - 10, 1, 10)
+    left = pd.read_feather(backfill.series_file("binanceus", "BTC/USD", "1d"))
+    assert (left["volume"] == 0).sum() == 2, "a quiet run under HALT_DAYS stays"
