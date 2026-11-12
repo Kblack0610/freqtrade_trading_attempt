@@ -137,6 +137,8 @@ Each row of home-config `apps/freqtrade/roster.tsv` is one paper bot: a strategy
 
 - `freqtrade-ingest` copies every bot's trades into Postgres every 5 minutes.
 - Drift compares each bot's trades with a backtest of the same days. A low match rate means the backtest does not model what the bot does; a steady negative gap means fills or fees the backtest leaves out.
+- Reconciliation (`reconcile`) keeps that match per trade and splits the gap into entry delay, price, fee and missed fills.
+- Markouts (`markouts`) mark every entry at +5m, +1h and +4h, BTC hedged and net of fees, against random entries on the same pair and side. A random entry averages minus the round-trip fee, so an entry that beats the null shows skill long before profit can. They are a diagnostic only.
 - `lab/watcher.py` marks a bot breached when its equity falls past the day-loss limit. This is Stage 0, so a breach only raises an alert; only a drill stops a bot's entries.
 - The decay test (a CUSUM over closed trades) says when trades stop looking like what walk-forward measured, and suggests retiring the strategy.
 
@@ -194,7 +196,7 @@ The tests check that each stage gives the right answer on inputs whose answer is
 - **Bias.** Every strategy gets lookahead-analysis and recursive-analysis each night, and the bias gate fails one that is not clean. `test_patterns.py` plants a rule that reads the next close and checks the prefix test catches it. `test_analyze.py` checks the planted `PlantedLookahead` fixture is flagged, but it skips unless backfilled binanceus candles are present, so CI does not run it.
 - **Cache.** The nightly reproduce check reruns cached chunks and a fold; `test_reproduce.py` checks a changed result counts as a mismatch and a failed rerun fails the run.
 - **Scoring.** `test_confidence.py` has the known answers: pure noise clears the score and the interval under 5% of the time, a market lifting every strategy does not lift the score, and an edge planted among noise strategies scores ready.
-- **Paper.** The drift and dry run gates are anytime-valid sequences ([design](anytime-gates.md)), so reading them every night does not inflate their error rate.
+- **Paper.** The drift and dry run gates are anytime-valid sequences ([design](anytime-gates.md)), so reading them every night does not inflate their error rate. `test_metrics.py` checks each reconciliation split on hand-built trades. `test_markouts.py` checks BTC hedged on itself leaves exactly minus the fee, random entries sit on the null and the null near minus the fee, and a planted jump after each entry clears the null.
 
 Not covered yet: known-answer cases for fills, stops and fees inside the engine; a check that each fold's hyperopt window ends before its test month; hyperopt determinism under a fixed seed; exact trial-register counts; and a run of null and planted-edge strategies through the whole pipeline, which would give each gate's false-positive rate and power.
 

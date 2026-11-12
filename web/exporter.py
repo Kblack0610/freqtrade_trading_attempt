@@ -58,6 +58,11 @@ SELECT DISTINCT ON (venue) venue, seen, changes, extract(epoch FROM finished_at 
 FROM market_sweeps WHERE ok AND started_at > now() - interval '7 days' ORDER BY venue, started_at DESC
 """
 LINKS = "SELECT split_part(source, ':', 1) AS source, status, count(*) AS n FROM market_links GROUP BY 1, 2"
+# lab/markouts.py and metrics.reconcile: per bot, the mean markout against its random-entry null, and the shortfall.
+MARKOUTS = ("SELECT bot, horizon_min, count(net) AS n, avg(net) AS net, avg(null_net) AS null_net, avg(fill_slip) AS slip "
+            "FROM markouts GROUP BY 1, 2")
+RECONCILE = ("SELECT bot, kind, count(*) AS n, avg(delay_s) AS delay_s, avg(price_gap) AS price, avg(fee_gap) AS fee, "
+             "avg(profit_gap) AS profit FROM reconcile GROUP BY 1, 2")
 PAPER = "SELECT account, capital, equity, open_positions, marked_at FROM paper_accounts WHERE marked_at IS NOT NULL"
 BROKERS = "SELECT DISTINCT ON (broker) broker, paper, equity, read_at FROM broker_balances WHERE error IS NULL ORDER BY broker, read_at DESC"
 
@@ -97,6 +102,8 @@ class TraderCollector:
                 links = cur.execute(LINKS).fetchall()
                 paper = cur.execute(PAPER).fetchall()
                 brokers = cur.execute(BROKERS).fetchall()
+                marks = cur.execute(MARKOUTS).fetchall()
+                rec = cur.execute(RECONCILE).fetchall()
         except Exception:  # noqa: BLE001 - any failure is reported as the db being unreadable
             up.add_metric([], 0)
             yield up
@@ -119,6 +126,7 @@ class TraderCollector:
         yield from market_metrics(now, sweeps, last_sweep, links)
         yield from paper_metrics(now, paper)
         yield from broker_metrics(now, brokers)
+        yield from markout_metrics(marks, rec)
 
 
 def family(name: str, doc: str, labels: list[str], items) -> GaugeMetricFamily:
@@ -224,8 +232,27 @@ def broker_metrics(now, brokers):
                  (([b["broker"]], age(now, b["read_at"])) for b in brokers))
 
 
+def markout_metrics(marks, rec):
+    yield family("trader_markout_entries", "Paper entries marked at the horizon, with a net figure", ["bot", "horizon"],
+                 (([m["bot"], f"{m['horizon_min']}m"], m["n"]) for m in marks))
+    yield family("trader_markout_net", "Mean markout at the horizon: the move after the fill, BTC beta hedged, net of the "
+                 "round-trip fee", ["bot", "horizon"], (([m["bot"], f"{m['horizon_min']}m"], m["net"]) for m in marks))
+    yield family("trader_markout_null", "Mean markout of random entries on the same pairs and sides; near minus the fee",
+                 ["bot", "horizon"], (([m["bot"], f"{m['horizon_min']}m"], m["null_net"]) for m in marks))
+    yield family("trader_markout_fill_slip", "Mean fill over the entry candle's open, positive when worse", ["bot"],
+                 (([bot], slip) for bot, slip in {m["bot"]: m["slip"] for m in marks}.items()))
+    yield family("trader_reconcile_trades", "Paper trades against the drift backtest: matched, live_only or bt_only",
+                 ["bot", "kind"], (([r["bot"], r["kind"]], r["n"]) for r in rec))
+    matched = [r for r in rec if r["kind"] == "matched"]
+    yield family("trader_shortfall", "Mean paper minus backtest gap per matched trade, as a ratio: price, fee or profit",
+                 ["bot", "component"], (([r["bot"], c], r[c]) for r in matched for c in ("price", "fee", "profit")))
+    yield family("trader_shortfall_delay_seconds", "Mean paper minus backtest entry time per matched trade", ["bot"],
+                 (([r["bot"]], r["delay_s"]) for r in matched))
+
+
 def serve(port: int | None = None) -> CollectorRegistry:
     registry = CollectorRegistry()
     registry.register(TraderCollector())
     start_http_server(port or int(os.environ.get("METRICS_PORT", "9100")), registry=registry)
     return registry
+
