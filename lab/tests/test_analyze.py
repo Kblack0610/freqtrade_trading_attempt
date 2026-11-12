@@ -528,6 +528,30 @@ def test_a_freqai_strategy_runs_its_window_as_is_with_its_fragment_and_a_model_p
     assert one(lab, "SELECT min(chunk_start) FROM backtest_chunks WHERE strategy = 'ML'") == dt.date(2025, 12, 1)
 
 
+def test_a_freqai_strategy_skips_a_venue_without_ohlcv_history(lab, tmp_path, monkeypatch):
+    ml_dir = tmp_path / "repo" / "user_data" / "strategies" / "ml"
+    ml_dir.mkdir(parents=True)
+    (ml_dir / "freqai.json").write_text(json.dumps({"freqai": {"enabled": True, "identifier": "x"}}))
+    monkeypatch.setattr(analyze, "REPO", tmp_path / "repo")
+    analyze.freqai_fragment.cache_clear()
+    monkeypatch.setattr(analyze, "ml_venue", lambda ex: ex != "coinbase")  # stands in for Kraken
+    (tmp_path / "variants.toml").write_text(TOY.format(max_chunks=1000))
+    lab.execute("INSERT INTO backtest_chunks (strategy, exchange, chunk_start, chunk_end, cache_key, ok, attempts) "
+                "VALUES ('ML', 'coinbase', '2026-03-01', '2026-04-01', 'k', false, 1)")
+    ml = {**strat("ML"), "file": "user_data/strategies/ml/ML.py"}
+    r = FakeRunner([ml])
+    assert analyze.main(r, TODAY) == 0
+    assert {ex for _, ex, _, _ in r.backtests} == {"binanceus"}
+    assert one(lab, "SELECT count(*) FROM backtest_chunks WHERE strategy = 'ML' AND exchange = 'coinbase'") == 0
+    assert {e for e, in lab.execute("SELECT DISTINCT exchange FROM strategy_windows WHERE strategy = 'ML'")} == {"binanceus"}
+
+
+def test_freqai_refuses_kraken_only():
+    pytest.importorskip("freqtrade")
+    assert not analyze.ml_venue("kraken")
+    assert all(analyze.ml_venue(ex) for ex in ("binanceus", "coinbase", "okx", "kucoin"))
+
+
 def test_without_lightgbm_a_freqai_strategy_is_a_load_failure(monkeypatch):
     monkeypatch.setattr(analyze, "FREQAI", False)
     ml = {s["name"]: s for s in analyze.Cli().discover()}["MLLightGBMBaseline"]
