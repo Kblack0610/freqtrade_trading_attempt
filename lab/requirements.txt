@@ -5,3 +5,4 @@ psycopg-pool==3.2.8
 pytest==8.4.2
 prometheus-client==0.22.1
 embit==0.8.0
+arch==9.0.0

@@ -32,6 +32,7 @@ Results go to the `trader` database in the cluster's shared Postgres, which the 
 | `lab/variants.py`, `lab/variants.toml`, `lab/grid.py` | Setup overlays the analysis sweeps (max open trades, stake, stoploss, ROI, pair count), and the one grid expander the overlays and the event-contract families share (see Setup overlays under The analysis) |
 | `lab/walkforward.py` | Nightly job: hyperopt on the months before each whole month since the venue's first training span, then that unseen month backtested as is and tuned (see Walk-forward), split over `WF_SHARDS` pods |
 | `lab/snapshot.py` | `publish`: the lab PVC's candle files to MinIO, content-addressed, with a manifest; `fetch`: the latest manifest's files to a pod's disk, so walk-forward pods run on any node (see Walk-forward, Candles) |
+| `lab/calibration.py` | Weekly job: each gate's false pass rate and power, from null and planted-edge strategies run through the whole pipeline on synthetic candles (see Calibration) |
 | `lab/reproduce.py` | Nightly step after the analysis: a random sample of cached chunks and folds run again and compared with what is stored (see Reproduce) |
 | `lab/metrics.py` | Pure functions behind the derived tables: daily returns, Sharpe, Sortino, drawdown, block-bootstrap intervals, deflated Sharpe with effective trials, overfit probability (CSCV), trades still needed, Monte Carlo, BTC regimes (`regimes()`, the one labeler: trend up, down or flat, volatility terciles of the volatility seen so far, so a day's label never changes) |
 | `lab/suggest.py`, `lab/suggest.toml` | After each analysis and walk-forward: promote, watch, demote, retire, fix and retune suggestions from the derived tables, with the thresholds as data (see Suggestions) |
@@ -125,7 +126,7 @@ npm run lint
 
 `npm test` runs pytest using the active Python environment. The Docker commands under [Run locally](#run-locally) supply the runtime dependencies and disposable database for the full suite. An unset `DATABASE_URL` skips database tests.
 
-`secrets`, the migrate-and-test step and the ML test step each stop after 10 minutes (`timeout-minutes`), so a hung test fails the run instead of holding a runner for six hours. `test` builds the image, runs the migrations twice and the tests against a Postgres 17 service; the second run must report `0 new`, which proves a migration applies once and a rerun is a no-op:
+`secrets`, the migrate-and-test step, the calibration step and the ML test step each stop after 10 minutes (`timeout-minutes`), so a hung test fails the run instead of holding a runner for six hours. `test` builds the image, runs the migrations twice and the tests against a Postgres 17 service; the second run must report `0 new`, which proves a migration applies once and a rerun is a no-op:
 
 ```sh
 python lab/migrate.py && python lab/migrate.py | grep -q "0 new" && python -m pytest -q -p no:cacheprovider lab/tests
@@ -140,7 +141,7 @@ freqtrade list-strategies --recursive-strategy-search \
 ! grep -E 'LOAD FAILED|DUPLICATE' strategies.txt
 ```
 
-`test-ml` builds the ML image (`--build-arg FREQTRADE_IMAGE=$ML_BASE`, the `2026.10_freqai` tag pinned by digest) and runs `lab/tests/test_ml.py` and `lab/tests/test_families.py` there. `publish` runs only on a push to master, after `secrets`, `quality`, `test` and `test-ml` pass, and pushes `trader` and `trader-ml` to GHCR as `sha-<7>` and `latest`.
+`test-ml` builds the ML image (`--build-arg FREQTRADE_IMAGE=$ML_BASE`, the `2026.10_freqai` tag pinned by digest) and runs `lab/tests/test_ml.py` and `lab/tests/test_families.py` there. `test-calibration` runs `lab/tests/test_calibration.py` with `CALIBRATION_E2E=1`, whose end-to-end universe (about three minutes) the `test` suite skips, so it runs beside the suite instead of lengthening it. `publish` runs only on a push to master, after `secrets`, `quality`, `test`, `test-calibration` and `test-ml` pass, and pushes `trader` and `trader-ml` to GHCR as `sha-<7>` and `latest`.
 
 `bump-home-config` then runs `ci/bump_home_config.py`: it sets the `trader` and `trader-ml` digests in home-config `apps/freqtrade/kustomization.yaml` (`images:`) to the one just pushed, opens that change on Forgejo as PR `trader-sha-<7>` through the public API at git.kennethblack.me, closes the older open `trader-sha-*` PRs it supersedes, then squash-merges its own. That merge is the deploy: Flux rolls the bots onto the new digest. It does not wait on home-config's PR checks, which never exercise a digest line; the image already passed `test` and `test-ml`. A bump that cannot merge fails the job and stays open for a person. It skips when master has already moved past the commit (the newer build opens the bump) and warns and skips when the repo secret `FORGEJO_DEPLOY_TOKEN` is unset. That secret is a Forgejo token with write on home-config, the same one the Forgejo deploy workflows use:
 
@@ -205,6 +206,16 @@ A backtest of a strategy as it is says nothing about tuning it, and hyperopt's b
 | `WF_BUDGET_S` | `0` | Seconds after which a run starts no more folds (0: no limit). Keep it under the job's deadline by `WF_TIMEOUT` plus the post steps; the run records `folds_left` and the next one carries on by cache key |
 | `WF_MEMORY_GB` | `10` | Estimated memory the folds running at once may hold |
 | `WF_STRATEGIES` | all | Space-separated names to limit a run to |
+
+## Calibration
+
+The confidence gates are thresholds chosen by hand, and their error rates were never measured on the pipeline as built. `lab/calibration.py` (weekly, the `freqtrade-calibration` CronJob) measures them. It writes seeded synthetic candles (GARCH(1,1) volatility, Student-t returns, and a persistent signal in the volume column that predicts the next hour's return with correlation `signal_ic`), and strategies that read that signal mixed with their own noise, so each one's correlation with the next return is one of `edges`, or zero for a null, which enters at random. Each has two tuned thresholds, so hyperopt has something to overfit.
+
+They run through the real `lab/analyze.py`, `lab/walkforward.py` and `confidence.rows()` in the Postgres schema `calibration_scratch`, with a temporary repo holding only the synthetic venue, so nothing reaches the trial register, the site or the league. The deflated Sharpe and minimum backtest length gates count the production register, the burden a real strategy faces. A universe (one seed, tagged with its number and the ISO week it started, `0001-2026-W46`) can take several runs: the walk-forward stops at `WF_BUDGET_S` and the next run carries on from its cached folds. When none are left, each strategy's gates over its newest 12 and 60 test months go to `calibration_outcomes`, `calibration` is rebuilt over every universe so far (rate and Wilson 95% interval per gate, edge and length; gate `stack` is all research gates together), and the next run starts a new universe. The paper gates (dry run, drift, not decayed) and venues agreeing need paper bots or a second venue and stay outside `stack`.
+
+Every run also stores SPA and StepM (Hansen 2005, Romano and Wolf 2005, via `arch`) in its `runs` row: whether any strategy's as-is daily returns over the year before the lockbox beat cash, per venue, and which ones. A diagnostic, not a gate.
+
+Settings: `[calibration]` in `lab/suggest.toml` (pairs, test lengths, volatility, signal, edges, strategies per edge, nulls). `CALIBRATION_SCHEMA` and `CALIBRATION_WORK` (where the candles are written, about 0.2 GB per pair) default to `calibration_scratch` and the temp directory; the `WF_*` settings reach the walk-forward as in its nightly job. A planted edge shows the pipeline finds a clean edge and invents none; synthetic candles say nothing about whether crypto has one.
 
 ## Reproduce
 
@@ -404,7 +415,7 @@ The event-contract paper league's accounts (`paper-<family>-<variant>`) get watc
 | `trader_ingest_age_seconds` | | Since any snapshot was written |
 | `trader_watch_age_seconds` | | Since the watcher last finished a pass |
 | `trader_watch_unseen_seconds`, `trader_watch_running`, `trader_watch_breached`, `trader_watch_day_loss_ratio` | `bot` | Since the last good read, 1 when taking entries, 1 after a daily loss breach, and the loss so far today as a share of capital |
-| `trader_run_started_timestamp_seconds`, `trader_run_finished_timestamp_seconds`, `trader_run_ok`, `trader_run_last_ok_timestamp_seconds` | `kind` (`analysis`, `walkforward`) | Newest run started, newest run finished and whether it succeeded, newest success |
+| `trader_run_started_timestamp_seconds`, `trader_run_finished_timestamp_seconds`, `trader_run_ok`, `trader_run_last_ok_timestamp_seconds` | `kind` (`analysis`, `walkforward`, `reproduce`, `calibration`) | Newest run started, newest run finished and whether it succeeded, newest success |
 | `trader_candle_age_seconds`, `trader_coverage_age_seconds`, `trader_coverage_series` | `exchange` | Newest stored candle, newest backfill write, series stored |
 | `trader_futures_age_seconds` | `kind`, `exchange` | Newest funding (`funding`) or open interest (`open_interest`) row |
 | `trader_suggestions` | `kind` | Open suggestions |
@@ -417,6 +428,8 @@ The event-contract paper league's accounts (`paper-<family>-<variant>`) get watc
 | `trader_markout_entries`, `trader_markout_net`, `trader_markout_null` | `bot`, `horizon` | Entries marked, their mean markout (BTC beta hedged, net of the round-trip fee) and the random-entry null's, from `markouts` |
 | `trader_markout_fill_slip` | `bot` | Mean fill over the entry candle's open, positive when worse |
 | `trader_reconcile_trades` | `bot`, `kind` (`matched`, `live_only`, `bt_only`) | Paper trades against the drift backtest, from `reconcile` |
+| `trader_calibration_fpr` | `gate`, `oos_months` | Share of null strategies (no edge) the gate passed over every calibration universe; gate `stack` is every research gate together |
+| `trader_calibration_power` | `gate`, `edge`, `oos_months` | The same share for strategies with a planted edge of that size |
 | `trader_shortfall`, `trader_shortfall_delay_seconds` | `bot`, `component` (`price`, `fee`, `profit`) | Mean paper minus backtest gap per matched trade, and the mean entry delay |
 
 ## Troubleshooting

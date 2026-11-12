@@ -81,6 +81,28 @@ jobs:
             | tee strategies.txt
           ! grep -E 'LOAD FAILED|DUPLICATE' strategies.txt
 
+  test-calibration:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: trader
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: docker build -t trader:ci .
+      - name: One calibration universe through the real analysis, walk-forward and confidence
+        timeout-minutes: 10
+        run: >-
+          docker run --rm --network host -e CALIBRATION_E2E=1
+          -e DATABASE_URL=postgresql://postgres:test@localhost:5432/trader --entrypoint python trader:ci
+          -m pytest -q -p no:cacheprovider lab/tests/test_calibration.py
+
   test-ml:
     runs-on: ubuntu-latest
     steps:
@@ -94,7 +116,7 @@ jobs:
           -m pytest -q -p no:cacheprovider lab/tests/test_ml.py lab/tests/test_families.py
 
   publish:
-    needs: [secrets, quality, test, test-ml]
+    needs: [secrets, quality, test, test-calibration, test-ml]
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     outputs:

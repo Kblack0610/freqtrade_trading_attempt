@@ -270,3 +270,26 @@ max_rho = 0.5
 # The strategy card's haircut: per-trade expectancy again with every win cut to this share of its size, since a
 # backtest's wins tend to shrink out of sample (tr-211 review, payoff ratio beside win rate). Judgment, not evidence.
 payoff_haircut = 0.5
+
+[calibration]
+# lab/calibration.py: the real analysis, walk-forward and confidence code on seeded synthetic candles, to measure each
+# gate's false pass rate (strategies with no edge) and power (strategies with a planted one). Every planted number is
+# a choice for the experiment, not a fact about crypto; the table says only whether the gates find a clean edge.
+# One synthetic venue with the first venue's fees and these pairs, each its own hourly path.
+pairs = ["BTC/USD", "ETH/USD", "SOL/USD"]
+# The calibration table reads the newest this-many test months of each strategy, so one run gives each length.
+oos_months = [12, 60]
+# Hourly returns: GARCH(1,1) with Student-t innovations (volatility clustering and fat tails) at this annual volatility.
+annual_vol = 0.60
+garch_alpha = 0.05
+garch_beta = 0.93
+tail_df = 4
+# The planted component: an AR(1) signal (an Ornstein-Uhlenbeck process sampled hourly) with this lag-1 correlation,
+# carried in the candle volume, whose correlation with the next hour's standardized return is signal_ic.
+signal_phi = 0.90
+signal_ic = 0.04
+# Each planted strategy reads the signal mixed with its own noise, so its correlation with the next return (its edge)
+# is one of these; a null reads only noise, so it enters at random times and is tuned like any other strategy.
+edges = [0.01, 0.02, 0.04]
+per_edge = 4
+nulls = 8
