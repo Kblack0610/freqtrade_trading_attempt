@@ -272,6 +272,9 @@ budget_rps = 5
 retries = 4
 # The drill rests one contract this far below the ask, post only, so it cannot fill before it is cancelled.
 drill_price = 0.01
+# Most demo markets have an empty book, a 1.00 ask (2026-11-12: 199 of the first 200), so the drill pages on to
+# find one it can rest under: 10 pages of 200 is 2,000 markets and 10 reads, 2 s at the budget.
+market_pages = 10
 # Reads lag writes (2026-11-09: a 404 right after a place, still resting 0.04 s after a cancel, canceled by 0.29 s),
 # and an order state read has no event short of the websocket, so reads wait up to 5 s.
 read_polls = 20
