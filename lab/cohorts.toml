@@ -43,13 +43,16 @@ binanceus = 300
 
 [diverse]
 # One forward test per different way of making money: the elite of each filled cell of the diversity archive
-# (lab/diversity.py, docs/strategy-coverage.md Diversity) on `venues`, best Sharpe low end first, skipping any whose
-# daily returns correlate past `[diversity] max_rho` (lab/suggest.toml) with one already picked, up to `max_bots`.
-# Strategies faster than `min_timeframe` are left out to keep the candle calls small. One bot per pick, base overlay.
+# (lab/diversity.py, docs/strategy-coverage.md Diversity) on `venues`, best Sharpe low end first. A pick needs a
+# positive mean edge before fees on its own venue and on a `replicate_on` venue in the archive window, so a one-venue
+# quirk is not forward-tested, and BTC-residual daily returns at |rho| `[diversity] max_rho` (lab/suggest.toml) or
+# under with every pick before it; up to `max_bots`. The picks' residual effective count is printed as a report, never
+# a gate (tr-211 review decisions, 2026-11-11: the lift was not in the verified data). Strategies faster than `min_timeframe` are left out to keep the candle calls small. One bot per pick, base overlay.
 # The promote gates are ignored, as for aggressive. Grow `max_bots` only by a human decision: about 320 MiB and a
 # PVC each.
 kind = "archive"
 venues = ["binanceus"]
+replicate_on = ["okx", "kucoin"]
 min_timeframe = "1h"
 max_bots = 16
 
