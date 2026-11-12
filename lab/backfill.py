@@ -12,6 +12,11 @@ listing date, or the floor), and is never prepended again. A series with no cand
 publishes that history in bulk (OKX 1m, lab/archive.py) takes it from there first, so the prepend pass
 has little or nothing left to page through.
 
+A run of flat, zero-volume candles lasting HALT_DAYS or more is dropped from every served series after its
+downloads: an exchange pads a suspended market that way (binanceus 1d across its USD suspension, 2023-07-15 to
+2025-02-18, while its 1h serves nothing there), and a backtest on the padding trades a frozen price as if the market
+were open. Dropped, the halt is a gap, as it already is on the timeframes the exchange leaves empty.
+
 A timeframe the exchange does not serve (coinbase 4h) is built from the longest served one that divides
 it (1h) after each run, and inherits that series' oldest_reached.
 
@@ -56,6 +61,10 @@ TIMEFRAMES = os.environ.get("TIMEFRAMES", "1m 5m 15m 30m 1h 4h 1d").split()
 FORWARD_EXCHANGES = set(os.environ.get("FORWARD_EXCHANGES", "kraken").split())
 PREPEND_FROM = os.environ.get("PREPEND_FROM", "20150101")
 PREPEND_FLOORS = dict(f.split("=", 1) for f in os.environ.get("PREPEND_FLOORS", "1m=20240101").split())
+# Measured on the lab PVC 2026-11-12: halts pad 93 days (okx 2019-10 to 2020-01), 585 (binanceus 1d, USD suspension)
+# and 1517 (binanceus XRP/USD 1d, 2021-01 to 2025-03); the longest flat run in a market that was open is 4.7 days
+# (binanceus' launch week, 2019-09).
+HALT_DAYS = float(os.environ.get("HALT_DAYS", "7"))
 # Freqtrade lines worth keeping in the job log; the rest is progress bars and config chatter.
 KEEP = re.compile(r"Downloaded data for| - (ERROR|WARNING) - ")
 SKIP = re.compile(r"not officially supported")
@@ -148,6 +157,20 @@ def merge_candles(dh, pair: str, tf: str, new: pd.DataFrame) -> None:
     merged = new if old.empty else pd.concat([old, new], ignore_index=True)
     dh.ohlcv_store(pair, tf, clean_ohlcv_dataframe(merged, tf, pair, fill_missing=False, drop_incomplete=False),
                    CandleType.SPOT)
+
+
+def drop_halts(exchange: str, pair: str, tf: str) -> int:
+    """Drop each run of flat, zero-volume candles lasting HALT_DAYS or more; returns how many went."""
+    dh = get_datahandler(datadir(exchange), "feather")
+    df = dh.ohlcv_load(pair, tf, CandleType.SPOT, fill_missing=False, warn_no_data=False)
+    if df.empty:
+        return 0
+    flat = (df["volume"] == 0) & (df["open"] == df["high"]) & (df["high"] == df["low"]) & (df["low"] == df["close"])
+    run = (flat != flat.shift()).cumsum()
+    halt = flat & (run.map(run.value_counts()) * timeframe_to_seconds(tf) >= HALT_DAYS * 86400)
+    if halt.any():
+        dh.ohlcv_store(pair, tf, df[~halt].reset_index(drop=True), CandleType.SPOT)
+    return int(halt.sum())
 
 
 def collect_forward(ft: Freqtrade, exchange: str, pairs: list[str], timeframes: list[str]) -> bool:
@@ -270,6 +293,10 @@ def backfill_exchange(ft: Freqtrade, conn, exchange: str, pairs: list[str], time
                 else:
                     ok = False
             ok = ft.download(exchange, ["-t", tf, "--pairs", *pairs]) and ok
+    for tf in tfs:
+        for p in pairs:
+            if n := drop_halts(exchange, p, tf):
+                print(f"backfill: {exchange}: {p} {tf}: dropped {n} halted candles", flush=True)
     for tf, src in derived.items():
         for p in pairs:
             derive(exchange, p, src, tf)
