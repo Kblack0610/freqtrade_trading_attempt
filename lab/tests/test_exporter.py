@@ -3,6 +3,7 @@ import datetime as dt
 import pytest
 from prometheus_client import CollectorRegistry, generate_latest
 
+
 def scrape(collector) -> dict[str, float]:
     registry = CollectorRegistry()
     registry.register(collector)
