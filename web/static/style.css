@@ -56,3 +56,25 @@ dl.card dt { color: var(--muted); }
 dl.card dd { margin: 0; }
 pre { margin: 0; padding: 0.5rem 0.75rem; overflow-x: auto; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; font-size: 0.85rem; }
 code { font-size: 0.9em; }
+
+#research-setups { overflow-wrap: anywhere; }
+#research-setups [hidden] { display: none; }
+#saved-setups caption { text-align: left; padding: 0.5rem 0.75rem; }
+#saved-setups td { white-space: normal; overflow-wrap: anywhere; }
+#saved-setups td:last-child { min-width: 9rem; }
+#saved-setups button + button { margin-left: 0.5rem; }
+.setup-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
+.setup-fields label { display: flex; flex-direction: column; gap: 0.35rem; min-width: 0; }
+.setup-fields input, .setup-fields select { box-sizing: border-box; width: 100%; min-width: 0; padding: 0.5rem; font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; }
+#research-setups button:focus-visible, .setup-fields :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+#research-setups button:disabled { cursor: not-allowed; opacity: 0.6; }
+@media (max-width: 600px) {
+  .setup-fields { grid-template-columns: minmax(0, 1fr); }
+  #saved-setups thead { display: none; }
+  #saved-setups tbody { display: block; }
+  #saved-setups tr { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 0.5rem 0; border-bottom: 1px solid var(--line); }
+  #saved-setups td { border: none; }
+  #saved-setups td:first-child, #saved-setups td:last-child { grid-column: 1 / -1; }
+  #saved-setups td:first-child { font-weight: 600; }
+  #saved-setups td[data-label]:not(:first-child)::before { content: attr(data-label) ": "; color: var(--muted); }
+}
