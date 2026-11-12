@@ -1,5 +1,6 @@
 import datetime as dt
 
+import pytest
 from prometheus_client import CollectorRegistry, generate_latest
 
 
@@ -47,8 +48,21 @@ def test_metrics_read_the_newest_state(conn):
                  "('mixture', 'm', '', 'abc', 'down/high', 90, 0, NULL, 5), "
                  "('benchmark', 'hold BTC', '', '', 'up/low', 90, 0, 0.3, 5)")
 
+    conn.execute("INSERT INTO markouts (bot, trade_id, open_date, horizon_min, pair, exchange, side, fill_slip, ret, "
+                 "btc_ret, beta, net, null_net, null_draws) VALUES "
+                 "('a', 1, %s, 60, 'ETH/USD', 'kraken', 1, 0.001, 0.02, 0.01, 1, 0.008, -0.002, 20), "
+                 "('a', 2, %s, 60, 'ETH/USD', 'kraken', 1, 0.003, 0.0, 0.0, 1, -0.002, -0.002, 20)", (NOW, NOW))
+    conn.execute("INSERT INTO reconcile (bot, n, pair, kind, delay_s, price_gap, fee_gap, profit_gap) VALUES "
+                 "('a', 0, 'ETH/USD', 'matched', 60, 0.002, 0, -0.004), ('a', 1, 'ETH/USD', 'bt_only', NULL, NULL, NULL, NULL)")
     m = scrape(TraderCollector(db.connect))
     assert m["trader_db_up"] == 1
+    assert m['trader_markout_net{bot="a",horizon="60m"}'] == pytest.approx(0.003)
+    assert m['trader_markout_null{bot="a",horizon="60m"}'] == pytest.approx(-0.002)
+    assert m['trader_markout_entries{bot="a",horizon="60m"}'] == 2
+    assert m['trader_markout_fill_slip{bot="a"}'] == pytest.approx(0.002)
+    assert m['trader_reconcile_trades{bot="a",kind="bt_only"}'] == 1
+    assert m['trader_shortfall{bot="a",component="price"}'] == 0.002
+    assert m['trader_shortfall_delay_seconds{bot="a"}'] == 60
     assert m['trader_climate_passing{kind="strategy",regime="up/low"}'] == 1
     assert m['trader_climate_passing{kind="mixture",regime="down/high"}'] == 0
     assert 'trader_climate_passing{kind="benchmark",regime="up/low"}' not in m

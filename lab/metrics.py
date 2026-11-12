@@ -405,37 +405,82 @@ def trend_buckets(close: pd.Series, band: float) -> pd.Series:
     return pd.Series(np.select([gap > band, gap < -band], ["up", "down"], "flat"), index=gap.index).where(gap.notna())
 
 
+RECONCILE_COLS = ["pair", "kind", "live_open", "bt_open", "delay_s", "price_gap", "fee_gap", "profit_gap"]
+
+
+def _trades(df: pd.DataFrame) -> pd.DataFrame:
+    """Dates as one resolution (merge_asof needs it) and the optional fill columns present."""
+    df = df.assign(open_date=pd.to_datetime(df["open_date"], utc=True).astype("datetime64[ns, UTC]"))
+    for c, v in (("open_rate", np.nan), ("fee_open", np.nan), ("fee_close", np.nan), ("is_short", False)):
+        if c not in df:
+            df[c] = v
+    return df.assign(is_short=df["is_short"].fillna(False).astype(bool))
+
+
+def reconcile(live: pd.DataFrame, bt: pd.DataFrame, tolerance: pd.Timedelta) -> pd.DataFrame:
+    """A league bot's dry run against a backtest of the same strategy, exchange and period, trade by trade: where the
+    two part, split the way Perold's implementation shortfall splits it (delay, price, fees, missed fills).
+
+    live: pair, open_date, is_open, profit_ratio, and when known open_rate, fee_open, fee_close, is_short. bt: pair,
+    open_date, exit_reason, profit_ratio, and the same optional columns. A live entry matches the backtest entry on
+    the same pair nearest in time, within `tolerance` (one candle). One row per live entry in open order (kind matched
+    or live_only), then one per backtest entry no live entry matched (bt_only: a fill the bot missed). The gaps are live
+    minus backtest: delay_s, price_gap (entry price as a ratio, signed so positive is worse for the side), fee_gap
+    (round-trip fee rate) and profit_gap, the last only for trades closed on both sides; a backtest trade still open at
+    the end is closed there with exit_reason force_exit, so it has none.
+    """
+    if not len(live) and not len(bt):
+        return pd.DataFrame(columns=RECONCILE_COLS)
+    side = _trades(bt)[["pair", "open_date", "open_rate", "fee_open", "fee_close", "profit_ratio", "exit_reason"]] \
+        .rename(columns=lambda c: c if c in ("pair", "open_date") else "bt_" + c) if len(bt) else None
+    rows = []
+    if len(live):
+        mine = _trades(live).sort_values("open_date")
+        if side is not None:
+            side = side.assign(bt_open=side["open_date"]).sort_values("open_date")
+            m = pd.merge_asof(mine, side, on="open_date", by="pair", tolerance=tolerance, direction="nearest")
+        else:
+            m = mine.assign(bt_open=pd.Series(pd.NaT, index=mine.index, dtype="datetime64[ns, UTC]"), bt_open_rate=np.nan, bt_fee_open=np.nan, bt_fee_close=np.nan,
+                            bt_profit_ratio=np.nan, bt_exit_reason=None)
+        sign = np.where(m["is_short"], -1.0, 1.0)
+        closed = ~m["is_open"].astype(bool) & m["bt_open"].notna() & (m["bt_exit_reason"] != "force_exit")
+        rows.append(pd.DataFrame({
+            "pair": m["pair"], "kind": np.where(m["bt_open"].notna(), "matched", "live_only"),
+            "live_open": m["open_date"], "bt_open": m["bt_open"],
+            "delay_s": (m["open_date"] - m["bt_open"]).dt.total_seconds(),
+            "price_gap": sign * (m["open_rate"].astype(float) / m["bt_open_rate"].astype(float) - 1),
+            "fee_gap": (m["fee_open"] + m["fee_close"]).astype(float) - (m["bt_fee_open"] + m["bt_fee_close"]).astype(float),
+            "profit_gap": (m["profit_ratio"].astype(float) - m["bt_profit_ratio"].astype(float)).where(closed)}))
+        hit = set(zip(m["pair"], m["bt_open"]))
+    else:
+        hit = set()
+    if side is not None:
+        missed = side[[(p, t) not in hit for p, t in zip(side["pair"], side["open_date"])]].sort_values("open_date")
+        rows.append(pd.DataFrame({"pair": missed["pair"], "kind": "bt_only", "live_open": pd.NaT,
+                                  "bt_open": missed["open_date"]}))
+    return pd.concat(rows, ignore_index=True).reindex(columns=RECONCILE_COLS)
+
+
 def drift(live: pd.DataFrame, bt: pd.DataFrame, tolerance: pd.Timedelta) -> dict:
-    """A league bot's dry run against a backtest of the same strategy, exchange and period.
+    """A league bot's dry run against a backtest of the same strategy, exchange and period, summed up from
+    reconcile(), which it returns too under "reconcile".
 
     live: pair, open_date, is_open, profit_ratio, profit_abs. bt: pair, open_date, exit_reason,
-    profit_ratio, profit_abs. A live entry matches the backtest entry on the same pair nearest in
-    time, within `tolerance` (one candle). A backtest trade still open at the end is closed there
-    with exit_reason force_exit, so it counts as an entry but not as a closed trade. The gap is the
-    mean live minus backtest profit ratio over matched trades closed on both sides.
+    profit_ratio, profit_abs. A backtest trade still open at the end counts as an entry but not as a closed trade.
+    The gap is the mean live minus backtest profit ratio over matched trades closed on both sides.
     """
     lc = live[~live["is_open"].astype(bool)] if len(live) else live
     bc = bt[bt["exit_reason"] != "force_exit"] if len(bt) else bt
-    out = {"live_entries": len(live), "bt_entries": len(bt), "matched": 0, "live_closed": len(lc), "bt_closed": len(bc),
-           "live_expectancy": float(lc["profit_ratio"].mean()) if len(lc) else None,
-           "bt_expectancy": float(bc["profit_ratio"].mean()) if len(bc) else None,
-           "live_profit": float(lc["profit_abs"].sum()) if len(lc) else 0.0,
-           "bt_profit": float(bc["profit_abs"].sum()) if len(bc) else 0.0, "gap": None, "gap_trades": 0, "gaps": []}
-    if not len(live) or not len(bt):
-        return out
-    side = bt[["pair", "open_date", "profit_ratio", "exit_reason"]].rename(
-        columns={"profit_ratio": "bt_ratio", "exit_reason": "bt_exit"})
-    # pandas keeps each source's time resolution, and merge_asof needs one
-    side = side.assign(open_date=pd.to_datetime(side["open_date"], utc=True).astype("datetime64[ns, UTC]"),
-                       bt_open=lambda x: x["open_date"])
-    mine = live.assign(open_date=pd.to_datetime(live["open_date"], utc=True).astype("datetime64[ns, UTC]"))
-    m = pd.merge_asof(mine.sort_values("open_date"), side.sort_values("open_date"), on="open_date", by="pair",
-                      tolerance=tolerance, direction="nearest")
-    hit = m[m["bt_open"].notna()]
-    both = hit[~hit["is_open"].astype(bool) & (hit["bt_exit"] != "force_exit")]
-    gaps = (both["profit_ratio"] - both["bt_ratio"]).astype(float)
-    out.update(matched=len(hit), gap_trades=len(both), gap=float(gaps.mean()) if len(both) else None, gaps=gaps.tolist())
-    return out
+    rec = reconcile(live, bt, tolerance)
+    gaps = rec["profit_gap"].dropna().astype(float)
+    return {"live_entries": len(live), "bt_entries": len(bt), "matched": int((rec["kind"] == "matched").sum()),
+            "live_closed": len(lc), "bt_closed": len(bc),
+            "live_expectancy": float(lc["profit_ratio"].mean()) if len(lc) else None,
+            "bt_expectancy": float(bc["profit_ratio"].mean()) if len(bc) else None,
+            "live_profit": float(lc["profit_abs"].sum()) if len(lc) else 0.0,
+            "bt_profit": float(bc["profit_abs"].sum()) if len(bc) else 0.0,
+            "gap": float(gaps.mean()) if len(gaps) else None, "gap_trades": len(gaps), "gaps": gaps.tolist(),
+            "reconcile": rec}
 
 
 def confidence_sequence(x, lo: float, hi: float, alpha: float, grid: int = 400) -> tuple[np.ndarray, np.ndarray]:
