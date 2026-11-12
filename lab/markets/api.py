@@ -12,7 +12,8 @@ What is retried depends on the method. A 429 means the provider did not act on t
 retried on it. A 5xx is retried only for an idempotent method (IDEMPOTENT): a POST or PATCH that drew a 5xx may
 have been carried out, an order placed, so it is returned to the caller at once. A timeout or connection error
 is raised at once for every method, for the same reason. params and headers may be callables, rebuilt on every
-attempt, so a signature over a timestamp is fresh on each retry.
+attempt, so a signature over a timestamp is fresh on each retry; body may be a callable too, called after params and
+before headers, so a nonce in the body (Kraken) is fresh on each retry.
 """
 
 import datetime as dt
@@ -110,7 +111,8 @@ class Api:
         for attempt in range(self.retries + 1):
             self._turn()
             q = params() if callable(params) else params
-            r = self.http.request(method, f"{self.base}{path}", params=q, json=body,
+            b = body() if callable(body) else body
+            r = self.http.request(method, f"{self.base}{path}", params=q, json=b,
                                   headers=headers(q) if callable(headers) else headers, timeout=self.timeout)
             retry = r.status_code == 429 or (r.status_code >= 500 and method in IDEMPOTENT)
             if not retry or attempt == self.retries:
