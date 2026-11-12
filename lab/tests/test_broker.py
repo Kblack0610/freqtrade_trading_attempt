@@ -4,6 +4,7 @@ import base64
 import datetime as dt
 import hashlib
 import hmac
+from urllib.parse import urlencode
 
 import pytest
 import requests
@@ -12,9 +13,13 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from lab import broker
 from lab.broker import AlpacaPaper, NotPaper, RobinhoodCrypto, SnapTrade, WrongHost
 
-PAPER = {"base_url": "https://paper-api.alpaca.markets", "timeout_s": 5}
+PAPER = {"base_url": "https://paper-api.alpaca.markets", "timeout_s": 5, "page_gap_s": 0, "retries": 2}
 ACCOUNT = {"id": "a1", "status": "ACTIVE", "currency": "USD", "equity": "100012.50", "cash": "99000.00",
            "buying_power": "199000.00"}
+
+
+def NO_SLEEP(_):
+    pass
 
 
 class Resp:
@@ -34,7 +39,7 @@ class Paper:
         self.calls, self.status, self.placed = [], None, placed
         self.pending, self.cancel_status, self.account_status = pending, cancel_status, account
 
-    def request(self, method, url, json, timeout, headers):
+    def request(self, method, url, json, timeout, headers, params=None):
         path = url.removeprefix("https://paper-api.alpaca.markets")
         self.calls.append((method, path, json, headers))
         if (method, path) == ("GET", "/v2/account"):
@@ -124,6 +129,7 @@ def test_a_failed_cancel_is_recorded_and_the_order_is_placed_once(conn):
     row = broker.rest_and_cancel(conn, client(s), "SPY", 1.0)
     assert row["status"] == "accepted" and row["canceled_at"] is None and "HTTP 503" in row["error"]
     assert [c[0] for c in s.calls].count("POST") == 1
+    assert [c[0] for c in s.calls].count("DELETE") == 1 + PAPER["retries"], "a cancel by id is retried on a 5xx"
 
 
 def test_a_cancel_stuck_pending_fails_the_drill_within_its_bound(conn):
@@ -136,14 +142,14 @@ def test_a_cancel_stuck_pending_fails_the_drill_within_its_bound(conn):
 def test_main_reads_and_stores_with_keys_set(conn, monkeypatch):
     monkeypatch.setenv("ALPACA_PAPER_KEY_ID", "key-1")
     monkeypatch.setenv("ALPACA_PAPER_SECRET_KEY", "secret-1")
-    assert broker.main(["read"], session=Paper()) == 0
+    assert broker.main(["read"], session=Paper(), sleep=NO_SLEEP) == 0
     assert conn.execute("SELECT equity, error FROM broker_balances").fetchall() == [(100012.5, None)]
 
 
 def test_main_exits_1_when_the_read_failed(conn, monkeypatch):
     monkeypatch.setenv("ALPACA_PAPER_KEY_ID", "key-1")
     monkeypatch.setenv("ALPACA_PAPER_SECRET_KEY", "secret-1")
-    assert broker.main(["read"], session=Paper(account=403)) == 1
+    assert broker.main(["read"], session=Paper(account=403), sleep=NO_SLEEP) == 1
     assert "HTTP 403" in conn.execute("SELECT error FROM broker_balances").fetchone()[0]
 
 
@@ -165,8 +171,8 @@ def test_no_keys_is_a_quiet_read_and_a_refused_drill():
 # Robinhood Crypto and SnapTrade: real accounts, read only.
 
 SEED = bytes(range(32))
-RH = {"base_url": "https://trading.robinhood.com", "timeout_s": 5, "quote": "USD"}
-ST = {"base_url": "https://api.snaptrade.com", "timeout_s": 5}
+RH = {"base_url": "https://trading.robinhood.com", "timeout_s": 5, "page_gap_s": 0, "quote": "USD"}
+ST = {"base_url": "https://api.snaptrade.com", "timeout_s": 5, "page_gap_s": 0}
 
 
 class Robinhood:
@@ -175,7 +181,7 @@ class Robinhood:
     def __init__(self, account=200, prices=("BTC-USD",)):
         self.calls, self.account_status, self.priced = [], account, prices
 
-    def request(self, method, url, json, timeout, headers):
+    def request(self, method, url, json, timeout, headers, params=None):
         path = url.removeprefix("https://trading.robinhood.com")
         self.calls.append((method, path, json, headers))
         if path == "/api/v1/crypto/trading/accounts/":
@@ -240,8 +246,8 @@ def test_a_refused_robinhood_read_is_a_row_without_the_key():
 
 def test_a_robinhood_next_page_on_another_host_is_refused():
     class Elsewhere(Robinhood):
-        def request(self, method, url, json, timeout, headers):
-            r = super().request(method, url, json, timeout, headers)
+        def request(self, method, url, json, timeout, headers, params=None):
+            r = super().request(method, url, json, timeout, headers, params)
             if url.endswith("/holdings/"):
                 r.body = {**r.body, "next": "https://evil.example/api/v1/crypto/trading/holdings/?cursor=c2"}
             return r
@@ -261,7 +267,8 @@ class Snap:
     def __init__(self, status=200):
         self.calls, self.status = [], status
 
-    def request(self, method, url, json, timeout, headers):
+    def request(self, method, url, json, timeout, headers, params=None):
+        url = f"{url}?{urlencode(params)}" if params else url
         self.calls.append((method, url, json, headers))
         if url.startswith("https://api.snaptrade.com/accounts?"):
             return Resp(self.status, ACCOUNTS if self.status == 200 else {"detail": "Invalid signature"})
@@ -295,15 +302,15 @@ def test_main_reads_every_source_whose_keys_are_set(conn, monkeypatch):
             Robinhood.__init__(self)
             self.status = 200
 
-        def request(self, method, url, json, timeout, headers):
+        def request(self, method, url, json, timeout, headers, params=None):
             if url.startswith("https://api.snaptrade.com"):
-                return Snap.request(self, method, url, json, timeout, headers)
-            return Robinhood.request(self, method, url, json, timeout, headers)
+                return Snap.request(self, method, url, json, timeout, headers, params)
+            return Robinhood.request(self, method, url, json, timeout, headers, params)
     monkeypatch.setenv("ROBINHOOD_API_KEY", "rh-key")
     monkeypatch.setenv("ROBINHOOD_PRIVATE_KEY", base64.b64encode(SEED).decode())
     monkeypatch.setenv("SNAPTRADE_CLIENT_ID", "c")
     monkeypatch.setenv("SNAPTRADE_CONSUMER_KEY", "k")
-    assert broker.main(["read"], session=Both()) == 1  # the Roth IRA has no total
+    assert broker.main(["read"], session=Both(), sleep=NO_SLEEP) == 1  # the Roth IRA has no total
     assert conn.execute("SELECT broker, paper, equity FROM broker_balances ORDER BY broker").fetchall() == [
         ("fidelity_individual_1234", False, 15363.23), ("fidelity_roth_ira_5678", False, None),
         ("robinhood_crypto", False, 850.5)]

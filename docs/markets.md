@@ -91,7 +91,7 @@ The league runs `longshot` only (8 accounts). `calibration` needs a bars fit eac
 
 - Signing (doc, https://docs.kalshi.com/getting_started/api_keys, 2026-11-06): `KALSHI-ACCESS-KEY`, `KALSHI-ACCESS-TIMESTAMP` in epoch ms, and `KALSHI-ACCESS-SIGNATURE`, the base64 signature of timestamp + method + path. The path includes `/trade-api/v2` and drops the query. RSA keys sign with PSS SHA-256 and a digest-length salt.
 - Orders (doc, api-reference create-order-v2, cancel-order-v2, get-order, 2026-11-06): `POST /portfolio/events/orders` takes `side` (`bid` buys yes), with `count` and `price` (dollars) as fixed-point strings. `DELETE /portfolio/events/orders/{id}?market_ticker=T` cancels. `GET /portfolio/orders/{id}` returns `status` (`resting`, `canceled` or `executed`). The legacy `/portfolio/orders` POST is deprecated.
-- The drill picks an open demo market with an ask above `drill_price` (1c), or takes `--ticker`. It rests one yes contract at 1c, post only, reads it back, cancels it and reads it back again, writing each step to `demo_orders`. It exits 1 unless the order was seen resting and then canceled. A POST is never retried, because a timeout may already have placed it.
+- The drill picks an open demo market with an ask above `drill_price` (1c), or takes `--ticker`. It rests one yes contract at 1c, post only, reads it back, cancels it and reads it back again, writing each step to `demo_orders`. It exits 1 unless the order was seen resting and then canceled. A POST is retried on a 429 only, never after a 5xx or a timeout, because either may already have placed it (Rate limits).
 - Reads lag writes on the demo (measured 2026-11-09): `GET /portfolio/orders/{id}` gave a 404 right after the place and returned the order by the next look, and still said `resting` 0.04 s after a cancel, `canceled` by 0.29 s. The client waits within `read_polls` x `read_poll_s` (`lab/markets.toml`), and a drill whose read-back fails still cancels the order, so it never stays on the book.
 - First passed on the demo exchange 2026-11-09: `demo_orders` row 3 rested, then canceled, no error. Rows 1 and 2 are the runs before it: unfunded account, then the read lag. The keys are not in SOPS, so the drill runs by hand: `KALSHI_DEMO_KEY_ID` from rbw, the PEM from `/data/Downloads`, `DATABASE_URL` over a port-forward.
 - The demo account starts empty and the API has no deposit call. Funding is on the demo.kalshi.co site, with the test debit cards Kalshi publishes (doc, https://help.kalshi.com/en/articles/13823775-creating-and-using-a-demo-account, 2026-11-09). The account holds $100 of mock money.
@@ -106,11 +106,12 @@ The exporter adds `trader_markets_*` and `trader_paper_*` (README, Metrics). hom
 
 ## Rate limits
 
-Every venue call goes through `Api.get` (`lab/markets/api.py`), which paces it two ways; adapters do not sleep on their own.
+Every third-party HTTP call in `lab/` goes through `Api.request` (`lab/markets/api.py`; `Api.get` for a JSON read), which paces it two ways; no caller sleeps or retries on its own. `lab/tests/test_money.py` finds every `Api(...)` and raw HTTP client in `lab/` and `web/` and fails on one without a row.
 
 - Shared budget: `budget_rps` in each `[venues.<v>]` table is how many requests a second every process on our egress IP may send that venue together. It is one row of `venue_budgets` (migration 041, `lab/markets/budget.py`): each request takes the next slot, `1/budget_rps` after the last one handed out, in one statement against the database clock, and sleeps until its slot. The recorder, the three history jobs and anything else calling a venue queue on that row, so jobs that overlap share the rate instead of adding up. The budget keeps its own autocommit connection, so a caller's open transaction never holds the row.
 - Own gap: `page_gap_s` is the least time between one process's requests (`[history.<v>] page_gap_s` replaces it for history). A 429 or 5xx doubles that process's gap for the rest of its run, up to 30 s, and each success takes 0.01 s off it until it is back at `page_gap_s`.
 - Retries: up to `retries`, each waiting the `Retry-After` the venue sends (seconds or a date), else `page_gap_s * 2^n`, at least 0.5 s and at most 60 s. A retry also holds the shared budget that long, so every process pauses, not only the one that got the 429.
+- What is retried depends on the method. A 429 is retried for every method: the provider did not act on it. A 5xx is retried only for GET, HEAD, OPTIONS, PUT and DELETE (the only DELETEs cancel an order by id). A POST or PATCH that drew a 5xx may have been carried out, an order placed, so it comes back to the caller at once. A timeout or a dropped connection is raised at once for every method. Signed headers and a signed query are built again for each attempt, so a retry carries a fresh timestamp.
 
 Budgets, about 60% of each venue's published limit:
 
@@ -123,7 +124,23 @@ Budgets, about 60% of each venue's published limit:
 | PredictIt | none published | 1 |
 | The Odds API | credits per month, no rate | 1 |
 
-Kalshi (doc, https://docs.kalshi.com/getting_started/rate_limits, rechecked 2026-11-11): a 429 carries no `Retry-After` or `X-RateLimit-*` header, and "there is no penalty or cooldown": the next request succeeds once the bucket refills. Before the shared budget, on 2026-11-11 the history jobs (settled every 3 h, bars and trades an hour and two after it) ran past `budget_min` into each other, three at about 6.7 requests/s each beside the recorder, over the 20/s limit: 950 to 1002 `HTTP 429` lines a settled run, about 530 a bars or trades run, 30 to 50 in a recorder run, and three recorder runs that ran out of retries. Why the history jobs overrun is tr-181. `lab/markets/research/kalshi_calibration.py` is run by hand from a workstation and keeps its own limiter.
+The other providers, each with its config beside the limit it quotes (all read 2026-11-11):
+
+| Provider | Published limit | Config |
+|---|---|---|
+| Kalshi demo (`lab/markets/kalshi_trade.py`) | as Kalshi; the page does not say the demo differs | `[demo.kalshi]`, budget 5 |
+| Manifold drill (`lab/markets/manifold_trade.py`) | per IP, so it takes `[venues.manifold]`'s budget | `[demo.manifold]` |
+| Kalshi calibration (by hand) | as Kalshi; drew 429s at 8/s | `[research.kalshi_calibration]`, no budget: a workstation's IP |
+| Alpaca paper | 200 requests/min per account | `lab/broker.toml` `[alpaca]`, budget 2 |
+| Robinhood Crypto | 100 requests/min per account, bursts to 300 | `[robinhood]`, budget 1 |
+| SnapTrade | 250 requests/min per clientId; no `Retry-After` | `[snaptrade]`, budget 2.5 |
+| Blockstream Esplora | none published; a maintainer suggests up to 5/s | `lab/wallet.toml` `[esplora]`, budget 1 |
+| OKX market-data-history | 5 requests per 2 s per IP | `lab/archive.py` `OKX`, gap 0.8 s |
+| Kraken and OKX archive files (CDN) | none published | `lab/archive.py` `KRAKEN`, `OKX_FILES` |
+
+Not on `Api`: our own services (the LiteLLM gateway in `lab/markets/links.py`, the bots' API in `lab/ingest.py`, the pod health check, Forgejo sign-in), and ccxt clients (`lab/futures.py`, `lab/backfill.py`, `lab/pairs.py`), which pace with ccxt's own `enableRateLimit`.
+
+Kalshi (doc, https://docs.kalshi.com/getting_started/rate_limits, rechecked 2026-11-11): a 429 carries no `Retry-After` or `X-RateLimit-*` header, and "there is no penalty or cooldown": the next request succeeds once the bucket refills. Before the shared budget, on 2026-11-11 the history jobs (settled every 3 h, bars and trades an hour and two after it) ran past `budget_min` into each other, three at about 6.7 requests/s each beside the recorder, over the 20/s limit: 950 to 1002 `HTTP 429` lines a settled run, about 530 a bars or trades run, 30 to 50 in a recorder run, and three recorder runs that ran out of retries. Why the history jobs overrun is tr-181. `lab/markets/research/kalshi_calibration.py` is run by hand from a workstation and goes through `Api` with `[research.kalshi_calibration]`, without the shared budget, which counts the cluster's IP.
 
 To check a run: `kubectl -n freqtrade logs <pod> | grep -c 'HTTP 429'`.
 

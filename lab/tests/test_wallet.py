@@ -44,9 +44,9 @@ def test_each_chain_is_scanned_to_the_gap_and_used_addresses_are_summed():
     used, idle = stats(funded=150_000, spent=50_000, txs=3), stats()
     s, slept = Session((200, used), (200, idle), (200, stats(pool_funded=7, pool_txs=1)), (200, idle), (200, idle),
                        (200, idle), (200, idle)), []
-    out = wallet.scan(wallet.descriptor(ZPUB), wallet.Esplora(CFG, s, slept.append), gap=2)
+    out = wallet.scan(wallet.descriptor(ZPUB), wallet.Esplora({**CFG, "page_gap_s": 1}, s, slept.append), gap=2)
     assert out == {"confirmed_sat": 100_000, "unconfirmed_sat": 7, "used_addresses": 2}
-    assert len(s.calls) == 7 and len(slept) == 6  # receive: used, idle, used, idle, idle; change: idle, idle
+    assert len(s.calls) == 7 and slept == [1.0] * 6, "Api's gap, once between requests"  # receive: used, idle, used, idle, idle; change: idle, idle
     assert s.calls[0][0] == "https://esplora.test/address/bc1qcr8te4kr609gcawutmrza0j4xv80jy8z306fyu"
 
 

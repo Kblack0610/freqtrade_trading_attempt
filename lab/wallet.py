@@ -81,15 +81,13 @@ class Esplora:
 
 def scan(d: Descriptor, esplora: Esplora, gap: int) -> dict:
     """Sum every used address on each chain, stopping a chain after `gap` unused addresses in a row."""
-    confirmed = unconfirmed = used = reads = 0
+    confirmed = unconfirmed = used = 0
     for branch in range(d.num_branches):
         idle = 0
         for addr in addresses(d, branch):
             if idle >= gap:
                 break
-            if reads:
-                esplora.api.sleep(esplora.api.gap)
-            a, reads = esplora.address(addr), reads + 1
+            a = esplora.address(addr)
             chain, pool = a["chain_stats"], a["mempool_stats"]
             if chain["tx_count"] + pool["tx_count"] == 0:
                 idle += 1

@@ -7,7 +7,7 @@ from cryptography.hazmat.primitives.asymmetric import ed25519, padding, rsa
 from lab.markets import kalshi_trade
 from lab.markets.kalshi_trade import KalshiDemo, NotDemo
 
-DEMO = {"base_url": "https://external-api.demo.kalshi.co/trade-api/v2", "timeout_s": 5, "read_polls": 3, "read_poll_s": 0.25}
+DEMO = {"base_url": "https://external-api.demo.kalshi.co/trade-api/v2", "timeout_s": 5, "page_gap_s": 0, "retries": 2, "read_polls": 3, "read_poll_s": 0.25}
 
 
 def pem(key) -> bytes:
@@ -19,8 +19,8 @@ RSA = rsa.generate_private_key(public_exponent=65537, key_size=2048)
 
 
 class Resp:
-    def __init__(self, status, body):
-        self.status_code, self.body, self.text = status, body, str(body)
+    def __init__(self, status, body, headers=None):
+        self.status_code, self.body, self.text, self.headers = status, body, str(body), headers or {}
 
     def json(self):
         return self.body
@@ -29,8 +29,8 @@ class Resp:
 class Demo:
     """A demo exchange: one resting order, cancellable; records every request."""
 
-    def __init__(self, cancel_works=True, unseen=0, stale=0):
-        self.calls, self.status, self.cancel_works = [], None, cancel_works
+    def __init__(self, cancel_works=True, unseen=0, stale=0, throttled=0):
+        self.calls, self.status, self.cancel_works, self.throttled = [], None, cancel_works, throttled
         self.unseen, self.stale = unseen, stale  # reads that lag the place (404) and the cancel (still resting)
 
     def request(self, method, url, params, json, timeout, headers):
@@ -40,6 +40,9 @@ class Demo:
             return Resp(200, {"markets": [{"ticker": "T-THIN", "yes_ask_dollars": "0.0100"},
                                           {"ticker": "T-OK", "yes_ask_dollars": "0.4200"}]})
         if method == "POST" and path == "/portfolio/events/orders":
+            if self.throttled:
+                self.throttled -= 1
+                return Resp(429, {"error": "too_many_requests"}, {"Retry-After": "1"})
             self.status = "resting"
             return Resp(201, {"order_id": "o1", "fill_count": "0.00", "remaining_count": "1.00", "ts_ms": 1})
         if method == "GET" and path == "/portfolio/orders/o1":
@@ -103,9 +106,25 @@ def test_the_drill_rests_one_contract_then_cancels_it(conn):
 
 def test_a_failed_cancel_is_recorded_and_fails_the_drill(conn):
     s = Demo(cancel_works=False)
-    row = kalshi_trade.drill(conn, KalshiDemo(DEMO, "k", pem(RSA), session=s), 0.01, ticker="T-OK")
+    row = kalshi_trade.drill(conn, KalshiDemo(DEMO, "k", pem(RSA), session=s, sleep=[].append), 0.01, ticker="T-OK")
     assert row["status"] == "resting" and row["canceled_at"] is None and "HTTP 503" in row["error"]
     assert [c[0] for c in s.calls].count("POST") == 1  # never retried
+    assert [c[0] for c in s.calls].count("DELETE") == 1 + DEMO["retries"], "a cancel by id is retried on a 5xx"
+
+
+def test_a_throttled_place_is_sent_again_with_a_fresh_signature():
+    """A 429 means Kalshi did not act on the order, so it is retried, after Retry-After, signed again."""
+    ticks, slept, s = iter([1.0, 2.0]), [], Demo(throttled=1)
+    c = KalshiDemo(DEMO, "k", pem(RSA), session=s, clock=lambda: next(ticks), sleep=slept.append)
+    assert c.place("T-OK", 0.01, 1, "cid")["order_id"] == "o1"
+    first, second = (h for m, _, _, _, h in s.calls if m == "POST")
+    assert (first["KALSHI-ACCESS-TIMESTAMP"], second["KALSHI-ACCESS-TIMESTAMP"]) == ("1000", "2000")
+    for h in (first, second):
+        RSA.public_key().verify(base64.b64decode(h["KALSHI-ACCESS-SIGNATURE"]),
+                                f"{h['KALSHI-ACCESS-TIMESTAMP']}POST/trade-api/v2/portfolio/events/orders".encode(),
+                                padding.PSS(mgf=padding.MGF1(hashes.SHA256()), salt_length=padding.PSS.DIGEST_LENGTH),
+                                hashes.SHA256())
+    assert slept[0] == 1.0, "Retry-After"
 
 
 def test_reads_that_lag_the_place_and_the_cancel_still_pass_the_drill(conn):

@@ -232,22 +232,29 @@ MONEY_MAP = {
         lambda c, conn: kalshi_trade.drill(conn, c, 0.01), Demo),
     ("lab/markets/manifold_trade.py", "ManifoldBets"): Client(
         "paper", frozenset({"api.manifold.markets"}), lambda: manifold_trade.MANIFOLD_HOSTS, _demo("manifold"),
-        lambda cfg, s: manifold_trade.ManifoldBets(cfg, "k", s),
+        lambda cfg, s: manifold_trade.ManifoldBets(cfg, "k", s, sleep=lambda _: None),
         lambda c, conn: (c.balance(), manifold_trade.drill(conn, c, 0.01, 0.10)), Manifold),
     ("lab/broker.py", "RobinhoodCrypto"): Client(
         "read", frozenset({"trading.robinhood.com"}), lambda: {broker.RobinhoodCrypto.host}, _broker("robinhood"),
-        lambda cfg, s: broker.RobinhoodCrypto(cfg, "k", base64.b64encode(SEED).decode(), s), lambda c, conn: c.read(),
+        lambda cfg, s: broker.RobinhoodCrypto(cfg, "k", base64.b64encode(SEED).decode(), s, sleep=lambda _: None),
+        lambda c, conn: c.read(),
         Robinhood),
     ("lab/broker.py", "SnapTrade"): Client(
         "read", frozenset({"api.snaptrade.com"}), lambda: {broker.SnapTrade.host}, _broker("snaptrade"),
-        lambda cfg, s: broker.SnapTrade(cfg, "c", "k", s), lambda c, conn: c.read(), Snap),
-    ("lab/markets/api.py", "Api"): Client("none", why="venue readers and the Trezor watch (lab/wallet.py): GET only, no key"),
+        lambda cfg, s: broker.SnapTrade(cfg, "c", "k", s, sleep=lambda _: None), lambda c, conn: c.read(), Snap),
+    ("lab/markets/api.py", "Api"): Client("none", why="the one paced client: every client built on it has its own row"),
+    ("lab/markets/kalshi.py", "Kalshi"): Client("none", why="Kalshi public market data, GET only, no key"),
+    ("lab/markets/polymarket.py", "PolymarketUS"): Client("none", why="Polymarket US public market data, GET only, no key"),
+    ("lab/markets/polymarket.py", "Polymarket"): Client("none", why="Polymarket public market data, GET only, no key"),
+    ("lab/markets/predictit.py", "PredictIt"): Client("none", why="PredictIt public market data, GET only, no key"),
+    ("lab/markets/manifold.py", "Manifold"): Client("none", why="Manifold public market data, GET only, no key"),
+    ("lab/markets/odds.py", "OddsApi"): Client("none", why="sportsbook odds, GET only; its key is a data plan's, no account"),
+    ("lab/wallet.py", "Esplora"): Client("none", why="the Trezor watch: public addresses on a block explorer, GET only"),
     ("lab/markets/links.py", "Llm"): Client("none", why="our LiteLLM gateway: market text in, no account"),
     ("lab/markets/research/kalshi_calibration.py", "<module>"): Client("none", why="Kalshi public market data"),
     ("lab/ingest.py", "http_fetch"): Client("none", why="our dry-run bots' API; its one POST is stopentry"),
     ("lab/healthcheck.py", "healthy"): Client("none", why="our own pod's health endpoint"),
-    ("lab/archive.py", "RangeFile"): Client("none", why="public candle archives"),
-    ("lab/archive.py", "_get"): Client("none", why="public candle archives (OKX monthly files)"),
+    ("lab/archive.py", "<module>"): Client("none", why="public candle archives (Kraken zips, the OKX listing and files)"),
     ("lab/futures.py", "Ccxt"): Client("none", why="public funding and open interest through ccxt, no key"),
     ("web/fetch_kit.py", "fetch"): Client("none", why="build-time download of the pinned web-kit files from GitHub, checked against web/kit.lock"),
     ("lab/backfill.py", "Cli"): Client("none", why="public candles through ccxt, no key"),
@@ -255,7 +262,7 @@ MONEY_MAP = {
     ("web/auth.py", "login_for_code"): Client("none", why="Forgejo sign-in for the read-only site"),
 }
 TRADERS = {k: c for k, c in MONEY_MAP.items() if c.kind != "none"}
-NET = {"requests.Session", "requests.request", "requests.get", "requests.post", "requests.put", "requests.patch",
+NET = {"Api", "requests.Session", "requests.request", "requests.get", "requests.post", "requests.put", "requests.patch",
        "requests.delete", "urllib.request.urlopen", "httpx.Client", "httpx.AsyncClient", "httpx.get", "httpx.post"}
 
 
@@ -264,7 +271,8 @@ def dotted(node) -> str:
 
 
 def net_calls(path: Path):
-    """(owner, call node) for each call in the file that opens a connection: requests, urllib, httpx or a ccxt client."""
+    """(owner, call node) for each call in the file that opens a connection: lab/markets/api.py Api, requests, urllib,
+    httpx or a ccxt client."""
     tree = ast.parse(path.read_text())
     owners: dict[int, str] = {}
 

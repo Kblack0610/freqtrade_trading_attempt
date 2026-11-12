@@ -1,11 +1,12 @@
-"""Api.get pacing on a fake clock, and the shared venue budget against Postgres."""
+"""Api.request pacing and its retry policy on a fake clock, and the shared venue budget against Postgres."""
 
 import email.utils
 import time
 
 import pytest
+import requests
 
-from lab.markets.api import Api, RECOVER_S, retry_after
+from lab.markets.api import IDEMPOTENT, Api, RECOVER_S, retry_after
 from lab.markets.budget import Budget
 from lab.markets.recorder import load_config
 from lab.tests.markets_fakes import Resp, Session
@@ -109,3 +110,85 @@ def test_the_budget_queues_every_caller_of_a_venue_at_its_rate(conn):
 def test_a_budget_refuses_no_rate():
     with pytest.raises(ValueError):
         Budget("kalshi", 0)
+
+
+class Wire:
+    """Answers any method from a queue of Resp, or raises an exception queued, and records each attempt as sent."""
+
+    def __init__(self, *answers):
+        self.answers, self.sent = list(answers), []
+
+    def request(self, method, url, params, json, headers, timeout):
+        self.sent.append((method, params, headers))
+        answer = self.answers.pop(0)
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+
+def wired(*answers, budget=None, clock=None):
+    clock, wire = clock or Clock(), Wire(*answers)
+    a = Api("v", {"base_url": "https://venue.test", "page_gap_s": 0.1, "retries": 3}, wire, sleep=clock.sleep,
+            budget=budget)
+    return a, wire, clock
+
+
+def test_a_signature_and_its_params_are_built_again_for_every_attempt():
+    ticks = iter(range(1, 10))
+    a, wire, _ = wired(Resp(429), Resp(503), Resp(200))
+    a.request("GET", "/x", lambda: {"ts": next(ticks)}, headers=lambda q: {"sig": f"signed-{q['ts']}"})
+    assert wire.sent == [("GET", {"ts": n}, {"sig": f"signed-{n}"}) for n in (1, 2, 3)]
+
+
+@pytest.mark.parametrize("method", ["POST", "PATCH"])
+@pytest.mark.parametrize("status", [500, 502, 503])
+def test_a_write_is_never_sent_again_after_a_5xx(method, status):
+    """A write that drew a 5xx may have been carried out: an order placed. It comes back to the caller at once."""
+    a, wire, clock = wired(Resp(status), Resp(200))
+    assert a.request(method, "/orders", body={"n": 1}).status_code == status
+    assert len(wire.sent) == 1 and clock.slept == [] and a.pace == 0.1
+
+
+@pytest.mark.parametrize("method", ["POST", "PATCH"])
+def test_a_write_is_sent_again_on_a_429_after_its_retry_after(method):
+    """A 429 means the provider did not act on it, so a write is retried, and the shared budget is held as long."""
+    shared = Shared()
+    a, wire, clock = wired(Resp(429, {}, {"Retry-After": "3"}), Resp(201), budget=shared)
+    assert a.request(method, "/orders", body={"n": 1}).status_code == 201
+    assert [m for m, _, _ in wire.sent] == [method, method]
+    assert clock.slept == [3.0, 0.2] and shared.holds == [3.0]
+
+
+@pytest.mark.parametrize("method", sorted(IDEMPOTENT))
+def test_an_idempotent_method_is_sent_again_on_a_5xx(method):
+    a, wire, _ = wired(Resp(503), Resp(200))
+    assert a.request(method, "/orders/o1").status_code == 200 and len(wire.sent) == 2
+
+
+@pytest.mark.parametrize("method", ["GET", "POST"])
+@pytest.mark.parametrize("err", [requests.Timeout("slow"), requests.ConnectionError("down")])
+def test_a_timeout_or_dropped_connection_is_raised_at_once(method, err):
+    """A request that timed out may have arrived, so it is never sent again, whatever the method."""
+    a, wire, _ = wired(err, Resp(200))
+    with pytest.raises(type(err)):
+        a.request(method, "/x")
+    assert len(wire.sent) == 1
+
+
+def test_a_4xx_is_returned_once_and_get_raises_on_it():
+    a, wire, _ = wired(Resp(404), Resp(400))
+    assert a.request("POST", "/x").status_code == 404
+    with pytest.raises(RuntimeError, match="HTTP 400"):
+        a.get("/y")
+    assert len(wire.sent) == 2
+
+
+def test_two_clients_on_one_provider_take_their_turns_from_one_budget():
+    """Polymarket's two hosts, or the Manifold reader and its drill: one budget, so a 429 on one pauses both."""
+    shared, clock = Shared(0.0, 0.5), Clock()
+    a, _, _ = wired(Resp(200), Resp(429), Resp(200), budget=shared, clock=clock)
+    b, _, _ = wired(Resp(200), budget=shared, clock=clock)
+    a.request("GET", "/a")
+    b.request("GET", "/b")  # the budget's second slot: 0.5
+    a.request("GET", "/c")  # gap 0.1, budget empty, 429 holds the budget 1 s for b too, then gap 0.2
+    assert clock.slept == [0.5, 0.1, 1.0, 0.2] and shared.holds == [1.0]
