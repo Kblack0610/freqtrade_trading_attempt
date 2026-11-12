@@ -33,11 +33,12 @@ class Resp:
 
 
 class Paper:
-    """A paper account with one order, cancelled after `pending` reads of pending_cancel; records every request."""
+    """A paper account with one order, cancelled after `pending` reads of pending_cancel; records every request.
+    `stale` reads right after the DELETE still return the status from before it, as the paper API did on 2026-11-12."""
 
-    def __init__(self, placed="accepted", pending=0, cancel_status=204, account=200):
+    def __init__(self, placed="accepted", pending=0, cancel_status=204, account=200, stale=0):
         self.calls, self.status, self.placed = [], None, placed
-        self.pending, self.cancel_status, self.account_status = pending, cancel_status, account
+        self.pending, self.cancel_status, self.account_status, self.stale = pending, cancel_status, account, stale
 
     def request(self, method, url, json, timeout, headers, params=None):
         path = url.removeprefix("https://paper-api.alpaca.markets")
@@ -50,6 +51,9 @@ class Paper:
             self.status = self.placed
             return Resp(200, {"id": "o1", "status": self.status})
         if (method, path) == ("GET", "/v2/orders/o1"):
+            if self.status == "pending_cancel" and self.stale > 0:
+                self.stale -= 1
+                return Resp(200, {"id": "o1", "status": self.placed})
             if self.status == "pending_cancel":
                 if self.pending == 0:
                     self.status = "canceled"
@@ -115,6 +119,14 @@ def test_the_drill_rests_one_share_then_cancels_it(conn):
     assert {k: post[k] for k in ("symbol", "qty", "side", "type", "time_in_force", "limit_price")} == \
         {"symbol": "SPY", "qty": "1", "side": "buy", "type": "limit", "time_in_force": "day", "limit_price": "1.00"}
     assert post["client_order_id"]
+
+
+def test_the_drill_waits_out_a_read_that_still_says_new_after_the_cancel(conn):
+    """The 2026-11-12 14:40Z failure: the read right after the DELETE still said new, and the drill took it as final."""
+    s, slept = Paper(placed="new", stale=1, pending=1), []
+    row = broker.rest_and_cancel(conn, client(s, slept), "SPY", 1.0)
+    assert (row["status"], row["error"]) == ("canceled", None)
+    assert len(slept) == 2
 
 
 def test_an_order_that_filled_fails_the_drill(conn):
