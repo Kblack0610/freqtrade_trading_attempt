@@ -21,23 +21,32 @@ roster --> paper bots (the league) --ingest--> Postgres --> drift, watcher, deca
 
 All times UTC. Backfill and analysis run on razer-laptop, because the candle files live on the `freqtrade-lab` volume there. Walk-forward runs as several pods on any amd64 node except hp-victus, from a copy of the candles in MinIO.
 
-| When | Job | What it does | Typical length |
+| When | Job | What it does | Measured length |
 |---|---|---|---|
 | every 5 min | `freqtrade-ingest` | Copies every paper bot's trades and a snapshot into Postgres | seconds |
 | hourly at :20 | `freqtrade-backfill` | New candles for the league exchanges | about 2 minutes |
 | hourly at :50 | `freqtrade-backfill-research` | New and older candles for okx and kucoin | about 1 minute once caught up |
-| 00:45 | `freqtrade-candles-publish` | Copies the changed candle files to MinIO for the walk-forward pods | minutes |
-| 01:00 | `freqtrade-walkforward` | Tunes and tests strategies month by month | up to the 4.5 h budget, 8 h hard limit |
-| 02:45 | `freqtrade-analysis` | Backtests everything, then scores everything | under an hour on a normal night, hours after a big change |
-| 05:35 | `freqtrade-futures` | Funding rates and open interest | under a minute |
+| 00:45 | `freqtrade-candles-publish` | Copies the changed candle files to MinIO for the walk-forward pods | about 1 minute (0.02 h on 2026-11-12) |
+| every 5 min | `trader-markets-recorder`, `-recorder-polymarket-us`, `-recorder-predictit`, `-recorder-manifold` | One sweep of every open market per venue (Kalshi, Polymarket US, PredictIt, Manifold) into Postgres and MinIO | a Kalshi sweep 3 to 4.5 minutes (measured 2026-11-06) |
+| every 15 min | `trader-markets-recorder-polymarket` | The same sweep for Polymarket global | about 10 minutes |
+| every 6 h at :07 | `trader-markets-recorder-odds-api` | Sportsbook odds | not measured |
+| every 3 h at :00, :01, :02 | `trader-markets-history-settled`, `-history-bars` (`0 1-23/3`), `-history-trades` (`0 2-23/3`) | Backfill of markets that settled before the recorder started | settled 0.84 h; bars and trades hit their 2 h limit (DeadlineExceeded) on most runs |
+| 01:30 | `trader-markets-compact` | Folds each settled day's quote parts into one object | about 1 minute |
+| 01:00 | `freqtrade-walkforward` | Tunes and tests strategies month by month | 5.2 h to 6.1 h (2026-11-10 and 11); a run the 8 h limit ended, or with failed fold pods, shows Failed (2026-11-07, 09 and 12) |
+| 02:45 | `freqtrade-analysis` | Backtests everything, then scores everything | 1.6 h on 2026-11-10; 7.1 h on 2026-11-09 and 7.7 h on 2026-11-11 after big changes. Not "under an hour" |
+| 05:35 | `freqtrade-futures` | Funding rates and open interest | under a minute (0.01 h) |
 | 10:00 | `trader-research-sync` (fleet machine) | Turns the night's changes into board rows and roster PRs | minutes |
-| Sunday 02:50 | `freqtrade-lab-backup` | Tars the lab volume to the NAS | minutes |
+| Sunday 02:50 | `freqtrade-lab-backup` | Tars the lab volume to the NAS | 0.11 h (2026-11-08) |
+
+Schedules are read from home-config `apps/freqtrade`; the markets jobs are described in [markets.md](markets.md). Lengths are start to completion of the Jobs `kubectl -n freqtrade get jobs` still holds (about 6 days, 2026-11-06 to 12); a Job past its deadline has no completion time and the column says so.
+
+A missed 01:00 or 02:45 slot shows as a `*-manual-<MMDD>` Job (`freqtrade-analysis-manual-1111`, `freqtrade-walkforward-manual-1111`) started by hand. 2026-11-11 had no scheduled walk-forward or analysis Job, only the two manual ones at 08:43 UTC; look for that name before reading a missing night as a failure.
 
 ## Step 1: price data
 
 A backtest is only as good as its candles. A candle is one time bar of a pair: open, high, low, close and volume.
 
-- `lab/backfill.py` keeps, per exchange, pair and timeframe (1m to 1d), every candle the exchange will give, prepended back to a floor per timeframe, and writes what it holds to `data_coverage`.
+- `lab/backfill.py` keeps, per exchange, pair and timeframe (1m to 1d), every candle the exchange will give, prepended back to a floor per timeframe, less the flat zero-volume padding an exchange serves for a suspended market (binanceus 1d across its 2023-07 to 2025-02 USD suspension), and writes what it holds to `data_coverage`.
 - Kraken's past comes from its published archive and its present from the newest candles each hour, because Kraken's API only serves recent candles.
 - OKX 1m history comes from OKX's monthly files, minutes instead of the day its API would take. Coinbase serves no 4h, so 4h is built from its 1h.
 - **The coverage guard.** An exchange and timeframe joins the analysis only when every pair on its whitelist is filled back to its oldest candle. A half-filled exchange would quietly compare strategies on different histories. Until then the run's `skipped` list says "not fully backfilled".
@@ -137,6 +146,8 @@ Each row of home-config `apps/freqtrade/roster.tsv` is one paper bot: a strategy
 
 - `freqtrade-ingest` copies every bot's trades into Postgres every 5 minutes.
 - Drift compares each bot's trades with a backtest of the same days. A low match rate means the backtest does not model what the bot does; a steady negative gap means fills or fees the backtest leaves out.
+- Reconciliation (`reconcile`) keeps that match per trade and splits the gap into entry delay, price, fee and missed fills.
+- Markouts (`markouts`) mark every entry at +5m, +1h and +4h, BTC hedged and net of fees, against random entries on the same pair and side. A random entry averages minus the round-trip fee, so an entry that beats the null shows skill long before profit can. They are a diagnostic only.
 - `lab/watcher.py` marks a bot breached when its equity falls past the day-loss limit. This is Stage 0, so a breach only raises an alert; only a drill stops a bot's entries.
 - The decay test (a CUSUM over closed trades) says when trades stop looking like what walk-forward measured, and suggests retiring the strategy.
 
@@ -190,13 +201,14 @@ The `/confidence` page shows each strategy's gates and which ones it fails.
 
 The tests check that each stage gives the right answer on inputs whose answer is known:
 
-- **Engine.** `test_golden.py` runs real freqtrade backtests on fixture candles: the same backtest twice gives the same trades byte for byte, one changed candle changes its digest and the trades, an overlay reaches freqtrade, and a walk-forward fold runs real hyperopt with its sampler.
-- **Bias.** Every strategy gets lookahead-analysis and recursive-analysis each night, and the bias gate fails one that is not clean. `test_patterns.py` plants a rule that reads the next close and checks the prefix test catches it. `test_analyze.py` checks the planted `PlantedLookahead` fixture is flagged, but it skips unless backfilled binanceus candles are present, so CI does not run it.
+- **Engine.** `test_engine.py` backtests hand-built candles whose trades are known first: each signal fills at the next open, ROI exits at its price on the pair's tick, a stop fills at its trigger or at the open of a candle that gaps through it, a trailing stop rises on the high before the low is tested, 1m detail decides whether ROI or the stop came first inside an hour, and a flat round trip loses exactly the venue's fee on both sides (a changed fee is the control). On random fat-tailed candles every fill lies inside its candle, no trade enters before its signal, each profit is the fee-net round trip, and the end balance is the start plus every trade. `test_golden.py` checks the same backtest twice gives the same trades byte for byte, one changed candle changes its digest and the trades, an overlay reaches freqtrade, and a walk-forward fold runs real hyperopt with its sampler; hyperopt with the same seed twice tunes the same parameters and another seed does not.
+- **Walk-forward.** `test_walkforward.py` runs every fold back to 2019 through the real fold code and checks hyperopt and the in-sample backtest stop the embargo before the test month; a training span one day into the test month is the control.
+- **Bias.** Every strategy gets lookahead-analysis and recursive-analysis each night, and the bias gate fails one that is not clean. `test_patterns.py` plants a rule that reads the next close and checks the prefix test catches it. `test_families.py` runs the nightly lookahead check on synthetic candles over one strategy of each family and every catalogue strategy, with the planted `PlantedLookahead` fixture as the control it must flag.
 - **Cache.** The nightly reproduce check reruns cached chunks and a fold; `test_reproduce.py` checks a changed result counts as a mismatch and a failed rerun fails the run.
-- **Scoring.** `test_confidence.py` has the known answers: pure noise clears the score and the interval under 5% of the time, a market lifting every strategy does not lift the score, and an edge planted among noise strategies scores ready.
-- **Paper.** The drift and dry run gates are anytime-valid sequences ([design](anytime-gates.md)), so reading them every night does not inflate their error rate.
+- **Scoring.** `test_confidence.py` has the known answers: pure noise clears the score and the interval under 5% of the time, a market lifting every strategy does not lift the score, and an edge planted among noise strategies scores ready. Each trial-register statement adds exactly its count on a fixture.
+- **Paper.** The drift and dry run gates are anytime-valid sequences ([design](anytime-gates.md)), so reading them every night does not inflate their error rate. `test_metrics.py` checks each reconciliation split on hand-built trades. `test_markouts.py` checks BTC hedged on itself leaves exactly minus the fee, random entries sit on the null and the null near minus the fee, and a planted jump after each entry clears the null.
 
-Not covered yet: known-answer cases for fills, stops and fees inside the engine; a check that each fold's hyperopt window ends before its test month; hyperopt determinism under a fixed seed; exact trial-register counts; and a run of null and planted-edge strategies through the whole pipeline, which would give each gate's false-positive rate and power.
+Not covered yet: a run of null and planted-edge strategies through the whole pipeline, which would give each gate's false-positive rate and power.
 
 ## Troubleshooting
 

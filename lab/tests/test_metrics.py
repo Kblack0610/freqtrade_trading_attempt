@@ -279,3 +279,29 @@ def test_confidence_sequence_separates_a_real_edge_and_never_widens():
     assert metrics.confidence_sequence([], -1, 1, 0.05)[0].size == 0
     bad_lo, bad_hi = metrics.confidence_sequence(np.full(100, -0.05), -0.3, 0.3, 0.05, grid=200)
     assert bad_hi[-1] < 0
+
+
+def test_reconcile_splits_each_trade_into_delay_price_fee_and_missed():
+    t = utc
+    live = pd.DataFrame({"pair": ["BTC/USD", "ETH/USD", "SOL/USD"],
+                         "open_date": [t("2026-11-01 10:02"), t("2026-11-02 12:00"), t("2026-11-03 08:00")],
+                         "is_open": [False, False, False], "profit_ratio": [0.01, -0.02, 0.0], "profit_abs": [3.0, -6.0, 0.0],
+                         "open_rate": [101.0, 99.0, 10.0], "fee_open": [0.002, 0.002, 0.002],
+                         "fee_close": [0.002, 0.002, 0.002], "is_short": [False, True, False]})
+    bt = pd.DataFrame({"pair": ["BTC/USD", "ETH/USD", "ETH/USD"],
+                       "open_date": [t("2026-11-01 10:00"), t("2026-11-02 12:00"), t("2026-11-03 00:00")],
+                       "exit_reason": ["roi", "roi", "roi"], "profit_ratio": [0.015, -0.01, 0.02],
+                       "profit_abs": [4.5, -3.0, 6.0], "open_rate": [100.0, 100.0, 100.0], "fee_open": [0.001] * 3,
+                       "fee_close": [0.001] * 3})
+    r = metrics.reconcile(live, bt, pd.Timedelta("5m"))
+    assert r["kind"].tolist() == ["matched", "matched", "live_only", "bt_only"]
+    assert r["delay_s"].iloc[:2].tolist() == [120.0, 0.0]
+    # the long paid 1% over the backtest; the short sold 1% under it: both are worse fills
+    assert r["price_gap"].iloc[:2].tolist() == pytest.approx([0.01, 0.01])
+    assert r["fee_gap"].iloc[:2].tolist() == pytest.approx([0.002, 0.002])
+    assert r["profit_gap"].iloc[:2].tolist() == pytest.approx([-0.005, -0.01])
+    assert pd.isna(r["profit_gap"].iloc[2]) and r["bt_open"].iloc[3] == t("2026-11-03 00:00")
+    d = metrics.drift(live, bt, pd.Timedelta("5m"))
+    assert d["matched"] == 2 and d["gaps"] == pytest.approx([-0.005, -0.01])
+    assert metrics.reconcile(live.iloc[0:0], bt, pd.Timedelta("5m"))["kind"].tolist() == ["bt_only"] * 3
+    assert metrics.reconcile(live, bt.iloc[0:0], pd.Timedelta("5m"))["kind"].tolist() == ["live_only"] * 3

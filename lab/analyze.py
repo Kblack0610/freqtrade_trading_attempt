@@ -19,7 +19,7 @@
    A FreqAI strategy (a freqai.json beside its file) runs as-is only, over the last ML_DAYS from the first of that
    month, with that file as its config and a model identifier per venue, chunk and file version, so FreqAI reuses
    only models trained for that chunk (user_data/models/<identifier>). On an image without lightgbm (the plain
-   trader image) it is recorded with load_error NEEDS_ML and runs nothing.
+   trader image) it is recorded with load_error NEEDS_ML and runs nothing. It skips a venue FreqAI refuses (ml_venue: Kraken).
 3. Bias: lookahead-analysis and recursive-analysis per strategy, rerun when its file hash changes. A FreqAI
    strategy gets none yet: lookahead-analysis would retrain per signal, and which check stands in is open.
 4. Derived, rebuilt in one transaction from the stored trades: daily returns, metrics over 30d, 90d,
@@ -29,7 +29,8 @@
    the deflated Sharpe of every window; the other derived tables are as-is only.
    Then lab/volatility.py scores HAR against plain variance forecasts per venue and pair (`vol_scores`, `vol_verdict`).
 5. Drift: each league bot's strategy backtested on its exchange over the time the bot has run, set
-   against the bot's dry-run trades in `drift`.
+   against the bot's dry-run trades in `drift`, and trade by trade in `reconcile`. Then lab/markouts.py marks each
+   entry at fixed horizons against random entries (`markouts`).
 6. Suggestions: lab/suggest.py turns those tables into promote, watch, demote, retire and fix rows,
    with the thresholds in lab/suggest.toml.
 
@@ -63,7 +64,7 @@ from typing import Protocol
 import pandas as pd
 from psycopg.types.json import Jsonb
 
-from lab import metrics, book, confidence, loop, mixtures, scorecard, suggest, universe, variants, volatility, vol_target, horizon
+from lab import metrics, markouts, book, confidence, loop, mixtures, scorecard, suggest, universe, variants, volatility, vol_target, horizon
 from lab.db import connect
 from lab.util import finite, utc
 
@@ -140,6 +141,17 @@ def ml_chunks(since: dt.date, today: dt.date) -> list[tuple[dt.date, dt.date]]:
     its training windows at a chunk's start, so a start that moves monthly, not nightly, keeps its models reusable."""
     lo = max(since, ml_start(today))
     return [(max(a, lo), b) for a, b in chunks(lo, today)]
+
+
+@cache
+def ml_venue(exchange: str) -> bool:
+    """Whether FreqAI runs on this venue: freqtrade's Exchange.validate_freqai refuses one whose OHLCV API has no
+    history (its ohlcv_has_history flag; Kraken), so a FreqAI chunk there only fails."""
+    import freqtrade.exchange as fx
+    from freqtrade.exchange.common import MAP_EXCHANGE_CHILDCLASS
+
+    cls = getattr(fx, MAP_EXCHANGE_CHILDCLASS.get(exchange, exchange).title(), fx.Exchange)
+    return {**fx.Exchange._ft_has_default, **cls._ft_has}["ohlcv_has_history"]
 
 
 def ml_start(today: dt.date) -> dt.date:
@@ -531,6 +543,9 @@ def plan(conn, found: list[dict], first: dict, today: dt.date, ft_version: str, 
             if (ex, s["timeframe"]) not in digests:
                 digests[ex, s["timeframe"]] = candle_digests(ex, s["timeframe"], "chunk", today)
             ml = freqai_fragment(s["file"]) is not None
+            if ml and not ml_venue(ex):
+                skipped.append(f"{s['name']} on {ex}: FreqAI needs OHLCV history this venue's API lacks")
+                continue
             for oid, o in [("", None), *([] if ml or (s["name"], ex) not in scored else (overlays or {}).items())]:
                 for start, end in (ml_chunks if ml else chunks)(since.date(), today):
                     cfg = chunk_config(s, ex, start, o and o["params"])
@@ -554,9 +569,12 @@ def plan(conn, found: list[dict], first: dict, today: dt.date, ft_version: str, 
 
 
 def prune_ml(conn, found: list[dict], today: dt.date) -> None:
-    """A FreqAI strategy's chunks that start before its window: the window moved on, and they would overlap its new first chunk."""
+    """A FreqAI strategy's chunks that start before its window (the window moved on, and they would overlap its new
+    first chunk) or sit on a venue FreqAI refuses (ml_venue)."""
     names = [s["name"] for s in found if freqai_fragment(s["file"])]
-    conn.execute("DELETE FROM backtest_chunks WHERE strategy = ANY(%s) AND chunk_start < %s", (names, ml_start(today)))
+    venues = [ex for ex in EXCHANGES if not ml_venue(ex)]
+    conn.execute("DELETE FROM backtest_chunks WHERE strategy = ANY(%s) AND (chunk_start < %s OR exchange = ANY(%s))",
+                 (names, ml_start(today), venues))
 
 
 def bias_todo(conn, found: list[dict], first: dict) -> list[tuple[str, str, str]]:
@@ -600,9 +618,11 @@ def store_drift(conn, task: dict, res: dict) -> None:
     if res.get("ok"):
         lo, hi = max(task["since"], res["bt_start"]), res["bt_end"]
         live = pd.DataFrame(conn.execute(
-            "SELECT pair, open_date, is_open, profit_ratio, profit_abs FROM bot_trades"
+            "SELECT pair, open_date, is_open, profit_ratio, profit_abs, open_rate, (raw->>'fee_open')::float,"
+            " (raw->>'fee_close')::float, coalesce((raw->>'is_short')::boolean, false) FROM bot_trades"
             " WHERE bot = %s AND open_date >= %s AND open_date < %s", (task["bot"], lo, hi)).fetchall(),
-            columns=["pair", "open_date", "is_open", "profit_ratio", "profit_abs"])
+            columns=["pair", "open_date", "is_open", "profit_ratio", "profit_abs", "open_rate", "fee_open",
+                     "fee_close", "is_short"])
         bt = res["trades"]
         if len(bt):
             opened = pd.to_datetime(bt["open_date"], utc=True)
@@ -611,10 +631,18 @@ def store_drift(conn, task: dict, res: dict) -> None:
                    **metrics.drift(live, bt, pd.Timedelta(task["timeframe"] or "5m")))
     else:
         row["error"] = res.get("error")
-    cols = ", ".join(DRIFT_COLS)
-    conn.execute(f"INSERT INTO drift ({cols}) VALUES ({', '.join(['%s'] * len(DRIFT_COLS))}) ON CONFLICT (bot) DO UPDATE"
-                 " SET " + ", ".join(f"{c} = EXCLUDED.{c}" for c in DRIFT_COLS[1:]) + ", computed_at = now()",
-                 [finite(row.get(c)) for c in DRIFT_COLS])
+    cols, rec = ", ".join(DRIFT_COLS), row.pop("reconcile", None)
+    with conn.transaction():
+        conn.execute("DELETE FROM reconcile WHERE bot = %s", (task["bot"],))
+        if rec is not None and len(rec):
+            conn.cursor().executemany(
+                f"INSERT INTO reconcile (bot, n, {', '.join(metrics.RECONCILE_COLS)}) VALUES "
+                f"({', '.join(['%s'] * (len(metrics.RECONCILE_COLS) + 2))})",
+                [[task["bot"], n, *(None if pd.isna(v) else finite(v) for v in r)]
+                 for n, r in enumerate(rec[metrics.RECONCILE_COLS].itertuples(index=False))])
+        conn.execute(f"INSERT INTO drift ({cols}) VALUES ({', '.join(['%s'] * len(DRIFT_COLS))}) ON CONFLICT (bot) DO UPDATE"
+                     " SET " + ", ".join(f"{c} = EXCLUDED.{c}" for c in DRIFT_COLS[1:]) + ", computed_at = now()",
+                     [finite(row.get(c)) for c in DRIFT_COLS])
 
 
 SERIES_COLS = ["open_date", "close_date", "open_rate", "close_rate", "min_rate", "stake_amount", "profit_ratio", "profit_abs"]
@@ -955,6 +983,8 @@ def main(runner: Runner | None = None, today: dt.date | None = None) -> int:
             cfg = suggest.load_config()
             summary.update(volatility.run(conn, vol_files(first, cfg["volatility"]["timeframe"]), cfg))
             lap("volatility")
+            summary.update(markouts.run(conn, RESULTS / "data", USER_DATA / "exchanges", cfg["markouts"]))
+            lap("markouts")
             for step in (vol_target, suggest, confidence, book, mixtures, scorecard, horizon, loop):
                 summary.update(step.run(conn))
                 lap(step.__name__.removeprefix("lab."))

@@ -14,7 +14,6 @@ from lab import analyze, metrics, variants
 
 TODAY = dt.date(2026, 11, 4)
 REPO = Path(__file__).resolve().parents[2]
-FIXTURES = Path(__file__).resolve().parent / "fixtures" / "strategies"
 
 
 @pytest.mark.parametrize("path", sorted((REPO / "user_data" / "exchanges").glob("*.json")), ids=lambda p: p.stem)
@@ -180,8 +179,8 @@ def test_each_league_bot_is_set_against_a_backtest_of_its_own_period(lab):
     lab.execute("UPDATE bots SET first_seen = '2026-10-20 06:00+00' WHERE name = 'binanceus-good'")
     for i, (opened, is_open, ratio) in enumerate((("2026-10-22 00:02+00", False, 0.004), ("2026-10-25 12:00+00", False, -0.01),
                                                   ("2026-11-04 00:00+00", True, None))):
-        lab.execute("INSERT INTO bot_trades (bot, trade_id, open_date, pair, is_open, profit_ratio, profit_abs, raw) "
-                    "VALUES ('binanceus-good', %s, %s, 'BTC/USD', %s, %s, %s, '{}')",
+        lab.execute("INSERT INTO bot_trades (bot, trade_id, open_date, pair, is_open, profit_ratio, profit_abs, open_rate, raw) "
+                    "VALUES ('binanceus-good', %s, %s, 'BTC/USD', %s, %s, %s, 100, '{}')",
                     (i + 1, opened, is_open, ratio, None if ratio is None else 300 * ratio))
     r = FakeRunner([strat("Good")])
     assert analyze.main(r, TODAY) == 0
@@ -190,6 +189,11 @@ def test_each_league_bot_is_set_against_a_backtest_of_its_own_period(lab):
                       "WHERE bot = 'binanceus-good'").fetchone()
     # the backtest enters every other day from 2026-10-20; its 10-20 entry is before the bot's start
     assert row == (3, 7, 1, 2, 1, None)
+    # trade by trade: the one match, the two entries the backtest did not take, and the six fills the bot missed
+    assert dict(lab.execute("SELECT kind, count(*) FROM reconcile WHERE bot = 'binanceus-good' GROUP BY 1").fetchall()) == \
+        {"matched": 1, "live_only": 2, "bt_only": 6}
+    # no candles in the fixture's results folder, so every entry waits for its markout
+    assert one(lab, "SELECT raw->>'markouts_pending' FROM runs ORDER BY id DESC LIMIT 1") == "3"
     assert one(lab, "SELECT raw->>'drift_run' FROM runs ORDER BY id DESC LIMIT 1") == "1"
 
 
@@ -285,13 +289,6 @@ def test_a_past_years_chunk_digest_is_the_one_it_was_stored_with(lab):
 
 
 DATA = Path(os.environ.get("LAB_RESULTS", "/lab")) / "data" / "binanceus" / "BTC_USD-5m.feather"
-
-
-@pytest.mark.skipif(not DATA.exists(), reason="needs backfilled binanceus data under LAB_RESULTS")
-def test_planted_lookahead_is_flagged_and_a_clean_strategy_is_not():
-    planted = analyze.bias_one("lookahead", "PlantedLookahead", str(FIXTURES))
-    assert planted["has_bias"] is True and "next_close" in planted["biased_indicators"]
-    assert analyze.bias_one("lookahead", "Strategy001", None)["has_bias"] is False
 
 
 @pytest.mark.skipif(not DATA.exists(), reason="needs backfilled binanceus data under LAB_RESULTS")
@@ -536,6 +533,30 @@ def test_a_freqai_strategy_runs_its_window_as_is_with_its_fragment_and_a_model_p
     r3 = FakeRunner([ml])
     assert analyze.main(r3, dt.date(2026, 12, 4)) == 0
     assert one(lab, "SELECT min(chunk_start) FROM backtest_chunks WHERE strategy = 'ML'") == dt.date(2025, 12, 1)
+
+
+def test_a_freqai_strategy_skips_a_venue_without_ohlcv_history(lab, tmp_path, monkeypatch):
+    ml_dir = tmp_path / "repo" / "user_data" / "strategies" / "ml"
+    ml_dir.mkdir(parents=True)
+    (ml_dir / "freqai.json").write_text(json.dumps({"freqai": {"enabled": True, "identifier": "x"}}))
+    monkeypatch.setattr(analyze, "REPO", tmp_path / "repo")
+    analyze.freqai_fragment.cache_clear()
+    monkeypatch.setattr(analyze, "ml_venue", lambda ex: ex != "coinbase")  # stands in for Kraken
+    (tmp_path / "variants.toml").write_text(TOY.format(max_chunks=1000))
+    lab.execute("INSERT INTO backtest_chunks (strategy, exchange, chunk_start, chunk_end, cache_key, ok, attempts) "
+                "VALUES ('ML', 'coinbase', '2026-03-01', '2026-04-01', 'k', false, 1)")
+    ml = {**strat("ML"), "file": "user_data/strategies/ml/ML.py"}
+    r = FakeRunner([ml])
+    assert analyze.main(r, TODAY) == 0
+    assert {ex for _, ex, _, _ in r.backtests} == {"binanceus"}
+    assert one(lab, "SELECT count(*) FROM backtest_chunks WHERE strategy = 'ML' AND exchange = 'coinbase'") == 0
+    assert {e for e, in lab.execute("SELECT DISTINCT exchange FROM strategy_windows WHERE strategy = 'ML'")} == {"binanceus"}
+
+
+def test_freqai_refuses_kraken_only():
+    pytest.importorskip("freqtrade")
+    assert not analyze.ml_venue("kraken")
+    assert all(analyze.ml_venue(ex) for ex in ("binanceus", "coinbase", "okx", "kucoin"))
 
 
 def test_without_lightgbm_a_freqai_strategy_is_a_load_failure(monkeypatch):

@@ -1,7 +1,9 @@
 import datetime as dt
 import json
 import types
+from pathlib import Path
 
+import pandas as pd
 import pytest
 
 from lab import analyze, metrics
@@ -72,6 +74,59 @@ def test_folds_stop_at_the_lockbox():
 def test_a_lockbox_in_the_future_changes_nothing():
     today = dt.date(2026, 3, 5)
     assert wf.folds(today, n=2, train_days=180, lockbox=dt.date(2026, 5, 1)) == wf.folds(today, n=2, train_days=180)
+
+
+class WindowSpy:
+    """analyze.Cli's place in walkforward.Cli: records every backtest window, and every hyperopt --timerange
+    through subprocess.run, writing the params file a finished hyperopt leaves."""
+
+    def __init__(self, monkeypatch):
+        self.windows: list[tuple[str, dt.date, dt.date]] = []
+        monkeypatch.setattr(wf.subprocess, "run", self.hyperopt)
+
+    def version(self):
+        return "test"
+
+    def backtest(self, strategy, exchange, start, end, overlay=None, strategy_path=None, detail=None):
+        self.windows.append(("backtest", start, end))
+        t = pd.DataFrame({"pair": ["BTC/USD"], "open_date": [pd.Timestamp(start, tz="UTC")],
+                          "close_date": [pd.Timestamp(start, tz="UTC") + pd.Timedelta(hours=2)],
+                          "profit_ratio": [0.01], "profit_abs": [10.0], "exit_reason": ["roi"]})
+        return {"ok": True, "trades": t, "start_balance": 1000.0}
+
+    def hyperopt(self, cmd, **kwargs):
+        a, b = (dt.datetime.strptime(d, "%Y%m%d").date() for d in cmd[cmd.index("--timerange") + 1].split("-"))
+        self.windows.append(("hyperopt", a, b))
+        strat = Path(cmd[cmd.index("--strategy-path") + 1])
+        name = cmd[cmd.index("--strategy") + 1]
+        (strat / f"{name}.json").write_text(json.dumps({"params": {"roi": {"0": 0.03}, "stoploss": -0.08}}))
+        return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+
+def leaks(spy: WindowSpy, fold: tuple) -> list[tuple]:
+    """Every window of a fold that tunes or scores in sample past the embargo before its test month."""
+    cli = wf.Cli.__new__(wf.Cli)
+    cli.bt = spy
+    spy.windows.clear()
+    res = cli.fold("Strategy001", "user_data/strategies/Strategy001.py", "binanceus", fold, 1)
+    assert res["ok"], res["error"]
+    train_start, test_start, test_end = fold
+    cutoff = test_start - dt.timedelta(days=wf.EMBARGO_DAYS)
+    tuned = [w for w in spy.windows if w[0] == "hyperopt" or (w[0] == "backtest" and w[1] < test_start)]
+    assert [w[0] for w in tuned] == ["hyperopt", "backtest"]  # the tuning and the in-sample score
+    assert all(w[1:] == (test_start, test_end) for w in spy.windows if w not in tuned)
+    return [w for w in tuned if w[1] < train_start or w[2] > cutoff]
+
+
+def test_no_fold_tunes_on_its_test_month_or_the_embargo_before_it(monkeypatch):
+    monkeypatch.setattr(analyze, "USER_DATA", REPO / "user_data")
+    spy = WindowSpy(monkeypatch)
+    all_folds = wf.folds(TODAY, since=dt.date(2019, 9, 1))
+    assert len(all_folds) > 60
+    assert [f for f in all_folds if leaks(spy, f)] == []
+    # the negative control: a training span that runs one day into the test month is caught
+    monkeypatch.setattr(wf, "train_end", lambda test_start: test_start + dt.timedelta(days=1))
+    assert len(leaks(spy, all_folds[-1])) == 2
 
 
 def backfilled(conn, ex, first):

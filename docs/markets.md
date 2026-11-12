@@ -19,7 +19,7 @@ Open markets counted 2026-11-05: Kalshi 178,883 open with combos excluded (`/mar
 
 ## Recorder
 
-`python -m lab.markets.recorder [venue ...]` (cwd `/repo`) runs one sweep per named venue; with no names it runs `[recorder] default_venues` in `lab/markets.toml`, which is Kalshi only, because the 5-min CronJob runs it bare and a Polymarket global sweep alone takes about 10 minutes. The other venues run by name, each in its own home-config CronJob `trader-markets-recorder-<venue>`: `polymarket_us`, `predictit` and `manifold` every 5 minutes, `polymarket` every 15. `odds_api` has none until its key and cadence are decided (Sportsbook odds below). Each sweep reads every open market a page at a time and queries stored metadata and outcomes only for that page's market IDs. Historical venue rows stay in Postgres. Each outcome's top of book is diffed against `outcomes`. Changed quotes go to one parquet object, `s3://trader-markets/quotes/venue=<v>/date=<YYYY-MM-DD>/<HHMMSS>Z.parquet`; only after it lands are `markets`, `outcomes`, `resolutions` and a `market_sweeps` row committed together. Endpoint and keys come from `S3_ENDPOINT`, `S3_ACCESS_KEY` and `S3_SECRET_KEY`, and the database from `DATABASE_URL`.
+`python -m lab.markets.recorder [venue ...]` (cwd `/repo`) runs one sweep per named venue; with no names it runs `[recorder] default_venues` in `lab/markets.toml`, which is Kalshi only, because the 5-min CronJob runs it bare and a Polymarket global sweep alone takes about 10 minutes. The other venues run by name, each in its own home-config CronJob `trader-markets-recorder-<venue>`: `polymarket_us`, `predictit` and `manifold` every 5 minutes, `polymarket` every 15. `odds_api` runs as `trader-markets-recorder-odds-api`, every 6 hours at :07 (Sportsbook odds below). Each sweep reads every open market a page at a time and queries stored metadata and outcomes only for that page's market IDs. Historical venue rows stay in Postgres. Each outcome's top of book is diffed against `outcomes`. Changed quotes go to one parquet object, `s3://trader-markets/quotes/venue=<v>/date=<YYYY-MM-DD>/<HHMMSS>Z.parquet`; only after it lands are `markets`, `outcomes`, `resolutions` and a `market_sweeps` row committed together. Endpoint and keys come from `S3_ENDPOINT`, `S3_ACCESS_KEY` and `S3_SECRET_KEY`, and the database from `DATABASE_URL`.
 
 Kalshi's `min_updated_ts` filter cannot be combined with `status=open`, so the venue cannot hand over only what changed. The recorder sweeps every open market and diffs on its side. Measured 2026-11-06 against the live API: 179k open markets in about 180 pages, 3 to 4.5 minutes a sweep with a few 429s absorbed by the backoff, 470 MB peak memory, and 12k to 16k changed quotes per 5 minutes after the first sweep, which writes everything. Resolutions are read from the last good sweep's start minus `resolutions_lookback_h`, so about 4k settled markets are re-read each run and stored once.
 
@@ -112,6 +112,17 @@ Every third-party HTTP call in `lab/` goes through `Api.request` (`lab/markets/a
 - Own gap: `page_gap_s` is the least time between one process's requests (`[history.<v>] page_gap_s` replaces it for history). A 429 or 5xx doubles that process's gap for the rest of its run, up to 30 s, and each success takes 0.01 s off it until it is back at `page_gap_s`.
 - Retries: up to `retries`, each waiting the `Retry-After` the venue sends (seconds or a date), else `page_gap_s * 2^n`, at least 0.5 s and at most 60 s. A retry also holds the shared budget that long, so every process pauses, not only the one that got the 429.
 - What is retried depends on the method. A 429 is retried for every method: the provider did not act on it. A 5xx is retried only for GET, HEAD, OPTIONS, PUT and DELETE (the only DELETEs cancel an order by id). A POST or PATCH that drew a 5xx may have been carried out, an order placed, so it comes back to the caller at once. A timeout or a dropped connection is raised at once for every method. Signed headers and a signed query are built again for each attempt, so a retry carries a fresh timestamp.
+
+Measured after #130 deployed (`kubectl -n freqtrade logs <pod> | grep -c 'HTTP 429'`, Kalshi pods, 2026-11-12 07:55 UTC):
+
+| Job | 429s before | 429s after |
+|---|---|---|
+| history-settled (3 runs) | 950-1002 a run | 0 each (Kalshi already `done`) |
+| history-bars (one run, 64 min so far) | about 530 | 54, still running |
+| history-trades (first 4 min) | about 530 | 12, still running |
+| recorder (4 sweeps) | 30-50 a sweep | 3, 3, 5, 3 a sweep |
+
+Settled is clean and the rest is cut by about 10x, not to zero: the recorder's `/markets` pages still draw 3 to 5 429s a sweep, each retried and the gap doubled to 7.6 s by the fifth. The budget stays at 12 req/s, so the Kalshi limit is probably tighter than the published 20 on the history and market-list reads; a lower `budget_rps` for Kalshi is the lever if the count matters.
 
 Budgets, about 60% of each venue's published limit:
 

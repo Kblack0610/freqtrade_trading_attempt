@@ -103,7 +103,7 @@ A quick analysis of two strategies: run a backfill into the mounted `/lab` first
 
 Analysis knobs (env): `ANALYZE_EXCHANGES` (`binanceus coinbase`), `ANALYZE_STRATEGIES` (empty means all), `ANALYZE_WORKERS` (at most 6 backtests at once), `ANALYZE_MEMORY_GB` (10: the estimated memory of the tasks in flight together; keep it 2 GB under the pod limit), `BIAS_EXCHANGE` (`binanceus`), `LOOKAHEAD_DAYS` (120), `RECURSIVE_DAYS` (30), `REGIME_EXCHANGE` (`coinbase`, the longest BTC history), `CHUNK_TIMEOUT` (3600 s).
 
-Backfill knobs (env): `BACKFILL_EXCHANGES` (`binanceus coinbase kraken`), `TIMEFRAMES` (`1m 5m 15m 30m 1h 4h 1d`, each capped at what the exchange offers), `FORWARD_EXCHANGES` (`kraken`), `PREPEND_FROM` (`20150101`), `PREPEND_FLOORS` (`1m=20240101`: space-separated `<timeframe>=<date>` pairs, the oldest candle a timeframe is prepended to), `LAB_RESULTS` (`/lab`). For a quick local run, add `-e TIMEFRAMES='4h 1d' -v "$HOME/.cache/trader-lab:/lab"` to the test container and run `python lab/backfill.py`.
+Backfill knobs (env): `BACKFILL_EXCHANGES` (`binanceus coinbase kraken`), `TIMEFRAMES` (`1m 5m 15m 30m 1h 4h 1d`, each capped at what the exchange offers), `FORWARD_EXCHANGES` (`kraken`), `PREPEND_FROM` (`20150101`), `PREPEND_FLOORS` (`1m=20240101`: space-separated `<timeframe>=<date>` pairs, the oldest candle a timeframe is prepended to), `HALT_DAYS` (`7`: a run of flat, zero-volume candles at least this long is a suspended market the exchange padded, and is dropped), `LAB_RESULTS` (`/lab`). For a quick local run, add `-e TIMEFRAMES='4h 1d' -v "$HOME/.cache/trader-lab:/lab"` to the test container and run `python lab/backfill.py`.
 
 ## CI
 
@@ -166,7 +166,8 @@ gh secret set FORGEJO_DEPLOY_TOKEN -R Kblack0610/freqtrade_trading_attempt --bod
 - **Trades still needed.** Per window, (1.645 x per-trade spread / mean per trade)^2 less the trades so far: how many more trades the low end of the 90% interval needs to clear zero if the mean and spread hold. Empty when the mean is not positive, since no sample size gets there. At a per-trade spread of 4.9%, an edge of +0.5% needs about 260 trades, +0.2% about 1,600 and +0.1% about 6,500.
 - **Estimates.** A seeded block bootstrap (10-day blocks, 5000 paths) of the last 365 days gives 30 and 90-day return bands (p10, p50, p90), the chance of a loss and the expected worst drawdown. Same data, same bands. It needs at least 180 days.
 - **Regimes.** Every day gets a BTC trend (up, down or flat, with a 5% band around its 200-day mean) and a volatility third (30-day realized volatility against expanding history, after 90 days), and the strategy page splits returns by both.
-- **Drift.** Each league bot's strategy is backtested on its own exchange from the bot's start to now, with the bot's config, and set against its dry-run trades (`drift`). An entry matches when the backtest entered the same pair within one candle; the gap is live minus backtest profit per trade over trades closed on both sides. A low match rate says the backtest does not model what the bot does (startup candles, data gaps, a different pairlist); a steady negative gap is fill or fee error the backtests leave out. It needs weeks of trades to mean anything. The Overview shows the match per bot and each bot page has the comparison.
+- **Drift.** Each league bot's strategy is backtested on its own exchange from the bot's start to now, with the bot's config, and set against its dry-run trades (`drift`). An entry matches when the backtest entered the same pair within one candle; the gap is live minus backtest profit per trade over trades closed on both sides. A low match rate says the backtest does not model what the bot does (startup candles, data gaps, a different pairlist); a steady negative gap is fill or fee error the backtests leave out. It needs weeks of trades to mean anything. The Overview shows the match per bot and each bot page has the comparison. `reconcile` keeps the same match trade by trade, split the way implementation shortfall splits it (Perold): entry delay, price paid over the backtest's, fee, and the fills the bot missed (`bt_only`).
+- **Markouts.** `lab/markouts.py` marks every paper entry at +5m, +1h and +4h after its fill (`[markouts]` in `lab/suggest.toml`): the move signed by side, minus the pair's BTC beta times BTC's move, minus the round-trip fee, beside the same figure for random entries on the same pair and side within a day (`markouts`). This is closing line value from sports betting: an entry with skill beats the null in tens of trades where profit needs thousands. A diagnostic only; making it a gate is the human's call.
 - **Correlations.** Each strategy's daily returns against every strategy the league runs on that exchange, over the last 365 days; near 1 means it would only duplicate a bot already running.
 
 The leaderboard ranks by the low end of the Sharpe interval, so a strategy has to look good on its unlucky draw. Rows under 20 trades sink, and lookahead-biased rows go last. Promoting a strategy is a home-config roster PR that the nightly research loop opens and a person merges.
@@ -194,7 +195,7 @@ A backtest of a strategy as it is says nothing about tuning it, and hyperopt's b
 | `WF_EMBARGO_DAYS` | `7` | Days between the end of training and the test month; longer than any trade's hold |
 | `WF_EPOCHS` | `150` | Hyperopt epochs per fold |
 | `WF_EPOCHS_ROI` | `60` | Hyperopt epochs for a strategy with no parameters of its own (ROI and stoploss only) |
-| `WF_EARLY_STOP` | `40` | Stop hyperopt after this many epochs without a better loss; 0 turns it off |
+| `WF_EARLY_STOP` | `40` | Stop hyperopt after this many epochs without a better loss; 0 turns it off, and freqtrade raises a value under 20 to 20 |
 | `WF_SAMPLERS` | `NSGAIIISampler TPESampler` | Optuna sampler arms; each fold takes one by its seed (the A/B in the run report's `arms`) |
 | `WF_LOSS` | `SharpeHyperOptLossDaily` | Hyperopt loss |
 | `WF_MIN_TRADES` | `10` | Training trades an epoch needs to count |
@@ -413,6 +414,10 @@ The event-contract paper league's accounts (`paper-<family>-<variant>`) get watc
 | `trader_markets_links` | `source` (`rule`, `llm`), `status` | Cross-venue links |
 | `trader_broker_equity`, `trader_broker_read_age_seconds` | `broker` | A broker paper account's equity at its last good read, and the time since. A real account exports only its read age |
 | `trader_paper_equity`, `trader_paper_capital`, `trader_paper_open_positions`, `trader_paper_marked_age_seconds` | `account` | Each marked paper account's equity, starting capital, open positions and time since its last mark |
+| `trader_markout_entries`, `trader_markout_net`, `trader_markout_null` | `bot`, `horizon` | Entries marked, their mean markout (BTC beta hedged, net of the round-trip fee) and the random-entry null's, from `markouts` |
+| `trader_markout_fill_slip` | `bot` | Mean fill over the entry candle's open, positive when worse |
+| `trader_reconcile_trades` | `bot`, `kind` (`matched`, `live_only`, `bt_only`) | Paper trades against the drift backtest, from `reconcile` |
+| `trader_shortfall`, `trader_shortfall_delay_seconds` | `bot`, `component` (`price`, `fee`, `profit`) | Mean paper minus backtest gap per matched trade, and the mean entry delay |
 
 ## Troubleshooting
 
