@@ -209,8 +209,8 @@ class Cli:
                    "--datadir", str(analyze.RESULTS / "data" / exchange), "--strategy", strategy,
                    "--strategy-path", str(strat), "--timerange", f"{train_start:%Y%m%d}-{train_end(test_start):%Y%m%d}",
                    "--hyperopt-loss", LOSS, "--spaces", *tune["spaces"].split(), "--ignore-missing-spaces",
-                   "-e", str(tune["epochs"]), "--early-stop", str(tune["early_stop"]),
-                   "-j", "1", "--random-state", str(seed), "--min-trades", str(MIN_TRADES)]
+                   "-e", str(tune["epochs"]), *(["--early-stop", str(tune["early_stop"])] if tune["early_stop"] else []),
+                   "-j", "1", "--random-state", str(seed), "--min-trades", str(MIN_TRADES)]  # freqtrade refuses 0
             h0 = time.monotonic()
             try:
                 p = subprocess.run(cmd, capture_output=True, text=True, timeout=TIMEOUT)

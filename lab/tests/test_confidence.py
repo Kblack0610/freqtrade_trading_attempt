@@ -2,6 +2,7 @@ import datetime as dt
 
 import numpy as np
 import pandas as pd
+from psycopg.types.json import Jsonb
 
 from lab import confidence, metrics, robustness, suggest
 
@@ -303,6 +304,37 @@ def test_the_register_keeps_a_strategy_that_is_gone(conn):
     assert confidence.register(conn) == 1
     conn.execute("DELETE FROM strategies")
     assert confidence.register(conn) == 1
+
+
+def test_each_register_statement_adds_exactly_its_trials(conn):
+    """A known fixture through REGISTER one statement at a time: each adds what it counts, once, however many
+    windows, folds or runs repeat it."""
+    conn.execute("TRUNCATE trials")
+    conn.execute("INSERT INTO strategies (name, file, file_hash, load_error) VALUES ('Broken', 'b.py', 'h', 'boom'), "
+                 "('A', 'a.py', 'h', NULL)")
+    for s, ex in (("A", "binanceus"), ("A", "okx"), ("B", "binanceus")):
+        for win, days in (("90d", 90), ("365d", 365)):  # windows of one series are one trial
+            conn.execute("INSERT INTO strategy_windows (strategy, exchange, win, days, trades) VALUES (%s, %s, %s, %s, 5)",
+                         (s, ex, win, days))
+    for overlay in ("tight", "wide"):
+        for win, days in (("90d", 90), ("365d", 365)):
+            conn.execute("INSERT INTO overlay_windows (overlay, strategy, exchange, win, days, trades) "
+                         "VALUES (%s, 'A', 'binanceus', %s, %s, 5)", (overlay, win, days))
+    tuned, other = {"roi": {"0": 0.03}}, {"roi": {"0": 0.05}}
+    robust = {"_settings": {"v": 1}, "delay:1": {"ok": True}, "detail:1m": {"ok": True}}
+    for month, params, rob in ((1, tuned, robust), (2, tuned, robust), (3, other, None), (4, None, None)):
+        conn.execute("INSERT INTO walkforward (strategy, exchange, fold_start, train_start, test_end, cache_key, ok, params, "
+                     "robustness) VALUES ('A', 'binanceus', %s, %s, %s, 'k', true, %s, %s)",
+                     (dt.date(2026, month, 1), dt.date(2025, 6, 1), dt.date(2026, month + 1, 1),
+                      Jsonb(params) if params else None, Jsonb(rob) if rob else None))
+    added = []
+    for sql in confidence.REGISTER:
+        before = conn.execute("SELECT count(*) FROM trials").fetchone()[0]
+        conn.execute(sql)
+        added.append(conn.execute("SELECT count(*) FROM trials").fetchone()[0] - before)
+    # as-is per series; per overlay; per distinct tuned set; per scenario of each distinct (params, settings); load-failed
+    assert added == [3, 2, 2, 2, 1]
+    assert confidence.register(conn) == 10
 
 
 def test_run_stores_a_row_and_replaces_the_last(conn):

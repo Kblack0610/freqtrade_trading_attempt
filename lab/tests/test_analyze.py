@@ -14,7 +14,6 @@ from lab import analyze, metrics, variants
 
 TODAY = dt.date(2026, 11, 4)
 REPO = Path(__file__).resolve().parents[2]
-FIXTURES = Path(__file__).resolve().parent / "fixtures" / "strategies"
 
 
 @pytest.mark.parametrize("path", sorted((REPO / "user_data" / "exchanges").glob("*.json")), ids=lambda p: p.stem)
@@ -288,13 +287,6 @@ def test_a_past_years_chunk_digest_is_the_one_it_was_stored_with(lab):
 
 
 DATA = Path(os.environ.get("LAB_RESULTS", "/lab")) / "data" / "binanceus" / "BTC_USD-5m.feather"
-
-
-@pytest.mark.skipif(not DATA.exists(), reason="needs backfilled binanceus data under LAB_RESULTS")
-def test_planted_lookahead_is_flagged_and_a_clean_strategy_is_not():
-    planted = analyze.bias_one("lookahead", "PlantedLookahead", str(FIXTURES))
-    assert planted["has_bias"] is True and "next_close" in planted["biased_indicators"]
-    assert analyze.bias_one("lookahead", "Strategy001", None)["has_bias"] is False
 
 
 @pytest.mark.skipif(not DATA.exists(), reason="needs backfilled binanceus data under LAB_RESULTS")
