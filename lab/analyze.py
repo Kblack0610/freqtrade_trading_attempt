@@ -19,7 +19,7 @@
    A FreqAI strategy (a freqai.json beside its file) runs as-is only, over the last ML_DAYS from the first of that
    month, with that file as its config and a model identifier per venue, chunk and file version, so FreqAI reuses
    only models trained for that chunk (user_data/models/<identifier>). On an image without lightgbm (the plain
-   trader image) it is recorded with load_error NEEDS_ML and runs nothing.
+   trader image) it is recorded with load_error NEEDS_ML and runs nothing. It skips a venue FreqAI refuses (ml_venue: Kraken).
 3. Bias: lookahead-analysis and recursive-analysis per strategy, rerun when its file hash changes. A FreqAI
    strategy gets none yet: lookahead-analysis would retrain per signal, and which check stands in is open.
 4. Derived, rebuilt in one transaction from the stored trades: daily returns, metrics over 30d, 90d,
@@ -143,6 +143,17 @@ def ml_chunks(since: dt.date, today: dt.date) -> list[tuple[dt.date, dt.date]]:
     its training windows at a chunk's start, so a start that moves monthly, not nightly, keeps its models reusable."""
     lo = max(since, ml_start(today))
     return [(max(a, lo), b) for a, b in chunks(lo, today)]
+
+
+@cache
+def ml_venue(exchange: str) -> bool:
+    """Whether FreqAI runs on this venue: freqtrade's Exchange.validate_freqai refuses one whose OHLCV API has no
+    history (its ohlcv_has_history flag; Kraken), so a FreqAI chunk there only fails."""
+    import freqtrade.exchange as fx
+    from freqtrade.exchange.common import MAP_EXCHANGE_CHILDCLASS
+
+    cls = getattr(fx, MAP_EXCHANGE_CHILDCLASS.get(exchange, exchange).title(), fx.Exchange)
+    return {**fx.Exchange._ft_has_default, **cls._ft_has}["ohlcv_has_history"]
 
 
 def ml_start(today: dt.date) -> dt.date:
@@ -534,6 +545,9 @@ def plan(conn, found: list[dict], first: dict, today: dt.date, ft_version: str, 
             if (ex, s["timeframe"]) not in digests:
                 digests[ex, s["timeframe"]] = candle_digests(ex, s["timeframe"], "chunk", today)
             ml = freqai_fragment(s["file"]) is not None
+            if ml and not ml_venue(ex):
+                skipped.append(f"{s['name']} on {ex}: FreqAI needs OHLCV history this venue's API lacks")
+                continue
             for oid, o in [("", None), *([] if ml or (s["name"], ex) not in scored else (overlays or {}).items())]:
                 for start, end in (ml_chunks if ml else chunks)(since.date(), today):
                     cfg = chunk_config(s, ex, start, o and o["params"])
@@ -557,9 +571,12 @@ def plan(conn, found: list[dict], first: dict, today: dt.date, ft_version: str, 
 
 
 def prune_ml(conn, found: list[dict], today: dt.date) -> None:
-    """A FreqAI strategy's chunks that start before its window: the window moved on, and they would overlap its new first chunk."""
+    """A FreqAI strategy's chunks that start before its window (the window moved on, and they would overlap its new
+    first chunk) or sit on a venue FreqAI refuses (ml_venue)."""
     names = [s["name"] for s in found if freqai_fragment(s["file"])]
-    conn.execute("DELETE FROM backtest_chunks WHERE strategy = ANY(%s) AND chunk_start < %s", (names, ml_start(today)))
+    venues = [ex for ex in EXCHANGES if not ml_venue(ex)]
+    conn.execute("DELETE FROM backtest_chunks WHERE strategy = ANY(%s) AND (chunk_start < %s OR exchange = ANY(%s))",
+                 (names, ml_start(today), venues))
 
 
 def bias_todo(conn, found: list[dict], first: dict) -> list[tuple[str, str, str]]:
