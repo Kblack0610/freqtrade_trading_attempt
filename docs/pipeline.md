@@ -21,17 +21,26 @@ roster --> paper bots (the league) --ingest--> Postgres --> drift, watcher, deca
 
 All times UTC. Backfill and analysis run on razer-laptop, because the candle files live on the `freqtrade-lab` volume there. Walk-forward runs as several pods on any amd64 node except hp-victus, from a copy of the candles in MinIO.
 
-| When | Job | What it does | Typical length |
+| When | Job | What it does | Measured length |
 |---|---|---|---|
 | every 5 min | `freqtrade-ingest` | Copies every paper bot's trades and a snapshot into Postgres | seconds |
 | hourly at :20 | `freqtrade-backfill` | New candles for the league exchanges | about 2 minutes |
 | hourly at :50 | `freqtrade-backfill-research` | New and older candles for okx and kucoin | about 1 minute once caught up |
-| 00:45 | `freqtrade-candles-publish` | Copies the changed candle files to MinIO for the walk-forward pods | minutes |
-| 01:00 | `freqtrade-walkforward` | Tunes and tests strategies month by month | up to the 4.5 h budget, 8 h hard limit |
-| 02:45 | `freqtrade-analysis` | Backtests everything, then scores everything | under an hour on a normal night, hours after a big change |
-| 05:35 | `freqtrade-futures` | Funding rates and open interest | under a minute |
+| 00:45 | `freqtrade-candles-publish` | Copies the changed candle files to MinIO for the walk-forward pods | about 1 minute (0.02 h on 2026-11-12) |
+| every 5 min | `trader-markets-recorder`, `-recorder-polymarket-us`, `-recorder-predictit`, `-recorder-manifold` | One sweep of every open market per venue (Kalshi, Polymarket US, PredictIt, Manifold) into Postgres and MinIO | a Kalshi sweep 3 to 4.5 minutes (measured 2026-11-06) |
+| every 15 min | `trader-markets-recorder-polymarket` | The same sweep for Polymarket global | about 10 minutes |
+| every 6 h at :07 | `trader-markets-recorder-odds-api` | Sportsbook odds | not measured |
+| every 3 h at :00, :01, :02 | `trader-markets-history-settled`, `-history-bars` (`0 1-23/3`), `-history-trades` (`0 2-23/3`) | Backfill of markets that settled before the recorder started | settled 0.84 h; bars and trades hit their 2 h limit (DeadlineExceeded) on most runs |
+| 01:30 | `trader-markets-compact` | Folds each settled day's quote parts into one object | about 1 minute |
+| 01:00 | `freqtrade-walkforward` | Tunes and tests strategies month by month | 5.2 h to 6.1 h (2026-11-10 and 11); a run the 8 h limit ended, or with failed fold pods, shows Failed (2026-11-07, 09 and 12) |
+| 02:45 | `freqtrade-analysis` | Backtests everything, then scores everything | 1.6 h on 2026-11-10; 7.1 h on 2026-11-09 and 7.7 h on 2026-11-11 after big changes. Not "under an hour" |
+| 05:35 | `freqtrade-futures` | Funding rates and open interest | under a minute (0.01 h) |
 | 10:00 | `trader-research-sync` (fleet machine) | Turns the night's changes into board rows and roster PRs | minutes |
-| Sunday 02:50 | `freqtrade-lab-backup` | Tars the lab volume to the NAS | minutes |
+| Sunday 02:50 | `freqtrade-lab-backup` | Tars the lab volume to the NAS | 0.11 h (2026-11-08) |
+
+Schedules are read from home-config `apps/freqtrade`; the markets jobs are described in [markets.md](markets.md). Lengths are start to completion of the Jobs `kubectl -n freqtrade get jobs` still holds (about 6 days, 2026-11-06 to 12); a Job past its deadline has no completion time and the column says so.
+
+A missed 01:00 or 02:45 slot shows as a `*-manual-<MMDD>` Job (`freqtrade-analysis-manual-1111`, `freqtrade-walkforward-manual-1111`) started by hand. 2026-11-11 had no scheduled walk-forward or analysis Job, only the two manual ones at 08:43 UTC; look for that name before reading a missing night as a failure.
 
 ## Step 1: price data
 
