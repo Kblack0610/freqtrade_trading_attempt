@@ -210,6 +210,15 @@ cadence_seconds = 60
 # Equity down this share of capital since the UTC day's first reading. Alert only at Stage 0.
 day_loss = 0.03
 
+[markouts]
+# lab/markouts.py: each paper entry's move this many minutes after its fill, hedged by the pair's BTC beta over the
+# beta_days before, against `draws` random entries on the same pair and side within window_hours. A diagnostic only.
+timeframe = "5m"
+horizons_minutes = [5, 60, 240]
+window_hours = 24
+draws = 20
+beta_days = 30
+
 [horizon]
 # lab/horizon.py: a strategy's out-of-sample days against hold BTC and the long-mean filter, shown on /book.
 level = 0.90
