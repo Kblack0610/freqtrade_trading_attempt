@@ -726,7 +726,7 @@ def overfit_rows(series: dict) -> list[dict]:
     median strategy's history, since start dates differ by years on one venue."""
     rows = []
     for ex in sorted({e for _, e in series}):
-        cols = {s: d.set_index("day")["ret"] for (s, e), (d, _) in series.items() if e == ex and not d.empty}
+        cols = {s: d.set_index("day")["ret"] for (s, e), d in series.items() if e == ex and not d.empty}
         for win, n in WINDOWS.items():
             if n is not None and n < metrics.PBO_MIN_DAYS:
                 continue
@@ -736,13 +736,8 @@ def overfit_rows(series: dict) -> list[dict]:
     return rows
 
 
-def hold_columns(rows: list[dict], series: dict, close: pd.Series) -> None:
-    """Add each window's share of capital in the market and its return over holding that share of BTC."""
-    for r in rows:
-        hold(r, *series[(r["strategy"], r["exchange"])], close)
-
-
 def hold(r: dict, daily: pd.DataFrame, trades: pd.DataFrame, close: pd.Series) -> None:
+    """Add the window's share of capital in the market and its return over holding that share of BTC."""
     start = pd.Timestamp(r["start_day"], tz="UTC")
     end = pd.Timestamp(r["end_day"], tz="UTC") + pd.Timedelta(days=1)
     t = trades[trades["close_date"] >= start]
@@ -752,19 +747,21 @@ def hold(r: dict, daily: pd.DataFrame, trades: pd.DataFrame, close: pd.Series) -
     r.update(zip(("hold_excess", "hold_excess_lo", "hold_excess_hi"), excess), capital_exposure=capital)
 
 
-def overlay_rows(conn, close: pd.Series) -> list[dict]:
-    """The windows of every overlay series, measured as they load, so only their daily returns stay in memory."""
-    rows = []
-    for k, (daily, trades) in load_series(conn, overlays=True):
+def measured(conn, close: pd.Series, overlays: bool = False) -> tuple[dict, list[dict]]:
+    """Every series' daily returns and its windows, measured as each series loads, so its trades are dropped before
+    the next loads: holding every series' trades at once ran the 14Gi analysis pod out of memory (2026-11-12)."""
+    series, rows = {}, []
+    for k, (daily, trades) in load_series(conn, overlays):
         for r in series_windows(k, daily, trades):
             hold(r, daily, trades, close)
             rows.append(r)
-    return rows
+        series[k] = daily
+    return series, rows
 
 
 def estimate_rows(series: dict) -> list[dict]:
     rows = []
-    for (s, e), (daily, _) in series.items():
+    for (s, e), daily in series.items():
         basis = daily["ret"].to_numpy()[-ESTIMATE_BASIS:]
         if len(basis) < ESTIMATE_MIN_DAYS:
             continue
@@ -777,12 +774,12 @@ def estimate_rows(series: dict) -> list[dict]:
 
 def correlation_rows(series: dict, league: set[str]) -> list[dict]:
     rows = []
-    for (s, e), (daily, _) in series.items():
+    for (s, e), daily in series.items():
         mine = daily.set_index("day")["ret"].iloc[-CORR_DAYS:]
         for other in sorted(league - {s}):
             if (other, e) not in series:
                 continue
-            theirs = series[(other, e)][0].set_index("day")["ret"]
+            theirs = series[(other, e)].set_index("day")["ret"]
             both = pd.concat([mine, theirs], axis=1, join="inner").dropna()
             if len(both) < CORR_MIN_DAYS or (both.std() == 0).any():
                 continue
@@ -802,7 +799,7 @@ def cluster_rows(series: dict, close: pd.Series, max_rho: float) -> tuple[list[d
     btc = close.pct_change().dropna()
     members, venues = [], []
     for e in sorted({k[1] for k in series}):
-        frame = pd.DataFrame({k: d.set_index("day")["ret"].iloc[-CORR_DAYS:] for k, (d, _) in series.items()
+        frame = pd.DataFrame({k: d.set_index("day")["ret"].iloc[-CORR_DAYS:] for k, d in series.items()
                               if k[1] == e and not d.empty})
         resid = diversity.residuals(frame, btc)
         resid = resid.loc[:, resid.notna().sum() >= CORR_MIN_DAYS] if not resid.empty else resid
@@ -860,16 +857,14 @@ BENCHMARK_COLS = ["name", "win", "start_day", "end_day", "total_return", "cagr",
 
 
 def derive(conn) -> dict:
-    series = dict(load_series(conn))
     league = {r[0] for r in conn.execute("SELECT DISTINCT strategy FROM bots")}
-    daily = [{"strategy": s, "exchange": e, **r} for (s, e), (d, _) in series.items() for r in d.to_dict("records")]
     close = daily_close("BTC")
-    windows = [r for k, (d, t) in series.items() for r in series_windows(k, d, t)]
-    overlaid = overlay_rows(conn, close)
+    series, windows = measured(conn, close)
+    daily = [{"strategy": s, "exchange": e, **r} for (s, e), d in series.items() for r in d.to_dict("records")]
+    overlaid = measured(conn, close, overlays=True)[1]
     deflate(windows + overlaid)
     estimates = estimate_rows(series)
     bench = book.benchmark_rows(close, daily_close("ETH"), suggest.load_config())
-    hold_columns(windows, series, close)
     corr, reg, overfit = correlation_rows(series, league), regime_rows(close, suggest.load_config()), overfit_rows(series)
     members, venues = cluster_rows(series, close, suggest.load_config()["diversity"]["max_rho"])
     with conn.transaction():

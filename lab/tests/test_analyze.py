@@ -573,7 +573,7 @@ def test_cluster_rows_cluster_each_venue_on_btc_residuals_and_skip_short_or_flat
     own = rng.normal(0, 0.01, len(days))
 
     def series(ret):
-        return pd.DataFrame({"day": days[:len(ret)], "ret": ret}), pd.DataFrame()
+        return pd.DataFrame({"day": days[:len(ret)], "ret": ret})
 
     beta1, beta2 = 1.2 * btc + rng.normal(0, 0.01, len(days)), 0.8 * btc + rng.normal(0, 0.01, len(days))
     found = {("Beta1", "x"): series(beta1), ("Beta2", "x"): series(beta2), ("Own1", "x"): series(own),
@@ -588,3 +588,25 @@ def test_cluster_rows_cluster_each_venue_on_btc_residuals_and_skip_short_or_flat
     assert {v["exchange"]: (v["series"], v["clusters"]) for v in venues} == {"x": (4, 3), "y": (1, 1)}
     assert all(m["days"] == 150 for m in members)
     assert analyze.cluster_rows(found, pd.Series(dtype=float), 0.5) == ([], [])
+
+
+def test_derive_drops_each_series_trades_before_the_one_after_next_loads(conn, monkeypatch):
+    """Holding every series' trades at once ran the 14Gi analysis pod out of memory (2026-11-12): derive keeps only
+    daily returns, so at most the series being measured and the one just yielded are alive."""
+    import gc
+    import weakref
+
+    alive: list = []
+
+    def fake(conn, overlays=False):
+        for i in range(5):
+            gc.collect()
+            assert sum(r() is not None for r in alive) <= 1, "derive still holds an earlier series' trades"
+            trades = pd.DataFrame({"close_date": pd.to_datetime([], utc=True)})
+            alive.append(weakref.ref(trades))
+            yield (f"S{i}", "binanceus", "o") if overlays else (f"S{i}", "binanceus"), \
+                (pd.DataFrame({"day": [], "ret": [], "pnl": [], "trades": []}), trades)
+
+    monkeypatch.setattr(analyze, "load_series", fake)
+    monkeypatch.setattr(analyze, "daily_close", lambda coin: pd.Series(dtype=float))
+    assert analyze.derive(conn)["series"] == 5
