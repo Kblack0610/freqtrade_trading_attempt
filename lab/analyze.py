@@ -29,7 +29,8 @@
    the deflated Sharpe of every window; the other derived tables are as-is only.
    Then lab/volatility.py scores HAR against plain variance forecasts per venue and pair (`vol_scores`, `vol_verdict`).
 5. Drift: each league bot's strategy backtested on its exchange over the time the bot has run, set
-   against the bot's dry-run trades in `drift`.
+   against the bot's dry-run trades in `drift`, and trade by trade in `reconcile`. Then lab/markouts.py marks each
+   entry at fixed horizons against random entries (`markouts`).
 6. Suggestions: lab/suggest.py turns those tables into promote, watch, demote, retire and fix rows,
    with the thresholds in lab/suggest.toml.
 
@@ -63,7 +64,7 @@ from typing import Protocol
 import pandas as pd
 from psycopg.types.json import Jsonb
 
-from lab import metrics, book, confidence, loop, mixtures, scorecard, suggest, universe, variants, volatility, vol_target, horizon
+from lab import metrics, markouts, book, confidence, loop, mixtures, scorecard, suggest, universe, variants, volatility, vol_target, horizon
 from lab.db import connect
 from lab.util import finite, utc
 
@@ -602,9 +603,11 @@ def store_drift(conn, task: dict, res: dict) -> None:
     if res.get("ok"):
         lo, hi = max(task["since"], res["bt_start"]), res["bt_end"]
         live = pd.DataFrame(conn.execute(
-            "SELECT pair, open_date, is_open, profit_ratio, profit_abs FROM bot_trades"
+            "SELECT pair, open_date, is_open, profit_ratio, profit_abs, open_rate, (raw->>'fee_open')::float,"
+            " (raw->>'fee_close')::float, coalesce((raw->>'is_short')::boolean, false) FROM bot_trades"
             " WHERE bot = %s AND open_date >= %s AND open_date < %s", (task["bot"], lo, hi)).fetchall(),
-            columns=["pair", "open_date", "is_open", "profit_ratio", "profit_abs"])
+            columns=["pair", "open_date", "is_open", "profit_ratio", "profit_abs", "open_rate", "fee_open",
+                     "fee_close", "is_short"])
         bt = res["trades"]
         if len(bt):
             opened = pd.to_datetime(bt["open_date"], utc=True)
@@ -613,10 +616,18 @@ def store_drift(conn, task: dict, res: dict) -> None:
                    **metrics.drift(live, bt, pd.Timedelta(task["timeframe"] or "5m")))
     else:
         row["error"] = res.get("error")
-    cols = ", ".join(DRIFT_COLS)
-    conn.execute(f"INSERT INTO drift ({cols}) VALUES ({', '.join(['%s'] * len(DRIFT_COLS))}) ON CONFLICT (bot) DO UPDATE"
-                 " SET " + ", ".join(f"{c} = EXCLUDED.{c}" for c in DRIFT_COLS[1:]) + ", computed_at = now()",
-                 [finite(row.get(c)) for c in DRIFT_COLS])
+    cols, rec = ", ".join(DRIFT_COLS), row.pop("reconcile", None)
+    with conn.transaction():
+        conn.execute("DELETE FROM reconcile WHERE bot = %s", (task["bot"],))
+        if rec is not None and len(rec):
+            conn.cursor().executemany(
+                f"INSERT INTO reconcile (bot, n, {', '.join(metrics.RECONCILE_COLS)}) VALUES "
+                f"({', '.join(['%s'] * (len(metrics.RECONCILE_COLS) + 2))})",
+                [[task["bot"], n, *(None if pd.isna(v) else finite(v) for v in r)]
+                 for n, r in enumerate(rec[metrics.RECONCILE_COLS].itertuples(index=False))])
+        conn.execute(f"INSERT INTO drift ({cols}) VALUES ({', '.join(['%s'] * len(DRIFT_COLS))}) ON CONFLICT (bot) DO UPDATE"
+                     " SET " + ", ".join(f"{c} = EXCLUDED.{c}" for c in DRIFT_COLS[1:]) + ", computed_at = now()",
+                     [finite(row.get(c)) for c in DRIFT_COLS])
 
 
 SERIES_COLS = ["open_date", "close_date", "open_rate", "close_rate", "min_rate", "stake_amount", "profit_ratio", "profit_abs"]
@@ -966,6 +977,8 @@ def main(runner: Runner | None = None, today: dt.date | None = None) -> int:
             cfg = suggest.load_config()
             summary.update(volatility.run(conn, vol_files(first, cfg["volatility"]["timeframe"]), cfg))
             lap("volatility")
+            summary.update(markouts.run(conn, RESULTS / "data", USER_DATA / "exchanges", cfg["markouts"]))
+            lap("markouts")
             for step in (vol_target, suggest, confidence, book, mixtures, scorecard, horizon, loop):
                 summary.update(step.run(conn))
                 lap(step.__name__.removeprefix("lab."))
