@@ -11,7 +11,9 @@ budget. An archive cohort (`kind = "archive"`) is one elite per filled cell of t
 on its venues and timeframe floor, best Sharpe low end first, keeping one only when its edge before fees is above 0
 on its own venue and on a `replicate_on` venue and its BTC-residual daily returns correlate at most `[diversity]
 max_rho` with every one already picked, up to `max_bots`. `pick` also prints the picks' residual effective count to
-stderr, a report and never a gate. The promote gates are not applied: a cohort
+stderr, a report and never a gate. A shadow cohort (`kind = "shadow"`) is the shadow paper accounts lab/shadow.py
+judged winning, best forward return first, up to `max_bots`, each on its own venue under its own overlay: the
+candidate league a person seeds (calm-lagoon P10). Elsewhere the promote gates are not applied: a cohort
 forward-tests near-misses. Nothing here edits the roster: ci/cohort_roster.py turns the rows into a home-config PR that a person
 merges.
 """
@@ -101,6 +103,24 @@ def pick_mixture(rows: list[tuple], cfg: dict) -> list[str]:
         return []
     _, sleeves, _, _ = min(rows, key=lambda r: (-r[2], -(r[3] if r[3] is not None else -math.inf), r[0]))
     return [f"{cfg['prefix']}-{e}-{s.lower()} {e} {s} {cfg['cohort']} {BASE}" for s, e in sleeves]
+
+
+def winner_rows(conn) -> list[tuple]:
+    """(strategy, exchange, overlay, forward return) of every shadow account in state winning, from its newest mark."""
+    return list(conn.execute(
+        "SELECT a.strategy, a.exchange, a.overlay, m.equity / a.capital - 1 FROM shadow_accounts a "
+        "JOIN LATERAL (SELECT equity FROM shadow_marks WHERE account = a.account ORDER BY day DESC LIMIT 1) m ON true "
+        "WHERE a.state = 'winning'"))
+
+
+def pick_winners(rows: list[tuple], cfg: dict, known: set[str]) -> list[str]:
+    """Pure: one roster line per winning shadow account, best forward return first (then strategy, exchange,
+    overlay), up to cfg["max_bots"], on its own exchange under its own overlay. An overlay the toml no longer declares
+    is left out, since league would stop the pod; a non-base overlay is in the bot name so two overlays of one
+    strategy and venue stay two rows."""
+    keep = sorted((r for r in rows if r[2] == "" or r[2] in known), key=lambda r: (-r[3], r[0], r[1], r[2]))
+    return [f"{cfg['prefix']}-{e}-{s.lower()}{'-' + o.lower() if o else ''} {e} {s} {cfg['cohort']} {o or BASE}"
+            for s, e, o, _ in keep[:cfg["max_bots"]]]
 
 
 def strategy_rows(conn) -> list[tuple]:
@@ -251,6 +271,9 @@ def main(argv: list[str]) -> int:
                 print(e, file=sys.stderr)
                 return 1
             print(f"{cfg['cohort']}: {neff_lift(elites, resid, lines)}", file=sys.stderr)
+        elif cfg.get("kind") == "shadow":
+            known, _ = variants.load()
+            lines = pick_winners(winner_rows(conn), cfg, set(known))
         elif cfg.get("kind") == "mixture":
             lines = pick_mixture(mixture_rows(conn, cfg["weighting"], cfg["gated"], cfg["min_days"]), cfg)
         else:

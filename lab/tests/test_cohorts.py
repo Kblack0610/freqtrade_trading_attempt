@@ -274,3 +274,40 @@ def test_the_roster_gains_one_row_and_replicas_follow():
 def test_the_roster_refuses_a_statefulset_already_out_of_step():
     with pytest.raises(ValueError, match="replicas 5 for 2 roster rows"):
         cohort_roster.roster_change(LOOP_ROSTER, LOOP_STS.replace("2  #", "5  #"), suggest.roster_line("Good", "kraken"))
+
+
+WIN = {"prefix": "win", "cohort": "winners", "max_bots": 2}
+WINNERS = [("A", "binanceus", "", 0.05), ("B", "okx", "ov1", 0.12), ("B", "okx", "", 0.12),
+           ("C", "kucoin", "gone", 0.90), ("D", "binanceus", "", 0.01)]
+
+
+def test_a_shadow_cohort_is_the_best_winners_each_on_its_own_venue_and_overlay():
+    assert cohorts.pick_winners(WINNERS, WIN, {"ov1"}) == ["win-okx-b okx B winners base",
+                                                           "win-okx-b-ov1 okx B winners ov1"]
+    # an overlay the toml no longer declares is left out; max_bots cuts the rest
+    assert [l.split()[0] for l in cohorts.pick_winners(WINNERS, {**WIN, "max_bots": 9}, {"ov1"})] == [
+        "win-okx-b", "win-okx-b-ov1", "win-binanceus-a", "win-binanceus-d"]
+    assert cohorts.pick_winners([], WIN, set()) == []
+
+
+def test_winner_rows_are_only_winning_accounts_at_their_newest_mark(conn):
+    from psycopg.types.json import Jsonb
+    for account, strategy, state in (("w", "W", "winning"), ("t", "T", "trial"), ("r", "R", "retired")):
+        conn.execute("INSERT INTO shadow_accounts (account, strategy, exchange, cohort, capital, promoted_on, entry, "
+                     "state) VALUES (%s, %s, 'binanceus', 'short', 1000, '2026-09-01', %s, %s)",
+                     (account, strategy, Jsonb({}), state))
+        for day, equity in (("2026-09-02", 1300), ("2026-10-15", 1100)):
+            conn.execute("INSERT INTO shadow_marks VALUES (%s, %s, 0, %s)", (account, day, equity))
+    assert [(s, e, o, round(r, 6)) for s, e, o, r in cohorts.winner_rows(conn)] == [("W", "binanceus", "", 0.1)]
+
+
+def test_the_shipped_winners_cohort_picks_rows_league_accepts(tmp_path):
+    cfg = {"prefix": "win", "cohort": "winners", **cohorts.load()["winners"]}
+    known, _ = variants.load()
+    oid = next(iter(known))
+    lines = cohorts.pick_winners([(f"S{i}", "binanceus", oid, 0.01 * i) for i in range(20)], cfg, set(known))
+    assert len(lines) == cfg["max_bots"]
+    roster = tmp_path / "roster.tsv"
+    roster.write_text("\n".join(lines))
+    parsed = league.roster_rows(roster)
+    assert {r.cohort for r in parsed} == {"winners"} and {r.overlay for r in parsed} == {oid}

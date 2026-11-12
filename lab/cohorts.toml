@@ -60,3 +60,12 @@ max_bots = 16
 # OHLCV calls a minute this cohort may make on a venue (see [strategies.budget]). 16 bots on 1h with 10 pairs make
 # under 3.
 binanceus = 10
+
+[winners]
+# The candidate league (calm-lagoon P10): the shadow paper accounts lab/shadow.py judged winning (lab/suggest.toml
+# [shadow]: up and the low end of the bootstrap interval above zero after min_days of unseen days), best forward
+# return first, one bot each on its own venue under its own overlay. A shadow mark is a backtest replayed on candles;
+# a pod adds live fills and fees, which is the check left. Seeding it is a person's call: ci/cohort_roster.py winners
+# opens the PR and never merges it. Grow `max_bots` only by a human decision: about 320 MiB and a PVC each.
+kind = "shadow"
+max_bots = 8
