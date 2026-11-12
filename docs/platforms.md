@@ -17,13 +17,13 @@ Tier is the highest rung we can use: **API** (an official API covers the job), *
 | Coinbase | candidate | crypto exchange | API | API, manual only | dry-run league | P2 |
 | Gemini | candidate | crypto exchange | API | API | Gemini sandbox | P2 |
 | Trezor | held | self-custody | API (xpub) | person (press on device) | none needed | P3 |
-| Alpaca | candidate | API broker | API | API | Alpaca paper account | code landed, needs paper keys |
+| Alpaca | candidate | API broker | API | API | Alpaca paper account | live 2026-11-12: hourly read and weekday drill (home-config #832) |
 | Interactive Brokers | candidate | API broker | API | API | IBKR paper account, needs a funded account | when a strategy needs it |
 | Schwab | candidate | API broker | API | API | none found | not connected: no paper API |
 | Tastytrade | candidate | API broker | API | API | cert sandbox | when a strategy needs it |
-| Fidelity | held | broker, no API | aggregator (SnapTrade, read connection) | person | SnapTrade sandbox for the read path | code landed, needs a SnapTrade key and the connection |
+| Fidelity | held | broker, no API | aggregator (SnapTrade, read connection) | person | SnapTrade sandbox for the read path | key deployed (home-config #832), waits on the person connecting Fidelity in SnapTrade |
 | Robinhood | candidate | broker | API (crypto only) | API (crypto), person (rest) | none | code landed, needs a read-only key |
-| Kalshi | candidate (tr-50) | prediction market | API | API | demo exchange | demo key (ask ybXZIM), account tr-50, live tr-48 |
+| Kalshi | candidate (tr-50) | prediction market | API | API | demo exchange | demo drill live 2026-11-12 (home-config #832); live key held, not deployed; live tr-48 |
 | Polymarket US | candidate | prediction market | API | API | backtest engine only | none until an account is opened |
 | Polymarket global | data only | prediction market | API | never (US is close-only) | n/a | none |
 | PredictIt | data only | prediction market | API (one feed) | person | none | none |
@@ -245,7 +245,7 @@ Only Alpaca and the Tastytrade sandbox can be practised on without money: IBKR p
 - `python -m lab.broker read` writes one `broker_balances` row: account status, equity, cash, buying power and the position count, or the error. Holdings themselves are not stored. `/accounts` shows the newest row and `trader_broker_equity` and `trader_broker_read_age_seconds` export it.
 - `python -m lab.broker drill` rests one SPY share at $1.00 (`lab/broker.toml`), reads it back, cancels it and reads it back, writing to `demo_orders`. Outside market hours the order sits in `accepted`, which counts as resting. Whether a limit that far from the market is accepted is Not verified; the first drill settles it.
 - Input: `ALPACA_PAPER_KEY_ID` and `ALPACA_PAPER_SECRET_KEY`. With none set, `read` exits 0 and writes nothing.
-- Not yet run against Alpaca: tested only against a fake API, because no paper keys exist. It is live once the person adds `trading/alpaca-paper` to rbw and a SOPS Secret, a CronJob in home-config `apps/freqtrade/` runs `read` hourly, and a balance appears on `/accounts`.
+- Live since 2026-11-12 (home-config #832): `trader-broker-read` runs `read` hourly at :17 and `trader-broker-drill` runs the drill weekdays at 14:40 UTC, keys from SOPS Secret `trader-brokers` (the person's copy is rbw `trading/alpaca-paper`). First run: equity 100000.0 USD, 0 positions, and the drill's SPY order was seen resting and then canceled.
 
 ### Interactive Brokers
 
@@ -327,7 +327,7 @@ Also seen, to record later: Tradier (personal tokens that never expire, 60 tradi
 - `python -m lab.broker read` writes one `broker_balances` row per connected account, named institution, account name and the last four of the number (`fidelity_individual_1234`), with `paper` from SnapTrade's `is_paper`. It stores the total value and status; holdings stay at SnapTrade. An account with no total is a row with an error.
 - Input: `SNAPTRADE_CLIENT_ID` and `SNAPTRADE_CONSUMER_KEY`. With none set, the source is skipped.
 - Cadence: once a day is enough, since SnapTrade refreshes once a day.
-- Not yet run against SnapTrade: tested only against a fake API. It is live once the person creates the Personal key, adds it to rbw as `trading/snaptrade` and a SOPS Secret, connects the sandbox and then Fidelity, a home-config CronJob runs `read` daily, and a Fidelity row appears on `/accounts`.
+- Key deployed 2026-11-12 (home-config #832): the Personal key is in rbw `trading/snaptrade` and Secret `trader-brokers`, read hourly by `trader-broker-read`; `/api/v1/accounts` answers 200 with no accounts. It is live once the person connects the sandbox, then Fidelity with a read connection, and a Fidelity row appears on `/accounts`.
 
 ### Robinhood
 
@@ -376,7 +376,7 @@ Data facts, fees as backtested, and adapter notes are in [markets.md](markets.md
 - Sign-in and 2FA: SMS or an authenticator app (TOTP), asked about every 30 days (snippet). TOTP fits rbw.
 - Risk controls: order groups with a 15 s fill cap; self-exclusion and funding caps that cannot be lifted early (doc).
 - Cost: no API fee found. Trading fees are in [markets.md](markets.md).
-- Paper: the demo exchange. The drill is built (`lab/markets/kalshi_trade.py`, [markets.md](markets.md), Demo orders) and waits on a demo account key, ask ybXZIM: the person opens a demo account at demo.kalshi.co, makes a key, and adds it to rbw as `trading/kalshi-demo` and to a SOPS Secret.
+- Paper: the demo exchange. The drill (`lab/markets/kalshi_trade.py`, [markets.md](markets.md), Demo orders) runs daily at 14:50 UTC as `trader-kalshi-demo-drill` since 2026-11-12 (home-config #832), with the key from Secret `trader-kalshi-demo` (rbw `trading/kalshi-demo`). First run: one contract seen resting and then canceled. The live key (rbw `trading/kalshi`) reads the real balance and is not deployed.
 - Verified: 2026-11-06. Sources: https://kalshi-public-docs.s3.amazonaws.com/Kalshi-Developer-Agreement.pdf, https://docs.kalshi.com/getting_started/api_keys, https://docs.kalshi.com/getting_started/rate_limits, https://docs.kalshi.com/getting_started/demo_env, https://help.kalshi.com/en/articles/13823787-how-do-i-use-2fa-two-factor-authentication-verification-codes.
 
 ### Polymarket US
