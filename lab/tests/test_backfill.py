@@ -258,14 +258,16 @@ def okx_zip(month: str, times_ms: list[int], confirm: int = 1) -> bytes:
 def test_okx_candles_from_monthly_files(monkeypatch):
     start = LISTED - dt.timedelta(minutes=2)
     ms = [int(start.timestamp() * 1000) + i * 60_000 for i in range(5)]
-    files = {"http://cdn/1.zip": okx_zip("2026-01", ms), "http://cdn/2.zip": okx_zip("2026-02", ms[-1:] + [ms[-1] + 60_000])}
+    cdn = archive.OKX_FILES.base
+    files = {f"{cdn}/1.zip": okx_zip("2026-01", ms), f"{cdn}/2.zip": okx_zip("2026-02", ms[-1:] + [ms[-1] + 60_000])}
     windows = []
 
-    def get(url):
+    def get(api, url, params=None):
         if url in files:
+            assert api is archive.OKX_FILES
             return files[url]
-        q = dict(p.split("=") for p in url.split("?", 1)[1].split("&"))
-        windows.append((int(q["begin"]), int(q["end"])))
+        assert (api, url) == (archive.OKX, archive.OKX_LIST)
+        windows.append((params["begin"], params["end"]))
         groups = [{"url": u} for u in files] if len(windows) == 1 else []
         return json.dumps({"code": "0", "msg": "", "data": [{"details": [{"groupDetails": groups}]}]}).encode()
 
@@ -278,7 +280,7 @@ def test_okx_candles_from_monthly_files(monkeypatch):
 
 
 def test_okx_listing_error_is_raised(monkeypatch):
-    monkeypatch.setattr(archive, "_get", lambda url: b'{"code":"50077","msg":"too long","data":[]}')
+    monkeypatch.setattr(archive, "_get", lambda api, url, params=None: b'{"code":"50077","msg":"too long","data":[]}')
     with pytest.raises(RuntimeError, match="50077"):
         archive.okx_candles("BTC/USDT", "20260101")
 
@@ -295,7 +297,7 @@ def test_the_image_has_every_userdir_folder(monkeypatch):
     directory_operations.create_userdata_dir(str(backfill.REPO / "user_data"))
 
 
-def test_range_file_reads_a_zip_split_across_urls(monkeypatch):
+def test_range_file_reads_a_zip_split_across_urls():
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
         z.writestr("XBTUSD_60.csv", "".join(f"{t},1,1,1,1,1,1\n" for t in range(5000)))
@@ -303,21 +305,27 @@ def test_range_file_reads_a_zip_split_across_urls(monkeypatch):
     third = len(data) // 3
     parts = {f"http://x/{i}": data[i * third:(i + 1) * third if i < 2 else None] for i in range(3)}
 
-    class Response(io.BytesIO):
+    class Response:
         def __init__(self, body, length):
-            super().__init__(body)
-            self.headers = {"Content-Length": str(length)}
+            self.content, self.status_code, self.headers = body, 206, {"Content-Length": str(length)}
 
-    def urlopen(req, timeout):
-        body = parts[req.full_url]
-        if req.get_method() == "HEAD":
-            return Response(b"", len(body))
-        a, b = req.get_header("Range").removeprefix("bytes=").split("-")
-        return Response(body[int(a):int(b) + 1], int(b) + 1 - int(a))
+        def raise_for_status(self):
+            pass
 
-    monkeypatch.setattr(archive.urllib.request, "urlopen", urlopen)
-    z = zipfile.ZipFile(archive.RangeFile(list(parts)))
+    class Session:
+        def request(self, method, url, params, json, headers, timeout):
+            assert headers["Accept-Encoding"] == "identity", "a range must be the file's own bytes"
+            body = parts[url]
+            if method == "HEAD":
+                return Response(b"", len(body))
+            a, b = headers["Range"].removeprefix("bytes=").split("-")
+            return Response(body[int(a):int(b) + 1], int(b) + 1 - int(a))
+
+    api = archive.Api("t", {"base_url": "http://x", "page_gap_s": 0}, Session(), sleep=lambda _: None)
+    z = zipfile.ZipFile(archive.RangeFile(list(parts), api))
     assert z.read("XBTUSD_60.csv").count(b"\n") == 5000, "zipfile checks the CRC on read"
+    with pytest.raises(ValueError, match="refusing"):
+        archive.RangeFile(["http://elsewhere/0"], api)
 
 
 def test_failed_download_still_records_what_is_on_disk(conn, lab):

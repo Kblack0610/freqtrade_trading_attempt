@@ -12,7 +12,8 @@ without the query), RSA-PSS SHA-256 with a digest-length salt, or Ed25519. Order
 routes: POST /portfolio/events/orders (side bid buys yes; count and price are fixed-point strings, price in
 dollars) and DELETE /portfolio/events/orders/{id}; GET /portfolio/orders/{id} reads one back. Reads lag writes on the
 demo: a 404 right after the place, the old status right after the cancel (docs/markets.md, Demo orders), so both wait
-within `read_polls` x `read_poll_s`.
+within `read_polls` x `read_poll_s`. Every request goes through lab/markets/api.py Api with [demo.kalshi]'s pace and
+budget, signed afresh on every attempt; a place (POST) is retried on a 429 only, never after a 5xx or a timeout.
 
 The drill (lab/markets/drill.py) picks an open demo market with an ask above `drill_price` (or takes --ticker), rests
 one yes contract at `drill_price`, post only, then cancels it. It exits 1 unless the order was seen resting and then
@@ -26,12 +27,11 @@ import sys
 import time
 from urllib.parse import urlparse
 
-import requests
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519, padding, rsa
 
 from lab.db import connect
-from lab.markets.api import num
+from lab.markets.api import Api, num
 from lab.markets.drill import rest_and_cancel
 from lab.markets.recorder import load_config
 
@@ -65,12 +65,11 @@ class KalshiDemo:
         url = urlparse(cfg["base_url"])
         if url.scheme != "https" or url.hostname not in DEMO_HOSTS:
             raise NotDemo(f"refusing {cfg['base_url']}: the order path runs on the Kalshi demo exchange only")
-        self.base, self.path = cfg["base_url"].rstrip("/"), url.path.rstrip("/")
+        self.path = url.path.rstrip("/")
         self.key_id, self.sign = key_id, signer(pem)
-        self.timeout = float(cfg.get("timeout_s", 30))
-        self.http = session or requests.Session()
         self.clock = clock or time.time
         self.sleep = sleep or time.sleep
+        self.api = Api(self.venue, cfg, session, self.sleep)
         self.read_polls, self.read_poll_s = int(cfg["read_polls"]), float(cfg["read_poll_s"])
 
     def headers(self, method: str, path: str) -> dict:
@@ -80,8 +79,7 @@ class KalshiDemo:
                 "KALSHI-ACCESS-SIGNATURE": base64.b64encode(sig).decode()}
 
     def call(self, method: str, path: str, params: dict | None = None, body: dict | None = None) -> dict:
-        r = self.http.request(method, f"{self.base}{path}", params=params, json=body, timeout=self.timeout,
-                              headers=self.headers(method, path))
+        r = self.api.request(method, path, params, body, headers=lambda _: self.headers(method, path))
         if r.status_code >= 400:
             kind = NotFound if r.status_code == 404 else RuntimeError
             raise kind(f"kalshi demo {method} {path}: HTTP {r.status_code}: {str(r.text)[:300]}")

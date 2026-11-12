@@ -5,9 +5,12 @@
 [esplora]
 # Any Esplora API (blockstream.info, mempool.space, or our own). Each address of a watched account is sent to it.
 # blockstream.info at a 1 s gap read the 40 used addresses of the BIP84 test-vector zpub in 84 s, no 429
-# (2026-11-06); mempool.space returned 429 at a 0.5 s gap.
+# (2026-11-06); mempool.space returned 429 at a 0.5 s gap. Blockstream publishes no limit for its public instance and
+# sends no Retry-After; a maintainer advised "up to 5 requests a second" (read 2026-11-11,
+# https://github.com/Blockstream/esplora/issues/304), so we stay at 1.
 base_url = "https://blockstream.info/api"
-page_gap_s = 1.0   # pause between address reads
+page_gap_s = 1.0   # pause between address reads (lab/markets/api.py Api paces them, the scan does not)
+budget_rps = 1     # every process on our IP together
 retries = 6
 timeout_s = 30
 

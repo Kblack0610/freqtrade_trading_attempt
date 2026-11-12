@@ -3,7 +3,7 @@ import pytest
 from lab.markets import manifold_trade
 from lab.markets.manifold_trade import ManifoldBets, NotManifold
 
-CFG = {"base_url": "https://api.manifold.markets", "timeout_s": 5, "drill_mana": 1, "expires_s": 600}
+CFG = {"base_url": "https://api.manifold.markets", "timeout_s": 5, "page_gap_s": 0, "drill_mana": 1, "expires_s": 600}
 
 
 class Resp:

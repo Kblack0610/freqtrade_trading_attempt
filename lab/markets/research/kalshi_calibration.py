@@ -1,8 +1,8 @@
 """By hand: is any Kalshi price bucket mispriced enough to beat the taker fee? Dry run, no keys, no orders.
 
-  python lab/markets/research/kalshi_calibration.py fetch [--days 60]   # settled markets + hourly candles
-  python lab/markets/research/kalshi_calibration.py report              # calibration tables, markdown
-  python lab/markets/research/kalshi_calibration.py open                # open markets that fit a surviving cell
+  python -m lab.markets.research.kalshi_calibration fetch [--days 60]   # settled markets + hourly candles
+  python -m lab.markets.research.kalshi_calibration report              # calibration tables, markdown
+  python -m lab.markets.research.kalshi_calibration open                # open markets that fit a surviving cell
 
 Reads only Kalshi's public market-data API. Data caches under ~/.cache/trader-markets/kalshi/.
 Entry is the taker price at a fixed horizon before the scheduled expiration: the yes ask to buy YES, one
@@ -24,7 +24,9 @@ from pathlib import Path
 import numpy as np
 import requests
 
-API = "https://api.elections.kalshi.com/trade-api/v2"
+from lab.markets.api import Api
+from lab.markets.recorder import load_config
+
 CACHE = Path.home() / ".cache" / "trader-markets" / "kalshi"
 HORIZONS_H = (24, 6, 1)
 BUCKETS = [(lo / 100, (lo + 10) / 100) for lo in range(0, 100, 10)]
@@ -38,46 +40,15 @@ BATCH = 100  # Tickers per batch candlestick call.
 PER_SERIES = 400  # Most markets fetched per series, so a few busy series do not make up the sample.
 MIN_N = 30  # Markets in a cell before it is scored at all.
 BOOT = 2000
-# Kalshi documents 20 reads a second for the basic tier, but the batch candle call drew 429s at 8.
-# There is no push feed for history, so requests are paced by one limiter at this cadence.
-READS_PER_SEC = 5
-
-
-class Pace:
-    def __init__(self, per_sec: float):
-        self.gap, self.next, self.lock = 1.0 / per_sec, 0.0, threading.Lock()
-
-    def wait(self):
-        with self.lock:
-            now = time.monotonic()
-            self.next = max(self.next, now) + self.gap
-            delay = self.next - self.gap - now
-        if delay > 0:
-            time.sleep(delay)
-
-    def slow(self):
-        """A 429 means the real limit is lower than our cadence: back the cadence off for good."""
-        with self.lock:
-            self.gap = min(self.gap * 1.5, 2.0)
-
-
-PACE = Pace(READS_PER_SEC)
-SESSION = requests.Session()
+# Paced by lab/markets/api.py Api with [research.kalshi_calibration] in lab/markets.toml; the four candle threads
+# share the one client, so they share its pace.
+_cfg = load_config()
+API = Api("kalshi", {**{k: v for k, v in _cfg["venues"]["kalshi"].items() if k != "budget_rps"},
+                     **_cfg["research"]["kalshi_calibration"]})
 
 
 def get(path: str, **params) -> dict:
-    for attempt in range(8):
-        PACE.wait()
-        r = SESSION.get(f"{API}{path}", params=params, timeout=30)
-        if r.status_code == 429 or r.status_code >= 500:
-            if r.status_code == 429:
-                PACE.slow()
-            time.sleep(2 ** attempt)
-            continue
-        r.raise_for_status()
-        return r.json()
-    r.raise_for_status()
-    return {}
+    return API.get(path, params)
 
 
 def ts(iso: str) -> int:

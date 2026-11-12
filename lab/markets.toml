@@ -61,7 +61,8 @@ base_url = "https://api.elections.kalshi.com/trade-api/v2"
 page_limit = 1000
 # An unpaced count of /markets drew 429s; 0.5 s between pages was clean (docs/markets.md, Rate limits).
 page_gap_s = 0.5
-# Requests a second across every process on our IP: 60% of the Basic tier's 20 (200 read tokens/s, 10 a request).
+# Requests a second across every process on our IP: 60% of the Basic tier's 20 (200 read tokens/s, 10 a request;
+# read 2026-11-11, https://docs.kalshi.com/getting_started/rate_limits).
 budget_rps = 12
 retries = 6
 timeout_s = 30
@@ -109,10 +110,11 @@ title = "Manifold"
 kind = "play-money"
 url = "https://manifold.markets"
 base_url = "https://api.manifold.markets"
-# search-markets caps a page at 1000; 500 requests/min per IP.
+# search-markets caps a page at 1000; "a rate limit of 500 requests per minute per IP" (read 2026-11-11,
+# https://docs.manifold.markets/api).
 page_limit = 1000
 page_gap_s = 0.2
-# Across every process, 60% of 500 a minute.
+# Across every process, 60% of 500 a minute. lab/markets/manifold_trade.py's drill takes its turns from this budget too.
 budget_rps = 5
 retries = 6
 timeout_s = 60
@@ -262,6 +264,12 @@ max_book_age_min = 15
 # Keys are the demo account's, apart from production: KALSHI_DEMO_KEY_ID and KALSHI_DEMO_KEY_FILE (a PEM).
 base_url = "https://external-api.demo.kalshi.co/trade-api/v2"
 timeout_s = 30
+# Basic tier: 200 read and 100 write tokens a second, 10 tokens a request, so 20 reads or 10 writes a second (read
+# 2026-11-11, https://docs.kalshi.com/getting_started/rate_limits); the page does not say the demo differs. One budget
+# for the demo key, apart from production's: half the write rate. A place is never retried after a 5xx (api.py).
+page_gap_s = 0.2
+budget_rps = 5
+retries = 4
 # The drill rests one contract this far below the ask, post only, so it cannot fill before it is cancelled.
 drill_price = 0.01
 # Reads lag writes (2026-11-09: a 404 right after a place, still resting 0.04 s after a cancel, canceled by 0.29 s),
@@ -273,9 +281,21 @@ read_poll_s = 0.25
 # lab/markets/manifold_trade.py, play money: the client refuses any host but api.manifold.markets. Key: MANIFOLD_API_KEY.
 base_url = "https://api.manifold.markets"
 timeout_s = 30
+# The limit is per IP, so the drill takes its turns from [venues.manifold] budget_rps, the reader's budget.
+page_gap_s = 0.2
+retries = 4
 # The drill rests a 1-mana YES limit bet (the minimum bet) at 1%, the lowest limit, on a market priced at min_prob or
 # more, so it cannot fill before it is cancelled. Manifold cancels it on its own after expires_s if the drill dies.
 drill_price = 0.01
 drill_mana = 1
 min_prob = 0.10
 expires_s = 600
+
+[research.kalshi_calibration]
+# lab/markets/research/kalshi_calibration.py, run by hand from a workstation: its own IP, so it takes no turns from
+# [venues.kalshi] budget_rps (that budget lives in the cluster's database). Kalshi documents 20 reads a second for the
+# Basic tier (read 2026-11-11, https://docs.kalshi.com/getting_started/rate_limits), but the batch candle call drew
+# 429s at 8 a second, so 5.
+page_gap_s = 0.2
+retries = 7
+timeout_s = 30

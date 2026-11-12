@@ -9,6 +9,9 @@ Requests carry `Authorization: Key <MANIFOLD_API_KEY>` (one key per account). Ro
 states them (2026-11-06): POST /v0/bet with `limitProb` (0.01 to 0.99, whole percents) is a limit order, and
 `expiresMillisAfter` has Manifold cancel it on its own, our dead-man switch; POST /v0/bet/cancel/{id} cancels;
 GET /v0/bets?userId=&contractId= reads it back (there is no one-bet route); GET /v0/me is the account and its balance.
+Every request goes through lab/markets/api.py Api with [demo.manifold]'s pace, on the Manifold reader's budget
+([venues.manifold] budget_rps): the limit is per IP, so the drill and the recorder share it. A bet or a cancel (both
+POST) is retried on a 429 only, never after a 5xx or a timeout.
 
 The drill (lab/markets/drill.py) picks an open binary mana market whose probability is at least `min_prob` (or takes
 --ticker), rests a `drill_mana` YES limit bet at `drill_price`, far below the market so nothing fills, then cancels it.
@@ -20,10 +23,9 @@ import os
 import sys
 from urllib.parse import urlparse
 
-import requests
-
 from lab.db import connect
-from lab.markets.api import num
+from lab.markets.api import Api, num
+from lab.markets.budget import Budget
 from lab.markets.drill import rest_and_cancel
 from lab.markets.recorder import load_config
 
@@ -47,20 +49,18 @@ class ManifoldBets:
     venue = "manifold"
     resting = frozenset({"open"})
 
-    def __init__(self, cfg: dict, key: str, session=None):
+    def __init__(self, cfg: dict, key: str, session=None, sleep=None, budget: Budget | None = None):
         url = urlparse(cfg["base_url"])
         if url.scheme != "https" or url.hostname not in MANIFOLD_HOSTS:
             raise NotManifold(f"refusing {cfg['base_url']}: the Manifold key goes to api.manifold.markets only")
-        self.base, self.key = cfg["base_url"].rstrip("/"), key
+        self.key = key
         self.mana = float(cfg.get("drill_mana", 1))
         self.expires_ms = int(float(cfg.get("expires_s", 600)) * 1000)
-        self.timeout = float(cfg.get("timeout_s", 30))
-        self.http = session or requests.Session()
+        self.api = Api(self.venue, cfg, session, sleep, budget)
         self.user_id, self.contracts = None, {}
 
     def call(self, method: str, path: str, params: dict | None = None, body: dict | None = None):
-        r = self.http.request(method, f"{self.base}{path}", params=params, json=body, timeout=self.timeout,
-                              headers={"Authorization": f"Key {self.key}"})
+        r = self.api.request(method, path, params, body, headers={"Authorization": f"Key {self.key}"})
         if r.status_code >= 400:
             raise RuntimeError(f"manifold {method} {path}: HTTP {r.status_code}: {str(r.text)[:300]}")
         return r.json()
@@ -122,7 +122,7 @@ def from_env(cfg: dict) -> ManifoldBets:
     key = os.environ.get("MANIFOLD_API_KEY")
     if not key:
         sys.exit("manifold_trade: need MANIFOLD_API_KEY (the account's key, rbw trading/manifold)")
-    return ManifoldBets(cfg["demo"]["manifold"], key)
+    return ManifoldBets(cfg["demo"]["manifold"], key, budget=Budget("manifold", cfg["venues"]["manifold"]["budget_rps"]))
 
 
 def main(argv: list[str] | None = None) -> int:

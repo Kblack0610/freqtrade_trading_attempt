@@ -20,25 +20,40 @@ A quarterly file covers what the full archive stops short of. Run it once by han
 OKX: one zip per pair and month (months in UTC+8, so each starts 8 hours before the UTC one), a CSV with a
 header; the listing call takes at most 10 months per request. The current month is not published yet,
 so the API append fills it.
+
+Every request goes through lab/markets/api.py Api, one client per host, paced and retried there. Nothing else reads
+these hosts, so none takes turns from a shared budget.
 """
 
 import io
 import json
 import sys
-import urllib.parse
-import urllib.request
 import zipfile
 
 import pandas as pd
 
-BASE = "https://assets.kraken.com/marketing/institutions/"
+from lab.markets.api import Api
+
+# Static files on Kraken's CDN: no published limit and no Retry-After seen (read 2026-11-11,
+# https://support.kraken.com/articles/360047124832-downloadable-historical-ohlcvt-open-high-low-close-volume-trades-data,
+# which gives none).
+# A range read is a few MB, so a short gap; the timeout covers the biggest member.
+KRAKEN = Api("kraken_archive", {"base_url": "https://assets.kraken.com/marketing/institutions", "page_gap_s": 0.2,
+                                "retries": 3, "timeout_s": 300})
+BASE = f"{KRAKEN.base}/"
 FULL = [f"{BASE}Kraken_OHLCVT_Full.zip.part0{i}" for i in range(5)]
 ALIASES = {"BTC": "XBT", "DOGE": "XDG"}
 MINUTES = {"1m": 1, "5m": 5, "15m": 15, "30m": 15, "1h": 60, "4h": 240, "1d": 1440}
-HEADERS = {"User-Agent": "trader-lab-backfill"}
-TIMEOUT = 300
+# identity: a Range read must be the file's own bytes, never a re-encoded body.
+HEADERS = {"User-Agent": "trader-lab-backfill", "Accept-Encoding": "identity"}
 COLS = ["date", "open", "high", "low", "close", "volume"]
-OKX_LIST = "https://www.okx.com/api/v5/public/market-data-history"
+# OKX "Get historical market data": "Rate Limit: 5 requests per 2 seconds", "Rate limit rule: IP" (read 2026-11-11,
+# https://www.okx.com/docs-v5/en/, Public Data, Get historical market data), so 0.8 s, under 2.5 a second.
+OKX = Api("okx", {"base_url": "https://www.okx.com/api/v5/public", "page_gap_s": 0.8, "retries": 4, "timeout_s": 60})
+OKX_LIST = f"{OKX.base}/market-data-history"
+# The monthly files the listing points at, on OKX's CDN: no published limit (read 2026-11-11, the page above).
+OKX_FILES = Api("okx_files", {"base_url": "https://static.okx.com/cdn/okex/traderecords", "page_gap_s": 0.2,
+                              "retries": 3, "timeout_s": 300})
 OKX_WINDOW = pd.DateOffset(months=9)  # the listing refuses a span over 10 months
 OKX_FROM = "20170101"  # before OKX's first spot listing in its files
 
@@ -46,13 +61,12 @@ OKX_FROM = "20170101"  # before OKX's first spot listing in its files
 class RangeFile:
     """Consecutive URLs as one seekable file. zipfile asks for each member in a single read."""
 
-    def __init__(self, urls: list[str]):
-        self.parts, self.size, self.pos = [], 0, 0
+    def __init__(self, urls: list[str], api: Api = KRAKEN):
+        self.api, self.parts, self.size, self.pos = api, [], 0, 0
         for url in urls:
-            head = urllib.request.Request(url, method="HEAD", headers=HEADERS)
-            with urllib.request.urlopen(head, timeout=TIMEOUT) as r:
-                n = int(r.headers["Content-Length"])
-            self.parts.append((self.size, n, url))
+            path = path_of(api, url)
+            n = int(ok(api.request("HEAD", path, headers=HEADERS)).headers["Content-Length"])
+            self.parts.append((self.size, n, path))
             self.size += n
 
     def seekable(self) -> bool:
@@ -68,17 +82,27 @@ class RangeFile:
     def read(self, n: int = -1) -> bytes:
         left = self.size - self.pos if n is None or n < 0 else min(n, self.size - self.pos)
         out = []
-        for start, size, url in self.parts:
+        for start, size, path in self.parts:
             if left > 0 and start <= self.pos < start + size:
                 a = self.pos - start
                 b = min(size, a + left) - 1
-                req = urllib.request.Request(url, headers={**HEADERS, "Range": f"bytes={a}-{b}"})
-                with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
-                    data = r.read()
+                data = ok(self.api.request("GET", path, headers={**HEADERS, "Range": f"bytes={a}-{b}"})).content
                 out.append(data)
                 self.pos += len(data)
                 left -= len(data)
         return b"".join(out)
+
+
+def path_of(api: Api, url: str) -> str:
+    """url's path under api's base; any other host or prefix is refused, so no request leaves the client's base."""
+    if not url.startswith(f"{api.base}/"):
+        raise ValueError(f"refusing {url}: not under {api.base}/")
+    return url[len(api.base):]
+
+
+def ok(r):
+    r.raise_for_status()
+    return r
 
 
 def member(pair: str, timeframe: str) -> str:
@@ -106,9 +130,8 @@ def resample(df: pd.DataFrame, timeframe: str) -> pd.DataFrame:
         {"open": "first", "high": "max", "low": "min", "close": "last", "volume": "sum"}).dropna().reset_index()
 
 
-def _get(url: str) -> bytes:
-    with urllib.request.urlopen(urllib.request.Request(url, headers=HEADERS), timeout=TIMEOUT) as r:
-        return r.read()
+def _get(api: Api, url: str, params: dict | None = None) -> bytes:
+    return ok(api.request("GET", path_of(api, url), params, headers=HEADERS)).content
 
 
 def okx_months(inst_id: str, start: pd.Timestamp, end: pd.Timestamp) -> list[str]:
@@ -116,9 +139,9 @@ def okx_months(inst_id: str, start: pd.Timestamp, end: pd.Timestamp) -> list[str
     urls: set[str] = set()
     while start < end:
         stop = min(start + OKX_WINDOW, end)
-        query = urllib.parse.urlencode({"module": 2, "instType": "SPOT", "instIdList": inst_id, "dateAggrType": "monthly",
-                                        "begin": int(start.timestamp() * 1000), "end": int(stop.timestamp() * 1000)})
-        body = json.loads(_get(f"{OKX_LIST}?{query}"))
+        query = {"module": 2, "instType": "SPOT", "instIdList": inst_id, "dateAggrType": "monthly",
+                                        "begin": int(start.timestamp() * 1000), "end": int(stop.timestamp() * 1000)}
+        body = json.loads(_get(OKX, OKX_LIST, query))
         if body["code"] != "0":
             raise RuntimeError(f"okx market-data-history {body['code']}: {body['msg']}")
         urls.update(g["url"] for d in body["data"] for det in d["details"] for g in det["groupDetails"])
@@ -131,7 +154,7 @@ def okx_candles(pair: str, floor: str | None = None) -> pd.DataFrame | None:
     start = pd.Timestamp(floor or OKX_FROM, tz="UTC")
     frames = []
     for url in okx_months(pair.replace("/", "-"), start, pd.Timestamp.now(tz="UTC")):
-        z = zipfile.ZipFile(io.BytesIO(_get(url)))
+        z = zipfile.ZipFile(io.BytesIO(_get(OKX_FILES, url)))
         for name in z.namelist():
             df = pd.read_csv(io.BytesIO(z.read(name)), usecols=["open_time", "open", "high", "low", "close", "vol", "confirm"])
             frames.append(df[df["confirm"] == 1])

@@ -16,7 +16,9 @@ here. A live order would come in behind lab/live.py's guard (docs/live.md), neve
 keys is skipped; with none set, `read` prints that and exits 0, as lab/wallet.py does with no accounts, so its job can
 exist before the keys do.
 
-Errors carry the HTTP status and the broker's message, never a key. `read` exits 1 when any read failed; `drill` exits
+Every request goes through the one paced client, lab/markets/api.py Api, with each platform's pace, retries and
+shared budget in lab/broker.toml beside its published limit; a signed request is re-signed on every retry. Errors
+carry the HTTP status and the broker's message, never a key. `read` exits 1 when any read failed; `drill` exits
 1 unless the order was seen resting and then canceled (lab/markets/drill.py, writing to demo_orders).
 """
 
@@ -32,13 +34,13 @@ import sys
 import time
 import tomllib
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import urlencode, urlparse
 
 import requests
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from lab.db import connect
-from lab.markets.api import num
+from lab.markets.api import Api, num
 from lab.markets.drill import rest_and_cancel
 
 CONFIG = Path(os.environ.get("BROKER_CONFIG", Path(__file__).resolve().parent / "broker.toml"))
@@ -76,14 +78,12 @@ class AlpacaPaper:
         url = urlparse(cfg["base_url"])
         if url.scheme != "https" or url.hostname != PAPER_HOST:
             raise NotPaper(f"refusing {cfg['base_url']}: this client runs on the Alpaca paper API only")
-        self.base = cfg["base_url"].rstrip("/")
         self.headers = {"APCA-API-KEY-ID": key_id, "APCA-API-SECRET-KEY": secret}
-        self.timeout = float(cfg["timeout_s"])
-        self.http = session or requests.Session()
         self.sleep = sleep or time.sleep
+        self.api = Api(self.venue, cfg, session, self.sleep)
 
     def call(self, method: str, path: str, body: dict | None = None):
-        r = self.http.request(method, f"{self.base}{path}", json=body, timeout=self.timeout, headers=self.headers)
+        r = self.api.request(method, path, body=body, headers=self.headers)
         if r.status_code >= 400:
             raise RuntimeError(f"alpaca paper {method} {path}: HTTP {r.status_code}: {str(r.text)[:300]}")
         return r.json() if r.status_code != 204 else None
@@ -118,20 +118,21 @@ class RobinhoodCrypto:
     venue = "robinhood_crypto"
     host = "trading.robinhood.com"
 
-    def __init__(self, cfg: dict, api_key: str, private_key_b64: str, session=None, clock=None):
-        self.base = https_host(cfg, self.host)
+    def __init__(self, cfg: dict, api_key: str, private_key_b64: str, session=None, clock=None, sleep=None):
+        https_host(cfg, self.host)
         self.api_key = api_key
         self.key = Ed25519PrivateKey.from_private_bytes(base64.b64decode(private_key_b64)[:32])
         self.quote = cfg["quote"]
-        self.timeout = float(cfg["timeout_s"])
-        self.http = session or requests.Session()
+        self.api = Api(self.venue, cfg, session, sleep)
         self.clock = clock or time.time
 
-    def get(self, path: str):
+    def signed(self, path: str) -> dict:
         ts = str(int(self.clock()))
         sig = self.key.sign(f"{self.api_key}{ts}{path}GET".encode())
-        headers = {"x-api-key": self.api_key, "x-timestamp": ts, "x-signature": base64.b64encode(sig).decode()}
-        r = self.http.request("GET", f"{self.base}{path}", json=None, timeout=self.timeout, headers=headers)
+        return {"x-api-key": self.api_key, "x-timestamp": ts, "x-signature": base64.b64encode(sig).decode()}
+
+    def get(self, path: str):
+        r = self.api.request("GET", path, headers=lambda _: self.signed(path), label=path.split("?")[0])
         if r.status_code >= 400:
             raise RuntimeError(f"robinhood GET {path.split('?')[0]}: HTTP {r.status_code}: {str(r.text)[:300]}")
         return r.json()
@@ -183,19 +184,24 @@ class SnapTrade:
 
     host = "api.snaptrade.com"
 
-    def __init__(self, cfg: dict, client_id: str, consumer_key: str, session=None, clock=None):
-        self.base = https_host(cfg, self.host)
+    venue = "snaptrade"
+
+    def __init__(self, cfg: dict, client_id: str, consumer_key: str, session=None, clock=None, sleep=None):
+        https_host(cfg, self.host)
         self.client_id, self.consumer_key = client_id, consumer_key
-        self.timeout = float(cfg["timeout_s"])
-        self.http = session or requests.Session()
+        self.api = Api(self.venue, cfg, session, sleep)
         self.clock = clock or time.time
 
+    def signed(self, path: str, query: dict) -> dict:
+        """The query is encoded as requests sends it, so the signature covers the bytes on the wire."""
+        body = json.dumps({"content": None, "path": path, "query": urlencode(query)}, separators=(",", ":"),
+                          sort_keys=True)
+        return {"Signature": base64.b64encode(hmac.new(self.consumer_key.encode(), body.encode(),
+                                                       hashlib.sha256).digest()).decode()}
+
     def get(self, path: str):
-        query = f"clientId={self.client_id}&timestamp={int(self.clock())}"
-        signed = json.dumps({"content": None, "path": path, "query": query}, separators=(",", ":"), sort_keys=True)
-        sig = base64.b64encode(hmac.new(self.consumer_key.encode(), signed.encode(), hashlib.sha256).digest()).decode()
-        r = self.http.request("GET", f"{self.base}{path}?{query}", json=None, timeout=self.timeout,
-                              headers={"Signature": sig})
+        r = self.api.request("GET", path, lambda: {"clientId": self.client_id, "timestamp": int(self.clock())},
+                             headers=lambda q: self.signed(path, q))
         if r.status_code >= 400:
             raise RuntimeError(f"snaptrade GET {path}: HTTP {r.status_code}: {str(r.text)[:300]}")
         return r.json()
@@ -248,22 +254,24 @@ def store(conn, row: dict, now: dt.datetime) -> None:
                  " %(cash)s, %(buying_power)s, %(positions)s, %(error)s)", {**row, "read_at": now})
 
 
-def sources(session=None) -> list:
+def sources(session=None, sleep=None) -> list:
     """Every read source whose keys are set, as a callable returning rows."""
     cfg = tomllib.loads(CONFIG.read_text())
     env = os.environ.get
     out = []
     if env("ALPACA_PAPER_KEY_ID") and env("ALPACA_PAPER_SECRET_KEY"):
-        c = AlpacaPaper(cfg["alpaca"], env("ALPACA_PAPER_KEY_ID"), env("ALPACA_PAPER_SECRET_KEY"), session)
+        c = AlpacaPaper(cfg["alpaca"], env("ALPACA_PAPER_KEY_ID"), env("ALPACA_PAPER_SECRET_KEY"), session, sleep)
         out.append(lambda: [read(c)])
     if env("ROBINHOOD_API_KEY") and env("ROBINHOOD_PRIVATE_KEY"):
-        out.append(RobinhoodCrypto(cfg["robinhood"], env("ROBINHOOD_API_KEY"), env("ROBINHOOD_PRIVATE_KEY"), session).read)
+        out.append(RobinhoodCrypto(cfg["robinhood"], env("ROBINHOOD_API_KEY"), env("ROBINHOOD_PRIVATE_KEY"), session,
+                                   sleep=sleep).read)
     if env("SNAPTRADE_CLIENT_ID") and env("SNAPTRADE_CONSUMER_KEY"):
-        out.append(SnapTrade(cfg["snaptrade"], env("SNAPTRADE_CLIENT_ID"), env("SNAPTRADE_CONSUMER_KEY"), session).read)
+        out.append(SnapTrade(cfg["snaptrade"], env("SNAPTRADE_CLIENT_ID"), env("SNAPTRADE_CONSUMER_KEY"), session,
+                             sleep=sleep).read)
     return out
 
 
-def main(argv: list[str] | None = None, session=None) -> int:
+def main(argv: list[str] | None = None, session=None, sleep=None) -> int:
     ap = argparse.ArgumentParser(prog="lab.broker")
     ap.add_argument("cmd", choices=("read", "drill"))
     a = ap.parse_args(argv)
@@ -274,10 +282,11 @@ def main(argv: list[str] | None = None, session=None) -> int:
             return 2
         cfg = tomllib.loads(CONFIG.read_text())["alpaca"]
         with connect(autocommit=True) as conn:
-            row = rest_and_cancel(conn, AlpacaPaper(cfg, key_id, secret, session), cfg["drill_symbol"], cfg["drill_price"])
+            row = rest_and_cancel(conn, AlpacaPaper(cfg, key_id, secret, session, sleep), cfg["drill_symbol"],
+                                  cfg["drill_price"])
         print(f"broker: drill {row}", flush=True)
         return 0 if row["error"] is None else 1
-    found = sources(session)
+    found = sources(session, sleep)
     if not found:
         print("broker: no broker keys set (Alpaca paper, Robinhood, SnapTrade)", flush=True)
         return 0

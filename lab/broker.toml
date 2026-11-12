@@ -1,8 +1,15 @@
 # Broker accounts read by lab/broker.py: Alpaca paper, and Robinhood Crypto and SnapTrade (Fidelity) read only.
-# Keys are not here: they come from env, named in lab/broker.py.
+# Keys are not here: they come from env, named in lab/broker.py. Every request goes through lab/markets/api.py Api:
+# page_gap_s between one process's requests, retries on a 429 (and a 5xx for a GET or DELETE), and budget_rps, the
+# requests a second every process on the same key may send together (lab/markets/budget.py), about 60% of the limit.
 
 [alpaca]
 base_url = "https://paper-api.alpaca.markets"   # the client refuses any other host
+# Published limit: "200 requests per minute, per account", each paper account counted on its own (read 2026-11-11,
+# https://alpaca.markets/support/usage-limit-api-calls). 60% of 3.3 a second.
+page_gap_s = 0.5
+budget_rps = 2
+retries = 4
 timeout_s = 30
 # The drill rests one share of this at this price, far under the market, so it cannot fill before it is cancelled.
 drill_symbol = "SPY"
@@ -10,9 +17,20 @@ drill_price = 1.00
 
 [robinhood]
 base_url = "https://trading.robinhood.com"   # the client refuses any other host and sends only GET
+# Published limit: 100 requests per minute per account, bursts to 300, a token bucket per endpoint whose values
+# "will fluctuate" (read 2026-11-11, https://docs.robinhood.com/crypto/trading/). 60% of 1.7 a second.
+page_gap_s = 1
+budget_rps = 1
+retries = 4
 timeout_s = 30
 quote = "USD"   # holdings are valued at the <asset>-USD best bid/ask midpoint
 
 [snaptrade]
 base_url = "https://api.snaptrade.com"   # the client refuses any other host and sends only GET
+# Published limit: 250 requests per minute per clientId, and for a Personal key 10 a minute per account on the
+# endpoints that name an account; a 429 carries no Retry-After (read 2026-11-11,
+# https://docs.snaptrade.com/docs/ratelimiting). We call only /accounts, once a run. 60% of 4.2 a second.
+page_gap_s = 1
+budget_rps = 2.5
+retries = 3
 timeout_s = 30

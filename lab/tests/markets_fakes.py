@@ -28,6 +28,10 @@ class Session:
     def __init__(self, *answers):
         self.answers, self.calls = list(answers), []
 
+    def request(self, method, url, params, json, headers, timeout):
+        assert (method, json, headers) == ("GET", None, None), "the venue fakes answer plain GETs only"
+        return self.get(url, params, timeout)
+
     def get(self, url, params, timeout):
         self.calls.append((url, dict(params)))
         answer = self.answers.pop(0)
