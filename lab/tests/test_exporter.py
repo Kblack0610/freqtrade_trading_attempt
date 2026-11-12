@@ -3,9 +3,6 @@ import datetime as dt
 import pytest
 from prometheus_client import CollectorRegistry, generate_latest
 
-NOW = dt.datetime.now(dt.timezone.utc)
-
-
 def scrape(collector) -> dict[str, float]:
     registry = CollectorRegistry()
     registry.register(collector)
@@ -21,25 +18,26 @@ def test_metrics_read_the_newest_state(conn):
     from lab import db
     from web.exporter import TraderCollector
 
+    now = dt.datetime.now(dt.timezone.utc)  # the collector ages rows against the scrape's clock, so take it here
     conn.execute("INSERT INTO bots (name, exchange, strategy, cohort) VALUES ('a', 'kraken', 'S', 'league'), "
                  "('b', 'kraken', 'S', 'aggressive')")
     conn.execute("INSERT INTO bot_snapshots (bot, ts, dry_run, open_trades, profit_all_pct) VALUES "
                  "('a', %s, false, 9, 5), ('a', %s, true, 2, 1.5), ('b', %s, NULL, NULL, -2)",
-                 (NOW - dt.timedelta(hours=3), NOW - dt.timedelta(hours=1), NOW - dt.timedelta(minutes=30)))
+                 (now - dt.timedelta(hours=3), now - dt.timedelta(hours=1), now - dt.timedelta(minutes=30)))
     conn.execute("UPDATE bot_snapshots SET error = 'connection refused' WHERE bot = 'b'")
     conn.execute("INSERT INTO runs (kind, name, raw, started_at, finished_at, ok) VALUES "
                  "('analysis', 'old', '{}', %s, %s, true), ('analysis', 'bad', '{}', %s, %s, false), "
                  "('analysis', 'now', '{}', %s, NULL, NULL), "
                  "('reproduce', 'old', '{\"checked\": 4, \"mismatch\": 0}', %s, %s, true), "
                  "('reproduce', 'new', '{\"checked\": 3, \"mismatch\": 1}', %s, %s, true)",
-                 (NOW - dt.timedelta(days=2), NOW - dt.timedelta(days=2) + dt.timedelta(hours=1),
-                  NOW - dt.timedelta(days=1), NOW - dt.timedelta(days=1) + dt.timedelta(hours=1), NOW,
-                  NOW - dt.timedelta(days=2), NOW - dt.timedelta(days=2), NOW - dt.timedelta(hours=2), NOW - dt.timedelta(hours=1)))
+                 (now - dt.timedelta(days=2), now - dt.timedelta(days=2) + dt.timedelta(hours=1),
+                  now - dt.timedelta(days=1), now - dt.timedelta(days=1) + dt.timedelta(hours=1), now,
+                  now - dt.timedelta(days=2), now - dt.timedelta(days=2), now - dt.timedelta(hours=2), now - dt.timedelta(hours=1)))
     conn.execute("INSERT INTO data_coverage (exchange, pair, timeframe, last_ts) VALUES "
                  "('kraken', 'BTC/USD', '5m', %s), ('kraken', 'ETH/USD', '5m', %s)",
-                 (NOW - dt.timedelta(minutes=20), NOW - dt.timedelta(hours=5)))
+                 (now - dt.timedelta(minutes=20), now - dt.timedelta(hours=5)))
     conn.execute("INSERT INTO funding_rates (exchange, pair, ts, rate) VALUES ('okx', 'BTC/USDT:USDT', %s, 0.0001)",
-                 (NOW - dt.timedelta(hours=8),))
+                 (now - dt.timedelta(hours=8),))
     conn.execute("INSERT INTO suggestions (kind, strategy, exchange, summary, action, gates) VALUES "
                  "('promote', 'S', 'kraken', 's', 'a', '[]'), ('promote', 'T', 'kraken', 's', 'a', '[]')")
     conn.execute("INSERT INTO climate_scorecard (kind, name, exchange, variant, cell, days, trades, lo, trials) VALUES "
@@ -51,7 +49,7 @@ def test_metrics_read_the_newest_state(conn):
     conn.execute("INSERT INTO markouts (bot, trade_id, open_date, horizon_min, pair, exchange, side, fill_slip, ret, "
                  "btc_ret, beta, net, null_net, null_draws) VALUES "
                  "('a', 1, %s, 60, 'ETH/USD', 'kraken', 1, 0.001, 0.02, 0.01, 1, 0.008, -0.002, 20), "
-                 "('a', 2, %s, 60, 'ETH/USD', 'kraken', 1, 0.003, 0.0, 0.0, 1, -0.002, -0.002, 20)", (NOW, NOW))
+                 "('a', 2, %s, 60, 'ETH/USD', 'kraken', 1, 0.003, 0.0, 0.0, 1, -0.002, -0.002, 20)", (now, now))
     conn.execute("INSERT INTO reconcile (bot, n, pair, kind, delay_s, price_gap, fee_gap, profit_gap) VALUES "
                  "('a', 0, 'ETH/USD', 'matched', 60, 0.002, 0, -0.004), ('a', 1, 'ETH/USD', 'bt_only', NULL, NULL, NULL, NULL)")
     m = scrape(TraderCollector(db.connect))
@@ -74,8 +72,8 @@ def test_metrics_read_the_newest_state(conn):
     assert m['trader_bot_profit_pct{bot="b",cohort="aggressive"}'] == -2
     assert 1700 < m["trader_ingest_age_seconds"] < 1900
     assert m['trader_run_ok{kind="analysis"}'] == 0
-    assert m['trader_run_started_timestamp_seconds{kind="analysis"}'] == NOW.timestamp()
-    assert m['trader_run_last_ok_timestamp_seconds{kind="analysis"}'] == (NOW - dt.timedelta(days=2, hours=-1)).timestamp()
+    assert m['trader_run_started_timestamp_seconds{kind="analysis"}'] == now.timestamp()
+    assert m['trader_run_last_ok_timestamp_seconds{kind="analysis"}'] == (now - dt.timedelta(days=2, hours=-1)).timestamp()
     assert 'trader_run_ok{kind="walkforward"}' not in m
     assert m["trader_repro_checked"] == 3 and m["trader_repro_mismatch"] == 1 and m['trader_run_ok{kind="reproduce"}'] == 1
     assert 1100 < m['trader_candle_age_seconds{exchange="kraken"}'] < 1300
@@ -98,7 +96,7 @@ def test_watch_metrics(conn):
     from lab import db
     from web.exporter import TraderCollector
 
-    now = dt.datetime.now(dt.timezone.utc)  # not the module's NOW: the age check is relative to the scrape
+    now = dt.datetime.now(dt.timezone.utc)
     conn.execute("INSERT INTO watch (bot, checked_at, seen_at, state, capital, equity, day_open, breached_at) VALUES "
                  "('a', %s, %s, 'paused', 1000, 960, 1000, %s)", (now, now - dt.timedelta(minutes=6), now))
     conn.execute("INSERT INTO watch (bot, checked_at, seen_at, error) VALUES ('new', %s, %s, 'refused')", (now, now))
