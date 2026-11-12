@@ -13,13 +13,37 @@ Env: FORGEJO_TOKEN (repo scope on home-config), KUBE_CONTEXT (default home-k3s),
 import base64
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from bump_home_config import BASE, REPO, call  # noqa: E402
-from research_sync import ROSTER, STATEFULSET, roster_change, rows_of  # noqa: E402
+
+ROSTER = "apps/freqtrade/roster.tsv"
+STATEFULSET = "apps/freqtrade/statefulset.yaml"
+REPLICAS = re.compile(r"^(\s*replicas:\s*)(\d+)(.*)$", re.M)
+
+
+def rows_of(roster: str) -> list[str]:
+    return [line for line in roster.splitlines() if line.strip() and not line.lstrip().startswith("#")]
+
+
+def roster_change(roster: str, statefulset: str, line: str) -> tuple[str, str] | None:
+    """Pure: roster.tsv with line appended and statefulset.yaml with replicas set to the new row count; None when
+    a row of that bot name is already there. Refuses a StatefulSet whose replicas already disagree with the roster."""
+    name = line.split()[0]
+    rows = rows_of(roster)
+    if any(r.split()[0] == name for r in rows):
+        return None
+    found = REPLICAS.findall(statefulset)
+    if len(found) != 1:
+        raise ValueError(f"{STATEFULSET}: expected one replicas line, found {len(found)}")
+    if int(found[0][1]) != len(rows):
+        raise ValueError(f"{STATEFULSET} has replicas {found[0][1]} for {len(rows)} roster rows; fix that first")
+    return (roster.rstrip("\n") + "\n" + line + "\n",
+            REPLICAS.sub(lambda m: f"{m[1]}{len(rows) + 1}{m[3]}", statefulset, count=1))
 
 
 def in_cohort(roster: str, cohort: str) -> bool:
@@ -34,7 +58,7 @@ def runs(row: str) -> tuple[str, str, str]:
 
 def seed(roster: str, statefulset: str, cohort: str, lines: list[str]) -> tuple[str, str] | None:
     """Pure: roster.tsv and statefulset.yaml with every line appended; None when the cohort is already in the roster
-    or no line is new. A row of a bot name already there is skipped (research_sync.roster_change), and so is one that
+    or no line is new. A row of a bot name already there is skipped (roster_change), and so is one that
     would run a strategy, exchange and overlay a bot already runs: a second bot would make the same trades."""
     if in_cohort(roster, cohort):
         return None

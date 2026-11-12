@@ -219,6 +219,17 @@ DEMO_ORDERS = "SELECT * FROM demo_orders ORDER BY placed_at DESC, id DESC LIMIT 
 BROKERS = "SELECT DISTINCT ON (broker) * FROM broker_balances ORDER BY broker, read_at DESC"
 WALLETS = "SELECT DISTINCT ON (account, coin) * FROM wallet_balances ORDER BY account, coin, read_at DESC"
 KILL_SWITCH = "SELECT * FROM watch ORDER BY stopped_at IS NULL, breached_at IS NULL, bot"
+# Shadow paper accounts (lab/shadow.py): winners, then the rest active, then the newest retired, best return first.
+SHADOW = """
+SELECT a.account, a.strategy, a.exchange, a.cohort, a.state, a.promoted_on, a.retired_on, a.retired_why, a.capital,
+       m.days, coalesce(m.equity, a.capital) AS equity, greatest(coalesce(m.peak, a.capital), a.capital) AS peak
+FROM shadow_accounts a LEFT JOIN LATERAL (
+    SELECT count(*) AS days, (array_agg(equity ORDER BY day DESC))[1] AS equity, max(equity) AS peak
+    FROM shadow_marks WHERE account = a.account) m ON true
+ORDER BY a.state = 'retired', a.state <> 'winning', a.retired_on DESC NULLS FIRST,
+         coalesce(m.equity, a.capital) / a.capital DESC, a.account
+LIMIT 200"""
+SHADOW_COUNTS = "SELECT cohort, state, count(*) AS n FROM shadow_accounts GROUP BY 1, 2"
 
 cfg = auth.Config()
 _pool: ConnectionPool | None = None
@@ -856,8 +867,13 @@ def accounts(request: Request):
     research = {"user": user, "accounts": refs,
                 "strategies": [{"name": name, **strategy_method(name, methods), "venues": venues}
                                for name, venues in catalog.items()]}
+    counts = {(r["cohort"], r["state"]): r["n"] for r in rows(SHADOW_COUNTS)}
+    shadow = {"rows": rows(SHADOW), "active": {c: counts.get((c, "trial"), 0) + counts.get((c, "winning"), 0)
+                                               for c in ("short", "long")},
+              "winning": sum(n for (_, s), n in counts.items() if s == "winning"),
+              "retired": sum(n for (_, s), n in counts.items() if s == "retired")}
     return page(request, "accounts.html", guard_lifted=live_lab.GUARD_LIFTED, brokers=brokers, wallets=wallets,
-                watch=rows(KILL_SWITCH), bots=bots, paper_accounts=paper, research=research,
+                watch=rows(KILL_SWITCH), bots=bots, paper_accounts=paper, research=research, shadow=shadow,
                 venues=venue_roster.rows(rows), stale_before=dt.datetime.now(dt.timezone.utc) - STALE)
 
 

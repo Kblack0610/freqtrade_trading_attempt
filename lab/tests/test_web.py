@@ -780,3 +780,22 @@ def test_account_evidence_distinguishes_recursive_instability(conn, signed_in):
     conn.execute("UPDATE bias_checks SET has_bias = true WHERE strategy = 'Strategy001' AND kind = 'recursive'")
     data = signed_in[1].get('/accounts/evidence?strategy=Strategy001&exchange=binanceus').json()
     assert data['bias'] == 'clean' and data['stability'] == 'unstable'
+
+
+def test_accounts_ranks_shadow_accounts_and_says_how_many_each_cohort_holds(conn, signed_in):
+    client = signed_in[1]
+    assert "No shadow account yet" in client.get("/accounts").text
+    conn.execute("INSERT INTO shadow_accounts (account, strategy, exchange, cohort, capital, promoted_on, entry, state, "
+                 "retired_on, retired_why) VALUES "
+                 "('shadow-A-binanceus', 'A', 'binanceus', 'short', 1000, '2026-10-01', '{}', 'trial', NULL, NULL), "
+                 "('shadow-W-kraken', 'W', 'kraken', 'long', 1000, '2026-08-01', '{}', 'winning', NULL, NULL), "
+                 "('shadow-R-binanceus', 'R', 'binanceus', 'short', 1000, '2026-09-01', '{}', 'retired', '2026-10-01', "
+                 "'drawdown 25.0% past 20%')")
+    conn.execute("INSERT INTO shadow_marks (account, day, ret, equity) VALUES "
+                 "('shadow-A-binanceus', '2026-10-02', 0.10, 1100), ('shadow-A-binanceus', '2026-10-03', -0.05, 1045), "
+                 "('shadow-W-kraken', '2026-08-02', 0.30, 1300)")
+    body = client.get("/accounts").text
+    assert "Active short 1, active long 1, winning 1, retired 1." in body
+    table = body.split('id="shadow"')[1].split("Prediction-market paper accounts")[0]
+    assert table.index("shadow-W-kraken") < table.index("shadow-A-binanceus") < table.index("shadow-R-binanceus")
+    assert "+30.0%" in table and "+4.5%" in table and "5.0%" in table and "drawdown 25.0% past 20%" in table

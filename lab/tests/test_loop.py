@@ -10,10 +10,6 @@ _spec = importlib.util.spec_from_file_location(
 research_sync = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(research_sync)
 
-ROSTER = "# name exchange strategy\n\nkraken-sample        kraken     SampleStrategy\nkraken-b  kraken  B\n"
-STS = "spec:\n  serviceName: x\n  replicas: 2  # rows\n  template: {}\n"
-
-
 def score(conn, name, cell, lo, kind="strategy"):
     conn.execute("INSERT INTO climate_scorecard (kind, name, exchange, variant, cell, days, trades, annual, lo, hi, trials) "
                  "VALUES (%s, %s, %s, 'tuned', %s, 90, 9, 0.2, %s, 0.4, 3)",
@@ -46,19 +42,6 @@ def test_a_change_is_an_event_once_and_a_steady_set_is_none(conn):
     assert loop.ack(conn, [e["id"] for e in events[:3]]) == 3
     assert loop.ack(conn, [events[0]["id"]]) == 0
     assert [e["name"] for e in loop.pending(conn)] == ["T", "S", "Good"]
-
-
-def test_the_roster_gains_one_row_and_replicas_follow():
-    line = suggest.roster_line("Good", "kraken")
-    roster, sts = research_sync.roster_change(ROSTER, STS, line)
-    assert roster.endswith(line + "\n") and research_sync.rows_of(roster)[:2] == research_sync.rows_of(ROSTER)
-    assert "  replicas: 3  # rows\n" in sts and sts.replace("3  #", "2  #") == STS
-    assert research_sync.roster_change(roster, sts, line) is None
-
-
-def test_the_roster_refuses_a_statefulset_already_out_of_step():
-    with pytest.raises(ValueError, match="replicas 5 for 2 roster rows"):
-        research_sync.roster_change(ROSTER, STS.replace("2  #", "5  #"), suggest.roster_line("Good", "kraken"))
 
 
 def test_one_board_row_carries_a_nights_climate_changes():
@@ -104,7 +87,6 @@ def test_sync_reports_retunes_and_only_acks_after_board_success(monkeypatch, dry
     monkeypatch.setenv("DRY_RUN", "1" if dry else "0")
     monkeypatch.setattr(research_sync, "kubectl_research", kubectl)
     monkeypatch.setattr(research_sync, "board", lambda *args: rows.append(args))
-    monkeypatch.setattr(research_sync, "roster_pr", lambda e: pytest.fail("retunes must not change the roster"))
     assert research_sync.main() == 0
     assert calls == ([("pending",)] if dry else [("pending",), ("ack", "1", "2")])
     assert len(rows) == (0 if dry else 2)
@@ -139,3 +121,16 @@ def test_sync_reads_on_the_site_and_acks_with_the_writer_role(monkeypatch):
         ["deploy/trader-web", "-c", "web"], ["deploy/freqtrade-watcher", "-c", "watcher"]]
     with pytest.raises(SystemExit, match="ack on deploy/freqtrade-watcher exited 1: .*ReadOnlySqlTransaction"):
         research_sync.kubectl_research("ack", "9")
+
+
+def test_a_promotion_files_a_board_row_and_opens_no_roster_pr(monkeypatch):
+    events = [dict(id=1, signal="promote", change="enters", name="Good", exchange="kraken", variant="", cell="",
+                   action=suggest.roster_line("Good", "kraken"))]
+    rows = []
+    monkeypatch.setenv("DRY_RUN", "0")
+    monkeypatch.setattr(research_sync, "kubectl_research",
+                        lambda *a: research_sync.json.dumps(events) if a == ("pending",) else "acked")
+    monkeypatch.setattr(research_sync, "board", lambda *a: rows.append(a))
+    assert research_sync.main() == 0
+    assert "shadow account" in rows[0][0] and rows[0][1][0] == "https://trader.kblab.me/accounts"
+    assert not hasattr(research_sync, "roster_pr") and not hasattr(research_sync, "call")

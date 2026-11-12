@@ -64,7 +64,7 @@ from typing import Protocol
 import pandas as pd
 from psycopg.types.json import Jsonb
 
-from lab import metrics, markouts, book, confidence, loop, mixtures, scorecard, suggest, universe, variants, volatility, vol_target, horizon
+from lab import metrics, markouts, book, confidence, loop, mixtures, scorecard, shadow, suggest, universe, variants, volatility, vol_target, horizon
 from lab.db import connect
 from lab.util import finite, utc
 
@@ -985,7 +985,7 @@ def main(runner: Runner | None = None, today: dt.date | None = None) -> int:
             lap("volatility")
             summary.update(markouts.run(conn, RESULTS / "data", USER_DATA / "exchanges", cfg["markouts"]))
             lap("markouts")
-            for step in (vol_target, suggest, confidence, book, mixtures, scorecard, horizon, loop):
+            for step in (vol_target, suggest, confidence, book, mixtures, scorecard, horizon, shadow, loop):
                 summary.update(step.run(conn))
                 lap(step.__name__.removeprefix("lab."))
             ok = failed <= FAIL_SHARE * max(len(todo), 1)
