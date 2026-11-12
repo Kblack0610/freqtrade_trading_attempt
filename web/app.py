@@ -30,6 +30,7 @@ from lab import book as book_lab
 from lab import live as live_lab
 from lab import db, diversity, metrics, suggest, universe
 from web import auth, charts, exporter, nav
+from web import venues as venue_roster
 
 HERE = Path(__file__).resolve().parent
 TZ = ZoneInfo(os.environ.get("TRADER_WEB_TZ", "UTC"))
@@ -857,7 +858,7 @@ def accounts(request: Request):
                                for name, venues in catalog.items()]}
     return page(request, "accounts.html", guard_lifted=live_lab.GUARD_LIFTED, brokers=brokers, wallets=wallets,
                 watch=rows(KILL_SWITCH), bots=bots, paper_accounts=paper, research=research,
-                stale_before=dt.datetime.now(dt.timezone.utc) - STALE)
+                venues=venue_roster.rows(rows), stale_before=dt.datetime.now(dt.timezone.utc) - STALE)
 
 
 def strategy_method(name: str, config: dict | None = None) -> dict:

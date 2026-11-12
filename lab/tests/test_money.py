@@ -22,7 +22,7 @@ from urllib.parse import urlparse
 
 import pandas as pd
 import pytest
-from test_broker import RH, SEED, ST, Paper, Robinhood, Snap
+from test_broker import KR_SECRET, RH, SEED, ST, Kraken, Paper, Robinhood, Snap
 from test_markets_kalshi_trade import RSA, Demo, pem
 from test_markets_manifold_trade import Manifold
 
@@ -191,7 +191,7 @@ def test_the_paper_league_runs_only_on_its_paper_venues(monkeypatch):
 # adds one here, in the same PR as the guard that gates it (docs/live.md), never by widening "paper".
 KINDS = {
     "paper": "paper, demo or play money: may write, only to its pinned hosts",
-    "read": "a real account: GET only, only to its pinned hosts",
+    "read": "a real account: GET, or POST to a read endpoint pinned in its row (reads), only to its pinned hosts",
     "none": "no account and no money credential: public data or our own services",
 }
 
@@ -205,6 +205,8 @@ class Client:
     make: Callable | None = None             # (cfg, session) -> the client
     drive: Callable | None = None            # (client, conn) -> run its real workflow
     fake: Callable | None = None             # () -> the venue fake the session answers from
+    reads: frozenset[str] = frozenset()      # a read client's POST paths that only read (Kraken's private API is POST)
+    declared_reads: Callable | None = None   # () -> the client's own path allowlist, which must equal reads
     why: str = ""
 
     def build(self, session, **cfg):
@@ -242,6 +244,11 @@ MONEY_MAP = {
     ("lab/broker.py", "SnapTrade"): Client(
         "read", frozenset({"api.snaptrade.com"}), lambda: {broker.SnapTrade.host}, _broker("snaptrade"),
         lambda cfg, s: broker.SnapTrade(cfg, "c", "k", s, sleep=lambda _: None), lambda c, conn: c.read(), Snap),
+    ("lab/broker.py", "KrakenRead"): Client(
+        "read", frozenset({"api.kraken.com"}), lambda: {broker.KrakenRead.host}, _broker("kraken"),
+        lambda cfg, s: broker.KrakenRead(cfg, "k", KR_SECRET, s, sleep=lambda _: None), lambda c, conn: c.read(),
+        Kraken, reads=frozenset({"/0/private/Balance", "/0/private/TradeBalance"}),
+        declared_reads=lambda: broker.KrakenRead.READS),
     ("lab/markets/api.py", "Api"): Client("none", why="the one paced client: every client built on it has its own row"),
     ("lab/markets/kalshi.py", "Kalshi"): Client("none", why="Kalshi public market data, GET only, no key"),
     ("lab/markets/polymarket.py", "PolymarketUS"): Client("none", why="Polymarket US public market data, GET only, no key"),
@@ -337,11 +344,11 @@ class Recorder:
         self.fake, self.sent = fake, []
 
     def request(self, method, url, **kw):
-        self.sent.append((method, urlparse(url).hostname))
+        self.sent.append((method, urlparse(url).hostname, urlparse(url).path))
         return self.fake.request(method, url, **kw)
 
     def get(self, url, **kw):
-        self.sent.append(("GET", urlparse(url).hostname))
+        self.sent.append(("GET", urlparse(url).hostname, urlparse(url).path))
         return self.fake.get(url, **kw)
 
 
@@ -363,10 +370,13 @@ def test_each_client_on_an_account_sends_only_where_its_kind_allows(conn, key):
     s = Recorder(c.fake())
     c.drive(c.build(s), conn)
     assert s.sent, "the workflow sent nothing, so this proves nothing"
-    assert {host for _, host in s.sent} <= c.hosts
-    writes = {m for m, _ in s.sent} - {"GET"}
+    assert {host for _, host, _ in s.sent} <= c.hosts
+    writes = {(m, path) for m, _, path in s.sent if m != "GET"}
     if c.kind == "read":
-        assert writes == set(), f"{key[1]} reads a real account and sent {writes}"
+        assert set(c.declared_reads() if c.declared_reads else ()) == c.reads, \
+            f"{key[1]}'s own read-path allowlist moved: review the change here, against KINDS"
+        assert {m for m, _ in writes} <= {"POST"} and {p for _, p in writes} <= c.reads, \
+            f"{key[1]} reads a real account and sent {writes}"
     else:
         assert writes, "a paper client's drill writes; the recorder saw none, so it is blind"
 

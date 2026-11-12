@@ -11,7 +11,7 @@ import requests
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from lab import broker
-from lab.broker import AlpacaPaper, NotPaper, RobinhoodCrypto, SnapTrade, WrongHost
+from lab.broker import AlpacaPaper, KrakenRead, NotPaper, RobinhoodCrypto, SnapTrade, WrongHost
 
 PAPER = {"base_url": "https://paper-api.alpaca.markets", "timeout_s": 5, "page_gap_s": 0, "retries": 2}
 ACCOUNT = {"id": "a1", "status": "ACTIVE", "currency": "USD", "equity": "100012.50", "cash": "99000.00",
@@ -215,7 +215,8 @@ def rh(s):
 
 @pytest.mark.parametrize("cls,cfg", [(RobinhoodCrypto, {"base_url": "https://trading.robinhood.com.evil.example"}),
                                      (RobinhoodCrypto, {"base_url": "http://trading.robinhood.com"}),
-                                     (SnapTrade, {"base_url": "https://api.snaptrade.example"})])
+                                     (SnapTrade, {"base_url": "https://api.snaptrade.example"}),
+                                     (KrakenRead, {"base_url": "https://api.kraken.com.evil.example"})])
 def test_a_read_only_client_refuses_any_other_host(cls, cfg):
     with pytest.raises(WrongHost):
         cls(cfg, "k", base64.b64encode(SEED).decode())
@@ -225,6 +226,7 @@ def test_the_shipped_config_points_at_each_platform():
     cfg = broker.tomllib.loads(broker.CONFIG.read_text())
     RobinhoodCrypto(cfg["robinhood"], "k", base64.b64encode(SEED).decode())
     SnapTrade(cfg["snaptrade"], "c", "k")
+    KrakenRead(cfg["kraken"], "k", KR_SECRET)
 
 
 def test_robinhood_signs_key_timestamp_path_and_method_with_the_ed25519_key():
@@ -326,3 +328,84 @@ def test_main_reads_every_source_whose_keys_are_set(conn, monkeypatch):
     assert conn.execute("SELECT broker, paper, equity FROM broker_balances ORDER BY broker").fetchall() == [
         ("fidelity_individual_1234", False, 15363.23), ("fidelity_roth_ira_5678", False, None),
         ("robinhood_crypto", False, 850.5)]
+
+
+# Kraken: a real account, read only, over POST.
+
+KR = {"base_url": "https://api.kraken.com", "timeout_s": 5, "page_gap_s": 0, "retries": 2}
+KR_SECRET = base64.b64encode(b"kraken-secret-bytes").decode()
+
+
+class Kraken:
+    """A spot account with USD cash, some BTC and a zero ETH line; records every request. `limited` 429s come first."""
+
+    def __init__(self, error=None, limited=0):
+        self.calls, self.error, self.limited = [], error, limited
+
+    def request(self, method, url, json, timeout, headers, params=None):
+        path = url.removeprefix("https://api.kraken.com")
+        self.calls.append((method, path, json, headers))
+        if self.limited:
+            self.limited -= 1
+            return Resp(429, {"error": ["EAPI:Rate limit exceeded"]})
+        if self.error:
+            return Resp(200, {"error": [self.error], "result": {}})
+        if path == "/0/private/Balance":
+            return Resp(200, {"error": [], "result": {"ZUSD": "120.5000", "XXBT": "0.0100000000", "XETH": "0.0000000000"}})
+        if path == "/0/private/TradeBalance":
+            return Resp(200, {"error": [], "result": {"eb": "720.5000", "tb": "720.5000"}})
+        return Resp(404, {"error": [f"EGeneral:Unknown method {path}"]})
+
+
+def kr(s, sleep=None):
+    return KrakenRead(KR, "kr-key", KR_SECRET, s, clock=lambda: 1700000000, sleep=sleep or NO_SLEEP)
+
+
+def test_kraken_reads_cash_holdings_and_its_own_usd_valuation():
+    s = Kraken()
+    [row] = kr(s).read()
+    assert row == {"broker": "kraken", "paper": False, "status": "open", "currency": "USD", "equity": 720.5,
+                   "cash": 120.5, "buying_power": None, "positions": 1, "error": None}
+    assert [(m, p) for m, p, _, _ in s.calls] == [("POST", "/0/private/Balance"), ("POST", "/0/private/TradeBalance")]
+    assert s.calls[1][2]["asset"] == "ZUSD"
+
+
+def test_kraken_signs_path_and_the_hash_of_nonce_and_body_with_the_secret():
+    s = Kraken()
+    kr(s).read()
+    for _, path, body, h in s.calls:
+        digest = hashlib.sha256((body["nonce"] + broker.json.dumps(body)).encode()).digest()
+        want = hmac.new(base64.b64decode(KR_SECRET), path.encode() + digest, hashlib.sha512).digest()
+        assert h == {"API-Key": "kr-key", "API-Sign": base64.b64encode(want).decode()}
+    nonces = [int(c[2]["nonce"]) for c in s.calls]
+    assert nonces == sorted(set(nonces)) and nonces[0] == 1700000000 * 10**9
+
+
+def test_a_kraken_retry_sends_a_fresh_nonce():
+    s = Kraken(limited=1)
+    [row] = kr(s).read()
+    assert row["error"] is None
+    first, retry = s.calls[0][2]["nonce"], s.calls[1][2]["nonce"]
+    assert int(retry) > int(first), "Kraken refuses a nonce it has seen"
+
+
+@pytest.mark.parametrize("path", ["/0/private/AddOrder", "/0/private/Withdraw", "/0/private/CancelAll"])
+def test_kraken_refuses_any_path_but_its_two_reads_before_sending(path):
+    s = Kraken()
+    with pytest.raises(ValueError, match="refusing"):
+        kr(s).post(path, {"pair": "XBTUSD"})
+    assert s.calls == []
+
+
+def test_a_kraken_error_is_a_row_without_the_key():
+    [row] = kr(Kraken(error="EGeneral:Permission denied")).read()
+    assert row["equity"] is None and row["error"] == "kraken POST /0/private/Balance: EGeneral:Permission denied"
+    assert "kr-key" not in row["error"] and KR_SECRET not in row["error"]
+
+
+def test_main_reads_kraken_when_its_keys_are_set(conn, monkeypatch):
+    monkeypatch.setenv("KRAKEN_API_KEY", "kr-key")
+    monkeypatch.setenv("KRAKEN_API_SECRET", KR_SECRET)
+    assert broker.main(["read"], session=Kraken(), sleep=NO_SLEEP) == 0
+    assert conn.execute("SELECT broker, paper, equity, cash, positions FROM broker_balances").fetchall() == [
+        ("kraken", False, 720.5, 120.5, 1)]

@@ -4,6 +4,8 @@
 <h1>Accounts</h1>
 <p>Read only. Real-money guard: {% if guard_lifted %}<span class="down">lifted</span>{% else %}<span class="up">on</span>{% endif %} (<code>lab/live.py</code>). Nothing on this site can place an order or move money: each table is the newest read a job wrote with a read-only key, a public key or a paper account.</p>
 
+{% include "_venues.html" %}
+
 <section id="research-setups" aria-labelledby="research-heading">
 <h2 id="research-heading">Research setups</h2>
 <p>Choose a strategy and a hypothetical budget to compare with its historical results. Saved setups do not change running accounts, orders, or kill switches.</p>

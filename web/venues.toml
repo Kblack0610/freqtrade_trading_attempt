@@ -1,0 +1,64 @@
+# Every venue the person holds or paper-trades, one /accounts row each (web/venues.py). A venue is connected when each
+# of its checks found a row newer than max_age_h with no error. A check reads the newest row per key of one source:
+#   broker  broker_balances, keyed by broker (lab/broker.py read, hourly)
+#   drill   demo_orders, keyed by venue (the order drills: lab/broker.py, lab/markets/kalshi_trade.py, manifold_trade.py)
+#   paper   paper_accounts, keyed by venue, newest mark (lab/markets/paper.py, after each recorder sweep)
+#   wallet  wallet_balances, keyed by account (lab/wallet.py)
+# match is the key, or a prefix ending in "*". human is what the person does while a check finds nothing; a venue
+# with no checks is not connected from here yet and shows only its human step.
+
+[[venue]]
+name = "Alpaca"
+money = "paper"
+checks = [{source = "broker", match = "alpaca_paper", max_age_h = 3},
+          {source = "drill", match = "alpaca_paper", max_age_h = 96}]
+human = "Nothing: the paper keys are deployed, so an error here is ours to fix"
+
+[[venue]]
+name = "Kalshi"
+money = "demo, and the paper league on the live books"
+checks = [{source = "drill", match = "kalshi_demo", max_age_h = 96},
+          {source = "paper", match = "kalshi", max_age_h = 1}]
+human = "Nothing: the demo keys are deployed, so an error here is ours to fix"
+
+[[venue]]
+name = "Kraken"
+money = "real, read only"
+checks = [{source = "broker", match = "kraken", max_age_h = 3}]
+human = "A Query Funds key (docs/platforms.md, Read-only key checklist) in SOPS trader-brokers as KRAKEN_API_KEY and KRAKEN_API_SECRET"
+
+[[venue]]
+name = "Fidelity (SnapTrade)"
+money = "real, read only"
+checks = [{source = "broker", match = "fidelity*", max_age_h = 48}]
+human = "Connect Fidelity in the SnapTrade Connection Portal with a read connection (tr-221)"
+
+[[venue]]
+name = "Robinhood Crypto"
+money = "real, read only"
+checks = [{source = "broker", match = "robinhood_crypto", max_age_h = 3}]
+human = "Create a Robinhood Crypto API key with read scope and register its Ed25519 public key; then ROBINHOOD_API_KEY and ROBINHOOD_PRIVATE_KEY go in SOPS trader-brokers"
+
+[[venue]]
+name = "Manifold"
+money = "play money"
+checks = [{source = "drill", match = "manifold", max_age_h = 96}]
+human = "Create a Manifold API key (tr-118); it goes in SOPS for the drill CronJob"
+
+[[venue]]
+name = "Trezor"
+money = "real, watch only"
+checks = [{source = "wallet", match = "*", max_age_h = 48}]
+human = "Export each account's public key (xpub) from Trezor Suite for WALLET_ACCOUNTS (docs/platforms.md, Trezor)"
+
+[[venue]]
+name = "Polymarket US"
+money = "real"
+checks = []
+human = "Open a Polymarket US account; its market data is already recorded without one"
+
+[[venue]]
+name = "Tastytrade"
+money = "real, with a cert sandbox"
+checks = []
+human = "Open a Tastytrade account and its cert sandbox login"
