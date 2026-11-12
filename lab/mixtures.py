@@ -177,11 +177,8 @@ def build(months: dict, daily: dict, order: list[tuple], label: pd.Series, cfg: 
 
 
 def set_pbo(rets: list[pd.Series], blocks: int) -> float | None:
-    """PBO across the mixtures, on the days every one of them was scored."""
-    if len(rets) < 2:
-        return None
-    days = sorted(set.intersection(*(set(r.index) for r in rets)))
-    res = metrics.pbo(np.column_stack([r.reindex(days).to_numpy(dtype=float) for r in rets]), blocks)
+    """PBO across the mixtures (metrics.pbo_panel over the median mixture's history); None under its minimum days."""
+    res = metrics.pbo_panel(dict(enumerate(rets)), blocks)
     return None if res is None else res["pbo"]
 
 

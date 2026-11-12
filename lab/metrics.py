@@ -5,6 +5,7 @@ zeros included; Sharpe and Sortino are annualized with sqrt(365) because crypto 
 Every resampling takes a seed, so a re-run over the same data gives the same numbers.
 """
 
+import datetime as dt
 import hashlib
 import itertools
 import math
@@ -327,6 +328,28 @@ def pbo(returns: np.ndarray, blocks: int = 16) -> dict | None:
     omega = (below + (ties + 1) / 2) / (n + 1)
     logit = np.log(omega / (1 - omega))
     return {"pbo": float((logit <= 0).mean()), "logit_median": float(np.median(logit)), "splits": len(combos)}
+
+
+PBO_COVERAGE = 0.9  # share of the panel's days a series needs to be ranked in it
+PBO_MIN_DAYS = 90  # under this a block is a handful of days
+
+
+def pbo_panel(cols: dict, blocks: int, n: int | None = None) -> dict | None:
+    """pbo() over the last n days of every series in cols (each indexed by day) that covers PBO_COVERAGE of them; the
+    days a series lacks count as flat. n None is the median series' history, so at least half the series are ranked
+    whatever their start dates. None under 2 series or PBO_MIN_DAYS days."""
+    cols = {k: c for k, c in cols.items() if len(c)}
+    if len(cols) < 2:
+        return None
+    end = max(c.index.max() for c in cols.values())
+    if n is None:
+        n = int(np.median([(end - c.index.min()).days + 1 for c in cols.values()]))
+    lo = end - dt.timedelta(days=n - 1)
+    m = pd.DataFrame({k: c[c.index >= lo] for k, c in cols.items() if (c.index >= lo).sum() >= PBO_COVERAGE * n})
+    if m.shape[1] < 2 or len(m) < PBO_MIN_DAYS:
+        return None
+    r = pbo(m.fillna(0.0).to_numpy(dtype=float), blocks)
+    return None if r is None else {"strategies": m.shape[1], "days": len(m), "blocks": blocks, **r}
 
 
 def shrink(x: np.ndarray, se: np.ndarray) -> tuple[np.ndarray, np.ndarray]:

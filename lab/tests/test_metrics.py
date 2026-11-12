@@ -221,6 +221,18 @@ def test_pbo_is_low_with_one_truly_better_strategy_and_near_half_on_noise():
     assert metrics.pbo(noise[:20]) is None and metrics.pbo(noise[:, :1]) is None
 
 
+def test_pbo_panel_ranks_the_median_history_and_refuses_a_short_sample():
+    rng = np.random.default_rng(7)
+    days = pd.date_range("2020-01-01", periods=800, freq="D")
+    cols = {i: pd.Series(rng.normal(0, 0.01, 800), index=days) for i in range(6)}
+    cols["late"] = cols.pop(5)[600:]  # 200 days: shorter than the median history, so left out
+    r = metrics.pbo_panel(cols, 8)
+    assert r["strategies"] == 5 and r["days"] == 800 and 0 <= r["pbo"] <= 1
+    assert metrics.pbo_panel(cols, 8, 365)["strategies"] == 5
+    short = {k: c[-60:] for k, c in cols.items()}  # 60 days, under PBO_MIN_DAYS: no PBO, not 0
+    assert metrics.pbo_panel(short, 8) is None
+
+
 def test_trades_needed_matches_the_closed_form():
     x = np.array([0.03, -0.01] * 50)  # mean 0.01, sd about 0.0201
     expect = math.ceil((1.645 * x.std(ddof=1) / x.mean()) ** 2) - len(x)

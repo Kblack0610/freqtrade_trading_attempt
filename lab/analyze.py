@@ -87,8 +87,6 @@ CHUNK_TIMEOUT = int(os.environ.get("CHUNK_TIMEOUT", "3600"))
 MAX_ATTEMPTS = 3
 WINDOWS = {"30d": 30, "90d": 90, "180d": 180, "365d": 365, "all": None}
 OVERFIT_BLOCKS = 16  # CSCV splits: C(16, 8) = 12,870 in-sample halves
-OVERFIT_MIN_DAYS = 90  # under this a block is a handful of days
-OVERFIT_COVERAGE = 0.9  # share of a window's days a strategy needs to be ranked in it
 HORIZONS = (30, 90)
 ESTIMATE_BASIS, ESTIMATE_MIN_DAYS = 365, 180
 CORR_DAYS, CORR_MIN_DAYS = 365, 60
@@ -696,26 +694,17 @@ def deflate(rows: list[dict]) -> None:
 
 
 def overfit_rows(series: dict) -> list[dict]:
-    """PBO per exchange and window over the daily returns of every strategy with that window there.
-    A strategy must cover OVERFIT_COVERAGE of the window's days; the days it lacks count as flat."""
+    """PBO per exchange and window over the daily returns of the strategies there (metrics.pbo_panel); "all" is the
+    median strategy's history, since start dates differ by years on one venue."""
     rows = []
     for ex in sorted({e for _, e in series}):
-        mine = {s: d for (s, e), (d, _) in series.items() if e == ex and not d.empty}
-        if len(mine) < 2:
-            continue
-        end = max(d["day"].iloc[-1] for d in mine.values())
+        cols = {s: d.set_index("day")["ret"] for (s, e), (d, _) in series.items() if e == ex and not d.empty}
         for win, n in WINDOWS.items():
-            if n is None or n < OVERFIT_MIN_DAYS:
+            if n is not None and n < metrics.PBO_MIN_DAYS:
                 continue
-            lo = end - dt.timedelta(days=n - 1)
-            cols = {s: d[d["day"] >= lo].set_index("day")["ret"] for s, d in mine.items()}
-            m = pd.DataFrame({s: c for s, c in cols.items() if len(c) >= OVERFIT_COVERAGE * n})
-            if m.shape[1] < 2 or len(m) < OVERFIT_MIN_DAYS:
-                continue
-            r = metrics.pbo(m.fillna(0.0).to_numpy(dtype=float), OVERFIT_BLOCKS)
+            r = metrics.pbo_panel(cols, OVERFIT_BLOCKS, n)
             if r:
-                rows.append({"exchange": ex, "win": win, "strategies": m.shape[1], "days": len(m),
-                             "blocks": OVERFIT_BLOCKS, **r})
+                rows.append({"exchange": ex, "win": win, **r})
     return rows
 
 
