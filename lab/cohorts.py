@@ -8,8 +8,10 @@ mixture cohort (`kind = "mixture"`) is the sleeves of the best mixture lab/mixtu
 specified, one row per sleeve on its own exchange. An all cohort (`kind = "all"`) is every lookahead-clean, loadable
 strategy outside its skipped families, one row per venue, refused when its candle calls would pass the venue's
 budget. An archive cohort (`kind = "archive"`) is one elite per filled cell of the diversity archive (lab/diversity.py)
-on its venues and timeframe floor, best Sharpe low end first, skipping any whose daily returns correlate past
-`[diversity] max_rho` with one already picked, up to `max_bots`. The promote gates are not applied: a cohort
+on its venues and timeframe floor, best Sharpe low end first, keeping one only when its edge before fees is above 0
+on its own venue and on a `replicate_on` venue and its BTC-residual daily returns correlate at most `[diversity]
+max_rho` with every one already picked, up to `max_bots`. `pick` also prints the picks' residual effective count to
+stderr, a report and never a gate. The promote gates are not applied: a cohort
 forward-tests near-misses. Nothing here edits the roster: ci/cohort_roster.py turns the rows into a home-config PR that a person
 merges.
 """
@@ -27,7 +29,7 @@ from freqtrade.exchange import timeframe_to_minutes
 import pandas as pd
 from psycopg.rows import dict_row
 
-from lab import analyze, diversity, variants
+from lab import analyze, diversity, metrics, scorecard, variants
 from lab.db import connect
 
 PATH = Path(os.environ.get("COHORTS_CONFIG", Path(__file__).with_name("cohorts.toml")))
@@ -157,17 +159,33 @@ def returns_frame(rows: list[tuple]) -> pd.DataFrame:
     return pd.DataFrame({col: wide[col].dropna().iloc[-analyze.CORR_DAYS:] for col in wide.columns})
 
 
-def pick_archive(elites: list[dict], returns: pd.DataFrame, cfg: dict, pairs: dict[str, int]) -> list[str]:
-    """Pure: the greedy diverse pick. Elites in order of Sharpe low end (then name), each joining when its daily
-    returns correlate at |rho| cfg["max_rho"] or under with every one already picked, until cfg["max_bots"]. A pair
-    with under analyze.CORR_MIN_DAYS shared days counts as different. One row per pick on its own venue, base
-    overlay. Raises ValueError when a venue's candle calls would pass its budget."""
-    rho = returns.corr(min_periods=analyze.CORR_MIN_DAYS) if not returns.empty else pd.DataFrame()
+def edges(conn, window: str) -> set[tuple[str, str]]:
+    """(strategy, exchange) with a positive mean edge before fees in `window`."""
+    return set(conn.execute("SELECT strategy, exchange FROM strategy_windows WHERE win = %s AND gross_expectancy > 0",
+                            (window,)).fetchall())
+
+
+def btc_returns(conn) -> pd.Series:
+    """BTC's daily return by day, from the regimes table."""
+    return scorecard.regimes(conn)["btc_close"].pct_change().dropna()
+
+
+def pick_archive(elites: list[dict], resid: pd.DataFrame, edged: set[tuple[str, str]], cfg: dict,
+                 pairs: dict[str, int]) -> list[str]:
+    """Pure: the greedy diverse pick. Elites in order of Sharpe low end (then name), each joining when (1) its edge
+    before fees is above 0 on its own venue and on one of cfg["replicate_on"] (in `edged`), so a one-venue quirk is
+    not forward-tested, and (2) its BTC-residual daily returns (diversity.residuals) correlate at |rho|
+    cfg["max_rho"] or under with every one already picked, until cfg["max_bots"]. A pair with under
+    analyze.CORR_MIN_DAYS shared days counts as different. One row per pick on its own venue, base overlay. Raises
+    ValueError when a venue's candle calls would pass its budget."""
+    rho = resid.corr(min_periods=analyze.CORR_MIN_DAYS) if not resid.empty else pd.DataFrame()
     picked: list[dict] = []
     for e in sorted(elites, key=lambda e: (-e["sharpe_lo"], e["strategy"], e["exchange"])):
         if len(picked) == cfg["max_bots"]:
             break
         key = (e["strategy"], e["exchange"])
+        if key not in edged or not any((e["strategy"], v) in edged for v in cfg["replicate_on"]):
+            continue
         keys = [(p["strategy"], p["exchange"]) for p in picked]
         if key in rho.columns and any(k in rho.columns and abs(rho.loc[key, k]) > cfg["max_rho"] for k in keys):
             continue
@@ -180,6 +198,20 @@ def pick_archive(elites: list[dict], returns: pd.DataFrame, cfg: dict, pairs: di
                              f"over its budget of {cfg['budget'][v]}")
     return [f"{cfg['prefix']}-{e['exchange']}-{e['strategy'].lower()} {e['exchange']} {e['strategy']} {cfg['cohort']} {BASE}"
             for e in picked]
+
+
+def neff_lift(elites: list[dict], resid: pd.DataFrame, lines: list[str]) -> str:
+    """Pure: the picks' effective count on BTC-residual returns beside that of as many best elites taken with no
+    cut, for the report. Not a gate: the lift was not in the verified data (tr-211 review decisions)."""
+    picks = [(l.split()[2], l.split()[1]) for l in lines]
+    ranked = sorted(elites, key=lambda e: (-e["sharpe_lo"], e["strategy"], e["exchange"]))
+    best = [(e["strategy"], e["exchange"]) for e in ranked][:len(picks)]
+
+    def neff(keys):
+        cols = [k for k in keys if k in resid.columns]
+        return (metrics.effective_trials(resid[cols], analyze.CORR_MIN_DAYS) if cols else 0.0) + len(keys) - len(cols)
+    return (f"{len(picks)} picks of {len(elites)} elites: residual effective count {neff(picks):.1f}, "
+            f"{neff(best):.1f} for the {len(best)} best with no cut (report only)")
 
 
 def families() -> dict[str, str]:
@@ -210,13 +242,15 @@ def main(argv: list[str]) -> int:
         elif cfg.get("kind") == "archive":
             dcfg = diversity.config()
             elites = archive_elites(conn, cfg, dcfg, families())
-            returns = returns_frame(daily_rows(conn, [(e["strategy"], e["exchange"]) for e in elites]))
+            resid = diversity.residuals(returns_frame(daily_rows(conn, [(e["strategy"], e["exchange"]) for e in elites])),
+                                        btc_returns(conn))
             try:
-                lines = pick_archive(elites, returns, {**cfg, "max_rho": dcfg["max_rho"]},
+                lines = pick_archive(elites, resid, edges(conn, dcfg["window"]), {**cfg, "max_rho": dcfg["max_rho"]},
                                      {v: len(analyze.pair_list(v)) for v in cfg["venues"]})
             except ValueError as e:
                 print(e, file=sys.stderr)
                 return 1
+            print(f"{cfg['cohort']}: {neff_lift(elites, resid, lines)}", file=sys.stderr)
         elif cfg.get("kind") == "mixture":
             lines = pick_mixture(mixture_rows(conn, cfg["weighting"], cfg["gated"], cfg["min_days"]), cfg)
         else:

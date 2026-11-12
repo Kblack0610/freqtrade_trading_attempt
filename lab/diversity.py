@@ -6,13 +6,16 @@ in `[diversity] window` (lab/suggest.toml) gets five descriptors: its family (la
 median holding time, the climate where its out-of-sample interval clears zero by the widest margin
 (climate_scorecard; "none" when no climate clears, "untested" when it has no walk-forward), its venue, and the
 bucket of its trades a month. Strategies sharing all five sit in one cell, and the cell's elite is the one with the
-highest low end of the Sharpe interval. /coverage shows the cells; the diverse cohort picks from the elites.
+highest low end of the Sharpe interval. /coverage shows the cells; the diverse cohort picks from the elites, and
+measures "different" on BTC-residual daily returns (`residuals`).
 Nothing here writes: it reads the tables the nightly analysis fills.
 """
 
 import math
 import statistics
 from pathlib import Path
+
+import pandas as pd
 
 from lab import cohorts, suggest
 
@@ -116,3 +119,22 @@ def build(rows: list[dict], climates: list[dict], family: dict[str, str], cfg: d
     return {"cells": cells, "strategies": len(described), "window": cfg["window"],
             "by_hold": projection(cells, fams, "hold", holds), "holds": holds,
             "by_climate": projection(cells, fams, "climate", CLIMATES), "climates": CLIMATES}
+
+
+def residuals(returns: pd.DataFrame, btc: pd.Series) -> pd.DataFrame:
+    """Pure: each column of daily returns less beta x BTC's daily return, beta by least squares over the days they
+    share (0 when under two). BTC is the one return source most strategies share (on 2026-11-09 the first principal
+    component of the binanceus 365-day matrix was 28% of the variance at rho 0.84 with BTC), so what is left is what
+    each strategy adds. A day BTC has no return keeps the strategy's own."""
+    if returns.empty:
+        return returns
+    btc = btc.set_axis(pd.to_datetime(btc.index))
+    out = {}
+    for col in returns.columns:
+        r = returns[col].dropna()
+        r = r.set_axis(pd.to_datetime(r.index))
+        both = pd.concat([r, btc], axis=1, join="inner").dropna()
+        var = both.iloc[:, 1].var() if len(both) > 1 else 0.0
+        beta = both.iloc[:, 0].cov(both.iloc[:, 1]) / var if var > 0 else 0.0
+        out[col] = r - beta * btc.reindex(r.index).fillna(0.0)
+    return pd.DataFrame(out)

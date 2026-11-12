@@ -1,3 +1,8 @@
+import datetime as dt
+
+import numpy as np
+import pandas as pd
+
 from lab import diversity
 
 CFG = {"window": "365d", "min_trades": 30, "hold_hours": [1, 24, 168], "freq_buckets": 3, "max_rho": 0.5,
@@ -65,3 +70,17 @@ def test_a_tie_on_low_end_picks_the_same_elite_every_time():
 def test_shipped_config_loads():
     cfg = diversity.config()
     assert cfg["hold_hours"] == sorted(cfg["hold_hours"]) and 0 < cfg["max_rho"] < 1
+
+
+def test_residuals_take_out_btc_by_its_beta_and_keep_what_is_left():
+    days = [dt.date(2026, 1, 1) + dt.timedelta(days=i) for i in range(120)]
+    rng = np.random.default_rng(3)
+    btc = pd.Series(rng.normal(0, 0.03, len(days)), index=pd.to_datetime(days))
+    own = rng.normal(0, 0.01, len(days))
+    returns = pd.DataFrame({("S", "x"): 1.5 * btc.to_numpy() + own, ("Flat", "x"): own}, index=days)
+    got = diversity.residuals(returns, btc)
+    # Negative control: before, S tracks BTC; after, it is the series' own part and no longer does.
+    assert returns[("S", "x")].corr(pd.Series(btc.to_numpy(), index=days)) > 0.9
+    assert abs(got[("S", "x")].corr(btc)) < 0.1
+    assert got[("S", "x")].corr(got[("Flat", "x")]) > 0.95
+    assert diversity.residuals(pd.DataFrame(), btc).empty

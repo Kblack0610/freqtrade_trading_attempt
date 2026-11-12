@@ -82,7 +82,7 @@ The catalogue above says which mechanisms exist. A strategy's label does not pro
 
 - **A cell's elite** is the strategy x venue with the highest low end of the 365-day Sharpe interval among those in the cell, the same score `aggressive` ranks by. `lab/diversity.py` builds the cells from `[diversity]` in `lab/suggest.toml`; /coverage shows them folded onto family x holding period and family x climate, a dash for each gap.
 - **Two strategies are one** when their daily returns correlate at |rho| over 0.5 (the correlation matrix behind the `max_rho` promote gate), whatever cells they sit in. A family tag that disagrees with that, such as a "trend" strategy at rho 0.9 with a mean-reversion one, is fixed in `lab/families.toml`.
-- **A diverse pick** is greedy: the best elite first, then each next elite whose largest |rho| to those already picked is 0.5 or under (`kind = "archive"` in `lab/cohorts.toml`, `lab/cohorts.py` `pick_archive`).
+- **A diverse pick** is greedy: the best elite first, then each next elite whose edge before fees is above 0 on its own venue and on okx or kucoin, and whose BTC-residual daily returns have |rho| 0.5 or under to every one already picked (`kind = "archive"` in `lab/cohorts.toml`, `lab/cohorts.py` `pick_archive`). BTC is taken out first because it is the one source most strategies share: on 2026-11-09 the first principal component of the binanceus 365-day matrix was 28% of the variance at rho 0.84 with BTC, and the effective count was 10.9 raw, 27.6 with BTC removed (tr-211). The pick prints the picks' residual effective count beside that of the same number of best elites with no cut; it is a report, not a gate.
 
 ### Search wide, forward-test few
 
