@@ -608,7 +608,8 @@ def test_accounts_shows_every_balance_and_kill_switch_read_only(conn, signed_in)
     assert "0.00000001" not in body  # only the newest wallet read
     assert body.index("paper-longshot-abcdef01") < body.index("kraken-s001")  # stopped before breached
     assert "alpaca_paper" not in client.get("/markets/book").text  # moved, not copied
-    assert body.count("<form") == 1 and 'action="/logout"' in body  # no control: sign-out is the only form
+    assert body.count("<form") == 2 and 'action="/logout"' in body
+    assert 'id="setup-form"' in body  # research choices persist in the browser; no account-changing endpoint
 
 
 def test_book_lists_the_strategies_clearing_zero_in_each_climate(conn, signed_in):
@@ -679,3 +680,103 @@ def test_fetch_kit_refuses_a_wrong_checksum(tmp_path):
     with pytest.raises(SystemExit, match="does not match"):
         fetch_kit.fetch(lock, tmp_path, get=lambda url: b"body")
     assert not (tmp_path / "a.css").exists()
+
+
+def test_account_setup_catalog_uses_typed_refs_and_latest_observations(conn, signed_in):
+    seed(conn)
+    seed_markets(conn)
+    conn.execute("INSERT INTO wallet_balances (account, read_at, coin, confirmed_sat) VALUES "
+                 "('kraken-s001', now(), 'btc', 42)")
+    conn.execute("UPDATE bot_snapshots SET balance_total = 2345.67 "
+                 "WHERE ts = (SELECT max(ts) FROM bot_snapshots WHERE bot = 'kraken-s001')")
+    app_mod, client = signed_in
+    response = client.get('/accounts')
+    assert response.status_code == 200
+    data = json.loads(re.search(r'<script[^>]*id="research-data"[^>]*>(.*?)</script>', response.text, re.S).group(1))
+    refs = {a['id'] for a in data['accounts']}
+    assert {'bot:kraken-s001', 'wallet:btc:kraken-s001', 'broker:alpaca_paper',
+            'paper:paper-longshot-abcdef01'} <= refs
+    assert all(set(a) == {'id', 'label'} for a in data['accounts'])
+    strategy = next(s for s in data['strategies'] if s['name'] == 'Strategy001')
+    assert strategy['family'] == 'trend' and strategy['venues'] == ['binanceus', 'kraken']
+    assert strategy['description'] == app_mod.strategy_method('Strategy001')['description']
+    assert '2,345.67' in response.text and 'Unknown reported units' in response.text
+
+
+def test_account_evidence_is_exact_pair_and_explicit_window(conn, signed_in):
+    seed(conn)
+    conn.execute("INSERT INTO strategy_windows (strategy, exchange, win, days, trades, total_return) "
+                 "VALUES ('Strategy001', 'kraken', '365d', 12, 2, -0.8), "
+                 "('Strategy001', 'binanceus', 'all', 900, 100, 9)")
+    conn.execute("INSERT INTO confidence (strategy, exchange, ready, passed, oos_trades, gates) "
+                 "VALUES ('Strategy001', 'binanceus', false, 1, 40, '[]')")
+    client = signed_in[1]
+    found = client.get('/accounts/evidence', params={'strategy': 'Strategy001', 'exchange': 'binanceus'}).json()
+    assert found['available'] and found['window'] == '365d'
+    assert found['total_return'] == 0.032 and found['trades'] == 40
+    assert found['max_drawdown'] == 0.04 and found['start_day'] == '2025-11-04'
+    assert found['bias'] == 'clean' and found['confidence'] == 'not ready'
+    other = client.get('/accounts/evidence', params={'strategy': 'Strategy001', 'exchange': 'kraken'}).json()
+    assert other['total_return'] == -0.8 and other['confidence'] == 'not checked'
+    assert client.post('/accounts/evidence').status_code == 405
+
+
+def test_account_evidence_missing_results_are_not_zero(conn, signed_in):
+    seed(conn)
+    client = signed_in[1]
+    found = client.get('/accounts/evidence', params={'strategy': 'Strategy001', 'exchange': 'kraken'}).json()
+    assert found['available'] is False
+    assert found['total_return'] is None and found['trades'] is None and found['max_drawdown'] is None
+    biased = client.get('/accounts/evidence', params={'strategy': 'Planted', 'exchange': 'binanceus'}).json()
+    assert biased['bias'] == 'biased' and biased['family'] == 'Not classified'
+
+
+@pytest.mark.parametrize('strategy,exchange', [('Unknown', 'binanceus'), ('Strategy001', 'bogus'),
+                                               ("Strategy001' OR 1=1 --", 'kraken')])
+def test_account_evidence_rejects_unknown_choices(conn, signed_in, strategy, exchange):
+    seed(conn)
+    assert signed_in[1].get('/accounts/evidence', params={'strategy': strategy, 'exchange': exchange}).status_code == 404
+
+
+def test_account_evidence_requires_sign_in(site):
+    r = site[1].get('/accounts/evidence?strategy=Strategy001&exchange=kraken')
+    assert r.status_code == 303 and r.headers['location'] == '/login'
+
+
+def test_strategy_method_and_setup_metadata_are_escaped(conn, signed_in, tmp_path, monkeypatch):
+    seed(conn)
+    app_mod, client = signed_in
+    cfg = tmp_path / 'families.toml'
+    cfg.write_text('[families]\ntrend = "<script>bad()</script>"\n[strategies]\n'
+                   'Strategy001 = {family="trend", inputs=["ohlcv"], note="<img src=x onerror=bad()>"}\n')
+    monkeypatch.setattr(app_mod, 'FAMILIES', cfg)
+    body = client.get('/strategies/Strategy001').text
+    assert '&lt;script&gt;bad()&lt;/script&gt;' in body and '<script>bad()' not in body
+    body = client.get('/accounts').text
+    assert '<img src=x onerror=bad()>' not in body
+    assert r'\u003cscript\u003e' in body
+
+
+def test_account_setup_catalog_empty_and_stale_states(conn, signed_in):
+    client = signed_in[1]
+    assert client.get('/accounts').status_code == 200
+    seed(conn)
+    conn.execute("UPDATE bot_snapshots SET ts = ts - interval '3 hours'")
+    body = client.get('/accounts').text
+    assert 'stale' in body.lower()
+    assert 'Strategy001' in body
+
+
+def test_account_balances_preserve_reported_stake_units(conn, signed_in):
+    seed(conn)
+    conn.execute("UPDATE bot_snapshots SET raw = %s", (Jsonb({'balance': {'stake': 'USDT'}}),))
+    body = signed_in[1].get('/accounts').text
+    assert 'USDT' in body
+    assert 'Equity (USD)' not in body.split('<h2>Prediction-market paper accounts</h2>')[0]
+
+
+def test_account_evidence_distinguishes_recursive_instability(conn, signed_in):
+    seed(conn)
+    conn.execute("UPDATE bias_checks SET has_bias = true WHERE strategy = 'Strategy001' AND kind = 'recursive'")
+    data = signed_in[1].get('/accounts/evidence?strategy=Strategy001&exchange=binanceus').json()
+    assert data['bias'] == 'clean' and data['stability'] == 'unstable'

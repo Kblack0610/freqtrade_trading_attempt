@@ -4,6 +4,7 @@
   "scripts": {
     "typecheck": "python -m mypy",
     "lint": "python -m ruff check lab web ci user_data/strategies",
-    "test": "python -m pytest -q -p no:cacheprovider lab/tests"
+    "test": "python -m pytest -q -p no:cacheprovider lab/tests",
+    "test:web": "node --test web/tests/*.test.cjs"
   }
 }
