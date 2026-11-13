@@ -50,12 +50,13 @@ import itertools
 import json
 import math
 import os
+import queue
 import subprocess
 import sys
 import tempfile
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 from collections.abc import Iterable
 from contextlib import contextmanager
 from functools import cache
@@ -188,26 +189,31 @@ def task_gb(exchange: str, timeframe: str | None, days: int, load: float = 1) ->
 
 class Budget:
     """Lets tasks run while their estimated memory together stays within a total. A task estimated above
-    the total runs alone, so nothing waits forever."""
+    the total runs alone, so nothing waits forever. Counts whole MB: float GB left a residue after every
+    task finished, so a task clamped to the total waited for an exact zero that never came."""
 
     def __init__(self, total: float):
-        self.total, self.used, self.waiting = total, 0.0, 0
+        self.total_mb, self.used_mb, self.waiting = round(total * 1024), 0, 0
         self.cv = threading.Condition()
+
+    @property
+    def used(self) -> float:
+        return self.used_mb / 1024
 
     @contextmanager
     def hold(self, gb: float):
-        gb = min(gb, self.total)
+        mb = min(round(gb * 1024), self.total_mb)
         with self.cv:
             self.waiting += 1
             self.cv.notify_all()
-            self.cv.wait_for(lambda: self.used + gb <= self.total)
+            self.cv.wait_for(lambda: self.used_mb + mb <= self.total_mb)
             self.waiting -= 1
-            self.used += gb
+            self.used_mb += mb
         try:
             yield
         finally:
             with self.cv:
-                self.used -= gb
+                self.used_mb -= mb
                 self.cv.notify_all()
 
 
@@ -951,9 +957,15 @@ def main(runner: Runner | None = None, today: dt.date | None = None) -> int:
                         ("bias", (s, kind, h)) for s, kind, h in bias}
                 futs.update({pool.submit(*bt(t)): ("drift", t) for t in drifts})
                 futs.update({pool.submit(*bt(t)): ("chunk", t) for t in todo})
+                # each future goes to the queue as it finishes and leaves futs once stored, so a result (its trades
+                # DataFrame) is freed then; as_completed holds every future to the end, which OOM-killed a full rerun
+                finished = queue.SimpleQueue()
+                for fut in futs:
+                    fut.add_done_callback(finished.put)
                 try:
-                    for fut in as_completed(futs):
-                        what, task = futs[fut]
+                    while futs:
+                        fut = finished.get()
+                        what, task = futs.pop(fut)
                         try:
                             res = fut.result()
                         except Exception as e:  # a runner bug in one task must not lose the others

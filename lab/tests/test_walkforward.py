@@ -362,6 +362,20 @@ def test_a_spent_budget_starts_no_more_folds_and_still_records_the_run(wlab, mon
     assert wf.main(rest, TODAY) == 0 and len(rest.calls) == 8, "the next run carries on where this one stopped"
 
 
+def test_a_rescheduled_shard_counts_the_budget_from_the_jobs_first_start(wlab, monkeypatch):
+    """A preempted shard's new pod must not get a fresh WF_BUDGET_S, or it runs past the Job's deadline."""
+    monkeypatch.setattr(wf, "WORKERS", 1)
+    monkeypatch.setattr(wf, "BUDGET_S", 3600.0)
+    monkeypatch.setattr(wf, "JOB", "wf-job")
+    wlab.execute("INSERT INTO runs (kind, name, raw, started_at) VALUES ('walkforward_shard', 'wf-job#0', '{}', "
+                 "now() - interval '2 hours')")
+    runner = FakeRunner()
+    assert wf.main(runner, TODAY) == 0
+    assert runner.calls == []
+    raw = wlab.execute("SELECT raw FROM runs WHERE kind = 'walkforward_shard' AND finished_at IS NOT NULL").fetchone()[0]
+    assert raw["folds_left"] == raw["folds_run"] > 0
+
+
 def test_robustness_configuration_invalidates_cached_folds(monkeypatch):
     cfg = wf.suggest.load_config()
     first = wf.fold_key('h', 'binanceus', (TODAY, TODAY, TODAY), 'v', 'candles', TUNE)
