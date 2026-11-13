@@ -20,14 +20,14 @@ Tier is the highest rung we can use: **API** (an official API covers the job), *
 | Alpaca | candidate | API broker | API | API | Alpaca paper account | live 2026-11-12: hourly read and weekday drill (home-config #832) |
 | Interactive Brokers | candidate | API broker | API | API | IBKR paper account, needs a funded account | when a strategy needs it |
 | Schwab | candidate | API broker | API | API | none found | not connected: no paper API |
-| Tastytrade | candidate | API broker | API | API | cert sandbox | when a strategy needs it |
-| Fidelity | held | broker, no API | aggregator (SnapTrade, read connection) | person | SnapTrade sandbox for the read path | key deployed (home-config #832), waits on the person connecting Fidelity in SnapTrade |
+| Tastytrade | applied | API broker | API | API | cert sandbox | account in review at Tastytrade (2026-11-12); then the OAuth app and sandbox login |
+| Fidelity | held | broker, no API | aggregator (SnapTrade, read connection) | person | SnapTrade sandbox for the read path | live 2026-11-12: four accounts read hourly through SnapTrade |
 | Robinhood | candidate | broker | API (crypto only) | API (crypto), person (rest) | none | code landed, needs a read-only key |
 | Kalshi | candidate (tr-50) | prediction market | API | API | demo exchange | demo drill live 2026-11-12 (home-config #832); live key held, not deployed; live tr-48 |
-| Polymarket US | candidate | prediction market | API | API | backtest engine only | none until an account is opened |
+| Polymarket US | held | prediction market | API | API | backtest engine only | read live 2026-11-12 (`PolymarketUSRead`); orders behind lab/live.py |
 | Polymarket global | data only | prediction market | API | never (US is close-only) | n/a | none |
 | PredictIt | data only | prediction market | API (one feed) | person | none | none |
-| Manifold | data, order drill built | play money | API | API, bots allowed | the venue is play money | key (tr-118) |
+| Manifold | data, order drill live | play money | API | API, bots allowed | the venue is play money | key deployed 2026-11-12, daily drill (home-config #904) |
 | DraftKings, FanDuel | candidate | sportsbook | Odds API | person | backtest engine only | none: odds recorded every 6 h since 2026-11-12 |
 | ProphetX, Novig | candidate | exchange-style sports venue (CFTC) | API | API (ProphetX terms allow bots) | ProphetX sandbox | when a strategy needs it |
 
@@ -285,7 +285,7 @@ Only Alpaca and the Tastytrade sandbox can be practised on without money: IBKR p
 
 ### Tastytrade
 
-- Status: candidate.
+- Status: applied. The person opened the account on 2026-11-12 and Tastytrade is reviewing it. Options level when it is approved: defined-risk spreads, no naked selling (human, 2026-11-12).
 - Strategy fit: options and futures.
 - API:
   - Open API, 96 operations, covering equities, options, futures and crypto (doc).
@@ -382,7 +382,8 @@ Data facts, fees as backtested, and adapter notes are in [markets.md](markets.md
 
 ### Polymarket US
 
-- Status: candidate. API status checked 2026-11-06 (P6): the Retail API trades today; no account is open.
+- Status: held. The account was opened in the app on 2026-11-12 and is unfunded. API status checked 2026-11-06 (P6): the Retail API trades today.
+- Read path: `PolymarketUSRead` in `lab/broker.py`. `python -m lab.broker read` writes one `broker_balances` row named `polymarket_us`: cash is the USD `currentBalance`, equity adds `assetNotional`, buying power is `buyingPower`, positions counts markets with a nonzero `netPosition`. GET only, to `/v1/account/balances` and `/v1/portfolio/positions`. An account with no balance entry reads as zero; a balance in another currency is an error, not a zero. Keys: `POLYMARKET_US_KEY_ID`, `POLYMARKET_US_SECRET_KEY` in the `trader-brokers` Secret. The secret is base64 seed plus public key, and the client signs with the first 32 bytes.
 - Strategy fit: a second regulated US prediction market for cross-venue links (`market_links` in [markets.md](markets.md)).
 - API:
   - A retail trading API exists: verify identity in the iOS app, then create a Key ID and Secret Key at polymarket.us/developer (doc). An invite code may be needed for the app (doc: "need an invite code ... email support@polymarket.us").

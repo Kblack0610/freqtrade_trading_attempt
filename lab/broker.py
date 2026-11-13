@@ -11,9 +11,11 @@ Sources, each with its own env:
 - SnapTrade (SNAPTRADE_CLIENT_ID, SNAPTRADE_CONSUMER_KEY: a Personal API key). Reads the accounts the person
   connected with a read connection, Fidelity first. A real account, read only.
 - Kraken (KRAKEN_API_KEY, KRAKEN_API_SECRET: a Query Funds key). A real account, read only.
+- Polymarket US (POLYMARKET_US_KEY_ID, POLYMARKET_US_SECRET_KEY: the base64 Ed25519 key from polymarket.us/developer).
+  A real account, read only.
 
-The real-account clients have no order method. Robinhood and SnapTrade send only GET. Kraken's private API takes POST
-for every call, reads included, so KrakenRead sends POST to its READS paths only (Balance, TradeBalance) and refuses
+The real-account clients have no order method. Robinhood, SnapTrade and Polymarket US send only GET. Kraken's
+private API takes POST for every call, reads included, so KrakenRead sends POST to its READS paths only (Balance, TradeBalance) and refuses
 any other path before a request leaves; a key that could trade still cannot from here. A live order would come in behind lab/live.py's guard (docs/live.md), never by widening these. A source with no
 keys is skipped; with none set, `read` prints that and exits 0, as lab/wallet.py does with no accounts, so its job can
 exist before the keys do.
@@ -294,6 +296,59 @@ class KrakenRead:
         return [row]
 
 
+class PolymarketUSRead:
+    """The Polymarket US Retail API, GET only. Each request signs timestamp (ms) + method + path with the Ed25519 key,
+    sent as X-PM-Signature beside X-PM-Access-Key and X-PM-Timestamp; a timestamp is good for 30 s
+    (docs.polymarket.us/api-reference/authentication)."""
+
+    venue = "polymarket_us"
+    host = "api.polymarket.us"
+
+    def __init__(self, cfg: dict, key_id: str, secret_b64: str, session=None, clock=None, sleep=None):
+        https_host(cfg, self.host)
+        self.key_id = key_id
+        self.key = Ed25519PrivateKey.from_private_bytes(base64.b64decode(secret_b64)[:32])
+        self.currency = cfg["currency"]
+        self.api = Api(self.venue, cfg, session, sleep)
+        self.clock = clock or time.time
+
+    def signed(self, path: str) -> dict:
+        ts = str(int(self.clock() * 1000))
+        sig = self.key.sign(f"{ts}GET{path}".encode())
+        return {"X-PM-Access-Key": self.key_id, "X-PM-Timestamp": ts, "X-PM-Signature": base64.b64encode(sig).decode()}
+
+    def get(self, path: str):
+        r = self.api.request("GET", path, headers=lambda _: self.signed(path))
+        if r.status_code >= 400:
+            raise RuntimeError(f"polymarket_us GET {path}: HTTP {r.status_code}: {str(r.text)[:300]}")
+        return r.json()
+
+    def read(self) -> list[dict]:
+        """One row: cash is the currency's balance, equity adds the notional of every position, positions counts the
+        markets with a net position. An account with no balance entry yet (never funded) reads as zero."""
+        row = blank_row(self.venue, False)
+        try:
+            balances = self.get("/v1/account/balances")["balances"]
+            bal = next((b for b in balances if b["currency"] == self.currency), None)
+            if bal is None and balances:
+                raise RuntimeError(f"polymarket_us: no {self.currency} balance among {[b['currency'] for b in balances]}")
+            bal = bal or {}
+            pos = self.get("/v1/portfolio/positions")
+            held = [p for p in pos["positions"].values() if num(p.get("netPosition"))]
+            cash, notional = num(bal.get("currentBalance")) or 0.0, num(bal.get("assetNotional")) or 0.0
+            row.update(status="open", currency=self.currency, cash=cash, equity=cash + notional,
+                       buying_power=num(bal.get("buyingPower")) or 0.0, positions=len(held))
+            if not pos.get("eof", True):
+                row["error"] = "polymarket_us: positions span more than one page, so the count is short"
+        except RuntimeError as e:
+            row["error"] = str(e)
+        except KeyError as e:
+            row["error"] = f"polymarket_us: no field {e}"
+        except requests.RequestException as e:
+            row["error"] = f"polymarket_us: {type(e).__name__}"
+        return [row]
+
+
 def read(client: AlpacaPaper) -> dict:
     row = blank_row(client.venue, True)
     try:
@@ -332,6 +387,9 @@ def sources(session=None, sleep=None) -> list:
     if env("KRAKEN_API_KEY") and env("KRAKEN_API_SECRET"):
         out.append(KrakenRead(cfg["kraken"], env("KRAKEN_API_KEY"), env("KRAKEN_API_SECRET"), session,
                               sleep=sleep).read)
+    if env("POLYMARKET_US_KEY_ID") and env("POLYMARKET_US_SECRET_KEY"):
+        out.append(PolymarketUSRead(cfg["polymarket_us"], env("POLYMARKET_US_KEY_ID"), env("POLYMARKET_US_SECRET_KEY"),
+                                    session, sleep=sleep).read)
     return out
 
 
@@ -352,7 +410,7 @@ def main(argv: list[str] | None = None, session=None, sleep=None) -> int:
         return 0 if row["error"] is None else 1
     found = sources(session, sleep)
     if not found:
-        print("broker: no broker keys set (Alpaca paper, Robinhood, SnapTrade, Kraken)", flush=True)
+        print("broker: no broker keys set (Alpaca paper, Robinhood, SnapTrade, Kraken, Polymarket US)", flush=True)
         return 0
     rows = [r for src in found for r in src()]
     now = dt.datetime.now(dt.timezone.utc).replace(microsecond=0)

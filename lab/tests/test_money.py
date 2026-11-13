@@ -22,7 +22,7 @@ from urllib.parse import urlparse
 
 import pandas as pd
 import pytest
-from test_broker import KR_SECRET, RH, SEED, ST, Kraken, Paper, Robinhood, Snap
+from test_broker import KR_SECRET, PM_SECRET, RH, SEED, ST, Kraken, Paper, Polymarket, Robinhood, Snap
 from test_markets_kalshi_trade import RSA, Demo, pem
 from test_markets_manifold_trade import Manifold
 
@@ -249,6 +249,10 @@ MONEY_MAP = {
         lambda cfg, s: broker.KrakenRead(cfg, "k", KR_SECRET, s, sleep=lambda _: None), lambda c, conn: c.read(),
         Kraken, reads=frozenset({"/0/private/Balance", "/0/private/TradeBalance"}),
         declared_reads=lambda: broker.KrakenRead.READS),
+    ("lab/broker.py", "PolymarketUSRead"): Client(
+        "read", frozenset({"api.polymarket.us"}), lambda: {broker.PolymarketUSRead.host}, _broker("polymarket_us"),
+        lambda cfg, s: broker.PolymarketUSRead(cfg, "k", PM_SECRET, s, sleep=lambda _: None), lambda c, conn: c.read(),
+        Polymarket),
     ("lab/markets/api.py", "Api"): Client("none", why="the one paced client: every client built on it has its own row"),
     ("lab/markets/kalshi.py", "Kalshi"): Client("none", why="Kalshi public market data, GET only, no key"),
     ("lab/markets/polymarket.py", "PolymarketUS"): Client("none", why="Polymarket US public market data, GET only, no key"),

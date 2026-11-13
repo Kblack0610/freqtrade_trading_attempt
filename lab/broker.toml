@@ -43,3 +43,13 @@ page_gap_s = 1
 budget_rps = 0.2
 retries = 3
 timeout_s = 30
+
+[polymarket_us]
+base_url = "https://api.polymarket.us"   # the client refuses any other host, and sends only GET
+currency = "USD"
+# Published limit: 25 requests a second per IP across the API (read 2026-11-06, https://docs.polymarket.us/api-reference/rate-limits).
+# Two calls a run. Well under it; the lab's public Polymarket US reads share the IP.
+page_gap_s = 0.5
+budget_rps = 2
+retries = 3
+timeout_s = 30
