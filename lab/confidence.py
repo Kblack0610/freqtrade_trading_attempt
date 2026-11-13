@@ -17,7 +17,8 @@ bot running it. One bad week cannot cross the bar; a sustained run of trades bel
 
 Every run first adds what was tried to the trial register, `trials`, which keeps a row when its strategy goes:
 each strategy x exchange as it stands, under each setup overlay (lab/variants.toml) and with each tuned parameter set.
-The effective trial count is the register's size at the window's effective share (metrics.effective_trials).
+The effective trial count is the crypto lab's share of the register (trial_count) at the window's effective share
+(metrics.effective_trials).
 
 Run alone with `python lab/confidence.py`; lab/analyze.py and lab/walkforward.py run it after suggest.
 """
@@ -35,6 +36,7 @@ from scipy.stats import norm
 
 from lab import metrics, robustness, suggest
 from lab.db import connect
+from lab.markets import venues as market_venues
 from lab.suggest import gate
 
 USER_DATA = Path(os.environ.get("FT_USER_DATA", Path(__file__).resolve().parents[1] / "user_data"))
@@ -78,10 +80,16 @@ def venue_fee(exchange: str) -> float | None:
     return json.loads(path.read_text()).get("fee") if path.is_file() else None
 
 
+def trial_count(conn) -> int:
+    """The crypto lab's tries. lab/markets/backtest.py registers event-contract variants in the same register under
+    their venue and counts only those; they are another lane's tries and do not raise this lane's bar."""
+    return conn.execute("SELECT count(*) FROM trials WHERE NOT (exchange = ANY(%s))", (market_venues(),)).fetchone()[0]
+
+
 def register(conn) -> int:
     for sql in REGISTER:
         conn.execute(sql)
-    return conn.execute("SELECT count(*) FROM trials").fetchone()[0]
+    return trial_count(conn)
 
 
 def load(conn, cfg: dict, now: dt.datetime | None = None) -> dict:

@@ -26,7 +26,7 @@ from psycopg.types.json import Jsonb
 from scipy.cluster.hierarchy import leaves_list, linkage
 from scipy.spatial.distance import squareform
 
-from lab import metrics, scorecard, suggest
+from lab import confidence, metrics, scorecard, suggest
 from lab.db import connect
 from lab.grid import variant_of
 
@@ -211,7 +211,7 @@ def run(conn, cfg: dict | None = None) -> dict:
         with conn.cursor() as cur:
             cur.executemany("INSERT INTO trials (strategy, exchange, variant) VALUES ('mixture', '', %s) ON CONFLICT DO NOTHING",
                             [(variant_of(b[0]),) for b in built])
-        trials = conn.execute("SELECT count(*) FROM trials").fetchone()[0]
+        trials = confidence.trial_count(conn)
         out = rows(built, trials, cfg)
         conn.execute("DELETE FROM mixtures")
         with conn.cursor() as cur:

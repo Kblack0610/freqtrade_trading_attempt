@@ -479,3 +479,15 @@ def test_pair_holdout_reads_only_successful_tuned_oos_folds(conn):
     facts = confidence.load(conn, {**CFG, 'lockbox': {'start': dt.date(2026, 5, 1)}})
     assert sorted(facts['pairs'][('S', 'binanceus')]) == [(1, 0.02), (1, 0.1)]
     assert confidence.without_best_pair(facts['pairs'][('S', 'binanceus')]) == 0.02
+
+
+def test_betting_trials_do_not_raise_the_crypto_bar(conn):
+    before = confidence.trial_count(conn)
+    rows = [("longshot", "kalshi", "lane-test"), ("gap", "odds_api", "lane-test"), ("Good", "kraken", "lane-test")]
+    conn.execute("INSERT INTO trials (strategy, exchange, variant) VALUES (%s, %s, %s), (%s, %s, %s), (%s, %s, %s)",
+                 [v for r in rows for v in r])
+    try:
+        assert confidence.trial_count(conn) == before + 1
+        assert confidence.register(conn) == before + 1
+    finally:
+        conn.execute("DELETE FROM trials WHERE variant = 'lane-test'")

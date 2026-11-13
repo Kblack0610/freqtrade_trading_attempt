@@ -12,7 +12,6 @@ market_sweeps (migration 019), and of the quote objects. Exits 1 if any venue fa
 """
 
 import datetime as dt
-import os
 import sys
 import tomllib
 import traceback
@@ -23,6 +22,7 @@ import pyarrow.parquet as pq
 from pyarrow import fs as pafs
 
 from lab.db import connect
+from lab.markets import CONFIG
 from lab.markets.kalshi import Kalshi
 from lab.markets.manifold import Manifold
 from lab.markets.odds import OddsApi
@@ -31,7 +31,6 @@ from lab.markets.predictit import PredictIt
 from lab.markets.venue import Quote, Venue
 from lab.util import s3_from_env
 
-CONFIG = Path(os.environ.get("MARKETS_CONFIG", Path(__file__).resolve().parents[1] / "markets.toml"))
 ADAPTERS = {a.name: a for a in (Kalshi, PolymarketUS, Polymarket, PredictIt, Manifold, OddsApi)}
 META = ("event_id", "series_id", "title", "subtitle", "market_type", "status", "open_time", "close_time")
 BOOK = ("bid", "ask", "last", "bid_size", "ask_size", "volume", "open_interest")

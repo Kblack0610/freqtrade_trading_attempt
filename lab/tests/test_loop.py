@@ -3,7 +3,7 @@ import pathlib
 
 import pytest
 
-from lab import loop, suggest
+from lab import confidence, loop, suggest
 
 _spec = importlib.util.spec_from_file_location(
     "research_sync", pathlib.Path(__file__).resolve().parents[2] / "ci" / "research_sync.py")
@@ -37,7 +37,7 @@ def test_a_change_is_an_event_once_and_a_steady_set_is_none(conn):
         ("climate", "enters", "m"), ("climate", "enters", "S"), ("promote", "enters", "Good"),
         ("climate", "enters", "T"), ("climate", "leaves", "S"), ("promote", "leaves", "Good")]
     good = events[2]
-    assert good["action"] == suggest.roster_line("Good", "kraken") and good["cell"] == "" and good["trials"] == conn.execute("SELECT count(*) FROM trials").fetchone()[0]
+    assert good["action"] == suggest.roster_line("Good", "kraken") and good["cell"] == "" and good["trials"] == confidence.trial_count(conn)
     assert events[1]["lo"] == 0.05 and events[1]["variant"] == "tuned" and events[0]["exchange"] == ""
     assert loop.ack(conn, [e["id"] for e in events[:3]]) == 3
     assert loop.ack(conn, [events[0]["id"]]) == 0

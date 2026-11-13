@@ -18,7 +18,7 @@ import hashlib
 import json
 import sys
 
-from lab import suggest
+from lab import confidence, suggest
 from lab.db import connect
 
 KEY = ("signal", "kind", "name", "exchange", "variant", "cell")
@@ -48,7 +48,7 @@ def run(conn) -> dict:
     with conn.transaction():
         before = {r[:6]: dict(zip(STATE_COLS, r)) for r in conn.execute(f"SELECT {', '.join(STATE_COLS)} FROM research_state")}
         now = current(conn)
-        trials = conn.execute("SELECT count(*) FROM trials").fetchone()[0]
+        trials = confidence.trial_count(conn)
         events = diff(before, now, trials)
         conn.execute("DELETE FROM research_state")
         with conn.cursor() as cur:

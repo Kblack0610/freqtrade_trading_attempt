@@ -17,7 +17,7 @@ import sys
 
 import pandas as pd
 
-from lab import metrics, suggest
+from lab import confidence, metrics, suggest
 from lab.db import connect
 
 COLS = ["kind", "name", "exchange", "variant", "cell", "days", "trades", "annual", "lo", "hi", "trials"]
@@ -89,7 +89,7 @@ def run(conn, cfg: dict | None = None) -> dict:
     for name, v, day, ret in conn.execute("SELECT m.name, m.variant, d.day, d.ret FROM mixtures m JOIN mixture_daily d "
                                           "USING (variant) ORDER BY 2, 3"):
         mixed.setdefault((name, v), {})[pd.Timestamp(day)] = ret
-    trials = conn.execute("SELECT count(*) FROM trials").fetchone()[0]
+    trials = confidence.trial_count(conn)
     out = build(reg, spans, frames, cfg, trials, {k: pd.Series(v, dtype=float) for k, v in mixed.items()})
     with conn.transaction():
         conn.execute("DELETE FROM climate_scorecard")
