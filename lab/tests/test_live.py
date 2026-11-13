@@ -7,7 +7,7 @@ from freqtrade import exchange as venues
 from freqtrade.configuration import Configuration
 from freqtrade.configuration.config_validation import validate_config_consistency, validate_config_schema
 
-from lab import league, live, suggest
+from lab import guard, league, live, suggest
 
 USER_DATA = Path(__file__).resolve().parents[2] / "user_data"
 API = {"username": "u", "password": "p", "jwt_secret_key": "j" * 32, "ws_token": "w"}
@@ -22,7 +22,7 @@ def cfg():
 
 @pytest.fixture
 def stage(cfg):
-    return live.stage_of(cfg["live"], cfg["book"])
+    return guard.stage_of(cfg["live"], cfg["book"])
 
 
 def merged(tmp_path, cfg, stage, exchange="kraken", keys=True) -> tuple[dict, list[Path]]:
@@ -35,7 +35,23 @@ def merged(tmp_path, cfg, stage, exchange="kraken", keys=True) -> tuple[dict, li
 
 
 def test_the_guard_is_on():
-    assert live.GUARD_LIFTED is False
+    assert guard.GUARD_LIFTED is False
+
+
+@pytest.fixture
+def lifted(monkeypatch):
+    """The guard lifted by hand, so the checks under it are tested while the shipped constant stays off."""
+    monkeypatch.setattr(guard, "GUARD_LIFTED", True)
+
+
+def test_the_shipped_guard_refuses_even_a_clean_config(tmp_path, cfg, stage):
+    conf, _ = merged(tmp_path, cfg, stage)
+    assert live.check(conf, cfg["live"], stage, ready=True, stopped=None) == ["the no-real-money guard is on (docs/live.md)"]
+
+
+def test_a_stopped_bankroll_refuses_a_start(tmp_path, cfg, stage, lifted):
+    conf, _ = merged(tmp_path, cfg, stage)
+    assert live.check(conf, cfg["live"], stage, ready=True, stopped="profit fell") == ["the bankroll is stopped: profit fell"]
 
 
 def test_main_refuses_before_it_reads_anything(monkeypatch, capsys):
@@ -50,10 +66,10 @@ def test_main_refuses_before_it_reads_anything(monkeypatch, capsys):
     assert "guard is on" in capsys.readouterr().err
 
 
-def test_the_shipped_config_passes_every_check(tmp_path, cfg, stage):
+def test_the_shipped_config_passes_every_check(tmp_path, cfg, stage, lifted):
     for exchange in cfg["live"]["venues"]:
         conf, _ = merged(tmp_path, cfg, stage, exchange)
-        assert live.check(conf, cfg["live"], stage, ready=True) == []
+        assert live.check(conf, cfg["live"], stage, ready=True, stopped=None) == []
 
 
 def test_freqtrade_accepts_the_shipped_config(tmp_path, cfg, stage):
@@ -96,47 +112,47 @@ def test_every_live_venue_keeps_its_stop_on_the_exchange(cfg):
     ({"pairlists": [{"method": "VolumePairList"}]}, "pairlists"),
     ({"pairlists": [{"method": "StaticPairList"}, {"method": "VolumePairList"}]}, "pairlists"),
 ])
-def test_refuses_each_field(tmp_path, cfg, stage, change, want):
+def test_refuses_each_field(tmp_path, cfg, stage, change, want, lifted):
     conf, _ = merged(tmp_path, cfg, stage)
-    problems = live.check({**conf, **change}, cfg["live"], stage, ready=True)
+    problems = live.check({**conf, **change}, cfg["live"], stage, ready=True, stopped=None)
     assert len(problems) == 1 and want in problems[0]
 
 
 @pytest.mark.parametrize("field", ["position_adjustment_enable", "force_entry_enable", "dry_run", "stake_amount",
                                    "max_open_trades", "order_types"])
-def test_a_missing_field_is_refused(tmp_path, cfg, stage, field):
+def test_a_missing_field_is_refused(tmp_path, cfg, stage, field, lifted):
     conf, _ = merged(tmp_path, cfg, stage)
     del conf[field]
-    assert live.check(conf, cfg["live"], stage, ready=True)
+    assert live.check(conf, cfg["live"], stage, ready=True, stopped=None)
 
 
-def test_refuses_a_venue_with_no_exchange_stop(tmp_path, cfg, stage):
+def test_refuses_a_venue_with_no_exchange_stop(tmp_path, cfg, stage, lifted):
     conf, _ = merged(tmp_path, cfg, stage, "coinbase")
-    assert any("coinbase" in p for p in live.check(conf, cfg["live"], stage, ready=True))
+    assert any("coinbase" in p for p in live.check(conf, cfg["live"], stage, ready=True, stopped=None))
 
 
-def test_refuses_a_thin_pair_and_no_pairs(tmp_path, cfg, stage):
+def test_refuses_a_thin_pair_and_no_pairs(tmp_path, cfg, stage, lifted):
     conf, _ = merged(tmp_path, cfg, stage)
     for pairs in (["BTC/USD", "DOT/USD"], []):
         conf["exchange"]["pair_whitelist"] = pairs
-        assert any("pair_whitelist" in p for p in live.check(conf, cfg["live"], stage, ready=True))
+        assert any("pair_whitelist" in p for p in live.check(conf, cfg["live"], stage, ready=True, stopped=None))
 
 
-def test_refuses_without_keys_and_names_no_value(tmp_path, cfg, stage):
+def test_refuses_without_keys_and_names_no_value(tmp_path, cfg, stage, lifted):
     conf, _ = merged(tmp_path, cfg, stage, keys=False)
-    assert live.check(conf, cfg["live"], stage, ready=True) == ["exchange.key is not set", "exchange.secret is not set"]
+    assert live.check(conf, cfg["live"], stage, ready=True, stopped=None) == ["exchange.key is not set", "exchange.secret is not set"]
 
 
-def test_refuses_a_strategy_not_at_ready(tmp_path, cfg, stage):
+def test_refuses_a_strategy_not_at_ready(tmp_path, cfg, stage, lifted):
     conf, _ = merged(tmp_path, cfg, stage)
-    assert live.check(conf, cfg["live"], stage, ready=False) == ["the strategy is not at ready on this venue"]
+    assert live.check(conf, cfg["live"], stage, ready=False, stopped=None) == ["the strategy is not at ready on this venue"]
 
 
-def test_a_keys_file_cannot_raise_the_caps(tmp_path, cfg, stage):
+def test_a_keys_file_cannot_raise_the_caps(tmp_path, cfg, stage, lifted):
     conf, files = merged(tmp_path, cfg, stage)
     files[3].write_text(json.dumps({"stake_amount": 5000, "exchange": {"key": "k", "secret": "s"}}))
     conf = Configuration.from_files([str(p) for p in files])
-    assert any("stake_amount" in p for p in live.check(conf, cfg["live"], stage, ready=True))
+    assert any("stake_amount" in p for p in live.check(conf, cfg["live"], stage, ready=True, stopped=None))
 
 
 class Conn:
@@ -155,16 +171,16 @@ def test_at_ready(row, want):
     assert live.at_ready(Conn(row), "Strat", "kraken") is want
 
 
-def run_lifted(monkeypatch, tmp_path, ready, env=ENV):
+def run_lifted(monkeypatch, tmp_path, ready, env=ENV, stopped=None):
     """main() with the guard lifted by hand, so the rest of it is tested while the shipped constant stays off."""
     started = []
     secret = tmp_path / "keys.json"
     secret.write_text(json.dumps({"exchange": {"key": "k-value", "secret": "s-value"}}))
-    monkeypatch.setattr(live, "GUARD_LIFTED", True)
+    monkeypatch.setattr(guard, "GUARD_LIFTED", True)
     monkeypatch.setattr(live, "USER_DATA", USER_DATA)
     monkeypatch.setattr(live, "STATE", tmp_path / "state")
     monkeypatch.setattr(live, "KEYS", secret)
-    monkeypatch.setattr(live, "connect", lambda: _Ctx(ready))
+    monkeypatch.setattr(live, "connect", lambda: _Ctx(ready, stopped))
     monkeypatch.setattr(live.os, "execvp", lambda f, a: started.append(a))
     for k, v in env.items():
         monkeypatch.setenv(k, v)
@@ -173,8 +189,18 @@ def run_lifted(monkeypatch, tmp_path, ready, env=ENV):
 
 
 class _Ctx(Conn):
-    def __init__(self, ready):
-        super().__init__((ready,))
+    """The confidence row says ready; the bankroll row is breached with `stopped` as its reason, or absent."""
+
+    def __init__(self, ready, stopped):
+        super().__init__(None)
+        self.ready, self.stopped = ready, stopped
+
+    def execute(self, sql, args=()):
+        if "bankroll" in sql:
+            self.row = ("2026-11-13", self.stopped) if self.stopped else None
+        else:
+            self.row = (self.ready,)
+        return self
 
     def __enter__(self):
         return self
@@ -184,7 +210,7 @@ class _Ctx(Conn):
 
 
 def test_lifted_and_clean_starts_with_keys_last(monkeypatch, tmp_path, capsys):
-    (args,) = run_lifted(monkeypatch, tmp_path, ready=True)
+    (args,) = run_lifted(monkeypatch, tmp_path, ready=True, stopped=None)
     configs = [args[i + 1] for i, a in enumerate(args) if a == "--config"]
     assert configs[-1].endswith("keys.json") and args[:2] == ["freqtrade", "trade"]
     assert (tmp_path / "state" / "live.json").stat().st_mode & 0o077 == 0
@@ -193,14 +219,20 @@ def test_lifted_and_clean_starts_with_keys_last(monkeypatch, tmp_path, capsys):
 
 def test_lifted_still_refuses_a_strategy_not_at_ready(monkeypatch, tmp_path, capsys):
     with pytest.raises(SystemExit):
-        run_lifted(monkeypatch, tmp_path, ready=False)
+        run_lifted(monkeypatch, tmp_path, ready=False, stopped=None)
     assert "not at ready" in capsys.readouterr().err
+
+
+def test_lifted_refuses_while_the_bankroll_is_stopped(monkeypatch, tmp_path, capsys):
+    with pytest.raises(SystemExit):
+        run_lifted(monkeypatch, tmp_path, ready=True, stopped="over the cap")
+    assert "the bankroll is stopped: over the cap" in capsys.readouterr().err
 
 
 def test_lifted_refuses_env_overrides(monkeypatch, tmp_path, capsys):
     monkeypatch.setenv("FREQTRADE__DRY_RUN", "false")
     with pytest.raises(SystemExit):
-        run_lifted(monkeypatch, tmp_path, ready=True)
+        run_lifted(monkeypatch, tmp_path, ready=True, stopped=None)
     assert "FREQTRADE__" in capsys.readouterr().err
 
 
@@ -268,12 +300,12 @@ def test_lifted_refuses_an_edited_strategy_over_open_trades(monkeypatch, tmp_pat
     make_db(state / "tradesv3.sqlite", 1)
     (state / "started.json").write_text(json.dumps({"fingerprint": "from-an-earlier-start"}))
     with pytest.raises(SystemExit):
-        run_lifted(monkeypatch, tmp_path, ready=True)
+        run_lifted(monkeypatch, tmp_path, ready=True, stopped=None)
     assert "open trades" in capsys.readouterr().err
     assert (state / "started.json").read_text() == json.dumps({"fingerprint": "from-an-earlier-start"})
 
 
 def test_lifted_starts_an_unchanged_bot_with_open_trades(monkeypatch, tmp_path):
-    run_lifted(monkeypatch, tmp_path, ready=True)
+    run_lifted(monkeypatch, tmp_path, ready=True, stopped=None)
     make_db(tmp_path / "state" / "tradesv3.sqlite", 2)
-    assert len(run_lifted(monkeypatch, tmp_path, ready=True)) == 1
+    assert len(run_lifted(monkeypatch, tmp_path, ready=True, stopped=None)) == 1

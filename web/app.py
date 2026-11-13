@@ -27,7 +27,7 @@ from psycopg_pool import ConnectionPool
 from starlette.concurrency import run_in_threadpool
 
 from lab import book as book_lab
-from lab import live as live_lab
+from lab import guard as guard_lab
 from lab import db, diversity, metrics, suggest, universe
 from web import auth, charts, exporter, nav
 from web import venues as venue_roster
@@ -750,7 +750,8 @@ def book(request: Request):
                 horizon=rows("SELECT * FROM horizon_verdict ORDER BY strategy, exchange, variant, plan"), trend_days=cfg["book"]["trend_days"],
                 benchmarks=rows("SELECT * FROM benchmarks ORDER BY end_day - start_day, name"),
                 short=cfg["book"]["horizon_months"][0], long=cfg["book"]["horizon_months"][-1],
-                stake=cfg["book"]["stages"][0]["stake"], min_days=cfg["scorecard"]["min_days"])
+                stake=cfg["book"]["stages"][0]["stake"], min_days=cfg["scorecard"]["min_days"],
+                bankroll=next(iter(rows("SELECT * FROM bankroll")), None))
 
 
 def strategy_classes() -> set[str]:
@@ -872,7 +873,7 @@ def accounts(request: Request):
                                                for c in ("short", "long")},
               "winning": sum(n for (_, s), n in counts.items() if s == "winning"),
               "retired": sum(n for (_, s), n in counts.items() if s == "retired")}
-    return page(request, "accounts.html", guard_lifted=live_lab.GUARD_LIFTED, brokers=brokers, wallets=wallets,
+    return page(request, "accounts.html", guard_lifted=guard_lab.GUARD_LIFTED, brokers=brokers, wallets=wallets,
                 watch=rows(KILL_SWITCH), bots=bots, paper_accounts=paper, research=research, shadow=shadow,
                 venues=venue_roster.rows(rows), stale_before=dt.datetime.now(dt.timezone.utc) - STALE)
 

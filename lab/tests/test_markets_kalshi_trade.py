@@ -58,6 +58,14 @@ class Demo:
                 return Resp(503, {"error": "busy"})
             self.status = "canceled"
             return Resp(200, {"order_id": "o1", "reduced_by": "1.00", "ts_ms": 2})
+        if method == "GET" and path == "/portfolio/positions":
+            return Resp(200, {"market_positions": [{"ticker": "T-A", "position_fp": "3.00", "market_exposure_dollars": "1.2600"},
+                                                   {"ticker": "T-B", "position_fp": "-2.00"}], "cursor": ""})
+        if method == "GET" and path == "/portfolio/fills":
+            return Resp(200, {"fills": [{"order_id": "o9", "ticker": "T-B", "side": "no", "action": "buy", "count_fp": "2.00",
+                                         "yes_price_dollars": "0.6100", "created_time": "2026-11-13T15:00:00Z"},
+                                        {"order_id": "o8", "ticker": "T-A", "side": "yes", "action": "sell", "count_fp": "1.00",
+                                         "yes_price_dollars": "0.4500", "created_time": "2026-11-13T14:00:00Z"}]})
         return Resp(404, {"error": path})
 
 
@@ -183,3 +191,12 @@ def test_a_cancel_stuck_resting_fails_the_drill_within_its_bound(conn):
 def test_the_demo_config_points_at_the_demo():
     cfg = kalshi_trade.load_config()["demo"]["kalshi"]
     KalshiDemo(cfg, "k", pem(RSA))  # does not raise
+
+
+def test_positions_and_fills_are_signed_on_the_yes_side():
+    from lab.markets.venue import Position
+    c = KalshiDemo(DEMO, "key-1", pem(RSA), session=Demo(), sleep=lambda s: None)
+    assert c.positions() == [Position("T-A", 3.0, 1.26), Position("T-B", -2.0, None)]
+    no_buy, yes_sell = c.fills()
+    assert (no_buy.order_id, no_buy.count, no_buy.price) == ("o9", -2.0, 0.61)
+    assert (yes_sell.count, yes_sell.ts.hour) == (-1.0, 14)

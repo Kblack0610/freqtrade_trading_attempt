@@ -109,3 +109,28 @@ def test_the_config_points_at_manifold():
     cfg = manifold_trade.load_config()["demo"]["manifold"]
     ManifoldBets(cfg, "k")  # does not raise
     assert cfg["drill_price"] < cfg["min_prob"]
+
+
+class Account(Manifold):
+    """Three settled bets: a yes buy filled in two matches, a no buy, and a sale of part of the yes."""
+    BETS = [{"id": "b3", "contractId": "A", "outcome": "YES", "shares": -4.0, "amount": -2.4,
+             "fills": [{"shares": -4.0, "amount": -2.4, "timestamp": 1763046000000}]},
+            {"id": "b2", "contractId": "B", "outcome": "NO", "shares": 5.0, "amount": 2.0,
+             "fills": [{"shares": 5.0, "amount": 2.0, "timestamp": 1763042400000}]},
+            {"id": "b1", "contractId": "A", "outcome": "YES", "shares": 10.0, "amount": 5.0,
+             "fills": [{"shares": 6.0, "amount": 3.0, "timestamp": 1763038800000},
+                       {"shares": 4.0, "amount": 2.0, "timestamp": 1763038860000}]}]
+
+    def request(self, method, url, params, json, timeout, headers):
+        if method == "GET" and url.endswith("/v0/bets"):
+            assert params == {"userId": "u1", "limit": 1000}
+            return Resp(200, self.BETS)
+        return super().request(method, url, params, json, timeout, headers)
+
+
+def test_positions_sum_the_bets_and_fills_list_each_match_newest_first():
+    c = ManifoldBets(CFG, "k", session=Account(), sleep=lambda s: None)
+    assert [(p.ticker, p.count, p.cost) for p in c.positions()] == [("A", 6.0, pytest.approx(2.6)), ("B", -5.0, 2.0)]
+    fills = c.fills()
+    assert [(f.order_id, f.count) for f in fills] == [("b3", -4.0), ("b2", -5.0), ("b1", 4.0), ("b1", 6.0)]
+    assert fills[1].price == pytest.approx(0.6) and fills[0].price == pytest.approx(0.6)

@@ -54,16 +54,19 @@ REGISTER = [
     "INSERT INTO trials (strategy, exchange, variant) SELECT name, '', 'load-failed' "
     "FROM strategies WHERE load_error IS NOT NULL ON CONFLICT DO NOTHING",
 ]
+# Live trading as the fills view (migration 047) holds it, on this lane's venues only: a market venue's fills are the
+# betting lane's, and a drill's proves an order path, not a strategy. Both bind market_venues().
 LIVE = """
-SELECT b.strategy, b.exchange, min(t.open_date), count(*) FILTER (WHERE NOT t.is_open),
-       count(*) FILTER (WHERE NOT t.is_open AND t.exit_reason ILIKE '%stop%')
-FROM bots b JOIN bot_trades t ON t.bot = b.name GROUP BY 1, 2
+SELECT strategy, venue, min(open_date), count(*) FILTER (WHERE NOT is_open),
+       count(*) FILTER (WHERE NOT is_open AND exit_reason ILIKE '%%stop%%')
+FROM fills WHERE source <> 'drill' AND NOT (venue = ANY(%s)) GROUP BY 1, 2
 """
 
 
 LIVE_RETURNS = """
-SELECT b.strategy, b.exchange, t.profit_ratio FROM bots b JOIN bot_trades t ON t.bot = b.name
-WHERE NOT t.is_open AND t.profit_ratio IS NOT NULL ORDER BY t.close_date, t.trade_id
+SELECT strategy, venue, profit_ratio FROM fills
+WHERE source <> 'drill' AND NOT (venue = ANY(%s)) AND NOT is_open AND profit_ratio IS NOT NULL
+ORDER BY close_date, fill_id
 """
 ROSTER = "SELECT strategy, exchange, name FROM bots WHERE last_seen >= %s ORDER BY name"
 
@@ -114,9 +117,9 @@ def load(conn, cfg: dict, now: dt.datetime | None = None) -> dict:
                                            "WHERE gap IS NOT NULL ORDER BY gap_trades"):
         facts["drift"][(s, e)] = {"gap": gap, "trades": n, "gaps": gaps or []}  # most trades last, so that bot's gap stands
     facts["live"] = {(s, e): {"since": since, "closed": closed, "stopouts": stops}
-                     for s, e, since, closed, stops in conn.execute(LIVE)}
+                     for s, e, since, closed, stops in conn.execute(LIVE, (market_venues(),))}
     facts["live_returns"] = {}
-    for s, e, ret in conn.execute(LIVE_RETURNS):
+    for s, e, ret in conn.execute(LIVE_RETURNS, (market_venues(),)):
         facts["live_returns"].setdefault((s, e), []).append(ret)
     facts["roster"] = {}
     for s, e, name in conn.execute(ROSTER, (now - suggest.ROSTER_STALE,)):

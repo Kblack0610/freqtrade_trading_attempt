@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Run one live bot. Today it always refuses, and nothing deploys it.
 
-GUARD_LIFTED is False, so main() exits 2 before it reads anything. Lifting it is a human's PR, with
-the docs that state the rule in the same PR. After that the merged config must still pass check():
-the caps of the [live] stage, a stop on the exchange, keys present, and a strategy at ready.
+lab/guard.py's GUARD_LIFTED is False, so main() exits 2 before it reads anything. Lifting it is a human's PR, with
+the docs that state the rule in the same PR. After that the merged config must still pass check(): the generic guard
+of lab/guard.py (stage caps, venue, ready, the bankroll kill switch) and this engine's own, a stop on the exchange
+and keys present among them.
 It also holds the operator rules of docs/operating-rules.md: no force entry, no Telegram, and no start over open trades after an edit.
 lab/league.py stays the entry point of every paper bot. See docs/live.md.
 """
@@ -15,10 +16,8 @@ import sqlite3
 import sys
 from pathlib import Path
 
-from lab import suggest
+from lab import guard, suggest
 from lab.db import connect
-
-GUARD_LIFTED = False
 
 USER_DATA = Path(os.environ.get("FT_USER_DATA", "/repo/user_data"))
 STATE = Path(os.environ.get("LIVE_STATE", "/freqtrade/state"))
@@ -29,10 +28,6 @@ API_PORT = 8080
 def die(msg: str) -> None:
     print(f"live: {msg}", file=sys.stderr)
     sys.exit(2)
-
-
-def stage_of(live: dict, book: dict) -> dict:
-    return next(s for s in book["stages"] if s["name"] == live["stage"])
 
 
 def overlay(live: dict, stage: dict, name: str, api: dict) -> dict:
@@ -60,19 +55,16 @@ def overlay(live: dict, stage: dict, name: str, api: dict) -> dict:
     }
 
 
-def check(cfg: dict, live: dict, stage: dict, ready: bool) -> list[str]:
-    """Why this merged config may not trade money, empty when it may. Names fields, never values of keys."""
+def check(cfg: dict, live: dict, stage: dict, ready: bool, stopped: str | None) -> list[str]:
+    """Why this merged config may not trade money, empty when it may: lab/guard.py's refusals, then Freqtrade's own.
+    Names fields, never values of keys."""
     ex = cfg.get("exchange", {})
-    stake, slots = cfg.get("stake_amount"), cfg.get("max_open_trades")
-    problems = []
+    problems = guard.refusals(ex.get("name"), cfg.get("stake_amount"), cfg.get("max_open_trades"), live, stage, ready,
+                              stopped)
     if cfg.get("dry_run") is not False:
         problems.append("dry_run is not false")
     if cfg.get("trading_mode", "spot") != "spot" or cfg.get("margin_mode"):
         problems.append("not spot")
-    if not isinstance(stake, (int, float)) or not 0 < stake <= stage["stake"]:
-        problems.append(f"stake_amount is {stake!r}, want a number up to {stage['stake']}")
-    if not isinstance(slots, (int, float)) or not 0 < slots <= stage["max_open"]:
-        problems.append(f"max_open_trades is {slots!r}, want 1 to {stage['max_open']}")
     if cfg.get("position_adjustment_enable") is not False:
         problems.append("position_adjustment_enable is not false")
     if cfg.get("force_entry_enable") is not False:
@@ -85,8 +77,6 @@ def check(cfg: dict, live: dict, stage: dict, ready: bool) -> list[str]:
         problems.append("no stop on the exchange")
     if not cfg.get("api_server", {}).get("enabled"):
         problems.append("api_server is off, so the watcher cannot stop this bot")
-    if ex.get("name") not in live["venues"]:
-        problems.append(f"exchange {ex.get('name')!r} is not one of {live['venues']}")
     if [p.get("method") for p in cfg.get("pairlists", [])] != ["StaticPairList"]:
         problems.append("pairlists is not one StaticPairList")
     pairs = ex.get("pair_whitelist") or []
@@ -95,8 +85,6 @@ def check(cfg: dict, live: dict, stage: dict, ready: bool) -> list[str]:
     for field in ("key", "secret"):
         if not ex.get(field):
             problems.append(f"exchange.{field} is not set")
-    if not ready:
-        problems.append("the strategy is not at ready on this venue")
     return problems
 
 
@@ -135,7 +123,7 @@ def at_ready(conn, strategy: str, exchange: str) -> bool:
 
 
 def main() -> None:
-    if not GUARD_LIFTED:
+    if not guard.GUARD_LIFTED:
         die("refusing to start: the no-real-money guard is on (docs/live.md)")
     overrides = sorted(k for k in os.environ if k.startswith("FREQTRADE__"))
     if overrides:
@@ -148,7 +136,7 @@ def main() -> None:
 
     config = suggest.load_config()
     live = config["live"]
-    stage = stage_of(live, config["book"])
+    stage = guard.stage_of(live, config["book"])
     STATE.mkdir(parents=True, exist_ok=True)
     path = STATE / "live.json"
     path.touch(mode=0o600)
@@ -159,9 +147,9 @@ def main() -> None:
     from freqtrade.configuration import Configuration
 
     with connect() as conn:
-        ready = at_ready(conn, strategy, exchange)
+        ready, stopped = at_ready(conn, strategy, exchange), guard.killed(conn)
     merged = Configuration.from_files([str(p) for p in configs])
-    problems = check(merged, live, stage, ready)
+    problems = check(merged, live, stage, ready, stopped)
     if problems:
         die("refusing to start: " + "; ".join(problems))
 

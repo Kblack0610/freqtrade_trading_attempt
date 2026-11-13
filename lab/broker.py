@@ -44,8 +44,9 @@ import requests
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from lab.db import connect
-from lab.markets.api import Api, num
+from lab.markets.api import Api, num, when
 from lab.markets.drill import await_terminal, rest_and_cancel
+from lab.markets.venue import Fill, Position
 
 CONFIG = Path(os.environ.get("BROKER_CONFIG", Path(__file__).resolve().parent / "broker.toml"))
 PAPER_HOST = "paper-api.alpaca.markets"
@@ -85,8 +86,8 @@ class AlpacaPaper:
         self.sleep = sleep or time.sleep
         self.api = Api(self.venue, cfg, session, self.sleep)
 
-    def call(self, method: str, path: str, body: dict | None = None):
-        r = self.api.request(method, path, body=body, headers=self.headers)
+    def call(self, method: str, path: str, body: dict | None = None, params: dict | None = None):
+        r = self.api.request(method, path, params, body, headers=self.headers)
         if r.status_code >= 400:
             raise RuntimeError(f"alpaca paper {method} {path}: HTTP {r.status_code}: {str(r.text)[:300]}")
         return r.json() if r.status_code != 204 else None
@@ -94,8 +95,13 @@ class AlpacaPaper:
     def account(self) -> dict:
         return self.call("GET", "/v2/account")
 
-    def positions(self) -> list[dict]:
-        return self.call("GET", "/v2/positions")
+    def positions(self) -> list[Position]:
+        return [Position(p["symbol"], num(p["qty"]), num(p.get("cost_basis"))) for p in self.call("GET", "/v2/positions")]
+
+    def fills(self) -> list[Fill]:
+        acts = self.call("GET", "/v2/account/activities/FILL", params={"direction": "desc", "page_size": 100})
+        return [Fill(a["order_id"], a["symbol"], when(a["transaction_time"]),
+                     num(a["qty"]) * (-1 if a["side"] == "sell" else 1), num(a["price"])) for a in acts]
 
     def place(self, ticker: str, price: float, count: int, client_id: str) -> dict:
         o = self.call("POST", "/v2/orders", {
