@@ -1,7 +1,8 @@
 """The order drill: the proof that an order path works end to end on mock funds.
 
 Rests one order, reads it back, cancels it and reads it back, writing each step to demo_orders (migration 023). A
-client gives `venue`, `resting` (the statuses that mean the order is on the book), place(), order() and cancel(). The
+client gives `venue`, `resting` (the statuses that mean the order is on the book), `terminal` (the statuses a cancel
+ends in), place(), order() and cancel(), which returns once await_terminal does. The
 row's error is None only when the order was seen resting and then canceled. A place is never retried: a timeout could
 have placed it, and a second one would double it. A read-back that fails says nothing about the order, so the drill
 cancels before it reports the failure; only a status it did read, and that is not resting, leaves the order alone.
@@ -11,6 +12,19 @@ import datetime as dt
 import uuid
 
 UTC = dt.timezone.utc
+# A cancel is asynchronous on every venue we drill, and none offers an end-of-cancel event a one-shot job can wait on
+# (Alpaca's is the trade-updates websocket, Manifold has none), so the order is re-read until it reaches one of the
+# client's `terminal` statuses, within this bound. A read right after the cancel can still say it rests (Alpaca and
+# Manifold, 2026-11-12).
+CANCEL_POLL_S, CANCEL_POLLS = 1.0, 10
+
+
+def await_terminal(client, order_id: str, sleep, polls: int = CANCEL_POLLS, gap_s: float = CANCEL_POLL_S) -> None:
+    """Return once the order reads terminal, or after the bound; the drill's own read-back then judges it."""
+    for _ in range(polls):
+        if client.order(order_id)["status"] in client.terminal:
+            return
+        sleep(gap_s)
 
 
 def rest_and_cancel(conn, client, ticker: str, price: float, now=None) -> dict:
