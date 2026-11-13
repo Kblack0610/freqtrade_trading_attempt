@@ -44,7 +44,8 @@ Results go to the `trader` database in the cluster's shared Postgres, which the 
 | `lab/mixtures.py` | After the book: strategies run together (1/N, inverse volatility, HRP, each with or without a regime gate), weights and gates fit on earlier walk-forward months and scored on the next, every mixture a `trials` row, PBO across the set; "Running bots together" on `/book`. Spec space and budget: `lab/suggest.toml` [mixtures]. |
 | `lab/shadow.py` | Analysis step before the research loop: opens, marks and retires the shadow paper accounts (Shadow accounts) |
 | `lab/loop.py` | Last step of each analysis, the nightly research loop: which strategies and mixtures entered or left a market climate's passing set, which promote suggestions appeared or went, and monthly retune fit changes, as `research_events`. See Nightly research loop |
-| `lab/live.py` | Live bot entry point: always refuses, nothing deploys it. See `docs/live.md` and the operator rules in `docs/operating-rules.md` |
+| `lab/guard.py` | The live guard every real-money entry point runs, whatever the engine: `GUARD_LIFTED`, stage caps, venue list, ready, the bankroll kill switch. See `docs/live.md` |
+| `lab/live.py` | Live Freqtrade bot entry point: always refuses, nothing deploys it. Its config checks sit on `lab/guard.py`. See `docs/live.md` and the operator rules in `docs/operating-rules.md` |
 | `lab/ingest.py` | Job run every 5 minutes: every bot's trades (closed and open) and a snapshot (profit, balance, dry-run flag, each open pair's newest candle time) into Postgres |
 | `lab/watcher.py` | Daily loss watch: each bot's marked-to-market equity every 60 s into `watch`, and the kill drill. See Watcher |
 | `lab/migrate.py`, `lab/migrations/` | Schema: numbered SQL files applied once each, in order, under an advisory lock; runs as the init container of every job |
@@ -363,6 +364,7 @@ The first run fetches full history (5m since 2019 on binanceus is the long pole)
 - `039`: permits monthly retune fits in the research loop state and event stream.
 - `045`: `shadow_accounts` and `shadow_marks`, the shadow paper accounts and their appended daily marks, written by `lab/shadow.py` (Shadow accounts).
 - `046`: `overlay_daily`, each strategy x exchange x overlay's daily returns, rebuilt by the analysis like `strategy_daily`; overlay shadow accounts are marked from it.
+- `047`: the money layer. `fills`, a read-only view of what traded on every engine (`bot_trades`, filled `paper_orders`, executed `demo_orders`), which `lab/confidence.py` scores live trading from; and `bankroll`, the one cross-venue bankroll row `lab/watcher.py` rewrites each pass (Watcher).
 
  A schema change is a new numbered file; never edit an applied one.
 
@@ -401,7 +403,7 @@ Sign-in cannot complete against a fake Forgejo; mint a cookie with `auth.make_se
 
 `lab/watcher.py` is a Deployment, not a job. Every 60 seconds it reads `/show_config`, `/profit` and `/balance` from each bot and writes one `watch` row per bot. Equity is `starting_capital` plus `profit_all_coin`, which values open trades at the current rate. The bot's `/balance` total is not used, since its wallet refreshes at most hourly.
 
-A bot is breached when equity falls `[watcher] day_loss` of capital below the first reading of the UTC day, and stays breached until the next one. This is Stage 0, so a breach only raises an alert. The day opens at the first reading, so a bot unseen at 00:00 UTC opens late, and a watcher started mid-day counts from then.
+A bot is breached when equity falls `[watcher] day_loss` of capital below the first reading of the UTC day, and stays breached until the next one. This is Stage 0, so a day-loss breach only raises an alert. The day opens at the first reading, so a bot unseen at 00:00 UTC opens late, and a watcher started mid-day counts from then.
 
 The drill proves the stopping path on one dry-run bot. Run these in the watcher pod:
 
@@ -411,6 +413,14 @@ python lab/watcher.py --drill-end <bot>
 ```
 
 The first flags the bot; the next pass marks it breached and POSTs `/stopentry`, which keeps managing open trades. `stopped_at` minus `drill_at` in `watch` is the time taken, and the plan's gate is two cadences. The pass repeats the stop while the drill lasts, because a restarted bot comes back running. The second clears the breach and POSTs `/start`.
+
+**One bankroll.** Each pass also rewrites the one `bankroll` row: every money (not dry-run) account on every venue, summed. Its cap is the `capital` of the `[live]` stage in `[[book.stages]]`, and its hard stop is `[book] hard_stop` of that capital below the peak of the summed profit (equity less capital, so an account joining or leaving moves it only by its own profit). An unseen money bot counts at its last good read. Past either, every money account gets `/stopentry` each pass, its `stopped_at` holds past the UTC day, and `lab/guard.py` refuses any live start. Open positions are not exited automatically. The breach holds until a human clears it, which starts nothing:
+
+```
+python lab/watcher.py --bankroll-clear
+```
+
+Dry-run bots and paper accounts are never in the bankroll, so today it reads 0 accounts. `/book` shows it under Budget.
 
 The event-contract paper league's accounts (`paper-<family>-<variant>`) get watch rows too, read from `paper_accounts` rather than an API, with `seen_at` the last paper pass. A drill on one sets `stopped_at`, and the next `markets.paper` pass takes no entries for it while its open fills still settle and mark; `--drill-end` clears the row, which is all that starts it again.
 

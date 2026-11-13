@@ -1,8 +1,12 @@
-"""The one adapter interface every venue implements, and the records it returns.
+"""The adapter interfaces every venue implements, and the records they return.
 
-A venue is read-only here: it lists its open markets with their top of book, and the markets that resolved
+A Venue is read-only: it lists its open markets with their top of book, and the markets that resolved
 since a time. A venue with history also serves it (the History methods), which lab/markets/history.py backfills. Prices are dollars per contract (0 to 1), sizes are contracts. An adapter returns plain records
 and never touches the database or object store; lab/markets/recorder.py does that.
+
+An order client (Orders) is the one order path, whatever the venue or asset: lab/broker.py AlpacaPaper,
+lab/markets/kalshi_trade.py KalshiDemo and lab/markets/manifold_trade.py ManifoldBets implement it, lab/markets/drill.py
+drives it, and each one refuses every host but its mock-funds one.
 """
 
 import datetime as dt
@@ -109,4 +113,47 @@ class History(Protocol):
         ...
 
     def trades(self, span: Span) -> Iterator[list[Trade]]:
+        ...
+
+
+@dataclass(frozen=True, slots=True)
+class Position:
+    """What the account holds of one instrument: count is signed, negative for a short or a no side."""
+    ticker: str
+    count: float
+    cost: float | None  # what the holding cost, in the account's currency, where the venue states it
+
+
+@dataclass(frozen=True, slots=True)
+class Fill:
+    order_id: str
+    ticker: str
+    ts: dt.datetime
+    count: float
+    price: float  # per unit (a contract's yes price, or a share's)
+
+
+class Orders(Protocol):
+    """An order client. resting: the statuses that mean an order is on the book; terminal: the ones a cancel ends in."""
+    venue: str
+    resting: frozenset[str]
+    terminal: frozenset[str]
+
+    def place(self, ticker: str, price: float, count: int, client_id: str) -> dict:
+        """One limit buy; returns {"order_id": ...}. Never retried by a caller: a timeout could have placed it."""
+        ...
+
+    def order(self, order_id: str) -> dict:
+        """The order as the venue reads it now, with at least its "status"."""
+        ...
+
+    def cancel(self, order_id: str, ticker: str) -> object:
+        """Returns once the order reads terminal, or after the client's bound (lab/markets/drill.py await_terminal)."""
+        ...
+
+    def positions(self) -> list[Position]:
+        ...
+
+    def fills(self) -> list[Fill]:
+        """The account's most recent fills, newest first, one page."""
         ...

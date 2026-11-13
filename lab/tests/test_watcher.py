@@ -3,10 +3,11 @@ import datetime as dt
 import pytest
 from psycopg.rows import dict_row
 
-from lab import watcher
+from lab import guard, watcher
 
 NOW = dt.datetime(2026, 11, 5, 12, tzinfo=dt.timezone.utc)
 LIMIT = 0.03
+BANK = {"stage": "Stage 1", "cap": 2500.0, "hard_stop": 0.15}
 
 
 class Bots:
@@ -40,7 +41,7 @@ def row(conn, bot="a"):
 
 
 def tick(conn, bots, now=NOW, names=("a",)):
-    watcher.tick(conn, list(names), LIMIT, bots, now)
+    watcher.tick(conn, list(names), LIMIT, bots, now, BANK)
 
 
 def test_a_loss_past_the_limit_breaches_and_holds_until_the_next_day(conn):
@@ -157,3 +158,59 @@ def test_ending_no_drill_starts_nothing(conn):
     with pytest.raises(SystemExit):
         watcher.drill_end(conn, "a", ["a"], bots)
     assert bots.posts == []
+
+
+def bank(conn):
+    with conn.cursor(row_factory=dict_row) as cur:
+        return cur.execute("SELECT * FROM bankroll").fetchone()
+
+
+def test_the_shipped_bankroll_is_the_live_stage_capital_and_the_hard_stop():
+    assert watcher.limits(watcher.load_config()) == {"stage": "Stage 1", "cap": 500.0, "hard_stop": 0.15}
+
+
+def test_dry_run_bots_are_not_the_bankroll(conn):
+    tick(conn, Bots(-500.0), names=("a",))
+    b = bank(conn)
+    assert (b["accounts"], b["capital"], b["breached_at"]) == (0, 0.0, None)
+    assert guard.killed(conn) is None
+
+
+def test_money_over_the_cap_stops_every_money_account_and_holds_until_cleared(conn):
+    names = ("a", "b", "c", "d")
+    bots = Bots(0.0, 0.0, 0.0, 0.0)
+    bots.dry_run = [False, False, True, True]
+    tick(conn, bots, names=names)
+    assert bank(conn)["breached_at"] is None and bots.posts == []
+    bots.dry_run[2] = False  # a third money account: 3000 of capital against a 2500 cap
+    tick(conn, bots, NOW + dt.timedelta(minutes=1), names=names)
+    assert "over the Stage 1 cap of 2500.00" in bank(conn)["reason"]
+    assert sorted(bots.posts) == [(0, "stopentry"), (1, "stopentry"), (2, "stopentry")]
+    assert "over the Stage 1 cap" in guard.killed(conn)
+    bots.dry_run[2] = True
+    tick(conn, bots, NOW + dt.timedelta(days=1), names=names)
+    assert bank(conn)["breached_at"] is not None and row(conn, "a")["stopped_at"] is not None
+    watcher.bankroll_clear(conn)
+    assert guard.killed(conn) is None and len(bots.posts) == 3  # nothing was started again
+
+
+def test_a_fall_past_the_hard_stop_breaches_and_an_unseen_bot_counts_at_its_last_read(conn):
+    names = ("a", "b")
+    bots = Bots(100.0, 0.0)
+    bots.dry_run = [False, False]
+    tick(conn, bots, names=names)
+    assert bank(conn)["peak"] == 100.0
+    bots.down.add(1)
+    bots.profit[0] = -270.0  # 370 under the peak; the hard stop is 375
+    tick(conn, bots, NOW + dt.timedelta(minutes=1), names=names)
+    assert bank(conn)["accounts"] == 2 and bank(conn)["breached_at"] is None
+    bots.profit[0] = -275.0
+    tick(conn, bots, NOW + dt.timedelta(minutes=2), names=names)
+    assert "past the hard stop of 15% of 2500.00" in bank(conn)["reason"]
+    assert bots.posts == [(0, "stopentry")]
+
+
+def test_clearing_a_bankroll_that_is_not_breached_says_so(conn):
+    tick(conn, Bots(0.0))
+    with pytest.raises(SystemExit):
+        watcher.bankroll_clear(conn)

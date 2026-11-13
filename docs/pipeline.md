@@ -149,7 +149,7 @@ Each row of home-config `apps/freqtrade/roster.tsv` is one paper bot: a strategy
 - Drift compares each bot's trades with a backtest of the same days. A low match rate means the backtest does not model what the bot does; a steady negative gap means fills or fees the backtest leaves out.
 - Reconciliation (`reconcile`) keeps that match per trade and splits the gap into entry delay, price, fee and missed fills.
 - Markouts (`markouts`) mark every entry at +5m, +1h and +4h, BTC hedged and net of fees, against random entries on the same pair and side. A random entry averages minus the round-trip fee, so an entry that beats the null shows skill long before profit can. They are a diagnostic only.
-- `lab/watcher.py` marks a bot breached when its equity falls past the day-loss limit. This is Stage 0, so a breach only raises an alert; only a drill stops a bot's entries.
+- `lab/watcher.py` marks a bot breached when its equity falls past the day-loss limit. This is Stage 0, so a day-loss breach only raises an alert; a drill, or the one cross-venue bankroll passing its cap or hard stop, is what stops entries.
 - The decay test (a CUSUM over closed trades) says when trades stop looking like what walk-forward measured, and suggests retiring the strategy.
 
 Reference: [Cohorts](../README.md#cohorts), [Watcher](../README.md#watcher).

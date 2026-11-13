@@ -25,10 +25,11 @@ import time
 from urllib.parse import urlparse
 
 from lab.db import connect
-from lab.markets.api import Api, num
+from lab.markets.api import Api, num, when
 from lab.markets.budget import Budget
 from lab.markets.drill import await_terminal, rest_and_cancel
 from lab.markets.recorder import load_config
+from lab.markets.venue import Fill, Position
 
 MANIFOLD_HOSTS = frozenset({"api.manifold.markets"})
 
@@ -103,6 +104,35 @@ class ManifoldBets:
         """The bets list lags the cancel: read right after, the drill's bet still said open (2026-11-12)."""
         self.call("POST", f"/v0/bet/cancel/{order_id}")
         await_terminal(self, order_id, self.sleep)
+
+    def bets(self) -> list[dict]:
+        """The account's newest bets, one page. A bet's shares and amount are what filled; a sale's are negative."""
+        if self.user_id is None:
+            self.me()
+        return self.call("GET", "/v0/bets", {"userId": self.user_id, "limit": 1000})
+
+    def positions(self) -> list[Position]:
+        """Shares held per market, summed over the newest bets: yes positive, no negative; cost is mana spent."""
+        held: dict[str, list[float]] = {}
+        for b in self.bets():
+            sign = 1 if b["outcome"] == "YES" else -1
+            h = held.setdefault(b["contractId"], [0.0, 0.0])
+            h[0] += sign * (num(b.get("shares")) or 0.0)
+            h[1] += num(b.get("amount")) or 0.0
+        return [Position(t, n, cost) for t, (n, cost) in held.items() if n]
+
+    def fills(self) -> list[Fill]:
+        """Each match of each bet. A share pays one mana, so a no share's price is one less the yes price."""
+        out = []
+        for b in self.bets():
+            yes = b["outcome"] == "YES"
+            for f in b.get("fills") or []:
+                shares, amount = num(f["shares"]), num(f["amount"])
+                if shares:
+                    each = amount / shares
+                    out.append(Fill(b["id"], b["contractId"], when(f["timestamp"]), shares if yes else -shares,
+                                    each if yes else 1 - each))
+        return sorted(out, key=lambda f: f.ts, reverse=True)
 
 
 def pick(markets: list[dict], min_prob: float) -> str | None:

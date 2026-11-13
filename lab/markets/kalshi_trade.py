@@ -31,9 +31,10 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519, padding, rsa
 
 from lab.db import connect
-from lab.markets.api import Api, num
+from lab.markets.api import Api, num, when
 from lab.markets.drill import await_terminal, rest_and_cancel
 from lab.markets.recorder import load_config
+from lab.markets.venue import Fill, Position
 
 DEMO_HOSTS = frozenset({"external-api.demo.kalshi.co", "demo-api.kalshi.co"})
 
@@ -118,6 +119,19 @@ class KalshiDemo:
         done = self.call("DELETE", f"/portfolio/events/orders/{order_id}", {"market_ticker": ticker})
         await_terminal(self, order_id, self.sleep, self.read_polls, self.read_poll_s)
         return done
+
+    def positions(self) -> list[Position]:
+        """Markets with a position, one page: position_fp is signed, a no position negative."""
+        page = self.call("GET", "/portfolio/positions", {"limit": 200, "count_filter": "position"})
+        return [Position(p["ticker"], num(p["position_fp"]), num(p.get("market_exposure_dollars")))
+                for p in page.get("market_positions") or []]
+
+    def fills(self) -> list[Fill]:
+        """Buying yes or selling no adds to the yes count, so those fills are positive."""
+        page = self.call("GET", "/portfolio/fills", {"limit": 100})
+        return [Fill(f["order_id"], f["ticker"], when(f["created_time"]),
+                     num(f["count_fp"]) * (1 if (f["side"] == "yes") == (f["action"] == "buy") else -1),
+                     num(f["yes_price_dollars"])) for f in page.get("fills") or []]
 
 
 def pick(markets: list[dict], price: float) -> str | None:
