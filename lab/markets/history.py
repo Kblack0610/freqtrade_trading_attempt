@@ -16,10 +16,15 @@ recorder already has is kept) and resolutions (on a row the recorder already has
 in). A finished walk is not repeated: the recorder keeps resolutions current from then on.
 
 bars and trades work one UTC settle date at a time, newest first: the date's resolutions whose volume reaches the
-job's `min_volume`, within `since_days` and before today. The date's rows stream into one object,
+job's `min_volume`, within `since_days` and before today. A Kalshi date can hold 35k markets, more than one run can
+fetch, so a date is fetched `chunk_markets` markets at a time, in market_id order, each chunk into its own part,
+<bucket>/<prefix>/parts/<job>/venue=<v>/date=<d>/<first market's position>.parquet, and market_backfill saves the
+position the next chunk starts at. A run stops between chunks once it is past its budget, and the next resumes the
+date where it stopped. Once the last chunk is in, the parts stream into one object,
 <bucket>/<prefix>/<job>/venue=<v>/date=<YYYY-MM-DD>.parquet, which an object store publishes only when it is closed
-and a rerun overwrites, and then the date is marked done with its market count. A date whose count has changed
-since (a later walk or the recorder added markets) is done again. Exits 1 if any venue failed; the others still run.
+and a rerun overwrites, the parts are deleted, and the date is marked done with its market count. A date whose count
+has changed since its first chunk (a later walk or the recorder added markets) starts over, done or not. Exits 1 if
+any venue failed; the others still run.
 """
 
 import argparse
@@ -31,6 +36,7 @@ import traceback
 
 import pyarrow as pa
 import pyarrow.parquet as pq
+from pyarrow import fs as pafs
 
 from lab.db import connect
 from lab.markets.recorder import ADAPTERS, META, load_config
@@ -118,19 +124,48 @@ def table(venue: str, recs: list, schema: pa.Schema) -> pa.Table:
     return pa.table({"venue": [venue] * len(recs), **cols}, schema=schema)
 
 
-def backfill_date(v, job: str, conn, fs, root: str, d: dt.date, floor: float, period_s: int) -> dict:
-    key = f"{root}/{job}/venue={v.name}/date={d.isoformat()}.parquet"
+def _clear(fs, d: str) -> None:
+    if fs.get_file_info(d).type == pafs.FileType.Directory:
+        fs.delete_dir(d)
+
+
+def backfill_date(v, job: str, conn, fs, root: str, d: dt.date, floor: float, period_s: int, chunk: int,
+                  deadline: float) -> dict:
+    """Fetch the date's markets from where the last run stopped, a chunk at a time, until it is all in or the run is
+    past its deadline; merge the parts into the date's object once it is all in."""
+    unit, todo = d.isoformat(), spans(conn, v.name, floor, d)
+    key = f"{root}/{job}/venue={v.name}/date={unit}.parquet"
+    parts = f"{root}/parts/{job}/venue={v.name}/date={unit}"
+    row = conn.execute("SELECT cursor, markets, rows FROM market_backfill WHERE venue = %s AND job = %s AND unit = %s "
+                       "AND NOT done", (v.name, job, unit)).fetchone()
+    pos, rows = (int(row[0]), row[2]) if row and row[0] and row[1] == len(todo) else (0, 0)
+    if pos == 0:
+        _clear(fs, parts)
+    if fs.type_name == "local":
+        fs.create_dir(parts, recursive=True)
+    fetched = 0
+    while pos < len(todo):
+        with pq.ParquetWriter(f"{parts}/{pos:06d}.parquet", SCHEMAS[job], filesystem=fs, compression="zstd") as w:
+            for s in todo[pos:pos + chunk]:
+                for recs in ([v.bars(s, period_s)] if job == "bars" else v.trades(s)):
+                    if recs:
+                        w.write_table(table(v.name, recs, SCHEMAS[job]))
+                        rows += len(recs)
+        n = min(chunk, len(todo) - pos)
+        pos, fetched = pos + n, fetched + n
+        mark(conn, v.name, job, unit, cursor=str(pos), markets=len(todo), rows=rows, object_key=None, done=False)
+        if pos < len(todo) and time.monotonic() > deadline:
+            return {"date": unit, "markets": len(todo), "fetched": fetched, "rows": rows, "done": False}
     if fs.type_name == "local":
         fs.create_dir(key.rsplit("/", 1)[0], recursive=True)
-    todo, rows = spans(conn, v.name, floor, d), 0
+    names = sorted(i.path for i in fs.get_file_info(pafs.FileSelector(parts)) if i.path.endswith(".parquet"))
     with pq.ParquetWriter(key, SCHEMAS[job], filesystem=fs, compression="zstd") as w:
-        for s in todo:
-            for recs in ([v.bars(s, period_s)] if job == "bars" else v.trades(s)):
-                if recs:
-                    w.write_table(table(v.name, recs, SCHEMAS[job]))
-                    rows += len(recs)
-    mark(conn, v.name, job, d.isoformat(), markets=len(todo), rows=rows, object_key=key, done=True)
-    return {"date": d.isoformat(), "markets": len(todo), "rows": rows}
+        for n in names:
+            for b in pq.ParquetFile(n, filesystem=fs).iter_batches():
+                w.write_batch(b)
+    mark(conn, v.name, job, unit, cursor=None, markets=len(todo), rows=rows, object_key=key, done=True)
+    _clear(fs, parts)
+    return {"date": unit, "markets": len(todo), "fetched": fetched, "rows": rows, "done": True}
 
 
 def backfill(v, job: str, hcfg: dict, conn, fs, root: str, deadline: float, today: dt.date | None = None) -> dict:
@@ -138,10 +173,11 @@ def backfill(v, job: str, hcfg: dict, conn, fs, root: str, deadline: float, toda
     todo = pending_dates(conn, v.name, job, floor, int(hcfg.get(f"{job}_since_days", 1095)),
                          today or dt.datetime.now(dt.timezone.utc).date())
     done, rows, period_s = 0, 0, int(hcfg.get("bars_period_min", 60)) * 60
+    chunk = int(hcfg.get("chunk_markets", 500))
     for d, _ in todo:
-        stats = backfill_date(v, job, conn, fs, root, d, floor, period_s)
+        stats = backfill_date(v, job, conn, fs, root, d, floor, period_s, chunk, deadline)
         print(f"markets: history {job} {v.name}: {stats}", flush=True)
-        done, rows = done + 1, rows + stats["rows"]
+        done, rows = done + stats["done"], rows + stats["rows"]
         if time.monotonic() > deadline:
             break
     return {"dates": done, "left": len(todo) - done, "rows": rows}
