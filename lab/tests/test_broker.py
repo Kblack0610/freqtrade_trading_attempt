@@ -11,7 +11,7 @@ import requests
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from lab import broker
-from lab.broker import AlpacaPaper, KrakenRead, NotPaper, RobinhoodCrypto, SnapTrade, WrongHost
+from lab.broker import AlpacaPaper, KrakenRead, NotPaper, PolymarketUSRead, RobinhoodCrypto, SnapTrade, WrongHost
 
 PAPER = {"base_url": "https://paper-api.alpaca.markets", "timeout_s": 5, "page_gap_s": 0, "retries": 2}
 ACCOUNT = {"id": "a1", "status": "ACTIVE", "currency": "USD", "equity": "100012.50", "cash": "99000.00",
@@ -216,7 +216,8 @@ def rh(s):
 @pytest.mark.parametrize("cls,cfg", [(RobinhoodCrypto, {"base_url": "https://trading.robinhood.com.evil.example"}),
                                      (RobinhoodCrypto, {"base_url": "http://trading.robinhood.com"}),
                                      (SnapTrade, {"base_url": "https://api.snaptrade.example"}),
-                                     (KrakenRead, {"base_url": "https://api.kraken.com.evil.example"})])
+                                     (KrakenRead, {"base_url": "https://api.kraken.com.evil.example"}),
+                                     (PolymarketUSRead, {"base_url": "https://api.polymarket.us.evil.example"})])
 def test_a_read_only_client_refuses_any_other_host(cls, cfg):
     with pytest.raises(WrongHost):
         cls(cfg, "k", base64.b64encode(SEED).decode())
@@ -227,6 +228,7 @@ def test_the_shipped_config_points_at_each_platform():
     RobinhoodCrypto(cfg["robinhood"], "k", base64.b64encode(SEED).decode())
     SnapTrade(cfg["snaptrade"], "c", "k")
     KrakenRead(cfg["kraken"], "k", KR_SECRET)
+    PolymarketUSRead(cfg["polymarket_us"], "k", PM_SECRET)
 
 
 def test_robinhood_signs_key_timestamp_path_and_method_with_the_ed25519_key():
@@ -409,3 +411,81 @@ def test_main_reads_kraken_when_its_keys_are_set(conn, monkeypatch):
     assert broker.main(["read"], session=Kraken(), sleep=NO_SLEEP) == 0
     assert conn.execute("SELECT broker, paper, equity, cash, positions FROM broker_balances").fetchall() == [
         ("kraken", False, 720.5, 120.5, 1)]
+
+
+# Polymarket US: a real account, read only, GET with an Ed25519 signature.
+
+PM = {"base_url": "https://api.polymarket.us", "timeout_s": 5, "page_gap_s": 0, "retries": 2, "currency": "USD"}
+PM_SECRET = base64.b64encode(SEED + bytes(32)).decode()   # the developer page hands out seed + public key, base64
+
+
+class Polymarket:
+    """An account with USD cash and one open market plus one closed out; records every request.
+    `balances` replaces the balance list (an unfunded account has none); `status` answers every call."""
+
+    def __init__(self, balances=None, status=200, eof=True):
+        self.calls, self.status, self.eof = [], status, eof
+        self.balances = [{"currency": "USD", "currentBalance": 40.25, "buyingPower": 38.0, "assetNotional": 12.5}] \
+            if balances is None else balances
+
+    def request(self, method, url, json, timeout, headers, params=None):
+        path = url.removeprefix("https://api.polymarket.us")
+        self.calls.append((method, path, headers))
+        if self.status != 200:
+            return Resp(self.status, {"message": "API key not found"})
+        if path == "/v1/account/balances":
+            return Resp(200, {"balances": self.balances})
+        if path == "/v1/portfolio/positions":
+            return Resp(200, {"positions": {"nba-lal-bos": {"netPosition": "5"}, "nfl-kc-buf": {"netPosition": "0"}},
+                              "eof": self.eof})
+        return Resp(404, {"message": path})
+
+
+def pm(s):
+    return PolymarketUSRead(PM, "pm-key", PM_SECRET, s, clock=lambda: 1700000000.5, sleep=NO_SLEEP)
+
+
+def test_polymarket_us_reads_cash_buying_power_and_the_value_of_open_markets():
+    s = Polymarket()
+    [row] = pm(s).read()
+    assert row == {"broker": "polymarket_us", "paper": False, "status": "open", "currency": "USD", "equity": 52.75,
+                   "cash": 40.25, "buying_power": 38.0, "positions": 1, "error": None}
+    assert [(m, p) for m, p, _ in s.calls] == [("GET", "/v1/account/balances"), ("GET", "/v1/portfolio/positions")]
+
+
+def test_polymarket_us_signs_millisecond_timestamp_method_and_path_with_the_ed25519_key():
+    s = Polymarket()
+    pm(s).read()
+    for _, path, h in s.calls:
+        assert (h["X-PM-Access-Key"], h["X-PM-Timestamp"]) == ("pm-key", "1700000000500")
+        Ed25519PrivateKey.from_private_bytes(SEED).public_key().verify(
+            base64.b64decode(h["X-PM-Signature"]), f"1700000000500GET{path}".encode())
+
+
+def test_an_unfunded_polymarket_us_account_reads_as_zero():
+    [row] = pm(Polymarket(balances=[])).read()
+    assert (row["cash"], row["equity"], row["buying_power"], row["error"]) == (0.0, 0.0, 0.0, None)
+
+
+def test_a_polymarket_us_balance_in_another_currency_is_an_error_not_a_zero():
+    [row] = pm(Polymarket(balances=[{"currency": "USDC", "currentBalance": 9}])).read()
+    assert row["cash"] is None and "no USD balance among ['USDC']" in row["error"]
+
+
+def test_a_polymarket_us_positions_list_past_one_page_says_its_count_is_short():
+    [row] = pm(Polymarket(eof=False)).read()
+    assert row["positions"] == 1 and "more than one page" in row["error"]
+
+
+def test_a_refused_polymarket_us_read_is_a_row_without_the_key():
+    [row] = pm(Polymarket(status=401)).read()
+    assert row["equity"] is None and row["error"].startswith("polymarket_us GET /v1/account/balances: HTTP 401")
+    assert "pm-key" not in row["error"] and PM_SECRET not in row["error"]
+
+
+def test_main_reads_polymarket_us_when_its_keys_are_set(conn, monkeypatch):
+    monkeypatch.setenv("POLYMARKET_US_KEY_ID", "pm-key")
+    monkeypatch.setenv("POLYMARKET_US_SECRET_KEY", PM_SECRET)
+    assert broker.main(["read"], session=Polymarket(), sleep=NO_SLEEP) == 0
+    assert conn.execute("SELECT broker, paper, equity, cash, positions FROM broker_balances").fetchall() == [
+        ("polymarket_us", False, 52.75, 40.25, 1)]

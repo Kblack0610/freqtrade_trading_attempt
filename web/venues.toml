@@ -53,12 +53,12 @@ human = "Export each account's public key (xpub) from Trezor Suite for WALLET_AC
 
 [[venue]]
 name = "Polymarket US"
-money = "real"
-checks = []
-human = "Open a Polymarket US account; its market data is already recorded without one"
+money = "real, read only"
+checks = [{source = "broker", match = "polymarket_us", max_age_h = 3}]
+human = "Nothing: the account is open (2026-11-12) and its read key is in SOPS trader-brokers as POLYMARKET_US_KEY_ID and POLYMARKET_US_SECRET_KEY"
 
 [[venue]]
 name = "Tastytrade"
 money = "real, with a cert sandbox"
 checks = []
-human = "Open a Tastytrade account and its cert sandbox login"
+human = "Wait for Tastytrade to finish reviewing the account (applied 2026-11-12), then make the OAuth app and the cert sandbox login"
