@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from lab import mixtures, scorecard, suggest
+from lab import confidence, mixtures, scorecard, suggest
 
 CFG = suggest.load_config()
 C = CFG["mixtures"]
@@ -108,12 +108,12 @@ def test_run_counts_each_mixture_as_a_trial_once(conn):
     for d in pd.date_range("2023-01-01", "2024-07-31", freq="D"):
         conn.execute("INSERT INTO regimes (day, btc_close, trend, vol_bucket) VALUES (%s, 100, 'up', 'low')", (d.date(),))
     conn.execute("DELETE FROM trials WHERE strategy = 'mixture'")  # the register is not truncated between tests
-    before = conn.execute("SELECT count(*) FROM trials").fetchone()[0]
+    before = confidence.trial_count(conn)
     out = mixtures.run(conn, CFG)
     n = len(mixtures.specs([("A", "x"), ("B", "x"), ("C", "x")], C))
     assert out["mixtures"] == n == 1 + 4 * 6 - 1
-    assert conn.execute("SELECT count(*) FROM trials").fetchone()[0] == before + n
-    assert mixtures.run(conn, CFG) == out and conn.execute("SELECT count(*) FROM trials").fetchone()[0] == before + n
+    assert confidence.trial_count(conn) == before + n
+    assert mixtures.run(conn, CFG) == out and confidence.trial_count(conn) == before + n
     base = conn.execute("SELECT months, days, trials, weights FROM mixtures WHERE baseline").fetchall()
     assert len(base) == 1 and base[0][:3] == (4, 122, before + n) and set(base[0][3]) == {"A x", "B x", "C x"}
     assert conn.execute("SELECT count(*) FROM mixture_daily").fetchone()[0] == 122 * n

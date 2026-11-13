@@ -395,7 +395,7 @@ def run(conn, cfg: dict, today: dt.date, report: dict) -> bool:
     if not done:
         print("calibration: folds left; the next run carries this universe on", flush=True)
         return analysed == 0 and walked == 0
-    production = conn.execute("SELECT count(*) FROM trials").fetchone()[0]
+    production = confidence.trial_count(conn)
     trials = max(production, scratch_trials)
     rows = [r for m in c["oos_months"] for r in outcomes(facts, trials, cfg, strategies, m)]
     report.update(trials=trials, production_trials=production, outcomes=len(rows), table_rows=record(conn, u["tag"], rows))
