@@ -231,7 +231,7 @@ MONEY_MAP = {
     ("lab/markets/kalshi_trade.py", "KalshiDemo"): Client(
         "paper", frozenset({"external-api.demo.kalshi.co", "demo-api.kalshi.co"}), lambda: kalshi_trade.DEMO_HOSTS,
         _demo("kalshi"), lambda cfg, s: kalshi_trade.KalshiDemo(cfg, "k", pem(RSA), s, sleep=lambda _: None),
-        lambda c, conn: kalshi_trade.drill(conn, c, 0.01), Demo),
+        lambda c, conn: kalshi_trade.drill(conn, c, 0.01, 0), Demo),
     ("lab/markets/manifold_trade.py", "ManifoldBets"): Client(
         "paper", frozenset({"api.manifold.markets"}), lambda: manifold_trade.MANIFOLD_HOSTS, _demo("manifold"),
         lambda cfg, s: manifold_trade.ManifoldBets(cfg, "k", s, sleep=lambda _: None),

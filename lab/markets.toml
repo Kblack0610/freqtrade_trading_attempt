@@ -40,6 +40,10 @@ bars_since_days = 1095
 # Trades are what the fill model is fitted on, and Kalshi prints millions a day: the liquid markets of the last 90 days.
 trades_min_volume = 10000
 trades_since_days = 90
+# Markets fetched per part. A run keeps every finished part and resumes the date there, so one Kalshi date (35k
+# markets on 2026-11-08) spans runs. At the about 3 requests/s one run gets, 500 bars take about 3 min and 500 trade
+# histories about 8, so a run stops within minutes of budget_min.
+chunk_markets = 500
 
 [history.polymarket_us]
 # The venue keeps 45 days, and its list carries no volume, so every settled market in that window.
@@ -270,6 +274,10 @@ timeout_s = 30
 page_gap_s = 0.2
 budget_rps = 5
 retries = 4
+# Kalshi splits markets across exchange indexes (shards); an order on one where the account holds no funds is refused
+# with insufficient_shard_balance (2026-11-13, a basketball market on index 3). The demo's mock funds sit on index 0
+# (https://docs.kalshi.com/getting_started/exchange_sharding), so the drill picks only markets there.
+drill_exchange_index = 0
 # The drill rests one contract this far below the ask, post only, so it cannot fill before it is cancelled.
 drill_price = 0.01
 # Most demo markets have an empty book, a 1.00 ask (2026-11-12: 199 of the first 200), so the drill pages on to

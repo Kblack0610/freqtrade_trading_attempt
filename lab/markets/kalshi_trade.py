@@ -15,7 +15,8 @@ demo: a 404 right after the place, the old status right after the cancel (docs/m
 within `read_polls` x `read_poll_s`. Every request goes through lab/markets/api.py Api with [demo.kalshi]'s pace and
 budget, signed afresh on every attempt; a place (POST) is retried on a 429 only, never after a 5xx or a timeout.
 
-The drill (lab/markets/drill.py) picks an open demo market with an ask above `drill_price` (or takes --ticker), rests
+The drill (lab/markets/drill.py) picks an open demo market on exchange index `drill_exchange_index`, the shard the
+mock funds sit on, with an ask above `drill_price` (or takes --ticker), rests
 one yes contract at `drill_price`, post only, then cancels it. It exits 1 unless the order was seen resting and then
 canceled.
 """
@@ -120,20 +121,22 @@ class KalshiDemo:
         return done
 
 
-def pick(markets: list[dict], price: float) -> str | None:
-    """The first market whose yes ask sits above `price`, so a post-only bid there rests."""
+def pick(markets: list[dict], price: float, shard: int) -> str | None:
+    """The first market on exchange index `shard` whose yes ask sits above `price`, so a post-only bid there rests."""
     for m in markets:
         ask = num(m.get("yes_ask_dollars"))
-        if ask is not None and price < ask < 1:
+        if m.get("exchange_index") == shard and ask is not None and price < ask < 1:
             return m["ticker"]
     return None
 
 
-def drill(conn, client: KalshiDemo, price: float, ticker: str | None = None, now=None) -> dict:
-    """lab/markets/drill.py on a market that lets a post-only bid at `price` rest. Returns the demo_orders row."""
-    ticker = ticker or next((t for page in client.open_markets() if (t := pick(page, price))), None)
+def drill(conn, client: KalshiDemo, price: float, shard: int, ticker: str | None = None, now=None) -> dict:
+    """lab/markets/drill.py on a market of exchange index `shard` that lets a post-only bid at `price` rest. Returns
+    the demo_orders row."""
+    ticker = ticker or next((t for page in client.open_markets() if (t := pick(page, price, shard))), None)
     if ticker is None:
-        raise RuntimeError(f"no open demo market with an ask above {price} in {client.market_pages} pages")
+        raise RuntimeError(f"no open demo market on exchange index {shard} with an ask above {price} "
+                           f"in {client.market_pages} pages")
     return rest_and_cancel(conn, client, ticker, price, now)
 
 
@@ -158,7 +161,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"kalshi_trade: demo balance {client.balance()}", flush=True)
         return 0
     with connect(autocommit=True) as conn:
-        row = drill(conn, client, cfg["demo"]["kalshi"]["drill_price"], a.ticker)
+        k = cfg["demo"]["kalshi"]
+        row = drill(conn, client, k["drill_price"], int(k["drill_exchange_index"]), a.ticker)
     print(f"kalshi_trade: drill {row}", flush=True)
     return 0 if row["error"] is None else 1
 

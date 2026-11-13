@@ -147,6 +147,37 @@ def test_trades_stream_every_page_and_a_budget_stops_between_dates(conn, tmp_pat
     assert [(r["trade_id"], r["count"], r["taker_side"]) for r in rows] == [("C-t1", 2.0, "yes")]
 
 
+def test_a_date_bigger_than_one_run_resumes_at_its_next_chunk_and_starts_over_when_it_grows(conn, tmp_path):
+    """A run past its budget keeps the chunks it finished; the date's object appears only once every chunk is in."""
+    fs, root = pafs.LocalFileSystem(), str(tmp_path / "bucket/history")
+    walk(conn, FakeHistory([[settled(m, D1) for m in "ABCDE"]]))
+    hcfg = {"bars_min_volume": 0, "bars_since_days": 30, "chunk_markets": 2}
+    final = f"{root}/bars/venue=fake/date=2026-11-03.parquet"
+
+    first = FakeHistory()
+    assert history.backfill(first, "bars", hcfg, conn, fs, root, 0, TODAY) == {"dates": 0, "left": 1, "rows": 2}
+    assert first.asked == ["A", "B"] and not (tmp_path / "bucket/history/bars").exists()
+    assert conn.execute("SELECT cursor, markets, done FROM market_backfill WHERE job = 'bars'").fetchone() == (
+        "2", 5, False)
+
+    second = FakeHistory()
+    assert history.backfill(second, "bars", hcfg, conn, fs, root, FAR, TODAY) == {"dates": 1, "left": 0, "rows": 5}
+    assert second.asked == ["C", "D", "E"], "resumes after the chunk the last run finished"
+    assert [r["market_id"] for r in pq.read_table(final).to_pylist()] == list("ABCDE")
+    assert not list((tmp_path / "bucket/history/parts").rglob("*.parquet")), "the parts go once merged"
+    assert conn.execute("SELECT cursor, markets, rows, done FROM market_backfill WHERE job = 'bars'").fetchone() == (
+        None, 5, 5, True)
+
+    walk(conn, FakeHistory([[settled("F", D1)]]), restart=True)
+    grown = FakeHistory()
+    assert history.backfill(grown, "bars", hcfg, conn, fs, root, 0, TODAY)["dates"] == 0
+    assert grown.asked == ["A", "B"], "a date that grew starts over"
+    assert len(pq.read_table(final)) == 5, "the old object stands until the new one is whole"
+    again = FakeHistory()
+    history.backfill(again, "bars", hcfg, conn, fs, root, FAR, TODAY)
+    assert again.asked == ["C", "D", "E", "F"] and len(pq.read_table(final)) == 6
+
+
 def test_main_refuses_a_venue_without_that_history_and_still_runs_the_rest(conn, tmp_path, monkeypatch, capsys):
     class NoTrades:
         name = "none"
