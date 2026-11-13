@@ -27,7 +27,7 @@ Three actions, nothing else:
 
 ## What the code enforces
 
-`lab/live.py` is the one entry point of a live bot, and it already refuses to start (`GUARD_LIFTED`). Once a human lifts the guard, it still exits 2 unless all of these hold:
+`lab/live.py` is the one entry point of a live bot, and it already refuses to start (`GUARD_LIFTED` in `lab/guard.py`). Once a human lifts the guard, it still exits 2 unless all of these hold:
 
 | Rule | Enforcement | Test |
 |---|---|---|

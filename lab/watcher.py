@@ -6,12 +6,17 @@ starting capital plus /profit's profit_all_coin, which values open trades at the
 /balance wallet refreshes at most hourly. A bot is breached once equity falls suggest.toml [watcher] day_loss of
 capital below the day's first reading, and stays breached until the next UTC day.
 
-Stage 0 of the money plan: a breach only raises an alert, through the exporter, and no limit stops a
-bot. A drill is the exception. It forces one dry-run bot's breach so the loop stops its entries the
+Stage 0 of the money plan: a day-loss breach only raises an alert, through the exporter, and no day limit stops a
+bot. Two things do stop one. The bankroll: every money (not dry-run) account on every venue sums into one row of
+`bankroll`, capped by the capital of the [live] stage in suggest.toml [[book.stages]] and by [book] hard_stop of that
+capital below the summed profit's peak; past either, every money account's entries stop and stay stopped until a
+human clears it, and lab/guard.py refuses a start meanwhile. Open positions are not exited: that stays a human's call.
+And a drill. It forces one dry-run bot's breach so the loop stops its entries the
 way a live breach will:
 
   python lab/watcher.py --drill <bot>       the next pass stops entries, open trades stay managed
   python lab/watcher.py --drill-end <bot>   clear the breach and start entries again
+  python lab/watcher.py --bankroll-clear    clear a bankroll breach; a human starts each money bot again
 
 The event-contract paper league's accounts (lab/markets/paper.py) are watched the same way, one row each, read from
 paper_accounts: equity is the last paper pass's mark, and seen_at that pass's time, so a dead paper job ages its rows
@@ -28,6 +33,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from psycopg.rows import dict_row
 
+from lab import guard
 from lab.db import connect
 from lab.ingest import ROSTER, Fetch, http_fetch
 from lab.league import roster_rows
@@ -44,6 +50,15 @@ ON CONFLICT (bot) DO UPDATE SET
     equity = EXCLUDED.equity, day = EXCLUDED.day, day_open = EXCLUDED.day_open,
     breached_at = EXCLUDED.breached_at, stopped_at = EXCLUDED.stopped_at
 """
+BANK = """
+INSERT INTO bankroll (checked_at, stage, cap, hard_stop, accounts, capital, equity, peak, breached_at, reason)
+VALUES (%(checked_at)s, %(stage)s, %(cap)s, %(hard_stop)s, %(accounts)s, %(capital)s, %(equity)s, %(peak)s,
+        %(breached_at)s, %(reason)s)
+ON CONFLICT (id) DO UPDATE SET
+    checked_at = EXCLUDED.checked_at, stage = EXCLUDED.stage, cap = EXCLUDED.cap, hard_stop = EXCLUDED.hard_stop,
+    accounts = EXCLUDED.accounts, capital = EXCLUDED.capital, equity = EXCLUDED.equity, peak = EXCLUDED.peak,
+    breached_at = EXCLUDED.breached_at, reason = EXCLUDED.reason
+"""
 FAILED = """
 INSERT INTO watch (bot, checked_at, seen_at, error) VALUES (%(bot)s, %(now)s, %(now)s, %(error)s)
 ON CONFLICT (bot) DO UPDATE SET checked_at = EXCLUDED.checked_at, error = EXCLUDED.error
@@ -59,8 +74,9 @@ def read(i: int, fetch: Fetch) -> dict:
     return {"dry_run": cfg.get("dry_run"), "state": cfg.get("state"), "capital": capital, "equity": equity}
 
 
-def step(prev: dict | None, seen: dict, now: dt.datetime, day_loss: float) -> dict:
-    """The row after this reading. The first reading of a UTC day opens it and clears its breach."""
+def step(prev: dict | None, seen: dict, now: dt.datetime, day_loss: float, held: bool = False) -> dict:
+    """The row after this reading. The first reading of a UTC day opens it and clears its breach; a held stop (the
+    bankroll's) outlasts the day."""
     day = now.date()
     same_day = prev is not None and prev["day"] == day
     day_open = prev["day_open"] if same_day else seen["equity"]
@@ -69,11 +85,35 @@ def step(prev: dict | None, seen: dict, now: dt.datetime, day_loss: float) -> di
     if breached_at is None and (drilled or (day_open - seen["equity"]) / seen["capital"] >= day_loss):
         breached_at = now
     return {**seen, "checked_at": now, "seen_at": now, "error": None, "day": day, "day_open": day_open,
-            "breached_at": breached_at, "stopped_at": prev["stopped_at"] if same_day or drilled else None}
+            "breached_at": breached_at, "stopped_at": prev["stopped_at"] if same_day or drilled or held else None}
 
 
-def tick(conn, bots: list[str], day_loss: float, fetch: Fetch, now: dt.datetime) -> None:
-    """One pass. Reads run together, so one hung bot costs one timeout and not a timeout each."""
+def limits(config: dict) -> dict:
+    """The one bankroll: the [live] stage's capital across every venue, and [book] hard_stop as a share of it."""
+    stage = guard.stage_of(config["live"], config["book"])
+    return {"stage": stage["name"], "cap": stage["capital"], "hard_stop": config["book"]["hard_stop"]}
+
+
+def bank_step(prev: dict | None, money: list[tuple[float, float]], lim: dict, now: dt.datetime) -> dict:
+    """The bankroll after this pass, from each money account's (capital, equity). The fall is measured on summed
+    profit, so an account joining or leaving moves it only by its own profit. A breach holds until cleared."""
+    capital, equity = sum(c for c, _ in money), sum(e for _, e in money)
+    profit = equity - capital
+    peak = profit if prev is None else max(prev["peak"], profit)
+    breached_at, reason = (prev["breached_at"], prev["reason"]) if prev else (None, None)
+    if breached_at is None:
+        if capital > lim["cap"]:
+            reason = f"money accounts hold {capital:.2f} of capital, over the {lim['stage']} cap of {lim['cap']:.2f}"
+        elif peak - profit >= lim["hard_stop"] * lim["cap"]:
+            reason = (f"profit fell {peak - profit:.2f} from its peak, past the hard stop of "
+                      f"{lim['hard_stop']:.0%} of {lim['cap']:.2f}")
+        breached_at = now if reason else None
+    return {"checked_at": now, **lim, "accounts": len(money), "capital": capital, "equity": equity, "peak": peak,
+            "breached_at": breached_at, "reason": reason}
+
+
+def tick(conn, bots: list[str], day_loss: float, fetch: Fetch, now: dt.datetime, lim: dict) -> None:
+    """One pass. Reads run together, so one hung bot costs one timeout and not a timeout each. lim is limits()."""
     def probe(i: int) -> dict | Exception:
         try:
             return read(i, fetch)
@@ -82,8 +122,17 @@ def tick(conn, bots: list[str], day_loss: float, fetch: Fetch, now: dt.datetime)
 
     with conn.cursor(row_factory=dict_row) as cur:
         prev = {r["bot"]: r for r in cur.execute("SELECT * FROM watch").fetchall()}
+        prev_bank = cur.execute("SELECT * FROM bankroll").fetchone()
     with ThreadPoolExecutor(max_workers=max(1, len(bots))) as pool:
         seen = list(pool.map(probe, range(len(bots))))
+    read_ok = {b: s for b, s in zip(bots, seen) if not isinstance(s, Exception)}
+    # An unseen money bot counts at its last good read, so a dead API cannot shrink the bankroll.
+    money = [(s["capital"], s["equity"]) for s in read_ok.values() if s["dry_run"] is False]
+    money += [(r["capital"], r["equity"]) for b, r in prev.items()
+              if b in bots and b not in read_ok and r["dry_run"] is False and r["equity"] is not None]
+    bank = bank_step(prev_bank, money, lim, now)
+    conn.execute(BANK, bank)
+    stopped = bank["breached_at"] is not None
     for name, capital, equity, marked_at in conn.execute(
             "SELECT account, capital, equity, marked_at FROM paper_accounts WHERE marked_at IS NOT NULL").fetchall():
         p = prev.get(name)
@@ -96,9 +145,11 @@ def tick(conn, bots: list[str], day_loss: float, fetch: Fetch, now: dt.datetime)
         if isinstance(s, Exception):
             conn.execute(FAILED, {"bot": bot, "now": now, "error": f"{type(s).__name__}: {s}"[:300]})
             continue
-        row = step(prev.get(bot), s, now, day_loss)
+        drilled = bot in prev and prev[bot]["drill_at"] is not None and s["dry_run"] is True
+        held = stopped and s["dry_run"] is False
+        row = step(prev.get(bot), s, now, day_loss, held)
         # Checked every pass and not only on the breach: a restarted bot comes back running.
-        if bot in prev and prev[bot]["drill_at"] is not None and row["dry_run"] is True and row["state"] == "running":
+        if (drilled or held) and row["state"] == "running":
             try:
                 fetch(i, "stopentry", True)
                 row["stopped_at"] = row["stopped_at"] or now
@@ -128,15 +179,26 @@ def drill_end(conn, bot: str, bots: list[str], fetch: Fetch) -> None:
     print(f"watcher: drill over on {bot}; entries started again")
 
 
-def loop(bots: list[str], cfg: dict) -> None:
+def bankroll_clear(conn) -> None:
+    """The peak restarts at today's profit, or the next pass would breach again on the same fall."""
+    n = conn.execute("UPDATE bankroll SET breached_at = NULL, reason = NULL, peak = equity - capital "
+                     "WHERE breached_at IS NOT NULL").rowcount
+    conn.commit()
+    if not n:
+        sys.exit("watcher: the bankroll is not breached")
+    print("watcher: bankroll breach cleared; no bot was started, a human starts each money bot")
+
+
+def loop(bots: list[str], config: dict) -> None:
     """Sampled, not event driven: a bot publishes no equity event. One pass per cadence."""
+    cfg, lim = config["watcher"], limits(config)
     stop = threading.Event()
     signal.signal(signal.SIGTERM, lambda *_: stop.set())
     print(f"watcher: {len(bots)} bots every {cfg['cadence_seconds']}s, day loss {cfg['day_loss']:.1%}", flush=True)
     while not stop.is_set():
         try:
             with connect() as conn:
-                tick(conn, bots, cfg["day_loss"], http_fetch, dt.datetime.now(dt.timezone.utc))
+                tick(conn, bots, cfg["day_loss"], http_fetch, dt.datetime.now(dt.timezone.utc), lim)
         except Exception as e:  # noqa: BLE001 - a bad pass ages the rows, and the alert on that is the report
             print(f"watcher: pass failed: {type(e).__name__}: {e}", file=sys.stderr, flush=True)
         stop.wait(cfg["cadence_seconds"])
@@ -146,6 +208,7 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--drill", metavar="BOT")
     ap.add_argument("--drill-end", metavar="BOT")
+    ap.add_argument("--bankroll-clear", action="store_true")
     args = ap.parse_args()
     bots = [row.name for row in roster_rows(ROSTER)]
     if args.drill:
@@ -154,8 +217,11 @@ def main() -> None:
     elif args.drill_end:
         with connect() as conn:
             drill_end(conn, args.drill_end, bots, http_fetch)
+    elif args.bankroll_clear:
+        with connect() as conn:
+            bankroll_clear(conn)
     else:
-        loop(bots, load_config()["watcher"])
+        loop(bots, load_config())
 
 
 if __name__ == "__main__":

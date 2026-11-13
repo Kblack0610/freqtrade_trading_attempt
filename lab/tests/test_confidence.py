@@ -2,6 +2,7 @@ import datetime as dt
 
 import numpy as np
 import pandas as pd
+import pytest
 from psycopg.types.json import Jsonb
 
 from lab import confidence, metrics, robustness, suggest
@@ -491,3 +492,31 @@ def test_betting_trials_do_not_raise_the_crypto_bar(conn):
         assert confidence.register(conn) == before + 1
     finally:
         conn.execute("DELETE FROM trials WHERE variant = 'lane-test'")
+
+
+def test_live_reads_the_fills_view_on_this_lanes_venues_only(conn):
+    """A league bot's trades count; a betting paper fill (a market venue) and a drill's fill do not."""
+    from lab.markets import venues as market_venues
+
+    at = dt.datetime(2026, 11, 1, tzinfo=dt.timezone.utc)
+    conn.execute("INSERT INTO bots (name, strategy, exchange) VALUES ('bot-s', 'S', 'binanceus')")
+    conn.execute("INSERT INTO bot_trades (bot, trade_id, open_date, pair, is_open, close_date, profit_ratio, profit_abs, "
+                 "exit_reason, raw) VALUES ('bot-s', 1, %s, 'BTC/USD', false, %s, -0.01, -0.5, 'stop_loss', '{}')", (at, at))
+    conn.execute("INSERT INTO paper_accounts (account, family, venue, variant, params, capital, started_at) "
+                 "VALUES ('paper-x', 'longshot', 'kalshi', 'v', '{}', 1000, %s)", (at,))
+    conn.execute("INSERT INTO paper_orders (account, market_id, side, stake, sent_at, quoted_at, contracts, price, fee, "
+                 "settled_at, profit) VALUES ('paper-x', 'M', 'yes', 10, %s, %s, 10, 0.05, 0.01, %s, 0.49)", (at, at, at))
+    conn.execute("INSERT INTO paper_orders (account, market_id, side, stake, sent_at, quoted_at, contracts, fee) "
+                 "VALUES ('paper-x', 'N', 'yes', 10, %s, %s, 0, 0)", (at, at))
+    conn.execute("INSERT INTO demo_orders (venue, ticker, client_id, price, count, placed_at, status) "
+                 "VALUES ('alpaca_paper', 'SPY', 'c1', 500, 1, %s, 'filled')", (at,))
+    assert sorted(r[0] for r in conn.execute("SELECT source FROM fills")) == ["drill", "freqtrade", "paper"]
+    paper = conn.execute("SELECT strategy, venue, stake, profit_abs, profit_ratio, is_open, exit_reason FROM fills "
+                         "WHERE source = 'paper'").fetchone()
+    assert paper == ("longshot", "kalshi", pytest.approx(0.51), 0.49, pytest.approx(0.49 / 0.51), False, "settled")
+    venues = (market_venues(),)
+    assert conn.execute(confidence.LIVE, venues).fetchall() == [("S", "binanceus", at, 1, 1)]
+    assert conn.execute(confidence.LIVE_RETURNS, venues).fetchall() == [("S", "binanceus", -0.01)]
+    trades = pd.DataFrame(conn.execute("SELECT close_date, profit_abs FROM fills WHERE source = 'freqtrade'").fetchall(),
+                          columns=["close_date", "profit_abs"])
+    assert metrics.daily_returns(trades, pd.Timestamp(at), pd.Timestamp(at) + pd.Timedelta(days=1), 50.0)["pnl"].tolist() == [-0.5]

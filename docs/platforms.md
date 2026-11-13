@@ -1,6 +1,6 @@
 # Platforms: what can be automated, and how
 
-One record per broker, exchange, wallet and market we use or might use. Each record says what an agent can automate and how: first the official API, then the agent machine (the mac-mini), and last what stays with the person. Nothing here trades money. `lab/league.py` refuses any config that is not dry-run, and `lab/live.py` keeps `GUARD_LIFTED = False`. Until real money is in, every platform is paper or read-only. Plan: `plan-mode-a-thorough-hashed-pike` (tr-72). Real-money gates, stages and caps belong to the calm-lagoon plan (tr-9, tr-21).
+One record per broker, exchange, wallet and market we use or might use. Each record says what an agent can automate and how: first the official API, then the agent machine (the mac-mini), and last what stays with the person. Nothing here trades money. `lab/league.py` refuses any config that is not dry-run, and `lab/guard.py` keeps `GUARD_LIFTED = False`. Until real money is in, every platform is paper or read-only. Plan: `plan-mode-a-thorough-hashed-pike` (tr-72). Real-money gates, stages and caps belong to the calm-lagoon plan (tr-9, tr-21).
 
 Checked 2026-11-06. Confidence follows [markets.md](markets.md): **doc** means read on the platform's own page, **secondary** means a vendor, review or community page, and **snippet** means a search summary only. Anything with no source says **Not verified**. Re-check a snippet or Not-verified claim before code or money relies on it.
 

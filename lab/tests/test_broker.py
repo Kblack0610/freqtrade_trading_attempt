@@ -47,7 +47,13 @@ class Paper:
         if (method, path) == ("GET", "/v2/account"):
             return Resp(self.account_status, ACCOUNT if self.account_status == 200 else {"message": "forbidden."})
         if (method, path) == ("GET", "/v2/positions"):
-            return Resp(200, [{"symbol": "SPY"}, {"symbol": "QQQ"}])
+            return Resp(200, [{"symbol": "SPY", "qty": "3", "cost_basis": "1500.30"}, {"symbol": "QQQ", "qty": "-2"}])
+        if (method, path) == ("GET", "/v2/account/activities/FILL"):
+            assert params == {"direction": "desc", "page_size": 100}
+            return Resp(200, [{"order_id": "o2", "symbol": "QQQ", "side": "sell", "qty": "2", "price": "480.10",
+                               "transaction_time": "2026-11-13T15:00:00.5Z"},
+                              {"order_id": "o1", "symbol": "SPY", "side": "buy", "qty": "3", "price": "500.10",
+                               "transaction_time": "2026-11-13T14:00:00Z"}])
         if (method, path) == ("POST", "/v2/orders"):
             self.status = self.placed
             return Resp(200, {"id": "o1", "status": self.status})
@@ -490,3 +496,12 @@ def test_main_reads_polymarket_us_when_its_keys_are_set(conn, monkeypatch):
     assert broker.main(["read"], session=Polymarket(), sleep=NO_SLEEP) == 0
     assert conn.execute("SELECT broker, paper, equity, cash, positions FROM broker_balances").fetchall() == [
         ("polymarket_us", False, 52.75, 40.25, 1)]
+
+
+def test_alpaca_paper_reads_signed_positions_and_fills_newest_first():
+    from lab.markets.venue import Fill, Position
+    c = client(Paper())
+    assert c.positions() == [Position("SPY", 3.0, 1500.30), Position("QQQ", -2.0, None)]
+    sold, bought = c.fills()
+    assert sold == Fill("o2", "QQQ", dt.datetime(2026, 11, 13, 15, 0, 0, 500000, tzinfo=dt.timezone.utc), -2.0, 480.10)
+    assert (bought.order_id, bought.count, bought.price) == ("o1", 3.0, 500.10)

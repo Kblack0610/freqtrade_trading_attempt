@@ -4,6 +4,8 @@ Nothing here trades money. `lab/live.py` always refuses, and no manifest starts 
 
 ## What `lab/live.py` checks
 
+The guard has two layers. `lab/guard.py` is the generic one, which any engine's live entry point runs: `GUARD_LIFTED`, the stage caps, the venue list, `confidence.ready` and the bankroll kill switch. `lab/live.py` adds the Freqtrade config checks on top. A later Kalshi or broker live path calls `guard.refusals` the same way and adds its own engine checks, rather than copying these.
+
 `GUARD_LIFTED` is False, so `main()` exits 2 before it reads a config, a key or the database. With the guard lifted, it builds the config from the stage named in `[live]` of `lab/suggest.toml` and exits 2 unless all of these hold on the merged config:
 
 - Real orders, spot, no margin.
@@ -16,16 +18,17 @@ Nothing here trades money. `lab/live.py` always refuses, and no manifest starts 
 - The venue is in `[live] venues`, the pair list is one `StaticPairList`, and every pair is in `[live] pairs`.
 - Key and secret are set, and no `FREQTRADE__` env var is.
 - `confidence.ready` is true for this strategy on this venue.
+- The bankroll is not stopped (`bankroll.breached_at` is empty; see Watcher in the README).
 
 A bot with open trades also refuses to start when its strategy, params, venue, pairs or caps differ from its last start. The rules behind these checks are in `docs/operating-rules.md`.
 
-Stake and open trades have one home, `[[book.stages]]`, which `/book` reads too. The keys file loads last, and the checks run after it, so it cannot raise a cap.
+Stake, open trades and the bankroll have one home, `[[book.stages]]`, which `/book` reads too: the `[live]` stage's `capital` caps the summed capital of every money account across venues, and `lab/watcher.py` enforces it with `[book] hard_stop`. The keys file loads last, and the checks run after it, so it cannot raise a cap.
 
 ## Lifting the guard
 
 This is a human decision, made in one PR, and only after a strategy reaches ready and the Accounts and keys phase passes:
 
-1. Set `GUARD_LIFTED = True` and change `test_the_guard_is_on`.
+1. Set `GUARD_LIFTED = True` in `lab/guard.py` and change `test_the_guard_is_on` and `test_the_shipped_guard_refuses_whatever_else_holds`.
 2. Change the docs that state the rule: `docs/idea.md` in the lab project, the anchor, the running plan and the guard section of the README.
 3. Give `lab/ingest.py` and the not-dry-run alert their exception for the live namespace. Both refuse a live bot today.
 4. Add `apps/freqtrade-live/` in home-config. `lab/league.py` stays as it is, and it refuses this config.

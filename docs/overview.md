@@ -12,7 +12,7 @@ Trader is a research and paper-trading application built around Freqtrade. This 
 
 ## Status
 
-The implemented trading league is dry run. `lab/league.py` rejects exchange credentials, environment overrides and configurations outside spot dry run. The live entry point in `lab/live.py` refuses while `GUARD_LIFTED` is false; [live operations](live.md) owns the requirements for changing that boundary. Paper-market and broker paths have separate controls described in [platforms](platforms.md).
+The implemented trading league is dry run. `lab/league.py` rejects exchange credentials, environment overrides and configurations outside spot dry run. The live entry point in `lab/live.py` refuses while `GUARD_LIFTED` in `lab/guard.py` is false; [live operations](live.md) owns the requirements for changing that boundary. Paper-market and broker paths have separate controls described in [platforms](platforms.md).
 
 The repo contains an image build, database migrations, tests and a digest-bump integration for home-k3s. Deployment manifests and secrets belong to home-config, so source and a successful image build alone do not establish the live cluster's health. This page records implementation status; it makes no profitability or current deployment-health claim.
 

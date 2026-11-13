@@ -9,6 +9,7 @@ from lab.markets import backtest, paper
 from lab.markets.recorder import load_config
 
 NOW = dt.datetime(2026, 11, 6, 12, tzinfo=dt.timezone.utc)
+BANK = {"stage": "Stage 1", "cap": 500.0, "hard_stop": 0.15}
 BAND = {"stake": 10, "max_spread": 0.05, "hours": 24, "bands": [{"buy": "no", "lo": 0.01, "hi": 0.10}]}
 
 
@@ -103,13 +104,13 @@ def test_families_that_need_a_fit_or_a_key_are_refused():
 def test_the_watcher_drill_stops_a_paper_account_and_ending_it_starts_it_again(conn):
     seed(conn)
     paper.run_pass(conn, "kalshi", cfg(), NOW)
-    watcher.tick(conn, [], 0.03, None, NOW)
+    watcher.tick(conn, [], 0.03, None, NOW, BANK)
     w = conn.execute("SELECT dry_run, state, equity, seen_at FROM watch WHERE bot = %s", (ACCOUNT,)).fetchone()
     assert w == (True, "running", pytest.approx(999.76), NOW)
 
     watcher.drill(conn, ACCOUNT)
     later = NOW + dt.timedelta(minutes=1)
-    watcher.tick(conn, [], 0.03, None, later)
+    watcher.tick(conn, [], 0.03, None, later, BANK)
     assert conn.execute("SELECT state, stopped_at, breached_at FROM watch WHERE bot = %s",
                         (ACCOUNT,)).fetchone() == ("paused", later, later)
     # a new market qualifies, but the stopped account takes no entry; its marks go on
@@ -119,7 +120,7 @@ def test_the_watcher_drill_stops_a_paper_account_and_ending_it_starts_it_again(c
     assert equity(conn)[3] == later + dt.timedelta(minutes=1)
 
     watcher.drill_end(conn, ACCOUNT, [], None)  # no API to call: fetch is never touched
-    watcher.tick(conn, [], 0.03, None, later + dt.timedelta(minutes=2))
+    watcher.tick(conn, [], 0.03, None, later + dt.timedelta(minutes=2), BANK)
     out = paper.run_pass(conn, "kalshi", cfg(), later + dt.timedelta(minutes=3))
     assert out["accounts"][ACCOUNT]["fills"] == 1 and [o[1] for o in orders(conn)] == ["A", "C"]
 
@@ -127,9 +128,9 @@ def test_the_watcher_drill_stops_a_paper_account_and_ending_it_starts_it_again(c
 def test_a_paper_loss_past_the_day_limit_breaches_without_stopping(conn):
     seed(conn)
     paper.run_pass(conn, "kalshi", cfg(), NOW)
-    watcher.tick(conn, [], 0.03, None, NOW)
+    watcher.tick(conn, [], 0.03, None, NOW, BANK)
     conn.execute("UPDATE paper_accounts SET equity = 960, marked_at = %s", (NOW + dt.timedelta(minutes=5),))
-    watcher.tick(conn, [], 0.03, None, NOW + dt.timedelta(minutes=6))
+    watcher.tick(conn, [], 0.03, None, NOW + dt.timedelta(minutes=6), BANK)
     breached, stopped, seen = conn.execute("SELECT breached_at, stopped_at, seen_at FROM watch WHERE bot = %s",
                                            (ACCOUNT,)).fetchone()
     assert breached is not None and stopped is None and seen == NOW + dt.timedelta(minutes=5)

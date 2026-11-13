@@ -131,5 +131,11 @@
   </tbody>
 </table>
 </div>
+{% if bankroll %}
+<p>Bankroll, every venue together: {{ bankroll.accounts }} money accounts hold ${{ bankroll.capital | int }} of the {{ bankroll.stage }} cap of ${{ bankroll.cap | int }}, equity ${{ bankroll.equity | int }}, checked {{ bankroll.checked_at | ago }}.
+{% if bankroll.breached_at %}<strong>Stopped {{ bankroll.breached_at | ago }}: {{ bankroll.reason }}.</strong> Entries stay stopped until a human clears it.{% else %}Not stopped.{% endif %}</p>
+{% else %}
+<p class="muted">Bankroll: the watcher has not written its row yet.</p>
+{% endif %}
 <p>Running costs: about ${{ budget.vps_year | int }} a year for a server with a fixed address, and about ${{ budget.cpa_once | int }} once for an accountant. A gap or an exchange failure can lose more than these limits. Balances on okx and kucoin are in USDT, not dollars: if USDT loses its peg, those balances fall with it, and no test here covers that.</p>
 {% endblock %}
