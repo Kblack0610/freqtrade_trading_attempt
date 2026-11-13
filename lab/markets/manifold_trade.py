@@ -21,12 +21,13 @@ It exits 1 unless the bet was seen open with nothing filled and then canceled.
 import argparse
 import os
 import sys
+import time
 from urllib.parse import urlparse
 
 from lab.db import connect
 from lab.markets.api import Api, num
 from lab.markets.budget import Budget
-from lab.markets.drill import rest_and_cancel
+from lab.markets.drill import await_terminal, rest_and_cancel
 from lab.markets.recorder import load_config
 
 MANIFOLD_HOSTS = frozenset({"api.manifold.markets"})
@@ -48,6 +49,7 @@ def status(bet: dict) -> str:
 class ManifoldBets:
     venue = "manifold"
     resting = frozenset({"open"})
+    terminal = frozenset({"canceled", "filled"})
 
     def __init__(self, cfg: dict, key: str, session=None, sleep=None, budget: Budget | None = None):
         url = urlparse(cfg["base_url"])
@@ -56,7 +58,8 @@ class ManifoldBets:
         self.key = key
         self.mana = float(cfg.get("drill_mana", 1))
         self.expires_ms = int(float(cfg.get("expires_s", 600)) * 1000)
-        self.api = Api(self.venue, cfg, session, sleep, budget)
+        self.sleep = sleep or time.sleep
+        self.api = Api(self.venue, cfg, session, self.sleep, budget)
         self.user_id, self.contracts = None, {}
 
     def call(self, method: str, path: str, params: dict | None = None, body: dict | None = None):
@@ -96,8 +99,10 @@ class ManifoldBets:
             raise RuntimeError(f"bet {order_id} is not in the account's bets on {self.contracts[order_id]}")
         return {"status": status(bet)}
 
-    def cancel(self, order_id: str, ticker: str) -> dict:
-        return self.call("POST", f"/v0/bet/cancel/{order_id}")
+    def cancel(self, order_id: str, ticker: str) -> None:
+        """The bets list lags the cancel: read right after, the drill's bet still said open (2026-11-12)."""
+        self.call("POST", f"/v0/bet/cancel/{order_id}")
+        await_terminal(self, order_id, self.sleep)
 
 
 def pick(markets: list[dict], min_prob: float) -> str | None:

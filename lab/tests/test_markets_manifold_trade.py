@@ -17,8 +17,9 @@ class Resp:
 class Manifold:
     """Manifold's bet routes: one limit bet that rests, fills or cancels as told; records every request."""
 
-    def __init__(self, cancel_works=True, fill=0.0):
-        self.calls, self.bet, self.cancel_works, self.fill = [], None, cancel_works, fill
+    def __init__(self, cancel_works=True, fill=0.0, stale=0):
+        """`stale` reads of the bets list after the cancel still show the bet open, as the live list did."""
+        self.calls, self.bet, self.cancel_works, self.fill, self.stale = [], None, cancel_works, fill, stale
 
     def request(self, method, url, params, json, timeout, headers):
         path = url.removeprefix("https://api.manifold.markets")
@@ -34,6 +35,9 @@ class Manifold:
                         "amount": self.fill, "orderAmount": json["amount"], "limitProb": json["limitProb"]}
             return Resp(200, {**self.bet, "betId": "b1"})
         if method == "GET" and path == "/v0/bets":
+            if self.bet and self.bet["isCancelled"] and self.stale > 0:
+                self.stale -= 1
+                return Resp(200, [{"id": "other"}, {**self.bet, "isCancelled": False}])
             return Resp(200, [{"id": "other"}, self.bet] if self.bet else [])
         if method == "POST" and path == "/v0/bet/cancel/b1":
             if not self.cancel_works:
@@ -71,9 +75,16 @@ def test_the_drill_rests_one_limit_bet_then_cancels_it(conn):
     bet = next(c for c in s.calls if c[:2] == ("POST", "/v0/bet"))[3]
     assert bet == {"contractId": "OK", "outcome": "YES", "amount": 1.0, "limitProb": 0.01, "expiresMillisAfter": 600000}
     assert [c[:2] for c in s.calls if c[1] != "/v0/me"][1:] == [
-        ("POST", "/v0/bet"), ("GET", "/v0/bets"), ("POST", "/v0/bet/cancel/b1"), ("GET", "/v0/bets")]
+        ("POST", "/v0/bet"), ("GET", "/v0/bets"), ("POST", "/v0/bet/cancel/b1"), ("GET", "/v0/bets"), ("GET", "/v0/bets")]
     reads = [c[2] for c in s.calls if c[1] == "/v0/bets"]
     assert all(p["userId"] == "u1" and p["contractId"] == "OK" for p in reads)
+
+
+def test_the_drill_waits_out_a_bets_list_that_still_says_open_after_the_cancel(conn):
+    s, slept = Manifold(stale=2), []
+    row = manifold_trade.drill(conn, ManifoldBets(CFG, "k", session=s, sleep=slept.append), 0.01, 0.10, ticker="OK")
+    assert (row["status"], row["error"]) == ("canceled", None)
+    assert len(slept) == 2
 
 
 def test_a_bet_that_filled_at_all_fails_the_drill(conn):

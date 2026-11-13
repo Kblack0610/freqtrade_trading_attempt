@@ -45,14 +45,10 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from lab.db import connect
 from lab.markets.api import Api, num
-from lab.markets.drill import rest_and_cancel
+from lab.markets.drill import await_terminal, rest_and_cancel
 
 CONFIG = Path(os.environ.get("BROKER_CONFIG", Path(__file__).resolve().parent / "broker.toml"))
 PAPER_HOST = "paper-api.alpaca.markets"
-# A cancel is asynchronous and only the trade-updates websocket reports its end, too much for a one-shot drill, so
-# the order is re-read until it reaches a terminal status, within this bound. A read right after the DELETE can still
-# say new (2026-11-12), so anything short of terminal means wait, not done.
-CANCEL_POLL_S, CANCEL_POLLS = 1.0, 10
 TERMINAL = frozenset({"canceled", "filled", "expired", "rejected", "replaced", "done_for_day"})
 
 
@@ -79,6 +75,7 @@ def blank_row(broker_name: str, paper: bool) -> dict:
 class AlpacaPaper:
     venue = "alpaca_paper"
     resting = frozenset({"pending_new", "accepted", "new"})
+    terminal = TERMINAL
 
     def __init__(self, cfg: dict, key_id: str, secret: str, session=None, sleep=None):
         url = urlparse(cfg["base_url"])
@@ -111,10 +108,7 @@ class AlpacaPaper:
 
     def cancel(self, order_id: str, ticker: str) -> None:
         self.call("DELETE", f"/v2/orders/{order_id}")
-        for _ in range(CANCEL_POLLS):
-            if self.order(order_id)["status"] in TERMINAL:
-                return
-            self.sleep(CANCEL_POLL_S)
+        await_terminal(self, order_id, self.sleep)
 
 
 class RobinhoodCrypto:
