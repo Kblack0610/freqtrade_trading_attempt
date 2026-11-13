@@ -49,4 +49,4 @@ def test_accounts_page_shows_the_venue_table(conn, signed_in):  # noqa: F811
     table = body.split("<h2>Venues</h2>")[1].split("<h2>Broker accounts</h2>")[0]
     for name in (v["name"] for v in venues.load()):
         assert name in table, name
-    assert "Open a Tastytrade account" in table and "Kraken" in table
+    assert "Wait for Tastytrade to finish reviewing" in table and "Kraken" in table
