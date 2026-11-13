@@ -384,6 +384,48 @@ def test_a_task_above_the_budget_runs_alone():
     assert b.used == 0
 
 
+def test_a_drained_budget_is_exactly_empty_so_a_task_at_the_total_still_runs():
+    """In float GB, holding 2.52, 3.46 and 1.4 and releasing them in that order left 1.3e-15 used, and a task
+    clamped to the 8 GB total waited for 8 + 1.3e-15 <= 8 forever (2026-11-13, Low_BB okx 2024 at 8.4 GB)."""
+    b = analyze.Budget(8)
+    held = [b.hold(gb) for gb in (2.52, 3.46, 1.4)]
+    for h in held:
+        h.__enter__()
+    for h in held:
+        h.__exit__(None, None, None)
+    assert b.used_mb == 0
+    entered = threading.Event()
+
+    def big():
+        with b.hold(8.4):
+            entered.set()
+
+    t = threading.Thread(target=big, daemon=True)
+    t.start()
+    assert entered.wait(timeout=10), "a task above the budget blocked on residue"
+
+
+def test_each_chunk_result_is_freed_once_stored(lab, monkeypatch):
+    """The parent once kept every chunk's trades until the end; a full rerun held 4.9M of them and was OOM-killed."""
+    import gc
+    import weakref
+    found = [strat("Good"), strat("Other")]
+    r = FakeRunner(found)
+    refs, alive = [], []
+    store = analyze.store_chunk
+
+    def tracked(conn, task, res, run_id):
+        gc.collect()
+        alive.append(sum(ref() is not None for ref in refs))
+        if res.get("trades") is not None:
+            refs.append(weakref.ref(res["trades"]))
+        return store(conn, task, res, run_id)
+
+    monkeypatch.setattr(analyze, "store_chunk", tracked)
+    assert analyze.main(r, TODAY) == 0
+    assert len(refs) > 10 and max(alive) == 0, alive
+
+
 def scored(conn, monkeypatch, *pairs) -> None:
     """Walk-forward has scored these strategy x exchange pairs, now and after each night's confidence rebuild."""
     rebuild = analyze.confidence.run

@@ -165,14 +165,31 @@ def test_an_idempotent_method_is_sent_again_on_a_5xx(method):
     assert a.request(method, "/orders/o1").status_code == 200 and len(wire.sent) == 2
 
 
-@pytest.mark.parametrize("method", ["GET", "POST"])
+@pytest.mark.parametrize("method", ["POST", "PATCH"])
 @pytest.mark.parametrize("err", [requests.Timeout("slow"), requests.ConnectionError("down")])
-def test_a_timeout_or_dropped_connection_is_raised_at_once(method, err):
-    """A request that timed out may have arrived, so it is never sent again, whatever the method."""
+def test_a_write_that_timed_out_or_dropped_is_raised_at_once(method, err):
+    """A write that timed out may have arrived, an order placed, so it is never sent again."""
     a, wire, _ = wired(err, Resp(200))
     with pytest.raises(type(err)):
         a.request(method, "/x")
     assert len(wire.sent) == 1
+
+
+@pytest.mark.parametrize("method", sorted(IDEMPOTENT))
+@pytest.mark.parametrize("err", [requests.Timeout("slow"), requests.ConnectionError("down")])
+def test_an_idempotent_method_is_sent_again_after_a_dropped_connection(method, err):
+    """A Kalshi SSLError and a Manifold connection reset each failed a recorder Job on 2026-11-13 on a GET."""
+    shared = Shared()
+    a, wire, clock = wired(err, Resp(200), budget=shared)
+    assert a.request(method, "/x").status_code == 200 and len(wire.sent) == 2
+    assert clock.slept == [1.0, 0.1] and a.pace == 0.1 and shared.holds == []
+
+
+def test_dropped_connections_run_out_of_retries():
+    a, wire, _ = wired(*[requests.ConnectionError("down")] * 4)
+    with pytest.raises(requests.ConnectionError):
+        a.request("GET", "/x")
+    assert len(wire.sent) == 4
 
 
 def test_a_4xx_is_returned_once_and_get_raises_on_it():

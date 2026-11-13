@@ -10,8 +10,9 @@ toml its caller reads (lab/markets.toml, lab/broker.toml, lab/wallet.toml), besi
 
 What is retried depends on the method. A 429 means the provider did not act on the request, so every method is
 retried on it. A 5xx is retried only for an idempotent method (IDEMPOTENT): a POST or PATCH that drew a 5xx may
-have been carried out, an order placed, so it is returned to the caller at once. A timeout or connection error
-is raised at once for every method, for the same reason. params and headers may be callables, rebuilt on every
+have been carried out, an order placed, so it is returned to the caller at once. A timeout or dropped connection
+is retried the same way for an idempotent method, after page_gap_s * 2^n, and raised at once for a write, for the
+same reason; it says nothing about the rate, so it neither widens the gap nor holds the shared budget. params and headers may be callables, rebuilt on every
 attempt, so a signature over a timestamp is fresh on each retry; body may be a callable too, called after params and
 before headers, so a nonce in the body (Kraken) is fresh on each retry.
 """
@@ -112,8 +113,17 @@ class Api:
             self._turn()
             q = params() if callable(params) else params
             b = body() if callable(body) else body
-            r = self.http.request(method, f"{self.base}{path}", params=q, json=b,
-                                  headers=headers(q) if callable(headers) else headers, timeout=self.timeout)
+            try:
+                r = self.http.request(method, f"{self.base}{path}", params=q, json=b,
+                                      headers=headers(q) if callable(headers) else headers, timeout=self.timeout)
+            except (requests.ConnectionError, requests.Timeout) as e:
+                if method not in IDEMPOTENT or attempt == self.retries:
+                    raise
+                wait = min(60.0, max(self.gap, 0.5) * 2 ** (attempt + 1))
+                print(f"markets: {self.name}: {type(e).__name__} on {method} {label or path}, retry in {wait:g}s",
+                      flush=True)
+                self.sleep(wait)
+                continue
             retry = r.status_code == 429 or (r.status_code >= 500 and method in IDEMPOTENT)
             if not retry or attempt == self.retries:
                 if r.status_code < 400:

@@ -30,7 +30,8 @@ Hyperopt runs on a copy of the strategy's folder in a temporary userdir, so its 
 next to the real strategy, where every nightly backtest would load it.
 
 Rows go to `walkforward`, and each test-month trade, dated, to `walkforward_trades`; lab/suggest.py turns them into retune suggestions and runs at the end.
-A run starts no fold after WF_BUDGET_S seconds (0: no limit), so a backlog longer than the job's deadline still ends in
+A run starts no fold after WF_BUDGET_S seconds from its Job's first shard start (0: no limit), so a shard rescheduled
+after a preemption still stops in time, and so a backlog longer than the job's deadline still ends in
 a recorded run with its post steps; the folds it left (`folds_left`) run next time, skipped by cache_key once stored.
 A run can be split over WF_SHARDS pods (a Kubernetes Indexed Job, each pod's JOB_COMPLETION_INDEX its shard): each
 strategy x venue belongs to one shard by a hash of its names, so every pod plans the same split. Each shard records a
@@ -352,8 +353,9 @@ def arms(conn) -> list[dict]:
             for s, sp, n, h, e, u in rows]
 
 
-def run_folds(conn, runner: Runner, today: dt.date, report: dict) -> bool:
-    """This shard's folds, stored as each finishes; True unless more than FAIL_SHARE of them failed."""
+def run_folds(conn, runner: Runner, today: dt.date, report: dict, spent: float = 0.0) -> bool:
+    """This shard's folds, stored as each finishes; True unless more than FAIL_SHARE of them failed. spent: seconds
+    of WF_BUDGET_S the Job used before this pod started."""
     found = candidates(conn)
     todo, cached, skipped = plan(conn, found, analyze.coverage(conn), today, runner.version())
     report.update(candidates=[s["name"] for s in found], folds_run=len(todo), folds_cached=cached,
@@ -362,7 +364,7 @@ def run_folds(conn, runner: Runner, today: dt.date, report: dict) -> bool:
           f"to run, {cached} cached, {len(skipped)} skipped, {WORKERS} workers", flush=True)
     failed, done, failures = 0, 0, []
     budget = analyze.Budget(MEMORY_GB)
-    stop_at = time.monotonic() + BUDGET_S if BUDGET_S else None
+    stop_at = time.monotonic() + BUDGET_S - spent if BUDGET_S else None
     left = 0
 
     def run(t):
@@ -454,12 +456,14 @@ def main(runner: Runner | None = None, today: dt.date | None = None) -> int:
         job = JOB or f"{started:%Y-%m-%d %H:%M:%S.%f}"
         shard_id = conn.execute("INSERT INTO runs (kind, name, raw, started_at) VALUES ('walkforward_shard', %s, '{}', %s) "
                                 "RETURNING id", (f"{job}#{SHARD}", started)).fetchone()[0]
+        spent = conn.execute("SELECT extract(epoch FROM %s - min(started_at))::float FROM runs WHERE kind = 'walkforward_shard' "
+                             "AND split_part(name, '#', 1) = %s", (started, job)).fetchone()[0]
         report: dict = {"exchanges": EXCHANGES, "universe": universe.describe_all(analyze.USER_DATA, EXCHANGES), "folds": FOLDS,
                         "train_days": TRAIN_DAYS, "epochs": EPOCHS, "epochs_roi": EPOCHS_ROI, "early_stop": EARLY_STOP,
                         "samplers": SAMPLERS, "loss": LOSS, "shard": SHARD, "shards": SHARDS}
         ok = False
         try:
-            ok = run_folds(conn, runner, today, report)
+            ok = run_folds(conn, runner, today, report, spent)
         except Exception as e:  # recorded, so the last shard still finishes the run over the others' folds
             report["error"] = f"{type(e).__name__}: {e}"
             traceback.print_exc()
