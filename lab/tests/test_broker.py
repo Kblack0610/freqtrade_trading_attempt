@@ -11,6 +11,7 @@ import requests
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from lab import broker
+from lab.markets import drill
 from lab.broker import AlpacaPaper, KrakenRead, NotPaper, RobinhoodCrypto, SnapTrade, WrongHost
 
 PAPER = {"base_url": "https://paper-api.alpaca.markets", "timeout_s": 5, "page_gap_s": 0, "retries": 2}
@@ -148,7 +149,7 @@ def test_a_cancel_stuck_pending_fails_the_drill_within_its_bound(conn):
     s, slept = Paper(pending=99), []
     row = broker.rest_and_cancel(conn, client(s, slept), "SPY", 1.0)
     assert row["status"] == "pending_cancel" and "after the cancel" in row["error"]
-    assert len(slept) == broker.CANCEL_POLLS
+    assert len(slept) == drill.CANCEL_POLLS
 
 
 def test_main_reads_and_stores_with_keys_set(conn, monkeypatch):

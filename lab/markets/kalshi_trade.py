@@ -32,7 +32,7 @@ from cryptography.hazmat.primitives.asymmetric import ed25519, padding, rsa
 
 from lab.db import connect
 from lab.markets.api import Api, num
-from lab.markets.drill import rest_and_cancel
+from lab.markets.drill import await_terminal, rest_and_cancel
 from lab.markets.recorder import load_config
 
 DEMO_HOSTS = frozenset({"external-api.demo.kalshi.co", "demo-api.kalshi.co"})
@@ -60,6 +60,7 @@ def signer(pem: bytes):
 class KalshiDemo:
     venue = "kalshi_demo"
     resting = frozenset({"resting"})
+    terminal = frozenset({"canceled", "executed"})
 
     def __init__(self, cfg: dict, key_id: str, pem: bytes, session=None, clock=None, sleep=None):
         url = urlparse(cfg["base_url"])
@@ -115,10 +116,7 @@ class KalshiDemo:
 
     def cancel(self, order_id: str, ticker: str) -> dict:
         done = self.call("DELETE", f"/portfolio/events/orders/{order_id}", {"market_ticker": ticker})
-        for _ in range(self.read_polls):
-            if self.order(order_id)["status"] not in self.resting:
-                break
-            self.sleep(self.read_poll_s)
+        await_terminal(self, order_id, self.sleep, self.read_polls, self.read_poll_s)
         return done
 
 
