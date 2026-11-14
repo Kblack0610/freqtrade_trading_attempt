@@ -176,7 +176,7 @@ gh secret set FORGEJO_DEPLOY_TOKEN -R Kblack0610/freqtrade_trading_attempt --bod
 - **Markouts.** `lab/markouts.py` marks every paper entry at +5m, +1h and +4h after its fill (`[markouts]` in `lab/suggest.toml`): the move signed by side, minus the pair's BTC beta times BTC's move, minus the round-trip fee, beside the same figure for random entries on the same pair and side within a day (`markouts`). This is closing line value from sports betting: an entry with skill beats the null in tens of trades where profit needs thousands. A diagnostic only; making it a gate is the human's call.
 - **Correlations.** Each strategy's daily returns against every strategy the league runs on that exchange, over the last 365 days; near 1 means it would only duplicate a bot already running.
 
-The leaderboard ranks by the low end of the Sharpe interval, so a strategy has to look good on its unlucky draw. Rows under 20 trades sink, and lookahead-biased rows go last. Promoting a strategy is a home-config roster PR that the nightly research loop opens and a person merges.
+The leaderboard ranks by the low end of the Sharpe interval, so a strategy has to look good on its unlucky draw. Rows under 20 trades sink, and lookahead-biased rows go last. A promotion the nightly research loop finds is a board row; it reaches a pod only as a person's pick through `ci/cohort_roster.py` (Cohorts).
 
 ## Walk-forward
 
