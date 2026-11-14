@@ -17,6 +17,7 @@ from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from pathlib import Path
 from zoneinfo import ZoneInfo
+from urllib.parse import urljoin
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, Response
@@ -29,7 +30,7 @@ from starlette.concurrency import run_in_threadpool
 from lab import book as book_lab
 from lab import guard as guard_lab
 from lab import calls as calls_lab
-from lab import db, diversity, metrics, suggest, universe
+from lab import db, diversity, metrics, suggest, universe, taxonomy
 from web import auth, charts, exporter, lanes, nav
 from web import venues as venue_roster
 
@@ -806,18 +807,29 @@ def coverage_board(tags: dict, families: list[str], on_disk: set[str], found: di
 
 
 @app.get("/coverage", response_class=HTMLResponse)
-def coverage(request: Request):
+def coverage(request: Request, signal_source: str = ""):
     user_of(request)
-    toml = suggest.load_config(FAMILIES)
-    board = coverage_board(toml["strategies"], list(toml["families"]), strategy_classes(),
+    toml = taxonomy.load(FAMILIES)
+    if signal_source and signal_source not in toml["signal_sources"]:
+        raise HTTPException(404, "Unknown signal source")
+    tags = {n: {**t, **toml["family_categories"][t["family"]]} for n, t in toml["strategies"].items()}
+    board = coverage_board(tags, list(toml["families"]), strategy_classes(),
                            {kind: rows(sql) for kind, sql in COVER.items()})
+    if signal_source:
+        board["strategies"] = [s for s in board["strategies"] if s.get("signal_source") == signal_source]
+        board["matrix"] = [f for f in board["matrix"]
+                           if f["family"] in toml["family_categories"]
+                           and toml["family_categories"][f["family"]]["signal_source"] == signal_source]
     dcfg = diversity.config()
     family = {n: t["family"] for n, t in toml["strategies"].items()}
     found = rows(diversity.ROWS, (dcfg["window"], dcfg["min_trades"]))
-    clusters = diversity.cluster_table(rows("SELECT * FROM residual_clusters"), rows("SELECT * FROM residual_venues"),
+    if signal_source:
+        found = [r for r in found if tags.get(r["strategy"], {}).get("signal_source") == signal_source]
+    clusters = [] if signal_source else diversity.cluster_table(rows("SELECT * FROM residual_clusters"), rows("SELECT * FROM residual_venues"),
                                        family, {(r["strategy"], r["exchange"]): r["sharpe_lo"] for r in found})
     archive = diversity.build(found, rows(diversity.CLIMATE_ROWS), family, dcfg)
-    return page(request, "coverage.html", untagged=UNTAGGED, **board, archive=archive, clusters=clusters, families={
+    return page(request, "coverage.html", signal_source=signal_source, signal_sources=toml["signal_sources"],
+                family_categories=toml["family_categories"], untagged=UNTAGGED, **board, archive=archive, clusters=clusters, families={
         **toml["families"], UNTAGGED: "On disk, no line in lab/families.toml.", GONE: "In the results only, not on disk."})
 
 
@@ -865,14 +877,22 @@ def links(request: Request, status: str = ""):
 
 
 @app.get("/markets/book", response_class=HTMLResponse)
-def markets_book(request: Request):
+def markets_book(request: Request, signal_source: str = ""):
     user_of(request)
+    tax = taxonomy.load()
+    if signal_source and signal_source not in tax["signal_sources"]:
+        raise HTTPException(404, "Unknown signal source")
+    def selected(found):
+        return [r for r in found if not signal_source
+                or tax["market_categories"].get(r["family"], {}).get("signal_source") == signal_source]
     hard_stop = suggest.load_config()["book"]["hard_stop"]
-    accounts = rows(PAPER_ACCOUNTS)
+    accounts = selected(rows(PAPER_ACCOUNTS))
     for a in accounts:
         a["ret"] = None if a["equity"] is None else a["equity"] / a["capital"] - 1
-    return page(request, "markets_book.html", backtests=rows(MARKET_BACKTESTS), categories=rows(MARKET_CATEGORIES), accounts=accounts,
-                fills=rows(PAPER_FILLS), demo=rows(DEMO_ORDERS), hard_stop=hard_stop)
+    return page(request, "markets_book.html", backtests=selected(rows(MARKET_BACKTESTS)), categories=selected(rows(MARKET_CATEGORIES)), accounts=accounts,
+                signal_source=signal_source, signal_sources=tax["signal_sources"], family_categories=tax["market_categories"],
+                fills=[r for r in rows(PAPER_FILLS) if not signal_source or r["account"] in {a["account"] for a in accounts}],
+                demo=rows(DEMO_ORDERS), hard_stop=hard_stop)
 
 
 # Every call newest first with its scores by horizon (lab/calls.py), and the scored rows groups() summarizes.
@@ -886,7 +906,7 @@ FROM calls c LEFT JOIN call_scores s ON s.call_id = c.id GROUP BY c.id ORDER BY 
 @app.get("/calls", response_class=HTMLResponse)
 def calls(request: Request):
     """Every trade idea recorded before its outcome, each horizon's score once its exit close has printed, and the
-    record per who, instrument and horizon."""
+    record per who, signal source, instrument and horizon."""
     return page(request, "calls.html", calls=rows(CALLS), groups=calls_lab.groups(rows(calls_lab.SCORED)))
 
 
@@ -954,3 +974,21 @@ def account_evidence(request: Request, strategy: str, exchange: str):
             "stability": "not checked" if unstable is None else "unstable" if unstable else "stable",
             "confidence": ("ready" if confidence[0]["ready"] else "not ready") if confidence else "not checked",
             **strategy_method(strategy)}
+
+
+@app.get("/avenues", response_class=HTMLResponse)
+def avenues(request: Request):
+    user_of(request)
+    lines = (HERE.parent / "docs" / "avenues.md").read_text().splitlines()
+    table = [[cell.strip() for cell in line.strip().strip("|").split("|")]
+             for line in lines if line.startswith("|")]
+    avenues = []
+    for row in table[2:]:
+        evidence = []
+        for part in re.split(r"(\[[^]]+\]\([^)]+\))", row[3]):
+            link = re.fullmatch(r"\[([^]]+)\]\(([^)]+)\)", part)
+            evidence.append({"text": link[1] if link else part,
+                             "url": urljoin("https://github.com/Kblack0610/freqtrade_trading_attempt/blob/master/docs/",
+                                            link[2]) if link else None})
+        avenues.append({"cells": row, "evidence": evidence})
+    return page(request, "avenues.html", avenues=avenues)

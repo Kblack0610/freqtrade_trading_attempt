@@ -36,6 +36,7 @@ def test_a_change_is_an_event_once_and_a_steady_set_is_none(conn):
     assert [(e["signal"], e["change"], e["name"]) for e in events] == [
         ("climate", "enters", "m"), ("climate", "enters", "S"), ("promote", "enters", "Good"),
         ("climate", "enters", "T"), ("climate", "leaves", "S"), ("promote", "leaves", "Good")]
+    assert all(e["avenue"] == loop.AVENUES for e in events)
     good = events[2]
     assert good["action"] == suggest.roster_line("Good", "kraken") and good["cell"] == "" and good["trials"] == confidence.trial_count(conn)
     assert events[1]["lo"] == 0.05 and events[1]["variant"] == "tuned" and events[0]["exchange"] == ""
@@ -51,7 +52,7 @@ def test_one_board_row_carries_a_nights_climate_changes():
     text, details = research_sync.climate_row(ev)
     assert "2026-11-10: 2 enter and 1 leave" in text
     assert details[0] == "enters up/low: strategy S on kraken (tuned), annual +20.0%, low end +1.0%"
-    assert "trial register at 40" in details[-1]
+    assert "trial register at 40" in details[-1] and research_sync.AVENUES in details[-1]
     many = research_sync.climate_row(ev * 20)[1]
     assert len(many) == research_sync.MOST_DETAILS + 2 and many[-2].startswith("and 20 more")
 
@@ -92,6 +93,7 @@ def test_sync_reports_retunes_and_only_acks_after_board_success(monkeypatch, dry
     assert len(rows) == (0 if dry else 2)
     if not dry:
         assert rows[0][1][0] == "fit JSON"
+        assert all(research_sync.AVENUES in details[-1] for _, details in rows)
         assert "no longer qualifies" in rows[1][0]
 
     def failed_board(*args):
@@ -133,4 +135,5 @@ def test_a_promotion_files_a_board_row_and_opens_no_roster_pr(monkeypatch):
     monkeypatch.setattr(research_sync, "board", lambda *a: rows.append(a))
     assert research_sync.main() == 0
     assert "shadow account" in rows[0][0] and rows[0][1][0] == "https://trader.kblab.me/accounts"
+    assert research_sync.AVENUES in rows[0][1][-1]
     assert not hasattr(research_sync, "roster_pr") and not hasattr(research_sync, "call")
