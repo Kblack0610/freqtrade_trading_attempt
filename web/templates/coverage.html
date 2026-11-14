@@ -2,13 +2,14 @@
 {% block title %}Coverage{% endblock %}
 {% block body %}
 <h1>Coverage</h1>
+{% include "_signal_filter.html" %}
 <p class="muted">Which kinds of method have been tested where. Families and data inputs come from <code>lab/families.toml</code>. Each cell is how many of the family's strategies have a whole-history backtest on that venue, then the walk-forward test months that ran (summed over its strategies) and its rows in the trial register. A family that is thin here has not been tried, which is different from having failed.</p>
 <div class="scroll">
 <table>
-  <thead><tr><th>Family</th><th class="n">Strategies</th>{% for e in exchanges %}<th class="n">{{ e }}</th>{% endfor %}<th class="n">All venues</th></tr></thead>
+  <thead><tr><th>Family</th><th>Signal source</th><th>Instrument</th><th>Horizon</th><th class="n">Strategies</th>{% for e in exchanges %}<th class="n">{{ e }}</th>{% endfor %}<th class="n">All venues</th></tr></thead>
   <tbody>
   {% for f in matrix %}
-  <tr{% if f.family == untagged %} class="down"{% endif %}><td title="{{ families[f.family] }}">{{ f.family }}</td><td class="n">{{ f.n }}</td>
+  <tr{% if f.family == untagged %} class="down"{% endif %}><td title="{{ families[f.family] }}">{{ f.family }}</td>{% set category = family_categories.get(f.family, {}) %}<td>{{ category.signal_source or "-" }}</td><td>{{ category.instrument or "-" }}</td><td>{{ category.horizon or "-" }}</td><td class="n">{{ f.n }}</td>
     {% for c in f.cells %}
     <td class="n">{% if c.tested or c.months or c.trials %}{{ c.tested }} of {{ f.n }}<br><span class="muted">{{ c.months }} months, {{ c.trials }} trials</span>{% else %}<span class="muted">-</span>{% endif %}</td>
     {% endfor %}</tr>
@@ -35,6 +36,7 @@
 </div>
 {% endfor %}
 {% if not archive.cells %}<p class="muted">No archive yet: it needs the nightly analysis on the {{ archive.window }} window.</p>{% endif %}
+{% if not signal_source %}
 <h2>Residual clusters</h2>
 <p class="muted">The family labels are weak (in the 2026-11-11 review, strategies of one family correlated at 0.28 on average, of different families at 0.19). These are the bets the returns say there are: per venue, BTC's part taken out of each strategy's last 365 days of daily returns, then strategies clustered so that a cluster's members correlate at about {{ archive.max_rho }} or more, the cut the diverse cohort picks with. The effective count is how many independent strategies the venue's residual returns are worth. Families shows the labels inside each cluster; a cluster with several is one bet under different names.</p>
 {% for v in clusters %}
@@ -55,16 +57,17 @@
 {% endif %}
 {% endfor %}
 {% if not clusters %}<p class="muted">No clusters yet: the nightly analysis fills them.</p>{% endif %}
+{% else %}<p class="muted">Clear the signal source filter to see residual clusters across all sources.</p>{% endif %}
 <h2>Strategies</h2>
 <p class="muted">Untagged means a strategy file under <code>user_data/strategies</code> with no line in <code>lab/families.toml</code>: add one. Gone means a name only the results still hold, such as a deleted strategy, whose trials still count. Best gates is the venue that passes the most confidence gates.</p>
 <div class="scroll">
 <table>
-  <thead><tr><th>Strategy</th><th>Family</th><th>Inputs</th><th>Backtested on</th><th class="n">Trades, all history</th><th class="n">Walk-forward months</th><th class="n">Trials</th><th class="n">Best gates</th><th class="n">Out-of-sample trades</th></tr></thead>
+  <thead><tr><th>Strategy</th><th>Family</th><th>Signal source</th><th>Inputs</th><th>Backtested on</th><th class="n">Trades, all history</th><th class="n">Walk-forward months</th><th class="n">Trials</th><th class="n">Best gates</th><th class="n">Out-of-sample trades</th></tr></thead>
   <tbody>
   {% for s in strategies %}
   <tr><td>{% if s.on_disk %}<a href="/strategies/{{ s.name }}">{{ s.name }}</a>{% else %}{{ s.name }}{% endif %}</td>
       <td{% if s.family == untagged %} class="down"{% endif %}{% if s.note %} title="{{ s.note }}"{% endif %}>{{ s.family }}{% if s.note %} <span class="muted">*</span>{% endif %}</td>
-      <td>{{ s.inputs | join(", ") or "-" }}</td><td>{{ s.venues | join(", ") or "-" }}</td>
+      <td>{{ s.signal_source or "-" }}</td><td>{{ s.inputs | join(", ") or "-" }}</td><td>{{ s.venues | join(", ") or "-" }}</td>
       <td class="n">{{ s.trades }}</td><td class="n">{{ s.months }}</td><td class="n">{{ s.trials }}</td>
       <td class="n">{% if s.best %}{{ s.best.passed }} of {{ s.best.gates }} on {{ s.best.exchange }}{% if s.best.ready %} <span class="up">ready</span>{% endif %}{% else %}-{% endif %}</td>
       <td class="n">{{ s.oos_trades }}</td></tr>

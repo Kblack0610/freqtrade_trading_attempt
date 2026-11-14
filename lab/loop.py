@@ -10,7 +10,7 @@ action digest (training dates and parameters), so a new fit is reported once, ev
 The first run has no previous set, so everything passing enters.
 
 ci/research_sync.py, on the fleet machine, reads the unreported events (`python -m lab.loop pending`), files
-them on the agent board, opens a paper-only roster PR for a promotion, and marks them reported
+them on the agent board with the avenues register link and marks them reported
 (`python -m lab.loop ack <id>...`). Nothing here trades or edits the roster.
 """
 
@@ -20,6 +20,8 @@ import sys
 
 from lab import confidence, suggest
 from lab.db import connect
+
+AVENUES = "https://github.com/Kblack0610/freqtrade_trading_attempt/blob/master/docs/avenues.md"
 
 KEY = ("signal", "kind", "name", "exchange", "variant", "cell")
 CLIMATE = ("SELECT 'climate', kind, name, exchange, variant, cell, lo, annual, '' FROM climate_scorecard "
@@ -64,7 +66,7 @@ def run(conn) -> dict:
 def pending(conn) -> list[dict]:
     cols = ("id", "at") + EVENT_COLS
     rows = conn.execute(f"SELECT {', '.join(cols)} FROM research_events WHERE reported_at IS NULL ORDER BY id")
-    return [dict(zip(cols, r), at=r[1].isoformat()) for r in rows]
+    return [dict(zip(cols, r), at=r[1].isoformat(), avenue=AVENUES) for r in rows]
 
 
 def ack(conn, ids: list[int]) -> int:

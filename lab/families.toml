@@ -219,3 +219,36 @@ FlowSurge = { family = "flow", inputs = ["ohlcv"] }
 FlowSurge_15m = { family = "flow", inputs = ["ohlcv"] }
 FlowSurge_1d = { family = "flow", inputs = ["ohlcv"] }
 FlowSurge_4h = { family = "flow", inputs = ["ohlcv"] }
+
+# Signal origin is separate from inputs (the data dependency). Horizons describe the exit rule;
+# measured holding-time cohorts stay in the diversity archive rather than being guessed here.
+[signal_sources]
+price = "Price or volume behaviour."
+structural = "Calendar, contract mechanics or historical resolution base rates."
+cross-venue = "A price discrepancy between venues."
+event = "A filing, news item or other discrete catalyst."
+sentiment = "Expressed opinion or attention."
+
+[family_categories]
+trend = { signal_source = "price", instrument = "crypto", horizon = "strategy-exit" }
+mean-reversion = { signal_source = "price", instrument = "crypto", horizon = "strategy-exit" }
+momentum = { signal_source = "price", instrument = "crypto", horizon = "strategy-exit" }
+breakout = { signal_source = "price", instrument = "crypto", horizon = "strategy-exit" }
+flow = { signal_source = "price", instrument = "crypto", horizon = "strategy-exit" }
+candlestick-pattern = { signal_source = "price", instrument = "crypto", horizon = "strategy-exit" }
+chart-pattern = { signal_source = "price", instrument = "crypto", horizon = "strategy-exit" }
+time-based = { signal_source = "structural", instrument = "crypto", horizon = "strategy-exit" }
+ml = { signal_source = "price", instrument = "crypto", horizon = "strategy-exit" }
+grid = { signal_source = "price", instrument = "crypto", horizon = "strategy-exit" }
+dca = { signal_source = "price", instrument = "crypto", horizon = "strategy-exit" }
+relative-value = { signal_source = "price", instrument = "crypto", horizon = "strategy-exit" }
+exit-example = { signal_source = "price", instrument = "crypto", horizon = "strategy-exit" }
+template = { signal_source = "price", instrument = "crypto", horizon = "strategy-exit" }
+biased-control = { signal_source = "price", instrument = "crypto", horizon = "strategy-exit" }
+short = { signal_source = "price", instrument = "crypto-futures", horizon = "strategy-exit" }
+
+[market_categories]
+longshot = { signal_source = "structural", instrument = "event-contract", horizon = "resolution" }
+calibration = { signal_source = "structural", instrument = "event-contract", horizon = "resolution" }
+gap = { signal_source = "cross-venue", instrument = "event-contract", horizon = "resolution" }
+llm = { signal_source = "event", instrument = "event-contract", horizon = "resolution" }

@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Avenues{% endblock %}
+{% block body %}
+<h1>Avenues</h1>
+<p><a href="https://github.com/Kblack0610/freqtrade_trading_attempt/blob/master/docs/avenues.md">Evidence and research documents</a></p>
+<div class="scroll">
+<table>
+  <thead><tr><th>Avenue</th><th>Status</th><th>Verdict</th><th>Evidence doc</th><th>Revisit trigger</th></tr></thead>
+  <tbody>
+    {% for avenue in avenues %}<tr>{% for cell in avenue.cells %}<td>{% if loop.index0 == 3 %}{% for part in avenue.evidence %}{% if part.url %}<a href="{{ part.url }}">{{ part.text }}</a>{% else %}{{ part.text }}{% endif %}{% endfor %}{% else %}{{ cell }}{% endif %}</td>{% endfor %}</tr>{% endfor %}
+  </tbody>
+</table>
+</div>
+{% endblock %}
