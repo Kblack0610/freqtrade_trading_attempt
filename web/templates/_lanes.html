@@ -1,0 +1,19 @@
+<section class="lanes" aria-label="Lanes">
+{% for c in lanes %}
+<article class="lane {{ c.level }}">
+  <a class="lane-title" href="{{ c.href }}" title="Counted: {{ c.counted }}">{{ c.title }} -&gt;</a>
+  <p class="lane-what">{{ c.what }}</p>
+  <p class="lane-big"><span class="big">{{ c.big }}</span> <span class="unit">{{ c.unit }}</span>{% if c.level == "nodata" %} <span class="tag">no data</span>{% endif %}</p>
+  {% if c.parts %}<p class="lane-parts">{% for p in c.parts %}<span class="{{ p.level }}">{{ p.label }} <b>{{ p.value }}</b></span>{% endfor %}</p>{% endif %}
+  {% if c.first %}
+  <p class="lane-head">Where to look first</p>
+  <ul class="lane-first">
+  {% for r in c.first %}
+    <li class="{{ r.level }}"><a href="{{ r.href or c.href }}">{{ r.text }}</a> <span class="muted">{{ r.sub }}{% if r.at %} {{ r.at | ago }}{% endif %}</span>{% if r.level %} <span class="tag">{{ "broken" if r.level == "red" else "needs a look" }}</span>{% endif %}</li>
+  {% endfor %}
+  {% if c.more %}<li class="muted"><a href="{{ c.href }}">{{ c.more }} more</a></li>{% endif %}
+  </ul>
+  {% endif %}
+</article>
+{% endfor %}
+</section>

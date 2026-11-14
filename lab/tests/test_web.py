@@ -194,8 +194,8 @@ def test_login_for_code_returns_the_forgejo_login():
 def test_every_page_renders_with_data(conn, signed_in):
     seed(conn)
     _, client = signed_in
-    pages = {"/": ["kraken-s001", "2.50%", "3 of 4", "binanceus", "Best strategies", "/strategies/Strategy001?exchange=binanceus",
-                   "2026-11-04 03:00:00"],
+    pages = {"/": ["kraken-s001", "2.50%", "binanceus", "Best strategies", "/strategies/Strategy001?exchange=binanceus",
+                   "Crypto dry-run league", "of 1 bots reporting", "Research gates", "Money and guard", "Dry run"],
              "/bots/kraken-s001": ["Strategy001 on kraken", "<svg", "BTC/USD", "1.20%", "Dry run against backtest", "1.85%",
                                    "3 of 4 dry-run entries matched the backtest; the gap is -0.65%"],
              "/strategies": ["Strategy001", "0.40", "62%", "-5% / ", "3.2%", "1.20%", "lookahead bias", "Broken", "failed to import",
@@ -249,7 +249,7 @@ def test_overview_warns_when_a_bot_is_not_dry_run(conn, signed_in):
     assert "Not dry run: kraken-s001" in signed_in[1].get("/").text
 
 
-def test_each_cohort_gets_a_row_and_the_overview_keeps_a_total(conn, signed_in):
+def test_each_cohort_gets_a_row_and_profit_stays_inside_its_lane(conn, signed_in):
     seed(conn)
     conn.execute("INSERT INTO overlays (id, grp, params) VALUES ('ab12cd34', 'slots', '{\"max_open_trades\": 5}')")
     conn.execute("INSERT INTO bots (name, exchange, strategy, cohort, overlay) VALUES "
@@ -259,12 +259,15 @@ def test_each_cohort_gets_a_row_and_the_overview_keeps_a_total(conn, signed_in):
                  "('kraken-agg', now(), 4, 40, 1040, 2), ('coinbase-agg', now(), -1, -10, 990, 1)")
     _, client = signed_in
     top = client.get("/").text
-    assert "Total profit" in top and "League profit" not in top and "55.00 USD" in top
+    assert "Total profit" not in top and "League profit" not in top
+    crypto = top[top.index("Crypto dry-run league"):].split("</article>")[0]
+    assert "55.00 USD" in crypto and "of 4 bots reporting" in crypto
     assert top.index('href="/cohorts#league"') < top.index('href="/cohorts#aggressive"')
     assert "2 of 3" in top and "1.50%" in top and "30.00" in top
     page = client.get("/cohorts").text
     assert '<h2 id="aggressive">' in page and 'ab12cd34 <span class="muted">max_open_trades 5</span>' in page
     assert page.rindex("kraken-agg") > page.index('<h2 id="aggressive">') > page.rindex("kraken-s001")
+    assert ">Backtest match</th>" in page and "<td class=\"n\">3 of 4</td>" in page and "<td class=\"n\">66%</td>" in page  # moved off /
 
 
 def test_the_markets_paper_league_is_a_cohort_beside_the_bots(conn, signed_in):
@@ -283,13 +286,16 @@ def test_the_markets_paper_league_is_a_cohort_beside_the_bots(conn, signed_in):
     row = top[top.index('href="/cohorts#markets"'):].split("</tr>")[0]
     assert "2 of 3" in row and "10.00" in row and "0.50%" in row and "2,010" in row
     assert '<a href="/markets/book">paper-longshot-aaaa1111</a> 2.00%' in row
-    assert "35.00 USD" in top  # the total: the league's 25.00 plus the paper league's 10.00
+    assert "35.00 USD" not in top  # no total across lanes: the league's 25.00 and the paper league's 10.00 stay apart
+    betting = top[top.index("Event-contract paper league"):].split("</article>")[0]
+    assert "10.00 USD" in betting and "of 3 accounts marked" in betting
     page = client.get("/cohorts").text
     section = page[page.index('<h2 id="markets">'):]
     assert "paper-longshot-bbbb2222" in section and "-1.00%" in section and "edge 0.06" in section
 
 
 def test_pages_render_on_an_empty_database(conn, signed_in):
+    assert signed_in[1].get("/").text.count('<span class="tag">no data</span>') == 8  # every lane but the guard
     for path in ("/", "/cohorts", "/data", "/runs", "/strategies", "/suggestions", "/walkforward", "/coverage", "/markets", "/links", "/markets/book", "/accounts", "/calls"):
         assert signed_in[1].get(path).status_code == 200, path
 

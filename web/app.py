@@ -30,7 +30,7 @@ from lab import book as book_lab
 from lab import guard as guard_lab
 from lab import calls as calls_lab
 from lab import db, diversity, metrics, suggest, universe
-from web import auth, charts, exporter, nav
+from web import auth, charts, exporter, lanes, nav
 from web import venues as venue_roster
 
 HERE = Path(__file__).resolve().parent
@@ -473,14 +473,26 @@ def overview(request: Request):
     user_of(request)
     bots = rows(BOTS)
     snaps = [b for b in bots if b["ts"]]
-    last_ingest = rows("SELECT max(ts) AS ts FROM bot_snapshots WHERE source = 'ingest'")[0]["ts"]
-    groups = all_cohorts(bots, rows(PAPER_ACCOUNTS))
-    return page(request, "overview.html", bots=bots, last_ingest=last_ingest, cohorts=groups,
-                total_abs=sum(c["profit_abs"] for c in groups), total_balance=sum(c["balance"] for c in groups),
+    paper = rows(PAPER_ACCOUNTS)
+    return page(request, "overview.html", cohorts=all_cohorts(bots, paper), lanes=lanes.cards(lane_reads(bots, paper)),
                 live_bots=[b["name"] for b in snaps if b["dry_run"] is False],
-                coverage=rows(COVERAGE_BY_EXCHANGE), last_run=(rows(RUNS) or [None])[0],
-                top=[r for r in rows(LEADERBOARD, ("365d",)) if not r["biased"] and r["trades"] >= MIN_TRADES][:5],
-                suggested=rows("SELECT kind, count(*) AS n FROM suggestions GROUP BY kind"))
+                top=[r for r in rows(LEADERBOARD, ("365d",)) if not r["biased"] and r["trades"] >= MIN_TRADES][:5])
+
+
+def lane_reads(bots: list[dict], paper: list[dict]) -> dict:
+    """The rows each lane card maps (web/lanes.py), from the same SQL as the lane's own tab."""
+    ready = "SELECT count(*) FILTER (WHERE ready) AS ready, count(*) AS n FROM {}"
+    paper_age = {c["match"]: c["max_age_h"] for v in venue_roster.load() for c in v["checks"] if c["source"] == "paper"}
+    return {"stale_h": STALE.total_seconds() / 3600, "bots": bots, "paper": paper, "paper_max_age_h": paper_age,
+            "shadow_counts": rows(SHADOW_COUNTS),
+            "shadow_newest": rows("SELECT max(day) AS day FROM shadow_marks")[0]["day"],
+            "calls": rows(CALLS), "calls_cfg": calls_lab.load_config(), "venues": venue_roster.rows(rows),
+            "recorder": rows(MARKET_VENUES), "recorder_ages": sweep_ages(),
+            "coverage": rows(COVERAGE_BY_EXCHANGE), "runs": rows(RUNS + " LIMIT 50"),
+            "confidence": rows(ready.format("confidence"))[0], "readiness": rows(ready.format("market_readiness"))[0],
+            "suggestions": rows("SELECT kind, count(*) AS n FROM suggestions GROUP BY kind ORDER BY kind"),
+            "bankroll": next(iter(rows("SELECT * FROM bankroll")), None), "watch": rows(KILL_SWITCH),
+            "guard_lifted": guard_lab.GUARD_LIFTED}
 
 
 def tf_seconds(tf: str | None) -> int | None:
@@ -826,12 +838,20 @@ def run(request: Request, run_id: int):
     return page(request, "run.html", run=found[0], failed=failed)
 
 
+def sweep_ages() -> tuple[int, dict[str, int]]:
+    """Minutes past which a venue's last good sweep is stale: [paper] max_book_age_min, or the venue's own
+    stale_after_min in lab/markets.toml when it sweeps less often."""
+    cfg = suggest.load_config(MARKETS)
+    default = cfg["paper"]["max_book_age_min"]
+    return default, {v: c.get("stale_after_min", default) for v, c in cfg["venues"].items()}
+
+
 @app.get("/markets", response_class=HTMLResponse)
 def markets(request: Request):
     user_of(request)
-    max_age = suggest.load_config(MARKETS)["paper"]["max_book_age_min"]
+    max_age, ages = sweep_ages()
     return page(request, "markets.html", venues=rows(MARKET_VENUES), errors=rows(SWEEP_ERRORS), backfill=rows(BACKFILL),
-                max_age=max_age)
+                max_age=max_age, ages=ages)
 
 
 @app.get("/links", response_class=HTMLResponse)
