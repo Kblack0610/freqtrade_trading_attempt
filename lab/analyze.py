@@ -37,6 +37,12 @@
 Returns are realized (on trade close); a trade still open at a chunk's end is closed there.
 A year with no candles in the data (binanceus has none from 2023-07 to 2025-02, when its USD pairs were
 suspended) is stored as empty, never retried, and is not a failure.
+Shards: with ANALYZE_SHARDS above 1 the run is an Indexed Job, each pod's JOB_COMPLETION_INDEX its shard. A strategy x
+exchange (its chunks, its overlay chunks, its bias checks) belongs to one shard by a hash of its names (`shard_of`), so
+every pod plans the same split. Each pod runs its share of steps 2 and 3 and records an `analysis_shard` row named
+ANALYZE_JOB#index; the pod that finishes last (under an advisory lock) runs steps 4 to 6 and records the night's
+`analysis` row, its chunk counts summed over the shards. A drift backtest belongs to its bot's strategy x exchange.
+A shard killed before it records leaves no `analysis` row for the night: rerun the Job, finished chunks are cached.
 Exits 1 when more than a tenth of the chunks run this time failed, or on a crash.
 
 `python lab/analyze.py bias-one <lookahead|recursive> <strategy> [--strategy-path DIR]` runs one bias
@@ -77,6 +83,9 @@ USER_DATA = REPO / "user_data"
 EXCHANGES = os.environ.get("ANALYZE_EXCHANGES", "binanceus coinbase").split()
 ONLY = set(os.environ.get("ANALYZE_STRATEGIES", "").split())
 WORKERS = int(os.environ.get("ANALYZE_WORKERS", "6"))
+SHARDS = int(os.environ.get("ANALYZE_SHARDS", "1"))  # pods the backtests split over (module docstring, Shards)
+SHARD = int(os.environ.get("JOB_COMPLETION_INDEX", "0"))
+JOB = os.environ.get("ANALYZE_JOB", "")  # the Job's name, shared by its shards; unset: the night's date
 # What the freqtrade processes in flight may hold together, under the pod's memory limit with room for this one.
 MEMORY_GB = float(os.environ.get("ANALYZE_MEMORY_GB", "10"))
 BIAS_EXCHANGE = os.environ.get("BIAS_EXCHANGE", "binanceus")
@@ -106,6 +115,22 @@ NEEDS_ML = "needs the trader-ml image"
 
 def sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
+
+
+def shard_of(strategy: str, exchange: str, shards: int) -> int:
+    """The shard a strategy x venue runs in: stable across pods and runs, so each plans the same split."""
+    return int(sha256(f"{strategy} {exchange}".encode())[:8], 16) % shards
+
+
+def close_shard(conn, shard_id: int, job: str, summary: dict, ok: bool, shards: int) -> list[dict] | None:
+    """Records this shard; when it is the last of the job's shards to finish, every shard's summary, else None. The
+    advisory lock makes exactly one shard the last."""
+    with conn.transaction():
+        conn.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (f"analysis:{job}",))
+        conn.execute("UPDATE runs SET raw = %s, finished_at = now(), ok = %s WHERE id = %s", (Jsonb(summary), ok, shard_id))
+        rows = conn.execute("SELECT raw FROM runs WHERE kind = 'analysis_shard' AND split_part(name, '#', 1) = %s "
+                            "AND finished_at IS NOT NULL", (job,)).fetchall()
+    return [r[0] for r in rows] if len(rows) >= shards else None
 
 
 def config_files(exchange: str) -> list[Path]:
@@ -903,14 +928,20 @@ def derive(conn) -> dict:
             "residual_clusters": sum(v["clusters"] for v in venues)}
 
 
+FINISHER = [True]  # False once this process was a shard another pod outlived: it skips the nightly reproduce
+
+
 def main(runner: Runner | None = None, today: dt.date | None = None) -> int:
     runner = runner or Cli()
     today = today or dt.datetime.now(dt.timezone.utc).date()
     started = dt.datetime.now(dt.timezone.utc)
     summary: dict = {"exchanges": EXCHANGES, "only": sorted(ONLY), "universe": universe.describe_all(USER_DATA, EXCHANGES)}
     with connect(autocommit=True) as conn:
-        run_id = conn.execute("INSERT INTO runs (kind, name, raw, started_at) VALUES ('analysis', %s, '{}', %s) RETURNING id",
-                              (started.strftime("%Y-%m-%d %H:%M:%S"), started)).fetchone()[0]
+        job = JOB or f"{today}"
+        sharded = SHARDS > 1
+        run_id = conn.execute("INSERT INTO runs (kind, name, raw, started_at) VALUES (%s, %s, '{}', %s) RETURNING id",
+                              ("analysis_shard" if sharded else "analysis",
+                               f"{job}#{SHARD}" if sharded else started.strftime("%Y-%m-%d %H:%M:%S"), started)).fetchone()[0]
         ok = False
         stage_s: dict[str, float] = {}  # wall seconds per step, so a cut shows where the night went
         summary["stage_s"] = stage_s
@@ -932,6 +963,11 @@ def main(runner: Runner | None = None, today: dt.date | None = None) -> int:
             todo, cached, skipped, waiting = plan(conn, found, first, today, version, overlays, sweep.get("max_chunks", 0))
             bias = bias_todo(conn, found, first)
             drifts = drift_todo(conn, found, today)
+            if sharded:
+                mine = lambda strategy, exchange: shard_of(strategy, exchange, SHARDS) == SHARD  # noqa: E731
+                todo = [t for t in todo if mine(t["strategy"], t["exchange"])]
+                bias = [b for b in bias if mine(b[0], BIAS_EXCHANGE)]
+                drifts = [d for d in drifts if mine(d["strategy"], d["exchange"])]
             hashes = {s["name"]: s["file_hash"] for s in found}
             lap("plan")
             summary.update(freqtrade=version, strategies=len(found), load_failed=sum(bool(s["load_error"]) for s in found),
@@ -992,8 +1028,24 @@ def main(runner: Runner | None = None, today: dt.date | None = None) -> int:
                     pool.shutdown(cancel_futures=True)
                     raise
             lap("backtests")
-            summary.update(chunks_failed=failed, chunks_empty=empty, failures=failures, bias_failed=conn.execute(
-                "SELECT count(*) FROM bias_checks WHERE has_bias IS NULL").fetchone()[0])
+            summary.update(chunks_failed=failed, chunks_empty=empty, failures=failures)
+            if sharded:
+                ran = len(todo)
+                shards = close_shard(conn, run_id, job, {**summary, "chunks_total": ran}, failed <= FAIL_SHARE * max(ran, 1), SHARDS)
+                if shards is None:
+                    ok = failed <= FAIL_SHARE * max(ran, 1)
+                    print(f"analyze: shard {SHARD + 1}/{SHARDS} done, another shard finishes the night", flush=True)
+                    FINISHER[0] = False
+                    return 0 if ok else 1
+                # the last shard: the night's `analysis` row carries every shard's counts, then the steps over all chunks
+                run_id = conn.execute("INSERT INTO runs (kind, name, raw, started_at) VALUES ('analysis', %s, '{}', %s) "
+                                      "RETURNING id", (started.strftime("%Y-%m-%d %H:%M:%S"), started)).fetchone()[0]
+                for k in ("chunks_run", "chunks_failed", "chunks_empty", "bias_run", "drift_run", "overlay_chunks_run"):
+                    summary[k] = sum(r.get(k) or 0 for r in shards)
+                summary["failures"] = [f for r in shards for f in r.get("failures") or []][:100]
+                summary["shards"] = len(shards)
+                failed, todo = summary["chunks_failed"], range(summary["chunks_run"])
+            summary["bias_failed"] = conn.execute("SELECT count(*) FROM bias_checks WHERE has_bias IS NULL").fetchone()[0]
             summary.update(derive(conn))
             lap("derive")
             cfg = suggest.load_config()
@@ -1025,4 +1077,4 @@ if __name__ == "__main__":
     from lab import reproduce  # the nightly reproduce step, after the night's own results are stored
 
     code = main()
-    sys.exit(max(code, reproduce.main()))
+    sys.exit(max(code, reproduce.main()) if FINISHER[0] else code)
