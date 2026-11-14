@@ -1,4 +1,3 @@
-import numpy as np
 
 from lab.markets.research import kalshi_calibration as kc
 
@@ -47,14 +46,6 @@ def test_rows_pay_the_ask_and_net_the_fee():
     no = next(r for r in out if r["side"] == "no" and r["h"] == 1)
     assert abs(yes["pnl"] - (1 - 0.45 - kc.fee(0.45))) < 1e-12
     assert abs(no["entry"] - 0.60) < 1e-12 and abs(no["pnl"] - (0 - 0.60 - kc.fee(0.60))) < 1e-12
-
-
-def test_bootstrap_resamples_events_not_rows():
-    # One event with 100 identical rows is one draw: the CI cannot shrink to a point from it.
-    pnl = np.array([1.0] * 100 + [-1.0])
-    groups = np.array(["a"] * 100 + ["b"])
-    lo, hi = kc.boot_ci(pnl, groups, 0.05, np.random.default_rng(0))
-    assert lo < 0 < hi
 
 
 def test_every_cell_counts_as_a_trial_even_when_too_thin_to_score():

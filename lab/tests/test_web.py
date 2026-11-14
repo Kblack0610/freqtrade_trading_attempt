@@ -558,8 +558,8 @@ def seed_markets(c):
               "returns, expectancy, expectancy_lo, expectancy_hi, dsr, trials) VALUES ('longshot', 'kalshi', 'abcdef0123456789', %s, "
               "'2025-01-01', '2026-01-01', 900, 812, 800, 12, %s, '{0.1,-0.05}', 0.0123, -0.004, 0.031, 0.42, 16)",
               (Jsonb({"edge": 0.06}), Jsonb({"winrate": 0.61})))
-    c.execute("INSERT INTO market_category_results (family, venue, variant, category, trades, mean, lo, hi) VALUES "
-              "('longshot', 'kalshi', 'abcdef0123456789', 'sports', 450, 0.0211, 0.0043, 0.0377)")
+    c.execute("INSERT INTO market_category_results (family, venue, variant, start_at, category, trades, mean, lo, hi) "
+              "VALUES ('longshot', 'kalshi', 'abcdef0123456789', '2025-01-01', 'sports', 450, 0.0211, 0.0043, 0.0377)")
     c.execute("INSERT INTO paper_accounts (account, family, venue, variant, params, capital, started_at, equity, realized, open_positions, marked_at) "
               "VALUES ('paper-longshot-abcdef01', 'longshot', 'kalshi', 'abcdef0123456789', %s, 1000, now(), 987.5, -4.25, 3, now())",
               (Jsonb({"edge": 0.06}),))

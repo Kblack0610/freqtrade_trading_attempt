@@ -20,13 +20,14 @@ The replay (replay, settle):
 
 The result (evaluate) is a trade table in the shape metrics.window_metrics reads, one row per fill: open_date the
 fill, close_date the settlement, open_rate the price, close_rate the payout per contract, profit_abs net of every
-fee, profit_ratio that over the cost with fees. Daily returns chain on `wallet` (metrics.daily_returns), the
-interval on the per-trade return is confidence.interval, and the score over every stored backtest is
-confidence.scores with suggest.toml [confidence], so an event contract clears the same bar a strategy does.
+fee, profit_ratio that over the cost with fees. Daily returns chain on `wallet` (metrics.daily_returns), and the
+interval on the per-trade return is confidence.interval resampled by event, with suggest.toml [confidence], so an
+event contract clears the same bar a strategy does.
 
 run() registers the trial before it reads any result, in the crypto lab's `trials` register (strategy = the
-family, exchange = the venue, variant = a hash of the params), stores one market_backtests row per family, venue
-and variant (migration 022), and rescores them all. The deflated Sharpe counts every trial on any markets venue.
+family, exchange = the venue, variant = a hash of the params and the window's first day), and stores one
+market_backtests row per family, venue, variant and window (migrations 022, 048). The deflated Sharpe counts every
+trial on any markets venue (trial_count). Pooling windows into a verdict is lab/markets/families.py gate().
 """
 
 import datetime as dt
@@ -239,18 +240,28 @@ def settle(fills: pd.DataFrame, resolutions: dict, fee_cfg: dict | None) -> pd.D
     return t.sort_values(["close_date", "open_date"], kind="stable").reset_index(drop=True)
 
 
+def trial_count(conn, cfg: dict) -> int:
+    """Trials on every markets venue: the betting lane's own multiple-testing count."""
+    return conn.execute("SELECT count(*) FROM trials WHERE exchange = ANY(%s)", (list(cfg["venues"]),)).fetchone()[0]
+
+
 def evaluate(trades: pd.DataFrame, start: dt.datetime, end: dt.datetime, wallet: float, seed: int,
-             ccfg: dict, trials: int) -> dict:
-    """window_metrics over the replay's days (to the last settlement, if later than end), the per-trade interval,
-    and the deflated Sharpe at `trials`."""
+             ccfg: dict, trials: int, events=None) -> dict:
+    """window_metrics over the replay's days (to the last settlement, if later than end), the per-trade interval
+    (resampled by `events` when given), the deflated Sharpe at `trials`, and the daily returns."""
     until = max(pd.Timestamp(end), trades["close_date"].max() + pd.Timedelta(days=1)) if len(trades) else end
     daily = metrics.daily_returns(trades, start, until, wallet)
     w = metrics.window_metrics(daily, trades, seed)
-    ev = confidence.interval(trades["profit_ratio"], seed, ccfg)
+    ev = confidence.interval(trades["profit_ratio"], seed, ccfg, events)
     dsr = metrics.deflated_sharpe(w["_sr_daily"], w["days"], w["_skew"], w["_kurt"], trials)
     m = {k: v.isoformat() if isinstance(v, dt.date) else finite(v)
          for k, v in w.items() if not k.startswith("_")}
-    return {"metrics": m, "interval": ev, "dsr": dsr}
+    return {"metrics": m, "interval": ev, "dsr": dsr, "daily": daily["ret"].to_numpy(dtype=float)}
+
+
+def event_of(trades: pd.DataFrame, markets: dict) -> list[str]:
+    """Each trade's event, the unit the interval resamples; a market with no event is its own."""
+    return [(markets[m].event_id if m in markets else None) or m for m in trades["market_id"]]
 
 
 def category_of(series_id: str | None, categories: dict) -> str:
@@ -271,53 +282,43 @@ def by_category(trades: pd.DataFrame, markets: dict, categories: dict, seed: int
     return out
 
 
-def rescore(conn, ccfg: dict) -> int:
-    """confidence.scores over every stored backtest; a row outside the population gets no score."""
-    ev = {(f, v, var): confidence.interval(r, metrics.seed_of(f, v, var, "confidence"), ccfg)
-          for f, v, var, r in conn.execute("SELECT family, venue, variant, returns FROM market_backtests")}
-    s = confidence.scores(ev, ccfg)
-    with conn.cursor() as cur:
-        cur.executemany("UPDATE market_backtests SET score = %s WHERE family = %s AND venue = %s AND variant = %s",
-                        [(s.get(k), *k) for k in ev])
-    return len(s)
-
-
 def run(conn, strategy: Strategy, venue: str, book: pd.DataFrame, start: dt.datetime, end: dt.datetime,
         cfg: dict | None = None, ccfg: dict | None = None) -> dict:
-    """Register the trial, replay, settle, evaluate, store and rescore. start and end bound the book's days."""
+    """Register the trial, replay, settle, evaluate and store. start and end bound the window's days."""
     cfg = cfg or load_config()
     ccfg = ccfg or suggest.load_config()["confidence"]
     bcfg, variant = cfg["backtest"], variant_of(strategy.params)
     conn.execute("INSERT INTO trials (strategy, exchange, variant) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
-                 (strategy.name, venue, variant))
-    trials = conn.execute("SELECT count(*) FROM trials WHERE exchange = ANY(%s)", (list(cfg["venues"]),)).fetchone()[0]
+                 (strategy.name, venue, f"{variant}:{pd.Timestamp(start).date()}"))
+    trials = trial_count(conn, cfg)
     markets, res = load_markets(conn, venue, book["market_id"].unique().tolist())
     fee_cfg = bcfg.get("fees", {}).get(venue)
     fills, sent = replay(book, markets, res, strategy, bcfg, fee_cfg)
     trades = settle(fills, res, fee_cfg)
+    events = event_of(trades, markets)
     e = evaluate(trades, start, end, bcfg["wallet"], metrics.seed_of(strategy.name, venue, variant, "confidence"),
-                 ccfg, trials)
+                 ccfg, trials, events)
     ev = e["interval"]
     conn.execute(
         """INSERT INTO market_backtests (family, venue, variant, params, start_at, end_at, orders, fills, trades,
-               open_fills, metrics, returns, expectancy, expectancy_lo, expectancy_hi, dsr, trials, computed_at)
-           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
-           ON CONFLICT (family, venue, variant) DO UPDATE SET params = EXCLUDED.params, start_at = EXCLUDED.start_at,
+               open_fills, metrics, returns, events, daily, expectancy, expectancy_lo, expectancy_hi, dsr, trials,
+               computed_at)
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
+           ON CONFLICT (family, venue, variant, start_at) DO UPDATE SET params = EXCLUDED.params,
                end_at = EXCLUDED.end_at, orders = EXCLUDED.orders, fills = EXCLUDED.fills, trades = EXCLUDED.trades,
                open_fills = EXCLUDED.open_fills, metrics = EXCLUDED.metrics, returns = EXCLUDED.returns,
-               expectancy = EXCLUDED.expectancy, expectancy_lo = EXCLUDED.expectancy_lo,
-               expectancy_hi = EXCLUDED.expectancy_hi, dsr = EXCLUDED.dsr, trials = EXCLUDED.trials,
-               score = NULL, computed_at = now()""",
+               events = EXCLUDED.events, daily = EXCLUDED.daily, expectancy = EXCLUDED.expectancy,
+               expectancy_lo = EXCLUDED.expectancy_lo, expectancy_hi = EXCLUDED.expectancy_hi, dsr = EXCLUDED.dsr,
+               trials = EXCLUDED.trials, computed_at = now()""",
         (strategy.name, venue, variant, Jsonb(strategy.params), start, end, sent, len(fills), len(trades),
-         len(fills) - len(trades), Jsonb(e["metrics"]),
-         ev["returns"].tolist(), ev["mean"], ev["lo"], ev["hi"], e["dsr"], trials))
-    conn.execute("DELETE FROM market_category_results WHERE family = %s AND venue = %s AND variant = %s",
-                 (strategy.name, venue, variant))
+         len(fills) - len(trades), Jsonb(e["metrics"]), ev["returns"].tolist(), events, e["daily"].tolist(),
+         ev["mean"], ev["lo"], ev["hi"], e["dsr"], trials))
+    conn.execute("DELETE FROM market_category_results WHERE family = %s AND venue = %s AND variant = %s AND start_at = %s",
+                 (strategy.name, venue, variant, start))
     with conn.cursor() as cur:
-        cur.executemany("INSERT INTO market_category_results (family, venue, variant, category, trades, mean, lo, hi) "
-                        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
-                        [(strategy.name, venue, variant, *r) for r in by_category(
+        cur.executemany("INSERT INTO market_category_results (family, venue, variant, start_at, category, trades, mean, "
+                        "lo, hi) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                        [(strategy.name, venue, variant, start, *r) for r in by_category(
                             trades, markets, cfg.get("categories", {}), metrics.seed_of(strategy.name, venue, variant), ccfg)])
-    scored = rescore(conn, ccfg)
     return {"orders": sent, "fills": len(fills), "trades": len(trades), "expectancy": ev["mean"], "lo": ev["lo"],
-            "hi": ev["hi"], "dsr": e["dsr"], "trials": trials, "scored": scored}
+            "hi": ev["hi"], "dsr": e["dsr"], "trials": trials}

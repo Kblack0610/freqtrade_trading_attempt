@@ -204,29 +204,96 @@ def test_load_links_takes_every_rule_link_and_no_llm_or_ambiguous_one(conn):
 
 
 def write_bars(fs, root, d, rows):
+    """rows of (market_id, ts, bid, ask), ts an hour offset from T0 or a timestamp."""
     key = f"{root}/venue=kalshi/date={d}.parquet"
     fs.create_dir(key.rsplit("/", 1)[0], recursive=True)
     cols = {f.name: [] for f in SCHEMAS["bars"]}
     for mid, h, bid, ask in rows:
-        for k, v in zip(cols, ("kalshi", mid, at(h), 3600, bid, ask, None, None, None, None, 1000.0, None)):
+        ts = h if isinstance(h, pd.Timestamp) else at(h)
+        for k, v in zip(cols, ("kalshi", mid, ts, 3600, bid, ask, None, None, None, None, 1000.0, None)):
             cols[k].append(v)
     pq.write_table(pa.table(cols, schema=SCHEMAS["bars"]), key, filesystem=fs)
 
 
-def test_the_command_backtests_and_registers_every_variant(conn, tmp_path):
-    fs = pafs.SubTreeFileSystem(str(tmp_path), pafs.LocalFileSystem())
+def test_a_window_is_a_whole_month_whose_every_settle_date_is_backfilled():
+    days = lambda a, b: {a + dt.timedelta(days=i) for i in range((b - a).days)}  # noqa: E731
+    done = days(dt.date(2026, 7, 15), dt.date(2026, 9, 1)) | days(dt.date(2026, 9, 2), dt.date(2026, 11, 14))
+    # July starts mid month, September misses its 1st, November is not over
+    assert families.months(done, dt.date(2026, 11, 14)) == [(dt.date(2026, 8, 1), dt.date(2026, 9, 1)),
+                                                           (dt.date(2026, 10, 1), dt.date(2026, 11, 1))]
+    assert families.months(set(), dt.date(2026, 11, 14)) == []
+
+
+def test_a_training_book_that_reaches_into_its_window_raises_lookahead():
+    book, markets, resolutions = calibration_data()
+    start = (T0 + dt.timedelta(days=30)).date()
+    families.trained(CAL, (book, markets, resolutions), start)  # ends before the window: fine
+    peek = pd.concat([book, pd.DataFrame([{"market_id": "T0", "ts": pd.Timestamp(start, tz="UTC"), "bid": 0.29,
+                                           "ask": 0.31, "depth_yes": 1, "depth_no": 1}])], ignore_index=True)
+    with pytest.raises(Lookahead):
+        families.trained(CAL, (peek, markets, resolutions), start)
+
+
+FIRST, TODAY = dt.date(2026, 3, 1), dt.date(2026, 11, 14)  # March to September test, October the lockbox
+
+
+def walkforward_book(conn, fs, yes_rate):
+    """Three markets a day, one event, all yes or all no, each quoted at 0.84 / 0.86 half a day before it settles:
+    a yes buyer at 0.86 earns when more than about 87% resolve yes. Every settle date is backfilled."""
     root = f"{CFG['recorder']['bucket']}/{CFG['history']['prefix']}/bars"
-    ids = [f"M{i}" for i in range(12)]
-    seed(conn, "kalshi", ids, close_h=40, results=["no" if i % 6 else "yes" for i in range(12)])
-    write_bars(fs, root, at(40).date(), [(m, 30, 0.05, 0.07) for m in ids])
-    end = at(40).date() + dt.timedelta(days=1)
-    assert families.main(["longshot", "--start", str(T0.date()), "--end", str(end)], fs=fs) == 0
+    conn.execute("DELETE FROM trials WHERE exchange = 'kalshi'")  # the fixture keeps the register's seeded rows
+    conn.execute("INSERT INTO venues (venue, title, kind) VALUES ('kalshi', 'kalshi', 'exchange') ON CONFLICT DO NOTHING")
+    days = [FIRST + dt.timedelta(days=i) for i in range((dt.date(2026, 11, 1) - FIRST).days)]
+    markets, res = [], []
+    for i, d in enumerate(days):
+        close = pd.Timestamp(d, tz="UTC") + pd.Timedelta(hours=12)
+        yes = (i * yes_rate) % 1 + yes_rate >= 1 or yes_rate == 1  # an even spread of yes days at the rate
+        ids = [f"D{i}-{k}" for k in range(3)]
+        for m in ids:
+            markets.append(("kalshi", m, f"E{i}", m, close - pd.Timedelta(days=2), close))
+            res.append(("kalshi", m, "yes" if yes else "no", 1.0 if yes else 0.0, close))
+        write_bars(fs, root, d, [(m, close - pd.Timedelta(hours=12), 0.84, 0.86) for m in ids])
+    with conn.cursor() as cur:
+        cur.executemany("INSERT INTO markets (venue, market_id, event_id, series_id, title, market_type, status, "
+                        "open_time, close_time, first_seen, updated_at) VALUES (%s, %s, %s, 'S', %s, 'binary', "
+                        "'settled', %s, %s, now(), now())", markets)
+        cur.executemany("INSERT INTO resolutions (venue, market_id, result, value, settled_at) "
+                        "VALUES (%s, %s, %s, %s, %s)", res)
+        cur.executemany("INSERT INTO market_backfill (venue, job, unit, done) VALUES ('kalshi', 'bars', %s, true)",
+                        [(d.isoformat(),) for d in days])
+
+
+def readiness(conn):
+    """(buy, lo, hours) -> (ready, windows, gates)."""
+    return {r[:3]: r[3:] for r in conn.execute(
+        "SELECT params->>'buy', params->>'lo', (params->>'hours')::int, ready, windows, gates FROM market_readiness "
+        "WHERE family = 'longshot'").fetchall()}
+
+
+def test_a_planted_edge_passes_the_gate_after_one_look_at_the_lockbox(conn, tmp_path):
+    fs = pafs.SubTreeFileSystem(str(tmp_path), pafs.LocalFileSystem())
+    walkforward_book(conn, fs, 0.97)
+    assert families.main(["--family", "longshot"], fs=fs, today=TODAY) == 0
     n = len(grid.variants(CFG["families"]["longshot"]))
-    assert conn.execute("SELECT count(*) FROM trials WHERE strategy = 'longshot' AND exchange = 'kalshi'"
-                        ).fetchone()[0] == n
-    rows = conn.execute("SELECT params->>'buy', params->>'lo', (params->>'hours')::int, trades FROM market_backtests "
-                        "WHERE family = 'longshot'").fetchall()
-    assert len(rows) == n
-    # 10 hours before close, so both windows; mid 0.06 is in the first no band only
-    assert sorted(r[3] for r in rows) == [0] * 6 + [12, 12]
-    assert {(r[0], r[1]) for r in rows if r[3]} == {("no", "0.01")}
+    rows = conn.execute("SELECT variant, start_at FROM market_backtests WHERE family = 'longshot'").fetchall()
+    # every variant on each of the 7 test months, and the lockbox only for the two that passed the rest
+    assert len(rows) == 7 * n + 2
+    trials = conn.execute("SELECT count(*) FROM trials WHERE exchange = 'kalshi'").fetchone()[0]
+    assert trials == 7 * n + 2
+    ready = readiness(conn)
+    assert {k for k, v in ready.items() if v[0]} == {("yes", "0.8", 24), ("yes", "0.8", 168)}
+    assert {v[1] for v in ready.values()} == {7}
+    lockbox = next(g for g in ready[("yes", "0.8", 24)][2] if g["gate"] == "lockbox")
+    assert lockbox["pass"] and lockbox["value"] > 0
+    assert families.main(["--family", "longshot"], fs=fs, today=TODAY) == 0  # stored windows are not run again
+    assert conn.execute("SELECT count(*) FROM trials WHERE exchange = 'kalshi'").fetchone()[0] == trials
+
+
+def test_no_edge_fails_the_gate_and_never_reads_the_lockbox(conn, tmp_path):
+    fs = pafs.SubTreeFileSystem(str(tmp_path), pafs.LocalFileSystem())
+    walkforward_book(conn, fs, 0.86)
+    assert families.main(["--family", "longshot"], fs=fs, today=TODAY) == 0
+    assert not any(v[0] for v in readiness(conn).values())
+    traded = conn.execute("SELECT gates FROM market_readiness WHERE family = 'longshot' AND trades > 0").fetchall()
+    assert traded and all(next(g for g in r[0] if g["gate"].startswith("expectancy"))["pass"] is False for r in traded)
+    assert conn.execute("SELECT count(*) FROM market_backtests WHERE start_at >= '2026-10-01'").fetchone()[0] == 0

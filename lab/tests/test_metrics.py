@@ -305,3 +305,21 @@ def test_reconcile_splits_each_trade_into_delay_price_fee_and_missed():
     assert d["matched"] == 2 and d["gaps"] == pytest.approx([-0.005, -0.01])
     assert metrics.reconcile(live.iloc[0:0], bt, pd.Timedelta("5m"))["kind"].tolist() == ["bt_only"] * 3
     assert metrics.reconcile(live, bt.iloc[0:0], pd.Timedelta("5m"))["kind"].tolist() == ["live_only"] * 3
+
+
+def test_the_cluster_interval_resamples_events_not_rows():
+    # One event with 100 identical rows is one draw: the interval cannot shrink to a point from it.
+    pnl = np.array([1.0] * 100 + [-1.0])
+    groups = np.array(["a"] * 100 + ["b"])
+    lo, hi = metrics.cluster_mean_ci(pnl, groups, 0, min_clusters=2)
+    assert lo < 0 < hi
+    assert metrics.cluster_mean_ci(pnl, groups, 0) == (None, None)  # 2 events, under the default 20
+
+
+def test_events_that_move_together_widen_the_interval():
+    rng = np.random.default_rng(1)
+    shock = np.repeat(rng.normal(0, 1, 40), 10)  # 40 events of 10 contracts that share one outcome
+    x = shock + rng.normal(0, 0.1, 400)
+    lo_c, hi_c = metrics.cluster_mean_ci(x, np.repeat(np.arange(40), 10), 2)
+    lo_r, hi_r = metrics.cluster_mean_ci(x, np.arange(400), 2)
+    assert hi_c - lo_c > 2 * (hi_r - lo_r)

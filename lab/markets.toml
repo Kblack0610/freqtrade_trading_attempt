@@ -204,11 +204,17 @@ politics = ["KXPRES", "KXSEN", "KXHOUSE", "KXGOV", "KXTRUMP", "KXELECT", "KXPOL"
 economics = ["KXFED", "KXCPI", "KXGDP", "KXPAYROLL", "KXJOBS", "KXUNRATE", "KXINFL", "KXRATE", "KXRECSS", "KXU3"]
 
 [families]
-# python -m lab.markets.families <family> (lab/markets/families.py). Each family below is a grid: a list is an axis, a
+# python -m lab.markets.families (lab/markets/families.py). Each family below is a grid: a list is an axis, a
 # list of tables merges each table into the variant, anything else is fixed. Every variant is a trial, and the
 # deflated Sharpe counts them all, so an axis is added only when its answer would change what trades.
-# The window when no --start is given: this many days before --end.
-days = 90
+# Walk-forward (lab/markets/families.py docstring): every whole backfilled month is a test window and a trial. The
+# newest this-many of them are the lockbox, read only by a variant that passes every other gate.
+lockbox_months = 1
+# PBO splits the family's daily returns into this many blocks, as the mixtures do (suggest.toml [mixtures]).
+pbo_blocks = 8
+# A run starts no window after this long; the next run resumes. The CronJob's deadline leaves room for the window
+# in hand and the gate.
+budget_min = 150
 
 [families.longshot]
 # Favourite-longshot bias: longshots are bought too dear and favourites too cheap. Buy one side of every market

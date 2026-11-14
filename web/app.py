@@ -200,7 +200,7 @@ WHERE %s = '' OR l.status = %s
 ORDER BY l.proposed_at DESC, l.id DESC LIMIT 200
 """
 LINK_ASKS = "SELECT model, venue_b, count(*) AS asked, sum(proposed) AS proposed, max(asked_at) AS last FROM market_link_asks GROUP BY model, venue_b ORDER BY model, venue_b"
-MARKET_BACKTESTS = "SELECT * FROM market_backtests ORDER BY score DESC NULLS LAST, expectancy_lo DESC NULLS LAST, family, venue, variant"
+MARKET_BACKTESTS = "SELECT * FROM market_backtests ORDER BY start_at DESC, expectancy_lo DESC NULLS LAST, family, venue, variant"
 MARKET_CATEGORIES = "SELECT * FROM market_category_results ORDER BY category, lo DESC NULLS LAST, family, venue, variant"
 PAPER_ACCOUNTS = """
 SELECT a.*, w.state, w.breached_at, w.stopped_at,

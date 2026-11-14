@@ -6,11 +6,11 @@
 <p class="muted">The event-contract strategy families: every backtested variant, then the paper league that trades them against the recorder's live books. Paper money only: nothing here can reach a venue's order API.</p>
 
 <h2>Backtests</h2>
-<p class="muted">One row per family, venue and variant, from the newest run. Each variant is a trial in the register before its result is read, so the deflated Sharpe counts every variant tried. The interval is a block bootstrap of the net return per trade, after fees.</p>
+<p class="muted">One row per family, venue, variant and walk-forward window (a settled month), newest first. Each window is a trial in the register before its result is read, so the deflated Sharpe counts every window tried. The interval resamples whole events of the net return per trade, after fees.</p>
 {% if backtests %}
 <div class="scroll">
 <table>
-  <thead><tr><th>Family</th><th>Venue</th><th>Variant</th><th>Window</th><th class="n">Orders</th><th class="n">Fills</th><th class="n">Settled</th><th class="n">Open</th><th class="n">Per trade (interval)</th><th class="n">Win rate</th><th class="n" title="Deflated Sharpe at the trial count">DSR</th><th class="n">Trials</th><th class="n">Score</th><th>Run</th></tr></thead>
+  <thead><tr><th>Family</th><th>Venue</th><th>Variant</th><th>Window</th><th class="n">Orders</th><th class="n">Fills</th><th class="n">Settled</th><th class="n">Open</th><th class="n">Per trade (interval)</th><th class="n">Win rate</th><th class="n" title="Deflated Sharpe at the trial count">DSR</th><th class="n">Trials</th><th>Run</th></tr></thead>
   <tbody>
   {% for b in backtests %}
   <tr><td>{{ b.family }}</td><td>{{ b.venue }}</td><td><span title="{{ b.params | tojson }}">{{ b.variant[:8] }}</span></td>
@@ -18,7 +18,7 @@
     <td class="n">{{ "{:,}".format(b.orders) }}</td><td class="n">{{ "{:,}".format(b.fills) }}</td><td class="n">{{ "{:,}".format(b.trades) }}</td><td class="n">{{ "{:,}".format(b.open_fills) }}</td>
     <td class="n {{ b.expectancy | tone }}">{{ b.expectancy | pct(2) }} <span class="muted">{{ b.expectancy_lo | pct(2) }} to {{ b.expectancy_hi | pct(2) }}</span></td>
     <td class="n">{{ b.metrics.winrate | pct(0) }}</td><td class="n">{{ b.dsr | num(2) }}</td><td class="n">{{ b.trials }}</td>
-    <td class="n">{{ "%.0f" | format(b.score) if b.score is not none else "-" }}</td><td>{{ b.computed_at | ago }}</td></tr>
+    <td>{{ b.computed_at | ago }}</td></tr>
   {% endfor %}
   </tbody>
 </table>
