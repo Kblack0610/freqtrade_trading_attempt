@@ -90,9 +90,13 @@ def test_no_score_without_a_population():
     assert confidence.scores(ev, C) == {}
 
 
-def test_every_gate_passing_is_ready():
+def test_a_planted_edge_cannot_be_ready_without_historical_universe_research():
     row = result(good_facts())
-    assert failed(row) == [] and row["ready"] and row["passed"] == len(row["gates"].obj) == 23
+    assert failed(row) == ["survivorship"] and not row["ready"]
+    assert row["passed"] == len(row["gates"].obj) - 1 == 23
+    assert row["score"] >= C["ready_score"]
+    g = next(g for g in row["gates"].obj if g["gate"] == "survivorship")
+    assert "not tested" in g["value"] and "delisted" in g["value"]
     assert row["oos_trades"] == 300
 
 
@@ -124,7 +128,8 @@ def test_one_bad_gate_is_named_and_blocks_ready_whatever_the_score():
                  "not decayed"):
         row = result(spoil(good_facts(), name))
         # losing live trades fail the dry run's expectancy sequence as well as the decay test
-        assert failed(row) == (["dry run", name] if name == "not decayed" else [name]) and not row["ready"] and row["score"] >= C["ready_score"]
+        assert set(failed(row)) == {"survivorship", name} | ({"dry run"} if name == "not decayed" else set())
+        assert not row["ready"] and row["score"] >= C["ready_score"]
 
 
 def test_a_broken_paper_bot_fails_the_dry_run_early_and_says_so():
@@ -432,7 +437,7 @@ def test_each_robustness_family_independently_blocks_a_high_score():
         facts = good_facts()
         f = facts["walkforward"][PAIR][0]
         del f["robustness"][next(n for n in f["robustness"] if n.startswith(prefix))]
-        assert failed(result(facts)) == [label]
+        assert failed(result(facts)) == ["survivorship", label]
 
 
 def test_slippage_sweep_reports_each_cost_and_uses_the_worst():
