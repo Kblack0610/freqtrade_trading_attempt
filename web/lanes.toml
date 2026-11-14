@@ -1,0 +1,59 @@
+# The overview's lane cards (web/lanes.py), in this order before the state sort puts red and amber first. One card per
+# lane: what the lane is and the tab that is its home. A card counts only what its tab's rows already hold, under the
+# tab's own stale rule (web/app.py STALE, web/venues.toml, lab/markets.toml), so the two cannot disagree; only research,
+# which no tab marks stale, sets max_age_h here.
+
+[[lane]]
+id = "crypto"
+title = "Crypto dry-run league"
+href = "/cohorts"
+what = "Freqtrade spot bots on live prices, dry run only (lab/league.py)"
+
+[[lane]]
+id = "betting"
+title = "Event-contract paper league"
+href = "/markets/book"
+what = "One paper account per family variant, filled against the recorded books (lab/markets/paper.py)"
+
+[[lane]]
+id = "shadow"
+title = "Shadow accounts"
+href = "/accounts#shadow"
+what = "Paper capital on walk-forward passes, marked nightly from backtests (lab/shadow.py)"
+
+[[lane]]
+id = "calls"
+title = "Calls"
+href = "/calls"
+what = "Trade ideas recorded before their entry close, scored on Alpaca daily closes (lab/calls.py)"
+
+[[lane]]
+id = "venues"
+title = "Venues and drills"
+href = "/accounts"
+what = "Broker and wallet reads and the order drills, one row per venue (web/venues.toml)"
+
+[[lane]]
+id = "recorder"
+title = "Market recorder"
+href = "/markets"
+what = "Event-contract venues swept for quotes and resolutions (lab/markets/recorder.py)"
+
+[[lane]]
+id = "prices"
+title = "Price data"
+href = "/data"
+what = "Candles per exchange that analysis and the bots read (lab/backfill.py)"
+
+[[lane]]
+id = "research"
+title = "Research gates"
+href = "/confidence"
+what = "Strategy and venue pairs that pass every confidence gate, and the nightly analysis behind them"
+max_age_h = 30  # nightly, with slack for a long run
+
+[[lane]]
+id = "money"
+title = "Money and guard"
+href = "/accounts"
+what = "The live guard, the one bankroll across venues and the loss watcher (lab/guard.py, lab/watcher.py)"
