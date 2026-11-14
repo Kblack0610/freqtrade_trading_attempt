@@ -80,7 +80,7 @@
 <h2>Demo orders</h2>
 <p class="muted">Each order path on mock funds, the Kalshi demo exchange, Manifold play money and the Alpaca paper API: the drill rests one order far from the market and cancels it.</p>
 {% if demo %}
-<table>
+<div class="scroll"><table>
   <thead><tr><th>Placed</th><th>Venue</th><th>Ticker</th><th class="n">Price</th><th class="n">Count</th><th>Status</th><th>Canceled</th><th>Error</th></tr></thead>
   <tbody>
   {% for d in demo %}
@@ -88,6 +88,6 @@
     <td>{{ d.status or "-" }}</td><td>{{ d.canceled_at | local }}</td><td>{% if d.error %}<code class="down">{{ d.error }}</code>{% endif %}</td></tr>
   {% endfor %}
   </tbody>
-</table>
+</table></div>
 {% else %}<p class="muted">No demo order yet.</p>{% endif %}
 {% endblock %}

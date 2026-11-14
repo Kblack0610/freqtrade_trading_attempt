@@ -1,6 +1,6 @@
 <h2>Venues</h2>
 <p class="muted">One row per venue (<code>web/venues.toml</code>): connected when each of its reads or drills wrote a row recently with no error. When one is missing, the last column says what you do to connect it.</p>
-<table>
+<div class="scroll"><table>
   <thead><tr><th>Venue</th><th>Money</th><th>State</th><th>Checks</th><th>To connect</th></tr></thead>
   <tbody>
   {% for v in venues %}
@@ -10,4 +10,4 @@
     <td>{% if v.status != "connected" %}{{ v.human }}{% else %}-{% endif %}</td></tr>
   {% endfor %}
   </tbody>
-</table>
+</table></div>

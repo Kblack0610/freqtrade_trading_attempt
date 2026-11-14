@@ -7,22 +7,22 @@
 
 <h2>By source</h2>
 {% if summary %}
-<table>
+<div class="scroll"><table>
   <thead><tr><th>Source</th><th>Status</th><th class="n">Links</th><th class="n">Resolved apart</th></tr></thead>
   <tbody>
   {% for r in summary %}<tr><td>{{ r.source }}</td><td>{{ r.status }}</td><td class="n">{{ "{:,}".format(r.n) }}</td><td class="n {{ 'down' if r.disagreed }}">{{ r.disagreed }}</td></tr>{% endfor %}
   </tbody>
-</table>
+</table></div>
 {% else %}<p class="muted">No links yet: the linker needs a recorded venue pair, such as odds_api against Kalshi.</p>{% endif %}
 
 {% if asks %}
 <h2>LLM asks</h2>
-<table>
+<div class="scroll"><table>
   <thead><tr><th>Model</th><th>Against</th><th class="n">Markets asked</th><th class="n">Links proposed</th><th>Last ask</th></tr></thead>
   <tbody>
   {% for a in asks %}<tr><td>{{ a.model }}</td><td>{{ a.venue_b }}</td><td class="n">{{ "{:,}".format(a.asked) }}</td><td class="n">{{ "{:,}".format(a.proposed) }}</td><td>{{ a.last | ago }}</td></tr>{% endfor %}
   </tbody>
-</table>
+</table></div>
 {% endif %}
 
 <h2>Newest links</h2>
