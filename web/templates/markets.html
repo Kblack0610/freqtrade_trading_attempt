@@ -27,18 +27,18 @@
 
 {% if errors %}
 <h2>Failed sweeps, last 7 days</h2>
-<table>
+<div class="scroll"><table>
   <thead><tr><th>Venue</th><th>Started</th><th>Error</th></tr></thead>
   <tbody>
   {% for e in errors %}<tr><td>{{ e.venue }}</td><td>{{ e.started_at | local }}</td><td><code>{{ e.error }}</code></td></tr>{% endfor %}
   </tbody>
-</table>
+</table></div>
 {% endif %}
 
 <h2>History backfill</h2>
 <p class="muted">Settled markets, hourly price bars and large Kalshi trades from before the recorder started. Each job walks one unit at a time (a settle date, or the settled walk as one unit) and resumes where it stopped.</p>
 {% if backfill %}
-<table>
+<div class="scroll"><table>
   <thead><tr><th>Venue</th><th>Job</th><th class="n">Units done</th><th>Dates</th><th class="n">Rows</th><th>Last write</th></tr></thead>
   <tbody>
   {% for b in backfill %}
@@ -47,6 +47,6 @@
     <td class="n">{{ "{:,}".format(b.rows) }}</td><td>{{ b.updated | ago }}</td></tr>
   {% endfor %}
   </tbody>
-</table>
+</table></div>
 {% else %}<p class="muted">No backfill has run yet.</p>{% endif %}
 {% endblock %}

@@ -7,7 +7,7 @@
 <h2>Perpetual swaps</h2>
 <p class="muted">Funding rates and daily open interest from the okx and kucoin swap of each spot pair, collected daily. The exchanges serve only a few months of either, so this history starts when collection began and grows from there.</p>
 {% if futures %}
-<table>
+<div class="scroll"><table>
   <thead><tr><th>Data</th><th>Exchange</th><th class="n">Pairs</th><th class="n">Rows</th><th>Oldest</th><th>Newest</th></tr></thead>
   <tbody>
   {% for f in futures %}
@@ -15,7 +15,7 @@
     <td>{{ f.first_ts | local("%Y-%m-%d") }}</td><td class="{{ 'down' if stale(f.last_ts, 2 * 86400) }}">{{ f.last_ts | local }}</td></tr>
   {% endfor %}
   </tbody>
-</table>
+</table></div>
 {% else %}
 <p>No swap data collected yet.</p>
 {% endif %}

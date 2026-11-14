@@ -818,3 +818,15 @@ def test_accounts_ranks_shadow_accounts_and_says_how_many_each_cohort_holds(conn
     table = body.split('id="shadow"')[1].split("Prediction-market paper accounts")[0]
     assert table.index("shadow-W-kraken") < table.index("shadow-A-binanceus") < table.index("shadow-R-binanceus")
     assert "+30.0%" in table and "+4.5%" in table and "5.0%" in table and "drawdown 25.0% past 20%" in table
+
+
+def test_every_table_sits_in_a_scroll_box():
+    """Cells never wrap (site.css), so a bare table widens the whole page past the viewport (tr-242: /accounts at 2325 px on a 1280 px window)."""
+    import pathlib
+
+    bare = []
+    for p in sorted((pathlib.Path(__file__).parents[2] / "web" / "templates").glob("*.html")):
+        s = p.read_text()
+        bare += [f"{p.name}:{s.count(chr(10), 0, m.start()) + 1}" for m in re.finditer(r"<table\b", s)
+                 if not re.search(r'<div class="scroll">\s*$', s[:m.start()])]
+    assert bare == []
