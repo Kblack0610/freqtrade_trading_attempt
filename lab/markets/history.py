@@ -4,7 +4,7 @@
   python -m lab.markets.history settled [venue ...]   # markets and resolutions into Postgres
   python -m lab.markets.history bars [venue ...]      # price bars per settle date into parquet
   python -m lab.markets.history trades [venue ...]    # trades per settle date into parquet
-      --budget-min N   stop between pages or dates once a run has taken N minutes ([history] budget_min)
+      --budget-min N   the run's minutes ([history] budget_min), split evenly over its venues
       --restart        settled only: walk again from the newest market
 
 With no venue named, a job runs its `[history] <job>_venues`. Each venue's knobs are `[history.<venue>]` in
@@ -19,8 +19,9 @@ bars and trades work one UTC settle date at a time, newest first: the date's res
 job's `min_volume`, within `since_days` and before today. A Kalshi date can hold 35k markets, more than one run can
 fetch, so a date is fetched `chunk_markets` markets at a time, in market_id order, each chunk into its own part,
 <bucket>/<prefix>/parts/<job>/venue=<v>/date=<d>/<first market's position>.parquet, and market_backfill saves the
-position the next chunk starts at. A run stops between chunks once it is past its budget, and the next resumes the
-date where it stopped. Once the last chunk is in, the parts stream into one object,
+position the next market starts at. Each venue gets an equal share of the run's budget that is left when it starts,
+so one that finishes early hands its time to the next. A venue stops between markets once past its share, keeping the
+part it has, and the next run resumes the date at the market after it. Once the last chunk is in, the parts stream into one object,
 <bucket>/<prefix>/<job>/venue=<v>/date=<YYYY-MM-DD>.parquet, which an object store publishes only when it is closed
 and a rerun overwrites, the parts are deleted, and the date is marked done with its market count. A date whose count
 has changed since its first chunk (a later walk or the recorder added markets) starts over, done or not. Exits 1 if
@@ -145,13 +146,16 @@ def backfill_date(v, job: str, conn, fs, root: str, d: dt.date, floor: float, pe
         fs.create_dir(parts, recursive=True)
     fetched = 0
     while pos < len(todo):
+        n = 0
         with pq.ParquetWriter(f"{parts}/{pos:06d}.parquet", SCHEMAS[job], filesystem=fs, compression="zstd") as w:
             for s in todo[pos:pos + chunk]:
                 for recs in ([v.bars(s, period_s)] if job == "bars" else v.trades(s)):
                     if recs:
                         w.write_table(table(v.name, recs, SCHEMAS[job]))
                         rows += len(recs)
-        n = min(chunk, len(todo) - pos)
+                n += 1
+                if time.monotonic() > deadline:
+                    break
         pos, fetched = pos + n, fetched + n
         mark(conn, v.name, job, unit, cursor=str(pos), markets=len(todo), rows=rows, object_key=None, done=False)
         if pos < len(todo) and time.monotonic() > deadline:
@@ -192,21 +196,24 @@ def main(argv: list[str] | None = None, fs=None, adapters: dict | None = None) -
     a = p.parse_args(argv)
     cfg = load_config()
     h, adapters = cfg["history"], adapters or ADAPTERS
-    deadline = time.monotonic() + 60 * (a.budget_min if a.budget_min is not None else h.get("budget_min", 50))
+    end = time.monotonic() + 60 * (a.budget_min if a.budget_min is not None else h.get("budget_min", 50))
     root = f"{cfg['recorder']['bucket']}/{h['prefix']}"
     if a.job != "settled":
         fs = fs or s3_from_env()
     failed = []
+    names = a.venues or h[f"{a.job}_venues"]
     with connect(autocommit=True) as conn:
-        for name in a.venues or h[f"{a.job}_venues"]:
+        for i, name in enumerate(names):
             hcfg = h.get(name, {})
+            now = time.monotonic()  # an equal share of what is left, so a venue that finishes early hands its time on
+            share = now + max(0.0, end - now) / (len(names) - i)
             try:
                 v = adapters[name]({**cfg["venues"][name], **{k: hcfg[k] for k in ("page_gap_s",) if k in hcfg}})
                 if not hasattr(v, a.job):
                     raise ValueError(f"{name} serves no {a.job} history")
-                stats = (walk_settled(v, cfg["venues"][name], conn, deadline, a.restart,
+                stats = (walk_settled(v, cfg["venues"][name], conn, share, a.restart,
                                       float(hcfg.get("settled_min_volume", 0))) if a.job == "settled"
-                         else backfill(v, a.job, hcfg, conn, fs, root, deadline))
+                         else backfill(v, a.job, hcfg, conn, fs, root, share))
                 print(f"markets: history {a.job} {name}: {stats}", flush=True)
             except Exception:  # one venue down must not stop the rest
                 traceback.print_exc()

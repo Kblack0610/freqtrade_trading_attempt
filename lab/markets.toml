@@ -19,7 +19,8 @@ grace_h = 1
 [history]
 # python -m lab.markets.history (lab/markets/history.py). Objects: <recorder bucket>/<prefix>/<job>/venue=<v>/date=<d>.parquet
 prefix = "history"
-# A run stops between pages (settled) or settle dates (bars, trades) once it has taken this long; the next resumes.
+# A run's minutes, split over its venues: each gets an equal share of what is left when it starts. A venue stops
+# between pages (settled) or markets (bars, trades) once past its share; the next run resumes there.
 budget_min = 50
 # What a job with no venue named runs. PredictIt states no results and the Odds API sells history only on paid
 # plans, so neither is here (docs/markets.md).
@@ -41,8 +42,7 @@ bars_since_days = 1095
 trades_min_volume = 10000
 trades_since_days = 90
 # Markets fetched per part. A run keeps every finished part and resumes the date there, so one Kalshi date (35k
-# markets on 2026-11-08) spans runs. At the about 3 requests/s one run gets, 500 bars take about 3 min and 500 trade
-# histories about 8, so a run stops within minutes of budget_min.
+# markets on 2026-11-08) spans runs; a run that stops mid-chunk keeps the short part.
 chunk_markets = 500
 
 [history.polymarket_us]

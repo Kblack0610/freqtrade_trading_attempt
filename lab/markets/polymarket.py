@@ -53,6 +53,9 @@ def us_resolution(m: dict) -> Resolution | None:
     return Resolution(market_id=m["slug"], result=result_of(value), value=value, settled_at=when(m["updatedAt"]))
 
 
+HISTORY_WINDOW_S = 15 * 86400
+
+
 def _span(span: Span) -> tuple[int, int]:
     end = int(span.settled_at.timestamp())
     return (int(span.open_time.timestamp()) if span.open_time else end - 45 * 86400), end
@@ -155,17 +158,21 @@ class Polymarket:
         tokens = json.loads(found[0].get("clobTokenIds") or "[]") if found else []
         if not tokens:
             return []
-        start, end = _span(span)
-        params, out = {"token_id": tokens[0], "start": start, "end": end, "bucket_seconds": period_s}, []
-        while True:
-            body = self.data.get("/v2/prices-history", params)
-            out += [Bar(market_id=span.market_id, ts=epoch_s(h["timestamp"]), period_s=period_s, bid=None, ask=None,
-                        open=None, high=None, low=None, close=num(h.get("price")), volume=None, open_interest=None)
-                    for h in body.get("data") or []]
-            page = body.get("pagination") or {}
-            if not page.get("has_more") or not page.get("next_cursor"):
-                return out
-            params = {**params, "cursor": page["next_cursor"]}
+        first, end = _span(span)
+        out = []
+        for start in range(first, end, HISTORY_WINDOW_S):  # the data API refuses a window over 15 days (400)
+            params = {"token_id": tokens[0], "start": start, "end": min(start + HISTORY_WINDOW_S, end),
+                      "bucket_seconds": period_s}
+            while True:
+                body = self.data.get("/v2/prices-history", params)
+                out += [Bar(market_id=span.market_id, ts=epoch_s(h["timestamp"]), period_s=period_s, bid=None,
+                            ask=None, open=None, high=None, low=None, close=num(h.get("price")), volume=None,
+                            open_interest=None) for h in body.get("data") or []]
+                page = body.get("pagination") or {}
+                if not page.get("has_more") or not page.get("next_cursor"):
+                    break
+                params = {**params, "cursor": page["next_cursor"]}
+        return list({b.ts: b for b in out}.values())  # a bar on a window edge can come back twice
 
     def resolutions(self, since: dt.datetime) -> Iterator[Resolution]:
         for markets, _, _ in self._walk({"closed": "true", "order": "closedTime", "ascending": "false"}):
