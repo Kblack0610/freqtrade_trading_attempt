@@ -37,8 +37,9 @@ class Demo:
         path = url.split("/trade-api/v2", 1)[1].split("?")[0]
         self.calls.append((method, path, params, json, headers))
         if method == "GET" and path == "/markets":
-            return Resp(200, {"markets": [{"ticker": "T-THIN", "yes_ask_dollars": "0.0100"},
-                                          {"ticker": "T-OK", "yes_ask_dollars": "0.4200"}]})
+            return Resp(200, {"markets": [{"ticker": "T-THIN", "yes_ask_dollars": "0.0100", "exchange_index": 0},
+                                          {"ticker": "T-SHARD3", "yes_ask_dollars": "0.4200", "exchange_index": 3},
+                                          {"ticker": "T-OK", "yes_ask_dollars": "0.4200", "exchange_index": 0}]})
         if method == "POST" and path == "/portfolio/events/orders":
             if self.throttled:
                 self.throttled -= 1
@@ -99,8 +100,9 @@ def test_an_ed25519_key_signs_too():
 
 
 def test_the_drill_rests_one_contract_then_cancels_it(conn):
+    """T-SHARD3 could rest too, but sits on an exchange index the funds are not on (insufficient_shard_balance)."""
     s = Demo()
-    row = kalshi_trade.drill(conn, KalshiDemo(DEMO, "k", pem(RSA), session=s), 0.01)
+    row = kalshi_trade.drill(conn, KalshiDemo(DEMO, "k", pem(RSA), session=s), 0.01, 0)
     assert (row["ticker"], row["order_id"], row["status"], row["error"]) == ("T-OK", "o1", "canceled", None)
     assert row["canceled_at"] is not None
     body = s.calls[1][3]
@@ -114,8 +116,8 @@ def test_the_drill_rests_one_contract_then_cancels_it(conn):
 
 def test_the_drill_pages_past_empty_books_to_find_a_market(conn):
     """Most demo markets ask 1.00 (no sellers), so the first page can hold none the drill can rest under."""
-    pages = {None: {"markets": [{"ticker": "T-EMPTY", "yes_ask_dollars": "1.0000"}], "cursor": "c2"},
-             "c2": {"markets": [{"ticker": "T-OK", "yes_ask_dollars": "0.4200"}], "cursor": "c3"}}
+    pages = {None: {"markets": [{"ticker": "T-EMPTY", "yes_ask_dollars": "1.0000", "exchange_index": 0}], "cursor": "c2"},
+             "c2": {"markets": [{"ticker": "T-OK", "yes_ask_dollars": "0.4200", "exchange_index": 0}], "cursor": "c3"}}
 
     class Paged(Demo):
         def request(self, method, url, params=None, json=None, headers=None, timeout=None):
@@ -125,7 +127,7 @@ def test_the_drill_pages_past_empty_books_to_find_a_market(conn):
             return super().request(method, url, params=params, json=json, timeout=timeout, headers=headers)
 
     s = Paged()
-    row = kalshi_trade.drill(conn, KalshiDemo({**DEMO, "market_pages": 3}, "k", pem(RSA), session=s), 0.01)
+    row = kalshi_trade.drill(conn, KalshiDemo({**DEMO, "market_pages": 3}, "k", pem(RSA), session=s), 0.01, 0)
     assert (row["ticker"], row["status"]) == ("T-OK", "canceled")
     assert [c[2].get("cursor") for c in s.calls if c[1] == "/markets"] == [None, "c2"], "stops at the first hit"
 
@@ -134,17 +136,17 @@ def test_no_restable_market_in_market_pages_fails_the_drill(conn):
     class Empty(Demo):
         def request(self, method, url, params=None, json=None, headers=None, timeout=None):
             self.calls.append((method, "/markets", params, json, headers))
-            return Resp(200, {"markets": [{"ticker": "T-EMPTY", "yes_ask_dollars": "1.0000"}], "cursor": "more"})
+            return Resp(200, {"markets": [{"ticker": "T-EMPTY", "yes_ask_dollars": "1.0000", "exchange_index": 0}], "cursor": "more"})
 
     s = Empty()
     with pytest.raises(RuntimeError, match="in 2 pages"):
-        kalshi_trade.drill(conn, KalshiDemo({**DEMO, "market_pages": 2}, "k", pem(RSA), session=s), 0.01)
+        kalshi_trade.drill(conn, KalshiDemo({**DEMO, "market_pages": 2}, "k", pem(RSA), session=s), 0.01, 0)
     assert len(s.calls) == 2
 
 
 def test_a_failed_cancel_is_recorded_and_fails_the_drill(conn):
     s = Demo(cancel_works=False)
-    row = kalshi_trade.drill(conn, KalshiDemo(DEMO, "k", pem(RSA), session=s, sleep=[].append), 0.01, ticker="T-OK")
+    row = kalshi_trade.drill(conn, KalshiDemo(DEMO, "k", pem(RSA), session=s, sleep=[].append), 0.01, 0, ticker="T-OK")
     assert row["status"] == "resting" and row["canceled_at"] is None and "HTTP 503" in row["error"]
     assert [c[0] for c in s.calls].count("POST") == 1  # never retried
     assert [c[0] for c in s.calls].count("DELETE") == 1 + DEMO["retries"], "a cancel by id is retried on a 5xx"
@@ -167,7 +169,7 @@ def test_a_throttled_place_is_sent_again_with_a_fresh_signature():
 
 def test_reads_that_lag_the_place_and_the_cancel_still_pass_the_drill(conn):
     s, slept = Demo(unseen=2, stale=2), []
-    row = kalshi_trade.drill(conn, KalshiDemo(DEMO, "k", pem(RSA), session=s, sleep=slept.append), 0.01, ticker="T-OK")
+    row = kalshi_trade.drill(conn, KalshiDemo(DEMO, "k", pem(RSA), session=s, sleep=slept.append), 0.01, 0, ticker="T-OK")
     assert (row["status"], row["error"]) == ("canceled", None)
     assert slept == [0.25] * 4
     assert [c[0] for c in s.calls].count("POST") == 1
@@ -175,7 +177,7 @@ def test_reads_that_lag_the_place_and_the_cancel_still_pass_the_drill(conn):
 
 def test_an_order_never_seen_is_canceled_and_fails_the_drill(conn):
     s, slept = Demo(unseen=99), []
-    row = kalshi_trade.drill(conn, KalshiDemo(DEMO, "k", pem(RSA), session=s, sleep=slept.append), 0.01, ticker="T-OK")
+    row = kalshi_trade.drill(conn, KalshiDemo(DEMO, "k", pem(RSA), session=s, sleep=slept.append), 0.01, 0, ticker="T-OK")
     assert row["order_id"] == "o1" and row["canceled_at"] is None and "HTTP 404" in row["error"]
     assert s.status == "canceled"  # not left on the book
     assert [c[0] for c in s.calls].count("POST") == 1
@@ -183,7 +185,7 @@ def test_an_order_never_seen_is_canceled_and_fails_the_drill(conn):
 
 def test_a_cancel_stuck_resting_fails_the_drill_within_its_bound(conn):
     s, slept = Demo(stale=99), []
-    row = kalshi_trade.drill(conn, KalshiDemo(DEMO, "k", pem(RSA), session=s, sleep=slept.append), 0.01, ticker="T-OK")
+    row = kalshi_trade.drill(conn, KalshiDemo(DEMO, "k", pem(RSA), session=s, sleep=slept.append), 0.01, 0, ticker="T-OK")
     assert row["status"] == "resting" and "after the cancel" in row["error"]
     assert slept == [0.25] * 3
 
