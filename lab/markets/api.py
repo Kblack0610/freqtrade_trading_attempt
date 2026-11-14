@@ -1,9 +1,9 @@
 """The one paced client every third-party HTTP call in lab/ goes through, and the venue adapters' field parsers.
 
-Api.request paces every request two ways (docs/markets.md, Rate limits). Its own gap starts at page_gap_s and is
-additive-increase, multiplicative-decrease on the rate: a retried 429 or 5xx doubles the gap for the rest of the
-run, and each success takes RECOVER_S off it, down to page_gap_s again. Then, when the provider's table sets
-budget_rps, the provider's one budget shared by every process (lab/markets/budget.py) gives the request its slot.
+Api.request paces every request two ways (docs/markets.md, Rate limits). Its own gap is a fixed page_gap_s. Then,
+when the provider's table sets budget_rps, the provider's one budget shared by every process (lab/markets/budget.py)
+gives the request its slot; that budget is the only rate control, so a 429 is answered by the retry wait and the
+budget hold, never by a wider gap.
 A retry waits the Retry-After the provider sends, else page_gap_s * 2^n, at least 0.5 s, capped at 60 s, and holds
 the shared budget that long so every other process pauses too. Every knob comes from the provider's table in the
 toml its caller reads (lab/markets.toml, lab/broker.toml, lab/wallet.toml), beside its published limit.
@@ -12,7 +12,7 @@ What is retried depends on the method. A 429 means the provider did not act on t
 retried on it. A 5xx is retried only for an idempotent method (IDEMPOTENT): a POST or PATCH that drew a 5xx may
 have been carried out, an order placed, so it is returned to the caller at once. A timeout or dropped connection
 is retried the same way for an idempotent method, after page_gap_s * 2^n, and raised at once for a write, for the
-same reason; it says nothing about the rate, so it neither widens the gap nor holds the shared budget. params and headers may be callables, rebuilt on every
+same reason; it says nothing about the rate, so it does not hold the shared budget. params and headers may be callables, rebuilt on every
 attempt, so a signature over a timestamp is fresh on each retry; body may be a callable too, called after params and
 before headers, so a nonce in the body (Kraken) is fresh on each retry.
 """
@@ -26,8 +26,6 @@ import requests
 
 from lab.markets.budget import Budget
 
-RECOVER_S = 0.01  # a success takes this off a widened gap: 100 clean requests undo a doubling from 1 s
-MAX_GAP_S = 30.0
 # RFC 9110 9.2.2: sending one of these twice has the effect of sending it once. DELETE is in because the only DELETEs
 # lab/ sends cancel an order by its id: a repeat finds it canceled already and cannot place or grow anything.
 IDEMPOTENT = frozenset({"GET", "HEAD", "OPTIONS", "PUT", "DELETE"})
@@ -83,7 +81,6 @@ class Api:
         self.base = cfg["base_url"].rstrip("/")
         self.limit = int(cfg.get("page_limit", 1000))
         self.gap = float(cfg.get("page_gap_s", 0.5))
-        self.pace = self.gap  # the gap in force: widened by a retried 429, walked back to self.gap by successes
         self.retries = int(cfg.get("retries", 6))
         self.timeout = float(cfg.get("timeout_s", 30))
         self.http = session or requests.Session()
@@ -94,8 +91,8 @@ class Api:
 
     def _turn(self):
         with self._turns:
-            if self.calls and self.pace > 0:
-                self.sleep(self.pace)
+            if self.calls and self.gap > 0:
+                self.sleep(self.gap)
             if self.budget and (wait := self.budget.take()) > 0:
                 self.sleep(wait)
             self.calls += 1
@@ -126,14 +123,10 @@ class Api:
                 continue
             retry = r.status_code == 429 or (r.status_code >= 500 and method in IDEMPOTENT)
             if not retry or attempt == self.retries:
-                if r.status_code < 400:
-                    self.pace = max(self.gap, self.pace - RECOVER_S)
                 return r
-            self.pace = min(MAX_GAP_S, max(self.pace, 0.1) * 2)
             wait = retry_after(r)
             wait = min(60.0, max(self.gap, 0.5) * 2 ** (attempt + 1)) if wait is None else wait
-            print(f"markets: {self.name}: HTTP {r.status_code} on {method} {label or path}, retry in {wait:g}s, "
-                  f"gap now {self.pace:g}s", flush=True)
+            print(f"markets: {self.name}: HTTP {r.status_code} on {method} {label or path}, retry in {wait:g}s", flush=True)
             if self.budget:
                 self.budget.hold(wait)
             self.sleep(wait)

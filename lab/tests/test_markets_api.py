@@ -6,7 +6,7 @@ import time
 import pytest
 import requests
 
-from lab.markets.api import IDEMPOTENT, Api, RECOVER_S, retry_after
+from lab.markets.api import IDEMPOTENT, Api, retry_after
 from lab.markets.budget import Budget
 from lab.markets.recorder import load_config
 from lab.tests.markets_fakes import Resp, Session
@@ -43,27 +43,26 @@ def api(*answers, budget=None, **kw):
     return a, clock
 
 
-def test_429_widens_the_gap_for_the_rest_of_the_run_and_successes_walk_it_back():
+def test_a_429_waits_its_back_off_and_never_widens_the_gap():
     a, clock = api((200, {}), (429, {}), (429, {}), (200, {}), (200, {}))
     a.get("/a")  # the first request waits for nothing
-    a.get("/b")  # paced, 429 (gap 0.2, back off 1 s), paced, 429 (gap 0.4, back off 2 s), paced, ok
-    assert clock.slept == [0.1, 1.0, 0.2, 2.0, 0.4]
-    assert a.pace == pytest.approx(0.4 - RECOVER_S)
-    a.get("/c")  # the next request still keeps the wider gap
-    assert clock.slept[-1] == pytest.approx(0.4 - RECOVER_S)
+    a.get("/b")  # paced, 429 (back off 1 s), paced, 429 (back off 2 s), paced, ok
+    assert clock.slept == [0.1, 1.0, 0.1, 2.0, 0.1]
+    a.get("/c")
+    assert clock.slept[-1] == 0.1
 
 
-def test_the_gap_never_recovers_below_page_gap_s():
+def test_the_gap_stays_page_gap_s():
     a, clock = api(*[(200, {})] * 5)
     for _ in range(5):
         a.get("/x")
-    assert clock.slept == [0.1] * 4 and a.pace == 0.1
+    assert clock.slept == [0.1] * 4
 
 
 def test_retry_after_is_honoured_in_seconds_and_as_a_date():
     a, clock = api(Resp(429, {}, {"Retry-After": "7"}), (200, {}))
     a.get("/x")
-    assert clock.slept == [7.0, 0.2]
+    assert clock.slept == [7.0, 0.1]
     later = email.utils.formatdate(time.time() + 30, usegmt=True)
     assert 28 <= retry_after(Resp(429, {}, {"Retry-After": later})) <= 30
     assert retry_after(Resp(429, {})) is None and retry_after(Resp(429, {}, {"Retry-After": "soon"})) is None
@@ -74,8 +73,8 @@ def test_the_shared_budget_paces_every_request_and_a_429_holds_it_for_everyone()
     a, clock = api((200, {}), (429, {}), (200, {}), budget=shared)
     a.get("/a")
     a.get("/b")
-    # /a: no wait. /b: gap 0.1, budget 0.5, 429 holds the budget 1 s and waits it, then gap 0.2 and budget 0.25.
-    assert clock.slept == [0.1, 0.5, 1.0, 0.2, 0.25]
+    # /a: no wait. /b: gap 0.1, budget 0.5, 429 holds the budget 1 s and waits it, then gap 0.1 and budget 0.25.
+    assert clock.slept == [0.1, 0.5, 1.0, 0.1, 0.25]
     assert shared.holds == [1.0]
 
 
@@ -146,7 +145,7 @@ def test_a_write_is_never_sent_again_after_a_5xx(method, status):
     """A write that drew a 5xx may have been carried out: an order placed. It comes back to the caller at once."""
     a, wire, clock = wired(Resp(status), Resp(200))
     assert a.request(method, "/orders", body={"n": 1}).status_code == status
-    assert len(wire.sent) == 1 and clock.slept == [] and a.pace == 0.1
+    assert len(wire.sent) == 1 and clock.slept == []
 
 
 @pytest.mark.parametrize("method", ["POST", "PATCH"])
@@ -156,7 +155,7 @@ def test_a_write_is_sent_again_on_a_429_after_its_retry_after(method):
     a, wire, clock = wired(Resp(429, {}, {"Retry-After": "3"}), Resp(201), budget=shared)
     assert a.request(method, "/orders", body={"n": 1}).status_code == 201
     assert [m for m, _, _ in wire.sent] == [method, method]
-    assert clock.slept == [3.0, 0.2] and shared.holds == [3.0]
+    assert clock.slept == [3.0, 0.1] and shared.holds == [3.0]
 
 
 @pytest.mark.parametrize("method", sorted(IDEMPOTENT))
@@ -182,7 +181,7 @@ def test_an_idempotent_method_is_sent_again_after_a_dropped_connection(method, e
     shared = Shared()
     a, wire, clock = wired(err, Resp(200), budget=shared)
     assert a.request(method, "/x").status_code == 200 and len(wire.sent) == 2
-    assert clock.slept == [1.0, 0.1] and a.pace == 0.1 and shared.holds == []
+    assert clock.slept == [1.0, 0.1] and shared.holds == []
 
 
 def test_dropped_connections_run_out_of_retries():
@@ -207,5 +206,5 @@ def test_two_clients_on_one_provider_take_their_turns_from_one_budget():
     b, _, _ = wired(Resp(200), budget=shared, clock=clock)
     a.request("GET", "/a")
     b.request("GET", "/b")  # the budget's second slot: 0.5
-    a.request("GET", "/c")  # gap 0.1, budget empty, 429 holds the budget 1 s for b too, then gap 0.2
-    assert clock.slept == [0.5, 0.1, 1.0, 0.2] and shared.holds == [1.0]
+    a.request("GET", "/c")  # gap 0.1, budget empty, 429 holds the budget 1 s for b too, then gap 0.1
+    assert clock.slept == [0.5, 0.1, 1.0, 0.1] and shared.holds == [1.0]

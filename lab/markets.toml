@@ -65,9 +65,12 @@ base_url = "https://api.elections.kalshi.com/trade-api/v2"
 page_limit = 1000
 # An unpaced count of /markets drew 429s; 0.5 s between pages was clean (docs/markets.md, Rate limits).
 page_gap_s = 0.5
-# Requests a second across every process on our IP: 60% of the Basic tier's 20 (200 read tokens/s, 10 a request;
-# read 2026-11-11, https://docs.kalshi.com/getting_started/rate_limits).
-budget_rps = 12
+# Requests a second across every process on our IP. Basic tier publishes 20 (200 read tokens/s, 10 a request; read
+# 2026-11-11, https://docs.kalshi.com/getting_started/rate_limits), but at 12 the history jobs sent about 7 req/s
+# beside the recorder's 2 and still drew 8-58 429s a run, while the recorder alone (2 req/s) drew none (2026-11-13).
+# So the clean rate is under 9 combined; 6 keeps every caller together under it. The budget is the only pacing:
+# a 429 holds it, it never widens a process's gap.
+budget_rps = 6
 retries = 6
 timeout_s = 30
 
@@ -98,6 +101,11 @@ page_limit = 100
 page_gap_s = 0.1
 # Across every process, Gamma and the data API together: half of Gamma's 30 a second.
 budget_rps = 15
+# The recorder lists only markets with at least this many dollars traded (Gamma volume_num_min). On 2026-11-13 Gamma
+# listed 200k active markets, 19.7k at or above 1000 and 35k past their close_time; the full walk took 815-886 s of the
+# 900 s deadline. The paper league is Kalshi only ([paper] venues) and bars_min_volume below is the same 1000, so
+# nothing reads a quote under it.
+open_min_volume = 1000
 retries = 6
 timeout_s = 30
 
