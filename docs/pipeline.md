@@ -198,6 +198,8 @@ for kind in ('analysis', 'walkforward'):
 
 The `/confidence` page shows each strategy's gates and which ones it fails.
 
+Inside a night, freqtrade itself is nearly all of the compute (measured 2026-11-14, walk-forward run 41 and analysis run 38). Walk-forward folds spend 86% of their seconds in hyperopt and 14% in the plain backtests; the analysis spends 2738 of its 3241 wall seconds in `backtests`. A cheaper engine in front of freqtrade could only skip work it can prove has no result, and there is little of that: folds that end with too few training trades cost 0.28 of 35.75 fold-hours, and chunks with zero trades 4.3 of 59 chunk-hours. So there is no vectorized pre-screen: one that rejected on its own approximate profit would decide what freqtrade never sees, and leave gaps in a strategy's out-of-sample months. The lever is fewer hyperopt epochs where tuning adds nothing out of sample; read the `arms` field of the newest walk-forward run.
+
 ## How the pipeline is tested
 
 The tests check that each stage gives the right answer on inputs whose answer is known:
