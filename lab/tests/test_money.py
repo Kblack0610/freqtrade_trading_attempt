@@ -253,6 +253,8 @@ MONEY_MAP = {
         "read", frozenset({"api.polymarket.us"}), lambda: {broker.PolymarketUSRead.host}, _broker("polymarket_us"),
         lambda cfg, s: broker.PolymarketUSRead(cfg, "k", PM_SECRET, s, sleep=lambda _: None), lambda c, conn: c.read(),
         Polymarket),
+    ("lab/broker.py", "AlpacaData"): Client(
+        "none", why="Alpaca market data on the paper key: GET only, data.alpaca.markets only, no order path"),
     ("lab/markets/api.py", "Api"): Client("none", why="the one paced client: every client built on it has its own row"),
     ("lab/markets/kalshi.py", "Kalshi"): Client("none", why="Kalshi public market data, GET only, no key"),
     ("lab/markets/polymarket.py", "PolymarketUS"): Client("none", why="Polymarket US public market data, GET only, no key"),

@@ -53,3 +53,15 @@ page_gap_s = 0.5
 budget_rps = 2
 retries = 3
 timeout_s = 30
+
+[alpaca_data]
+base_url = "https://data.alpaca.markets"   # the client refuses any other host and sends only GET
+# The free (Basic) plan serves SIP bars older than 15 minutes, so a daily close read after the session is the
+# consolidated one; IEX alone is about 2% of volume and its close can differ by a cent (read 2026-11-13).
+feed = "sip"
+# Published limit: 200 requests per minute on the Basic plan, sent as X-RateLimit-Limit (read 2026-11-13,
+# https://docs.alpaca.markets/docs/about-market-data-api). One request a night for every call's symbols. 60% of 3.3 a second.
+page_gap_s = 0.5
+budget_rps = 2
+retries = 4
+timeout_s = 30
