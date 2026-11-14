@@ -133,6 +133,7 @@ class Polymarket:
     def __init__(self, cfg: dict, session=None, sleep=None):
         self.api = Api(self.name, cfg, session, sleep)
         self.data = Api(self.name, {**cfg, "base_url": DATA_API}, session, sleep, budget=self.api.budget)
+        self.open_min_volume = float(cfg.get("open_min_volume", 0))
 
     def _walk(self, params: dict, cursor: str | None = None) -> Iterator[tuple[list[dict], dt.datetime, str | None]]:
         while True:
@@ -145,7 +146,9 @@ class Polymarket:
                 return
 
     def open_markets(self) -> Iterator[list[Quote]]:
-        for markets, ts, _ in self._walk({}):  # closed omitted means open
+        # closed omitted means open; volume_num_min drops the dead long tail Gamma still lists as open
+        floor = {"volume_num_min": self.open_min_volume} if self.open_min_volume > 0 else {}
+        for markets, ts, _ in self._walk(floor):
             yield [global_quote(m, ts) for m in markets]
 
     def settled(self, cursor: str | None) -> Iterator[tuple[list[Settled], str | None]]:

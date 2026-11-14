@@ -55,6 +55,12 @@ def test_polymarket_us_resolutions_read_the_long_side_and_stop_at_since():
     assert list(PolymarketUS(cfg(page_limit=4), s, sleep=nosleep).resolutions(later)) == [] and len(s.calls) == 1
 
 
+def test_polymarket_global_asks_gamma_for_markets_over_open_min_volume_on_every_page():
+    s = Session((200, "polymarket_open_page1.json"), (200, "polymarket_open_page2.json"))
+    list(Polymarket(cfg(page_limit=2, open_min_volume=1000), s, sleep=nosleep).open_markets())
+    assert [c[1]["volume_num_min"] for c in s.calls] == [1000.0, 1000.0]
+
+
 def test_polymarket_global_follows_the_keyset_cursor():
     s, slept = Session((200, "polymarket_open_page1.json"), (200, "polymarket_open_page2.json")), []
     pages = list(Polymarket(cfg(page_limit=2), s, sleep=slept.append).open_markets())

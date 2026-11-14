@@ -111,7 +111,7 @@ The exporter adds `trader_markets_*` and `trader_paper_*` (README, Metrics). hom
 Every third-party HTTP call in `lab/` goes through `Api.request` (`lab/markets/api.py`; `Api.get` for a JSON read), which paces it two ways; no caller sleeps or retries on its own. `lab/tests/test_money.py` finds every `Api(...)` and raw HTTP client in `lab/` and `web/` and fails on one without a row.
 
 - Shared budget: `budget_rps` in each `[venues.<v>]` table is how many requests a second every process on our egress IP may send that venue together. It is one row of `venue_budgets` (migration 041, `lab/markets/budget.py`): each request takes the next slot, `1/budget_rps` after the last one handed out, in one statement against the database clock, and sleeps until its slot. The recorder, the three history jobs and anything else calling a venue queue on that row, so jobs that overlap share the rate instead of adding up. The budget keeps its own autocommit connection, so a caller's open transaction never holds the row.
-- Own gap: `page_gap_s` is the least time between one process's requests (`[history.<v>] page_gap_s` replaces it for history). A 429 or 5xx doubles that process's gap for the rest of its run, up to 30 s, and each success takes 0.01 s off it until it is back at `page_gap_s`.
+- Own gap: `page_gap_s` is the least time between one process's requests (`[history.<v>] page_gap_s` replaces it for history). It is fixed: the shared budget is the only rate control, so a 429 holds the budget and is never answered with a wider gap (a per-process doubling once ran the Kalshi recorder to a 19.98 s gap on 2026-11-13).
 - Retries: up to `retries`, each waiting the `Retry-After` the venue sends (seconds or a date), else `page_gap_s * 2^n`, at least 0.5 s and at most 60 s. A retry also holds the shared budget that long, so every process pauses, not only the one that got the 429. A timeout or dropped connection is retried the same way for an idempotent method (GET, DELETE of an order by id) and raised at once for a write; it holds no budget.
 - What is retried depends on the method. A 429 is retried for every method: the provider did not act on it. A 5xx is retried only for GET, HEAD, OPTIONS, PUT and DELETE (the only DELETEs cancel an order by id). A POST or PATCH that drew a 5xx may have been carried out, an order placed, so it comes back to the caller at once. A timeout or a dropped connection is raised at once for every method. Signed headers and a signed query are built again for each attempt, so a retry carries a fresh timestamp.
 
@@ -124,13 +124,13 @@ Measured after #130 deployed (`kubectl -n freqtrade logs <pod> | grep -c 'HTTP 4
 | history-trades (first 4 min) | about 530 | 12, still running |
 | recorder (4 sweeps) | 30-50 a sweep | 3, 3, 5, 3 a sweep |
 
-Settled is clean and the rest is cut by about 10x, not to zero: the recorder's `/markets` pages still draw 3 to 5 429s a sweep, each retried and the gap doubled to 7.6 s by the fifth. The budget stays at 12 req/s, so the Kalshi limit is probably tighter than the published 20 on the history and market-list reads; a lower `budget_rps` for Kalshi is the lever if the count matters.
+Settled is clean and the rest is cut by about 10x, not to zero: the recorder's `/markets` pages still draw 3 to 5 429s a sweep, each retried and the gap doubled to 7.6 s by the fifth. The budget was 12 req/s. Measured 2026-11-13: the recorder alone (2 req/s) drew no 429s, and in the hours the history jobs ran (8-58 429s a history-trades run, 29-41 a recorder run) the jobs sent about 7 req/s beside it, so Kalshi's real limit on these reads is under 9 combined, not the published 20. `budget_rps` is now 6; the 429 count per run after it deploys is the check.
 
 Budgets, about 60% of each venue's published limit:
 
 | Venue | Published limit | `budget_rps` |
 |---|---|---|
-| Kalshi | Basic tier 200 read tokens/s, 10 tokens a request: 20 requests/s | 12 |
+| Kalshi | Basic tier 200 read tokens/s, 10 tokens a request: 20 requests/s; clean under 9 measured | 6 |
 | Polymarket US | 20 requests/s per IP on the public gateway | 12 |
 | Polymarket global | Gamma `/markets` 300 per 10 s; the data API shares the budget | 15 |
 | Manifold | 500 requests/min per IP | 5 |
@@ -208,7 +208,7 @@ Read-only prices. A US resident must not trade it: the US is close-only on both 
 - Hosts (doc): Gamma `https://gamma-api.polymarket.com`, CLOB `https://clob.polymarket.com`, data `https://data-api.polymarket.com`, websocket `wss://ws-subscriptions-clob.polymarket.com/ws/market`.
 - Price history: `GET /v2/prices-history` on the data host since 2026-09-04. The CLOB v1 route retired 2026-11-02, so older tutorials are broken (doc, changelog). CLOB V2 went live 2026-04-28 with pUSD collateral.
 - Limits (doc, per 10 s, Cloudflare queues rather than rejects): Gamma `/markets` 300, `/events` 500; CLOB `/book` 1,500; data `/v2/prices-history` 200, `/v2/trades` 300.
-- Gamma `/markets` pages by `offset` and refuses an offset past 2,100 with a 422. `/markets/keyset` pages by `after_cursor` (100 a page) and reaches every market: 2,343 pages and 234,259 markets in 575 s on 2026-11-06, too slow for a 5-min job. The events keyset is slower.
+- Gamma `/markets` pages by `offset` and refuses an offset past 2,100 with a 422. `/markets/keyset` pages by `after_cursor` (100 a page) and reaches every market: 2,343 pages and 234,259 markets in 575 s on 2026-11-06, too slow for a 5-min job; 815-886 s a sweep by 2026-11-13, against the 900 s deadline. 200k were active, 19.7k with volume of 1000 or more and 35k past their `close_time`, so `[venues.polymarket] open_min_volume` (1000) sends Gamma `volume_num_min` and the recorder lists only those. The paper league is Kalshi only. The events keyset is slower.
 - Adapter (`lab/markets/polymarket.py`, `polymarket`): one yes outcome per market, the first outcome token, keyed by `conditionId`, with the event as `event_id`, the series slug as `series_id` and `groupItemTitle` as the subtitle. Resolutions read `closed=true&order=closedTime&ascending=false` and keep markets with `umaResolutionStatus` resolved; the first entry of `outcomePrices` is the payout.
 - Fees (doc, https://docs.polymarket.com/trading/fees): taker `C * feeRate * p * (1 - p)`, makers 0. The rate depends on category: crypto 0.07, sports and economics 0.05, politics and finance 0.04, geopolitics 0. Each market's `feeSchedule` object is the authority.
 - Terms: market-data distributors may not use site data without a written agreement. Our use is private research, and the adapter reads only the documented API.
