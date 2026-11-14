@@ -1,0 +1,18 @@
+# How lab/calls.py scores a call. Prices come from lab/broker.toml [alpaca_data].
+
+# Costs a call pays. Alpaca charges no commission on US stocks; cost_bps per side stands for the half spread plus the
+# SEC and FINRA sell fees, about 1 bp on a large cap (est.). borrow_apr is the stock loan fee a short pays on the
+# calendar days held, actual/360; 0.3% a year is general collateral for an easy-to-borrow large cap (est.), and a
+# hard-to-borrow name costs far more, so a call on one should not lean on this number.
+cost_bps = 2
+borrow_apr = 0.003
+
+# A daily bar counts once this many hours have passed after the 16:00 ET close (the closing auction and late prints).
+settle_hours = 2
+# A horizon that has no score this many calendar days past its five-sessions-a-week span is overdue, and the
+# analysis fails for it. Covers a holiday week.
+slack_days = 4
+
+# groups(): the anytime-valid interval on the mean net return, values clipped to [-bound, bound].
+alpha = 0.05
+bound = 1.0

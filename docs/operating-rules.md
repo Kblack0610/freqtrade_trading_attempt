@@ -23,7 +23,7 @@ Three actions, nothing else:
 
 - Read P&L once a week, on a fixed day. The daily loss watcher acts on its own and is not a prompt to decide anything.
 - Judge a decision by whether these rules were followed over a full sample, not by last week's result.
-- Log every override in the repo's issue or the lab notes with its date and reason, including a kill switch pull. An override with no reason in the log did not happen under the rules.
+- Record every override, including a kill switch pull, and every trade idea of your own as a call before it plays out: `python -m lab.calls add` with the thesis as the reason (README, Calls). The server stamps it and the row cannot be edited, so the record is the one the nightly analysis scores. An override with no call did not happen under the rules.
 
 ## What the code enforces
 
