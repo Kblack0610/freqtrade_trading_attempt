@@ -148,21 +148,21 @@ def test_trades_stream_every_page_and_a_budget_stops_between_dates(conn, tmp_pat
 
 
 def test_a_date_bigger_than_one_run_resumes_at_its_next_chunk_and_starts_over_when_it_grows(conn, tmp_path):
-    """A run past its budget keeps the chunks it finished; the date's object appears only once every chunk is in."""
+    """A run past its budget keeps the parts it wrote; the date's object appears only once every chunk is in."""
     fs, root = pafs.LocalFileSystem(), str(tmp_path / "bucket/history")
     walk(conn, FakeHistory([[settled(m, D1) for m in "ABCDE"]]))
     hcfg = {"bars_min_volume": 0, "bars_since_days": 30, "chunk_markets": 2}
     final = f"{root}/bars/venue=fake/date=2026-11-03.parquet"
 
     first = FakeHistory()
-    assert history.backfill(first, "bars", hcfg, conn, fs, root, 0, TODAY) == {"dates": 0, "left": 1, "rows": 2}
-    assert first.asked == ["A", "B"] and not (tmp_path / "bucket/history/bars").exists()
+    assert history.backfill(first, "bars", hcfg, conn, fs, root, 0, TODAY) == {"dates": 0, "left": 1, "rows": 1}
+    assert first.asked == ["A"] and not (tmp_path / "bucket/history/bars").exists()
     assert conn.execute("SELECT cursor, markets, done FROM market_backfill WHERE job = 'bars'").fetchone() == (
-        "2", 5, False)
+        "1", 5, False)
 
     second = FakeHistory()
     assert history.backfill(second, "bars", hcfg, conn, fs, root, FAR, TODAY) == {"dates": 1, "left": 0, "rows": 5}
-    assert second.asked == ["C", "D", "E"], "resumes after the chunk the last run finished"
+    assert second.asked == ["B", "C", "D", "E"], "resumes after the market the last run finished"
     assert [r["market_id"] for r in pq.read_table(final).to_pylist()] == list("ABCDE")
     assert not list((tmp_path / "bucket/history/parts").rglob("*.parquet")), "the parts go once merged"
     assert conn.execute("SELECT cursor, markets, rows, done FROM market_backfill WHERE job = 'bars'").fetchone() == (
@@ -171,11 +171,50 @@ def test_a_date_bigger_than_one_run_resumes_at_its_next_chunk_and_starts_over_wh
     walk(conn, FakeHistory([[settled("F", D1)]]), restart=True)
     grown = FakeHistory()
     assert history.backfill(grown, "bars", hcfg, conn, fs, root, 0, TODAY)["dates"] == 0
-    assert grown.asked == ["A", "B"], "a date that grew starts over"
+    assert grown.asked == ["A"], "a date that grew starts over"
     assert len(pq.read_table(final)) == 5, "the old object stands until the new one is whole"
     again = FakeHistory()
     history.backfill(again, "bars", hcfg, conn, fs, root, FAR, TODAY)
-    assert again.asked == ["C", "D", "E", "F"] and len(pq.read_table(final)) == 6
+    assert again.asked == ["B", "C", "D", "E", "F"] and len(pq.read_table(final)) == 6
+
+
+def test_a_venue_past_its_budget_stops_between_markets_inside_a_chunk(conn, tmp_path, monkeypatch):
+    """One Kalshi trades chunk took a whole run (2026-11-14), so the deadline is checked after every market."""
+    fs, root = pafs.LocalFileSystem(), str(tmp_path / "bucket/history")
+    walk(conn, FakeHistory([[settled(m, D1) for m in "ABCDE"]]))
+    hcfg = {"bars_min_volume": 0, "bars_since_days": 30, "chunk_markets": 500}
+    clock = iter(range(100))
+    monkeypatch.setattr(history.time, "monotonic", lambda: next(clock))
+    first = FakeHistory()
+    assert history.backfill(first, "bars", hcfg, conn, fs, root, 0.5, TODAY) == {"dates": 0, "left": 1, "rows": 2}
+    assert first.asked == ["A", "B"]
+    assert conn.execute("SELECT cursor FROM market_backfill WHERE job = 'bars'").fetchone() == ("2",)
+    second = FakeHistory()
+    monkeypatch.setattr(history.time, "monotonic", lambda: 0)
+    assert history.backfill(second, "bars", hcfg, conn, fs, root, FAR, TODAY)["dates"] == 1
+    assert second.asked == ["C", "D", "E"]
+    assert [r["market_id"] for r in pq.read_table(f"{root}/bars/venue=fake/date=2026-11-03.parquet").to_pylist()] == list("ABCDE")
+
+
+def test_main_splits_what_is_left_of_the_budget_evenly_over_the_venues_still_to_run(conn, tmp_path, monkeypatch):
+    """Kalshi took the whole shared budget, so polymarket bars never ran (2026-11-13)."""
+    now, got = [0.0], {}
+
+    def backfill(v, job, hcfg, conn, fs, root, deadline):
+        got[v.name] = deadline - now[0]
+        now[0] += hcfg.get("takes", 0)
+        return {}
+
+    def adapter(name):
+        return lambda cfg: type(name, (), {"name": name, "bars": None})()
+    cfg = {"recorder": {"bucket": str(tmp_path / "bucket")},
+           "history": {"prefix": "history", "budget_min": 1, "bars_venues": ["a", "b", "c"], "a": {"takes": 6}},
+           "venues": {"a": {}, "b": {}, "c": {}}}
+    monkeypatch.setattr(history, "load_config", lambda: cfg)
+    monkeypatch.setattr(history, "backfill", backfill)
+    monkeypatch.setattr(history.time, "monotonic", lambda: now[0])
+    assert history.main(["bars"], fs=pafs.LocalFileSystem(), adapters={n: adapter(n) for n in "abc"}) == 0
+    assert got == {"a": 20, "b": 27, "c": 54}, "a finished early and b at once, so each hands its time on"
 
 
 def test_main_refuses_a_venue_without_that_history_and_still_runs_the_rest(conn, tmp_path, monkeypatch, capsys):
@@ -271,7 +310,7 @@ def test_kalshi_trades_read_each_side_the_market_can_have_trades_on():
 def test_polymarket_global_bars_look_up_the_yes_token_then_page_the_price_history():
     cid = "0x7d28e63e97000c6737b3588909043805bcabdfed1c80dcce6f44de4a4ad3e062"
     s = Session((200, "polymarket_tokens.json"), (200, "polymarket_prices_page1.json"), (200, "polymarket_prices_page2.json"))
-    span = Span(cid, None, dt.datetime(2026, 10, 1, tzinfo=UTC), dt.datetime(2026, 11, 6, tzinfo=UTC))
+    span = Span(cid, None, dt.datetime(2026, 10, 25, tzinfo=UTC), dt.datetime(2026, 11, 6, tzinfo=UTC))
     bars = Polymarket({"base_url": "https://gamma", "page_gap_s": 0.1}, s, sleep=nosleep).bars(span, 3600)
     assert s.calls[0][1] == {"condition_ids": cid, "closed": "true"}
     assert s.calls[1][0] == "https://data-api.polymarket.com/v2/prices-history"
@@ -279,6 +318,20 @@ def test_polymarket_global_bars_look_up_the_yes_token_then_page_the_price_histor
     assert s.calls[1][1]["bucket_seconds"] == 3600 and "cursor" in s.calls[2][1]
     assert [b.close for b in bars][:3] == [0.505, 0.545, 0.655] and len(bars) > 3
     assert Polymarket({"base_url": "https://gamma"}, Session((200, [])), sleep=nosleep).bars(span, 3600) == []
+
+
+def test_polymarket_global_bars_ask_for_at_most_15_days_a_request():
+    """The data API answers a longer window with 400 "'start' to 'end' must span at most 15 days" (seen 2026-11-14)."""
+    tokens = [{"clobTokenIds": '["1"]'}]
+    edge = {"timestamp": 1793318400, "price": 0.5}
+    s = Session((200, tokens), (200, {"data": [edge]}), (200, {"data": [edge]}), (200, {"data": []}))
+    span = Span("0xabc", None, dt.datetime(2026, 10, 1, tzinfo=UTC), dt.datetime(2026, 11, 6, tzinfo=UTC))
+    bars = Polymarket({"base_url": "https://gamma"}, s, sleep=nosleep).bars(span, 3600)
+    windows = [(c[1]["start"], c[1]["end"]) for c in s.calls[1:]]
+    assert len(windows) == 3 and all(0 < e - b <= 15 * 86400 for b, e in windows)
+    assert windows[0][0] == int(span.open_time.timestamp()) and windows[-1][1] == int(span.settled_at.timestamp())
+    assert all(windows[i][1] == windows[i + 1][0] for i in range(2))
+    assert len(bars) == 1, "a bar on a window edge is kept once"
 
 
 def test_polymarket_us_bars_turn_the_short_price_into_the_yes_bid():
