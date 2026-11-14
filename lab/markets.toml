@@ -85,6 +85,9 @@ retries = 6
 timeout_s = 30
 
 [venues.polymarket]
+# Swept every 15 min (home-config markets-venue-recorders), so /markets and the overview call it stale after two missed
+# ticks, as TraderMarketsRecorderStale does. A venue without stale_after_min uses [paper] max_book_age_min.
+stale_after_min = 45
 # Global prices, read-only: a US resident may not trade this book.
 title = "Polymarket (global)"
 kind = "exchange"
@@ -124,6 +127,8 @@ retries = 6
 timeout_s = 60
 
 [venues.odds_api]
+# Swept every 6 h (home-config markets-venue-recorders, "7 */6 * * *"): stale after one missed run and 30 min of slack.
+stale_after_min = 390
 # Sportsbook implied odds, read-only; the key comes from ODDS_API_KEY. Credits a run: per sport, 1 per region for the
 # odds plus 2 for /scores, 3 a run for one sport. Every 5 min is about 26,000 a month against the free tier's 500, so the cadence
 # and the sports list wait on the plan the human buys (docs/markets.md, The Odds API).

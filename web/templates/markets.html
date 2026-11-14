@@ -3,7 +3,7 @@
 {% block body %}
 <h1>Markets</h1>
 {% include "_markets_nav.html" %}
-<p class="muted">Event contracts across venues, read only. The recorder sweeps each venue's open markets on its own schedule and writes only the quotes that changed, to parquet in MinIO; this page is each venue's newest sweep. A venue whose last good sweep is over {{ max_age }} minutes old shows red: the paper league takes no entries there until it recovers, and the stale-recorder alert fires.</p>
+<p class="muted">Event contracts across venues, read only. The recorder sweeps each venue's open markets on its own schedule and writes only the quotes that changed, to parquet in MinIO; this page is each venue's newest sweep. A venue whose last good sweep is over {{ max_age }} minutes old (a slower venue's own <code>stale_after_min</code> in <code>lab/markets.toml</code>) shows red: the paper league takes no entries there until it recovers, and the stale-recorder alert fires.</p>
 
 <h2>Recorder</h2>
 {% if venues %}
@@ -14,7 +14,7 @@
   {% for v in venues %}
   <tr><td>{{ v.title }} <span class="muted">{{ v.venue }}</span></td><td>{{ v.kind }}</td>
     <td>{% if v.started_at %}{{ v.started_at | ago }}{% if not v.ok %} <span class="down" title="{{ v.error }}">failed</span>{% endif %}{% else %}<span class="muted">never swept</span>{% endif %}</td>
-    <td class="{{ 'down' if v.started_at and stale(v.last_ok, max_age * 60) }}">{{ v.last_ok | ago }}</td>
+    <td class="{{ 'down' if v.started_at and stale(v.last_ok, ages.get(v.venue, max_age) * 60) }}">{{ v.last_ok | ago }}</td>
     <td class="n">{{ "%.0f s" | format(v.took.total_seconds()) if v.took else "-" }}</td>
     <td class="n">{{ "{:,}".format(v.seen) if v.seen is not none else "-" }}</td><td class="n">{{ "{:,}".format(v.changes) if v.changes is not none else "-" }}</td>
     <td class="n">{{ "{:,}".format(v.new_markets) if v.new_markets is not none else "-" }}</td><td class="n">{{ "{:,}".format(v.resolved) if v.resolved is not none else "-" }}</td>
