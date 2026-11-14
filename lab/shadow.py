@@ -11,15 +11,18 @@ cohort is full. The cohort is its holding period: short under hold_edge_hours fo
 Each night appends the account's days after its promotion day from strategy_daily (overlay_daily for an overlay
 series), the backtest that lab/analyze.py reruns through yesterday (an overlay series with an open account reruns
 outside the [sweep] cap): days nobody had seen when it was promoted, replayed on candles, not filled
-on a book. A mark is never rewritten. Then the written rule: retire past the cohort's drawdown, when the
-block-bootstrap interval of the mean daily return is below zero after min_days, or at max_days without winning;
-winning when, after min_days, it is up and the interval's low end is above zero. A winner that fails the rule
-retires. A retired series never comes back, and its slot is refilled the same night.
+on a book. A mark is never rewritten. Then the written rule: retire past the cohort's drawdown, when the anytime-valid
+confidence sequence (metrics.confidence_sequence) of the mean daily return lies below zero, or at max_days without
+winning; winning when the account is up and the sequence's low end is above zero. The sequence holds at every day at
+once, so reading it nightly and acting the first time it excludes zero costs no false-win rate (docs/anytime-gates.md,
+Shadow judge); its alpha is split over `family` accounts (1: none). A winner whose equity falls back to
+capital retires. A retired series never comes back, and its slot is refilled the same night.
 
 lab/analyze.py runs this after horizon; `python -m lab.shadow` runs it alone. Paper only: nothing here trades.
 """
 
 import datetime as dt
+import json
 import sys
 
 import numpy as np
@@ -52,20 +55,39 @@ def cohort_of(hold_hours: float, cfg: dict) -> str:
 
 
 def eligible(c: dict, cfg: dict) -> bool:
-    """Pure: the entry gates, each a walk-forward or backtest edge with enough trades behind it. Walk-forward
+    """Pure: the entry gates (GATES), each a walk-forward or backtest edge with enough trades behind it. Walk-forward
     scores the strategy x venue as it stands, so an overlay series carries its base's out-of-sample edge."""
-    return (c["median_hold_hours"] is not None
-            and (c["trades"] or 0) >= cfg["min_backtest_trades"]
-            and c["expectancy_lo"] is not None and c["expectancy_lo"] > cfg["expectancy_lo_above"]
-            and (c["oos_trades"] or 0) >= cfg["min_oos_trades"]
-            and c["oos_expectancy"] is not None and c["oos_expectancy"] > cfg["oos_expectancy_above"])
+    return c["median_hold_hours"] is not None and all(ok(c, cfg) for _, ok in GATES)
 
 
-def promote(candidates: list[dict], accounts: list[dict], resid: pd.DataFrame, cfg: dict, min_days: int) -> list[dict]:
+GATES = (("min_backtest_trades", lambda c, g: (c["trades"] or 0) >= g["min_backtest_trades"]),
+         ("expectancy_lo_above", lambda c, g: c["expectancy_lo"] is not None and c["expectancy_lo"] > g["expectancy_lo_above"]),
+         ("min_oos_trades", lambda c, g: (c["oos_trades"] or 0) >= g["min_oos_trades"]),
+         ("oos_expectancy_above", lambda c, g: c["oos_expectancy"] is not None and c["oos_expectancy"] > g["oos_expectancy_above"]))
+
+
+def gate_funnel(candidates: list[dict], cfg: dict) -> dict[str, int]:
+    """Pure: how many series survive each entry gate in turn, from every series with a window ("series") to "eligible"
+    (what `eligible` accepts). Each gate's count is the series that passed it and every gate before it."""
+    alive = [c for c in candidates if c["median_hold_hours"] is not None]
+    out = {"series": len(candidates), "has_hold": len(alive)}
+    for name, ok in GATES:
+        alive = [c for c in alive if ok(c, cfg)]
+        out[name] = len(alive)
+    out["eligible"] = len(alive)
+    return out
+
+
+def promote(candidates: list[dict], accounts: list[dict], resid: pd.DataFrame, cfg: dict, min_days: int,
+            blocked: dict | None = None) -> list[dict]:
     """Pure: the accounts to open. Greedy per cohort by Sharpe low end (then name): an eligible series never
     shadowed joins while its cohort has a free slot and its residual returns correlate at |rho| max_rho or
     under with each active account and pick of that cohort. A pair with under min_days shared days counts as
-    different."""
+    different. `blocked`, when given, counts the eligible series each rule turned away: shadowed_before, cohort_full,
+    correlated."""
+    blocked = {} if blocked is None else blocked
+    for k in ("shadowed_before", "cohort_full", "correlated"):
+        blocked.setdefault(k, 0)
     ever = {tuple(a[k] for k in KEY) for a in accounts}
     rho = resid.corr(min_periods=min_days) if not resid.empty else pd.DataFrame()
     held = {c: [tuple(a[k] for k in KEY) for a in accounts if a["cohort"] == c and a["state"] != "retired"]
@@ -73,13 +95,18 @@ def promote(candidates: list[dict], accounts: list[dict], resid: pd.DataFrame, c
     out = []
     for c in sorted(candidates, key=lambda c: (-(c["sharpe_lo"] or -np.inf), *(c[k] for k in KEY))):
         key = tuple(c[k] for k in KEY)
-        if key in ever or not eligible(c, cfg):
+        if not eligible(c, cfg):
+            continue
+        if key in ever:
+            blocked["shadowed_before"] += 1
             continue
         cohort = cohort_of(c["median_hold_hours"], cfg)
         mine = held[cohort]
         if len(mine) >= cfg[cohort]["max_active"]:
+            blocked["cohort_full"] += 1
             continue
         if key in rho.columns and any(k in rho.columns and abs(rho.loc[key, k]) > cfg["max_rho"] for k in mine):
+            blocked["correlated"] += 1
             continue
         mine.append(key)
         ever.add(key)
@@ -102,7 +129,10 @@ def marks(start: dt.date, equity: float, through: dt.date, daily: dict[dt.date, 
 
 
 def judge(account: str, state: str, capital: float, rets: list[float], equity: list[float], cfg: dict) -> tuple:
-    """Pure: (state, why) by the written rule; why is None unless it retires."""
+    """Pure: (state, why) by the written rule; why is None unless it retires. The mean daily return's confidence
+    sequence is read at every day, at level alpha / family, so the chance a zero-mean account ever wins is at most that,
+    however often it is read. Daily returns
+    are clipped to +-ret_bound, which the sequence needs: a clipped good day only lowers the mean."""
     c = cfg
     if not rets:
         return state, None
@@ -110,16 +140,13 @@ def judge(account: str, state: str, capital: float, rets: list[float], equity: l
     drawdown = float(1 - (eq / np.maximum.accumulate(np.concatenate([[capital], eq]))[1:]).min())
     if drawdown > c["max_drawdown"]:
         return "retired", f"drawdown {drawdown:.1%} past {c['max_drawdown']:.0%}"
-    if len(rets) < c["min_days"]:
-        return state, None
-    lo, hi = metrics.block_mean_ci(np.asarray(rets), metrics.seed_of(account, len(rets)), block=c["block"],
-                                   level=c["level"])
-    if hi is not None and hi < 0:
-        return "retired", f"mean daily return interval below zero after {len(rets)} days"
-    if eq[-1] > capital and lo is not None and lo > 0:
+    lo, hi = metrics.confidence_sequence(rets, -c["ret_bound"], c["ret_bound"], c["alpha"] / c["family"])
+    if hi[-1] < 0:
+        return "retired", f"mean daily return sequence below zero after {len(rets)} days"
+    if eq[-1] > capital and lo[-1] > 0:
         return "winning", None
     if state == "winning":
-        return "retired", "lost its edge: up and interval above zero no longer both hold"
+        return "retired", "lost its edge: equity back under capital"
     if len(rets) >= c["max_days"]:
         return "retired", f"{len(rets)} days without winning"
     return state, None
@@ -167,19 +194,55 @@ def run(conn, cfg: dict | None = None, today: dt.date | None = None) -> dict:
         candidates = cur.execute(CANDIDATES, (cfg["window"],)).fetchall()
         keys = sorted({tuple(c[k] for k in KEY) for c in candidates if eligible(c, cfg)}
                       | {tuple(a[k] for k in KEY) for a in accounts if a["state"] != "retired"})
-        new = promote(candidates, accounts, residual_frame(conn, keys), cfg, CORR_MIN_DAYS)
+        blocked: dict = {}
+        new = promote(candidates, accounts, residual_frame(conn, keys), cfg, CORR_MIN_DAYS, blocked)
         cur.executemany("INSERT INTO shadow_accounts (account, strategy, exchange, overlay, cohort, capital, promoted_on, "
                         "entry) VALUES (%(account)s, %(strategy)s, %(exchange)s, %(overlay)s, %(cohort)s, %(capital)s, "
                         "%(promoted_on)s, %(entry)s)", [dict(n, promoted_on=today, entry=Jsonb(n["entry"])) for n in new])
         counts = dict(((c, s), n) for c, s, n in conn.execute(
             "SELECT cohort, state, count(*) FROM shadow_accounts GROUP BY 1, 2"))
     active = lambda c: counts.get((c, "trial"), 0) + counts.get((c, "winning"), 0)  # noqa: E731
-    return {"shadow_promoted": len(new), "shadow_retired": retired, "shadow_marked": marked,
+    gates = {**gate_funnel(candidates, cfg), **blocked, "admitted": len(new)}
+    return {"shadow_funnel": gates, "shadow_promoted": len(new), "shadow_retired": retired, "shadow_marked": marked,
             "shadow_active_short": active("short"), "shadow_active_long": active("long"),
             "shadow_winning": counts.get(("short", "winning"), 0) + counts.get(("long", "winning"), 0)}
 
 
+def funnel(conn, cfg: dict | None = None) -> dict:
+    """The funnel from the first ok analysis night: tonight's gate counts (the latest ok night's `shadow_funnel`),
+    then every account ever admitted by how it left: winning now, retired early (before max_days: drawdown, the
+    sequence below zero, a lost win), retired at max_days, still in trial. `limit` names the step that holds the most
+    candidates: the entry gate that drops the most series, or "supply" when a cohort has free slots and no eligible
+    series is left unshadowed."""
+    cfg = (cfg or suggest.load_config())["shadow"]
+    first = conn.execute("SELECT min(started_at) FROM runs WHERE kind = 'analysis' AND ok").fetchone()[0]
+    night = conn.execute("SELECT raw->'shadow_funnel', raw->'shadow_active_short', raw->'shadow_active_long' FROM runs "
+                         "WHERE kind = 'analysis' AND ok AND raw ? 'shadow_funnel' ORDER BY started_at DESC LIMIT 1").fetchone()
+    gates, active = (night[0], {"short": night[1], "long": night[2]}) if night else ({}, {})
+    rows = conn.execute("SELECT cohort, state, retired_on - promoted_on, retired_why FROM shadow_accounts").fetchall()
+    out = {"first_ok_night": first and first.date().isoformat(), "tonight": gates, "admitted_total": len(rows),
+           "winning": sum(r[1] == "winning" for r in rows), "trial": sum(r[1] == "trial" for r in rows)}
+    gone = [r for r in rows if r[1] == "retired"]
+    out["retired_early"] = sum(r[2] is not None and r[2] < cfg[r[0]]["max_days"] for r in gone)
+    out["retired_at_max_days"] = len(gone) - out["retired_early"]
+    out["median_days_to_retire"] = float(np.median([r[2] for r in gone])) if gone else None
+    if gates:
+        drops = {}
+        prev = gates["has_hold"]
+        for name, _ in GATES:
+            drops[name], prev = prev - gates[name], gates[name]
+        free = {c: cfg[c]["max_active"] - (active.get(c) or 0) for c in ("short", "long")}
+        left = gates["eligible"] - gates["shadowed_before"] - gates["admitted"]
+        out["limit"] = "supply" if left == 0 and any(v > 0 for v in free.values()) else max(
+            [*drops, "cohort_full", "correlated"], key=lambda k: drops.get(k, gates.get(k, 0)))
+        out["free_slots"] = free
+    return out
+
+
 if __name__ == "__main__":
     with connect(autocommit=True) as conn:
+        if sys.argv[1:] == ["funnel"]:
+            print(json.dumps(funnel(conn), indent=1, default=str))
+            sys.exit(0)
         print(f"shadow: {run(conn)}", flush=True)
     sys.exit(0)

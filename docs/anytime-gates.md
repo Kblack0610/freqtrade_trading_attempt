@@ -80,3 +80,21 @@ One PR in this repo:
 - `docs/pipeline.md`: the gate table rows for drift and dry run.
 
 No cache key changes and no recompute: the sequences read paper trades and drift rows that ingest already stores.
+
+## Shadow judge
+
+Built 2026-11-14 (task tr-266). `lab/shadow.judge` re-checked a fixed 90% block-bootstrap interval of the mean daily return every night between `min_days` and `max_days`. That is optional stopping, and with 30 days at block 10 the interval resamples 3 blocks. It now reads `metrics.confidence_sequence` on the daily returns (clipped to +-`ret_bound`), at level `alpha / family`, every night with no floor: it retires a loser the night its upper bound is below zero, names a winner the night its lower bound is above zero and equity is above capital, and still retires past the drawdown or at `max_days`. The old `min_days`, `block` and `level` keys are gone.
+
+Tests in `lab/tests/test_shadow.py`: zero-mean accounts read every day to `max_days` win at most alpha (family 1) and at most alpha / family (Bonferroni, family = `max_active`); the retired rule read the same way wins far more than 10% of them; a strong edge wins before day 30.
+
+What it costs, measured on simulated daily returns with sd 1%, range +-3%, alpha 0.10 (days to a win; "-" none in 120):
+
+| True mean a day | family 1 | family 60 (Bonferroni) |
+|---|---|---|
+| 0.5% | 31 to 85 | none in 120 |
+| 1% | 15 to 27 | 41 to 61 |
+| 2% | 10 to 13 | 20 to 29 |
+
+A thin edge wins in no night count the deadline allows, under any sound judge: the old judge named such accounts winners mostly by chance. Splitting alpha over the slots is the price of a cohort-wide guarantee, and raising `max_active` makes each win harder at family = `max_active`. So `max_active` stays 60: it is raised only once a night's funnel shows free slots and eligible candidates waiting, which a sound judge makes safe at family 1 (each null account keeps its alpha) and unsafe at family 1 for a cohort-wide count.
+
+`family` shipped at 1 (ask i3bjck, answered by the fleet judge; the human can override), the per-account level the old judge was meant to have. e-BH over the accounts (Wang and Ramdas 2022) would keep the cohort-wide false discovery rate with less of that cost, but needs each account's e-process, which `confidence_sequence` does not expose; it is the next step if family 1's false-win count (about alpha times the null accounts) is too many.

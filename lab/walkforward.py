@@ -237,11 +237,6 @@ class Cli:
         return took(out)
 
 
-def shard_of(strategy: str, exchange: str, shards: int) -> int:
-    """The shard a strategy x venue runs in: stable across pods and runs, so each plans the same split."""
-    return int(analyze.sha256(f"{strategy} {exchange}".encode())[:8], 16) % shards
-
-
 def candidates(conn) -> list[dict]:
     """League strategies first, then promote and watch suggestions by score, then each venue's best 365-day
     expectancy low end, one venue after another; loadable and lookahead-clean."""
@@ -280,7 +275,7 @@ def plan(conn, found: list[dict], first: dict, today: dt.date, ft_version: str) 
     days: dict[tuple[str, str], dict] = {}
     for s in found:
         for ex in EXCHANGES:
-            if shard_of(s["name"], ex, SHARDS) != SHARD:
+            if analyze.shard_of(s["name"], ex, SHARDS) != SHARD:
                 continue
             since = first.get((ex, s["timeframe"]))
             if since is None:

@@ -310,19 +310,24 @@ oos_expectancy_above = 0.0
 max_rho = 0.5
 # A median trade held under this many hours is the short cohort, otherwise long ([diversity] hold_hours' middle edge).
 hold_edge_hours = 24
-# The block-bootstrap interval on the mean daily return: blocks of this many days, at this level.
-block = 10
-level = 0.90
+# The judge (docs/anytime-gates.md, Shadow judge): the anytime-valid confidence sequence on the mean daily return. An
+# account whose true mean is zero or below is named a winner with probability at most alpha / family over its whole life,
+# read every night. family 1: each account at alpha, so at most alpha of the null accounts win (false-discovery style,
+# about 6 of 60 at 0.10). family = max_active: Bonferroni, at most alpha false wins in the whole cohort, but each win then
+# needs several times the days (a steady +1% a day takes 43 days, not 19). A daily return is clipped to +-ret_bound, which
+# the sequence needs. Judgment calls, not evidence: alpha continues the old 90% level; ret_bound is 3 times a daily sd
+# of 1%. family 1 was answered by the fleet judge (ask i3bjck); the human can override.
+alpha = 0.10
+family = 1
+ret_bound = 0.03
 
 [shadow.short]
-# Open accounts at once; judged after min_days, retired at max_days unless winning, or past max_drawdown any day.
+# Open accounts at once; judged every day, retired at max_days unless winning, or past max_drawdown any day.
 max_active = 60
-min_days = 30
 max_days = 60
 max_drawdown = 0.20
 
 [shadow.long]
 max_active = 60
-min_days = 90
 max_days = 180
 max_drawdown = 0.30

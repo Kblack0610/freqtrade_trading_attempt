@@ -2,8 +2,9 @@ import datetime as dt
 
 import numpy as np
 import pandas as pd
+from psycopg.types.json import Jsonb
 
-from lab import shadow, suggest
+from lab import metrics, shadow, suggest
 
 CFG = suggest.load_config()["shadow"]
 DAY = dt.date(2026, 11, 1)
@@ -77,20 +78,89 @@ def test_judge_retires_on_drawdown_any_day():
 
 
 def test_judge_keeps_a_young_account_in_trial_and_names_a_steady_winner():
-    up = [0.004 + 0.001 * (i % 3) for i in range(40)]
-    assert shadow.judge("a", "trial", 1000.0, up[:10], curve(up[:10]), rule()) == ("trial", None)
+    up = [0.006 + 0.001 * (i % 3) for i in range(40)]
+    assert shadow.judge("a", "trial", 1000.0, up[:3], curve(up[:3]), rule()) == ("trial", None)
     assert shadow.judge("a", "trial", 1000.0, up, curve(up), rule()) == ("winning", None)
 
 
 def test_judge_retires_a_loser_and_one_that_runs_out_of_days():
-    down = [-0.004 - 0.001 * (i % 3) for i in range(35)]
+    down = [-0.006 - 0.001 * (i % 3) for i in range(35)]
     state, why = shadow.judge("a", "trial", 1000.0, down, curve(down), rule(max_drawdown=0.9))
     assert state == "retired" and "below zero" in why
     flat = [0.01 * (-1) ** i for i in range(60)]
     state, why = shadow.judge("a", "trial", 1000.0, flat, curve(flat), rule())
     assert state == "retired" and "without winning" in why
-    state, why = shadow.judge("a", "winning", 1000.0, flat[:40], curve(flat[:40]), rule())
+    state, why = shadow.judge("a", "winning", 1000.0, flat[:41], curve(flat[:41]), rule())
     assert state == "retired" and "lost its edge" in why
+
+
+def null_run(rng, days: int, cfg: dict) -> str:
+    """A zero-mean account judged every day, as the nightly step does, until it leaves trial."""
+    rets, state = [], "trial"
+    for _ in range(days):
+        rets.append(float(np.clip(rng.normal(0, 0.01), -0.03, 0.03)))
+        state, _ = shadow.judge("n", state, 1000.0, rets, curve(rets), cfg)
+        if state != "trial":
+            break
+    return state
+
+
+def test_a_null_account_wins_at_most_alpha_over_a_full_run():
+    """The judge's error rate: zero-mean accounts, read every day to max_days, win no more often than alpha. The
+    sequence's alpha holds at family 1 and, split over the slots, at family max_active (negative control below: the old
+    rule, read the same way, breaks 10%)."""
+    cfg = rule()
+    rng = np.random.default_rng(7)
+    runs = 150
+    wins = sum(null_run(rng, cfg["max_days"], cfg) == "winning" for _ in range(runs))
+    assert wins / runs <= cfg["alpha"]
+    bonf = rule(family=cfg["max_active"])
+    wins = sum(null_run(rng, bonf["max_days"], bonf) == "winning" for _ in range(runs))
+    assert wins / runs <= bonf["alpha"] / bonf["family"] + 1 / runs
+
+
+def test_the_old_bootstrap_rule_read_daily_breaks_alpha_where_the_sequence_does_not():
+    """Negative control: the retired judge (a 90% block bootstrap re-read each day after 30 days) names a zero-mean account
+    a winner far more often than 10% when read every day (optional stopping)."""
+    rng = np.random.default_rng(11)
+    runs, wins = 60, 0
+    for r in range(runs):
+        rets = rng.normal(0, 0.01, 60)
+        for n in range(30, 61):
+            lo, _ = metrics.block_mean_ci(rets[:n], r * 100 + n, samples=300, block=10, level=0.90)
+            if lo is not None and lo > 0:
+                wins += 1
+                break
+    assert wins / runs > 0.10
+
+
+def test_a_strong_edge_wins_before_its_last_day_and_a_broken_one_retires_without_the_drawdown():
+    cfg = rule()
+    rng = np.random.default_rng(3)
+    good = list(np.clip(rng.normal(0.01, 0.01, 60), -0.03, 0.03))
+    for n in range(1, 61):
+        if shadow.judge("g", "trial", 1000.0, good[:n], curve(good[:n]), cfg)[0] == "winning":
+            break
+    assert n < 30
+    bad = list(np.clip(rng.normal(-0.008, 0.004, 60), -0.03, 0.03))
+    state, why = shadow.judge("b", "trial", 1000.0, bad[:40], curve(bad[:40]), rule(max_drawdown=0.9))
+    assert state == "retired" and "below zero" in why
+
+
+def test_gate_funnel_counts_each_entry_gate_in_turn_and_promote_counts_what_it_turns_away():
+    cands = [cand("A"), cand("B"), cand("FewTrades", trades=5), cand("NoOOS", oos_trades=3), cand("Neg", oos_expectancy=-1),
+             cand("NoHold", hold=None)]
+    f = shadow.gate_funnel(cands, CFG)
+    assert f == {"series": 6, "has_hold": 5, "min_backtest_trades": 4, "expectancy_lo_above": 4, "min_oos_trades": 3,
+                 "oos_expectancy_above": 2, "eligible": 2}
+    old = {"account": "x", "strategy": "A", "exchange": "binanceus", "overlay": "", "cohort": "short", "state": "retired"}
+    blocked: dict = {}
+    out = shadow.promote(cands, [old], resid({}), {**CFG, "short": {**CFG["short"], "max_active": 1}}, 60, blocked)
+    assert [o["account"] for o in out] == ["shadow-B-binanceus"] and blocked == {
+        "shadowed_before": 1, "cohort_full": 0, "correlated": 0}
+    blocked = {}
+    shadow.promote(cands, [], resid({}), {**CFG, "short": {**CFG["short"], "max_active": 1}}, 60, blocked)
+    assert blocked["cohort_full"] == 1
 
 
 def seed(conn):
@@ -138,3 +208,22 @@ def test_run_opens_an_overlay_account_and_marks_it_from_its_own_daily_returns(co
     # through the 3rd, where its own chunks end, and only its own overlay's returns
     got = conn.execute("SELECT day, ret FROM shadow_marks WHERE account = 'shadow-S-binanceus-o1' ORDER BY day").fetchall()
     assert [(d.day, r) for d, r in got] == [(2, 0.01), (3, 0.0)]
+
+
+def test_funnel_reports_the_first_ok_night_the_exits_and_the_gate_holding_most(conn):
+    gates = {"series": 100, "has_hold": 90, "min_backtest_trades": 80, "expectancy_lo_above": 30, "min_oos_trades": 20,
+             "oos_expectancy_above": 10, "eligible": 10, "shadowed_before": 4, "cohort_full": 0, "correlated": 2,
+             "admitted": 4}
+    conn.execute("INSERT INTO runs (kind, name, raw, started_at, finished_at, ok) VALUES "
+                 "('analysis', 'bad', '{}', '2026-11-01', now(), false), ('analysis', 'a', '{}', '2026-11-02', now(), true), "
+                 "('analysis', 'b', %s, '2026-11-03', now(), true)",
+                 (Jsonb({"shadow_funnel": gates, "shadow_active_short": 8, "shadow_active_long": 60}),))
+    for acct, state, promoted, retired in (("a", "winning", 1, None), ("b", "trial", 20, None), ("c", "retired", 1, 6),
+                                           ("d", "retired", 1, 61)):
+        conn.execute("INSERT INTO shadow_accounts (account, strategy, exchange, overlay, cohort, capital, promoted_on, "
+                     "retired_on, state, entry) VALUES (%s, %s, 'binanceus', '', 'short', 1000, %s, %s, %s, '{}')",
+                     (acct, acct, DAY + dt.timedelta(days=promoted), retired and DAY + dt.timedelta(days=retired), state))
+    f = shadow.funnel(conn, suggest.load_config())
+    assert (f["first_ok_night"], f["admitted_total"], f["winning"], f["trial"]) == ("2026-11-02", 4, 1, 1)
+    assert (f["retired_early"], f["retired_at_max_days"]) == (1, 1)
+    assert f["limit"] == "expectancy_lo_above" and f["free_slots"] == {"short": 52, "long": 0}

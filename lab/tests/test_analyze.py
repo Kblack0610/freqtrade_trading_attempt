@@ -678,3 +678,26 @@ def test_derive_drops_each_series_trades_before_the_one_after_next_loads(conn, m
     monkeypatch.setattr(analyze, "load_series", fake)
     monkeypatch.setattr(analyze, "daily_close", lambda coin: pd.Series(dtype=float))
     assert analyze.derive(conn)["series"] == 5
+
+
+def test_shards_split_the_backtests_by_strategy_and_venue_and_the_last_one_finishes_the_night(lab, monkeypatch):
+    found = [strat("Good"), strat("Other"), strat("Planted"), strat("Third")]
+    monkeypatch.setattr(analyze, "SHARDS", 2)
+    monkeypatch.setattr(analyze, "JOB", "night")
+    runs = []
+    for index in (0, 1):
+        monkeypatch.setattr(analyze, "SHARD", index)
+        r = FakeRunner(found)
+        analyze.FINISHER[0] = True
+        assert analyze.main(r, TODAY) == 0
+        runs.append(r)
+        assert (analyze.FINISHER[0], one(lab, "SELECT count(*) FROM runs WHERE kind = 'analysis'")) == (index == 1, index)
+    owned = [{(s, e) for s, e, *_ in r.backtests} for r in runs]
+    assert not owned[0] & owned[1] and owned[0] and owned[1]
+    assert {(s, e) for s in ("Good", "Other", "Planted", "Third") for e in ("binanceus", "coinbase")} == owned[0] | owned[1]
+    assert all(analyze.shard_of(s, e, 2) == i for i, o in enumerate(owned) for s, e in o)
+    assert sum(len(r.backtests) for r in runs) == 100
+    assert one(lab, "SELECT count(*) FROM backtest_chunks WHERE ok") == 100
+    raw = one(lab, "SELECT raw FROM runs WHERE kind = 'analysis'")
+    assert raw["shards"] == 2 and raw["chunks_run"] == 100 and raw["series"] == 8
+    assert one(lab, "SELECT count(*) FROM runs WHERE kind = 'analysis_shard'") == 2
