@@ -32,7 +32,9 @@ def test_a_venue_is_connected_only_when_every_check_is_fresh_and_clean():
         broker=[{"account": "alpaca_paper", "at": NOW - H, "error": None},
                 {"account": "kraken", "at": NOW - 5 * H, "error": None},
                 {"account": "fidelity_individual_1234", "at": NOW - H, "error": None},
-                {"account": "fidelity_roth_ira_5678", "at": NOW - H, "error": "snaptrade: no total balance"}],
+                {"account": "fidelity_roth_ira_5678", "at": NOW - H, "error": "snaptrade: no total balance"},
+                {"account": "tastytrade_7058", "at": NOW - H, "error": None},
+                {"account": "tastytrade_7055", "at": NOW - H, "error": None}],
         drill=[{"account": "alpaca_paper", "at": NOW - 2 * H, "error": "RuntimeError: order o1 is new after the cancel"},
                {"account": "kalshi_demo", "at": NOW - 20 * H, "error": None}],
         paper=[{"account": "kalshi", "at": NOW - dt.timedelta(minutes=5), "error": None}]), NOW))
@@ -40,7 +42,8 @@ def test_a_venue_is_connected_only_when_every_check_is_fresh_and_clean():
     assert rows["Alpaca"]["status"] == "error" and "after the cancel" in rows["Alpaca"]["checks"][1]["error"]
     assert rows["Kraken"]["status"] == "stale"  # hourly read, 5 h old
     assert rows["Fidelity (SnapTrade)"]["status"] == "error"  # the worst of its accounts
-    assert rows["Tastytrade"]["status"] == "missing" and rows["Tastytrade"]["checks"] == []
+    assert rows["Tastytrade"]["status"] == "connected"  # every tastytrade_* account fresh and clean
+    assert rows["Trezor"]["status"] == "missing"  # no wallet read at all
 
 
 def test_accounts_page_shows_the_venue_table(conn, signed_in):  # noqa: F811
@@ -49,4 +52,4 @@ def test_accounts_page_shows_the_venue_table(conn, signed_in):  # noqa: F811
     table = body.split("<h2>Venues</h2>")[1].split("<h2>Broker accounts</h2>")[0]
     for name in (v["name"] for v in venues.load()):
         assert name in table, name
-    assert "Wait for Tastytrade to finish reviewing" in table and "Kraken" in table
+    assert "split the read and trade grants" in table and "Kraken" in table
