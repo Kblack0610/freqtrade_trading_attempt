@@ -59,6 +59,6 @@ human = "Nothing: the account is open (2026-11-12) and its read key is in SOPS t
 
 [[venue]]
 name = "Tastytrade"
-money = "real, with a cert sandbox"
-checks = []
-human = "Wait for Tastytrade to finish reviewing the account (applied 2026-11-12), then make the OAuth app and the cert sandbox login"
+money = "real, read only, with a cert sandbox"
+checks = [{source = "broker", match = "tastytrade_*", max_age_h = 3}]
+human = "Nothing to read it: the OAuth app and grant are in SOPS trader-brokers as TASTYTRADE_CLIENT_ID, TASTYTRADE_CLIENT_SECRET and TASTYTRADE_REFRESH_TOKEN. Before trading, split the read and trade grants (tr-274)"

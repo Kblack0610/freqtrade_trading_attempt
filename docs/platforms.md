@@ -20,7 +20,7 @@ Tier is the highest rung we can use: **API** (an official API covers the job), *
 | Alpaca | candidate | API broker | API | API | Alpaca paper account | live 2026-11-12: hourly read and weekday drill (home-config #832) |
 | Interactive Brokers | candidate | API broker | API | API | IBKR paper account, needs a funded account | when a strategy needs it |
 | Schwab | candidate | API broker | API | API | none found | not connected: no paper API |
-| Tastytrade | applied | API broker | API | API | cert sandbox | account in review at Tastytrade (2026-11-12); then the OAuth app and sandbox login |
+| Tastytrade | held | API broker | API | API | cert sandbox | read live 2026-11-13 (`TastytradeRead`), two accounts; the grant can trade, split it before any order (tr-274) |
 | Fidelity | held | broker, no API | aggregator (SnapTrade, read connection) | person | SnapTrade sandbox for the read path | live 2026-11-12: four accounts read hourly through SnapTrade |
 | Robinhood | candidate | broker | API (crypto only) | API (crypto), person (rest) | none | code landed, needs a read-only key |
 | Kalshi | candidate (tr-50) | prediction market | API | API | demo exchange | demo drill live 2026-11-12 (home-config #832); live key held, not deployed; live tr-48 |
@@ -285,7 +285,9 @@ Only Alpaca and the Tastytrade sandbox can be practised on without money: IBKR p
 
 ### Tastytrade
 
-- Status: applied. The person opened the account on 2026-11-12 and Tastytrade is reviewing it. Options level when it is approved: defined-risk spreads, no naked selling (human, 2026-11-12).
+- Status: held. Tastytrade approved the account on 2026-11-13; it holds two individual accounts. Options level: defined-risk spreads, no naked selling (human, 2026-11-12).
+- Read path: `TastytradeRead` in `lab/broker.py`. `python -m lab.broker read` trades the refresh token for a `read`-scoped access token, then writes one `broker_balances` row per account, `tastytrade_<last4>`: cash is `cash-balance`, equity `net-liquidating-value`, buying power `equity-buying-power`, positions the open positions. A refused token exchange is not retried, because repeated failed logins block the IP.
+- Credentials: a personal OAuth app (rbw `trading/tastytrade`: client id and secret) and its grant (rbw `trading/tastytrade_refresh`: the refresh token), in SOPS trader-brokers. The grant holds `read trade openid` (human, 2026-11-13); before any strategy trades here, a read-only grant for the reader and a trade grant for the trading service alone (tr-274). Regenerating the client secret revokes every grant.
 - Strategy fit: options and futures.
 - API:
   - Open API, 96 operations, covering equities, options, futures and crypto (doc).
