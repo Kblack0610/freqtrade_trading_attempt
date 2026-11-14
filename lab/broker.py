@@ -14,8 +14,11 @@ Sources, each with its own env:
 - Kraken (KRAKEN_API_KEY, KRAKEN_API_SECRET: a Query Funds key). A real account, read only.
 - Polymarket US (POLYMARKET_US_KEY_ID, POLYMARKET_US_SECRET_KEY: the base64 Ed25519 key from polymarket.us/developer).
   A real account, read only.
+- Tastytrade (TASTYTRADE_CLIENT_ID, TASTYTRADE_CLIENT_SECRET, TASTYTRADE_REFRESH_TOKEN: a personal OAuth app and its
+  grant). Real accounts, read only.
 
-The real-account clients have no order method. Robinhood, SnapTrade and Polymarket US send only GET. Kraken's
+The real-account clients have no order method. Robinhood, SnapTrade and Polymarket US send only GET. Tastytrade
+sends GET, plus the one POST that trades its refresh token for an access token, scoped `read` so it cannot trade. Kraken's
 private API takes POST for every call, reads included, so KrakenRead sends POST to its READS paths only (Balance, TradeBalance) and refuses
 any other path before a request leaves; a key that could trade still cannot from here. A live order would come in behind lab/live.py's guard (docs/live.md), never by widening these. A source with no
 keys is skipped; with none set, `read` prints that and exits 0, as lab/wallet.py does with no accounts, so its job can
@@ -393,6 +396,76 @@ class PolymarketUSRead:
         return [row]
 
 
+class TastytradeRead:
+    """Tastytrade over OAuth2, GET only past the token. Each read trades the refresh token (it never expires and is
+    not rotated) for a 15-minute access token, asking for the `read` scope alone so the token this client holds
+    cannot trade even when the grant can; every request sends a User-Agent or it is refused
+    (developer.tastytrade.com/docs/authentication/oauth2). Repeated failed logins block the IP for about 8 hours,
+    so a refused token exchange is never retried: Api retries a POST only on a 429."""
+
+    venue = "tastytrade"
+    host = "api.tastyworks.com"
+    READS = frozenset({"/oauth/token"})   # the only POST: it returns a token and touches no account
+    AGENT = "trader-lab-broker/1"
+
+    def __init__(self, cfg: dict, client_id: str, client_secret: str, refresh_token: str, session=None, sleep=None):
+        https_host(cfg, self.host)
+        self.client_id, self.client_secret, self.refresh_token = client_id, client_secret, refresh_token
+        self.api = Api(self.venue, cfg, session, sleep)
+        self.token = None
+
+    def login(self) -> None:
+        body = {"grant_type": "refresh_token", "refresh_token": self.refresh_token, "client_id": self.client_id,
+                "client_secret": self.client_secret, "scope": "read"}
+        r = self.api.request("POST", "/oauth/token", body=body, headers={"User-Agent": self.AGENT})
+        if r.status_code >= 400:
+            raise RuntimeError(f"tastytrade POST /oauth/token: HTTP {r.status_code}: {str(r.text)[:300]}")
+        self.token = r.json()["access_token"]
+
+    def get(self, path: str, label: str) -> dict:
+        r = self.api.request("GET", path, headers={"User-Agent": self.AGENT, "Authorization": f"Bearer {self.token}"},
+                             label=label)
+        if r.status_code >= 400:
+            raise RuntimeError(f"tastytrade GET {label}: HTTP {r.status_code}: {str(r.text)[:300]}")
+        return r.json()["data"]
+
+    @staticmethod
+    def name(number: str) -> str:
+        """tastytrade_<last4>, so the two accounts stay apart and the full number never reaches a row."""
+        return f"tastytrade_{number[-4:]}"
+
+    def read(self) -> list[dict]:
+        """One row per account: cash is the cash balance, equity the net liquidating value, buying power the equity
+        buying power, positions the open positions. A failed login or account list is one row with the error."""
+        try:
+            self.login()
+            accounts = [i["account"] for i in self.get("/customers/me/accounts", "/customers/me/accounts")["items"]]
+        except RuntimeError as e:
+            return [{**blank_row(self.venue, False), "error": str(e)}]
+        except KeyError as e:
+            return [{**blank_row(self.venue, False), "error": f"tastytrade: no field {e}"}]
+        except requests.RequestException as e:
+            return [{**blank_row(self.venue, False), "error": f"tastytrade: {type(e).__name__}"}]
+        rows = []
+        for a in accounts:
+            n = a["account-number"]
+            row = blank_row(self.name(n), False)
+            try:
+                bal = self.get(f"/accounts/{n}/balances", "/accounts/{n}/balances")
+                pos = self.get(f"/accounts/{n}/positions", "/accounts/{n}/positions")["items"]
+                row.update(status="closed" if a.get("is-closed") else "open", currency=bal["currency"],
+                           cash=num(bal["cash-balance"]), equity=num(bal["net-liquidating-value"]),
+                           buying_power=num(bal["equity-buying-power"]), positions=len(pos))
+            except RuntimeError as e:
+                row["error"] = str(e)
+            except KeyError as e:
+                row["error"] = f"tastytrade: no field {e}"
+            except requests.RequestException as e:
+                row["error"] = f"tastytrade: {type(e).__name__}"
+            rows.append(row)
+        return rows
+
+
 def read(client: AlpacaPaper) -> dict:
     row = blank_row(client.venue, True)
     try:
@@ -434,6 +507,9 @@ def sources(session=None, sleep=None) -> list:
     if env("POLYMARKET_US_KEY_ID") and env("POLYMARKET_US_SECRET_KEY"):
         out.append(PolymarketUSRead(cfg["polymarket_us"], env("POLYMARKET_US_KEY_ID"), env("POLYMARKET_US_SECRET_KEY"),
                                     session, sleep=sleep).read)
+    if env("TASTYTRADE_CLIENT_ID") and env("TASTYTRADE_CLIENT_SECRET") and env("TASTYTRADE_REFRESH_TOKEN"):
+        out.append(TastytradeRead(cfg["tastytrade"], env("TASTYTRADE_CLIENT_ID"), env("TASTYTRADE_CLIENT_SECRET"),
+                                  env("TASTYTRADE_REFRESH_TOKEN"), session, sleep=sleep).read)
     return out
 
 
@@ -454,7 +530,7 @@ def main(argv: list[str] | None = None, session=None, sleep=None) -> int:
         return 0 if row["error"] is None else 1
     found = sources(session, sleep)
     if not found:
-        print("broker: no broker keys set (Alpaca paper, Robinhood, SnapTrade, Kraken, Polymarket US)", flush=True)
+        print("broker: no broker keys set (Alpaca paper, Robinhood, SnapTrade, Kraken, Polymarket US, Tastytrade)", flush=True)
         return 0
     rows = [r for src in found for r in src()]
     now = dt.datetime.now(dt.timezone.utc).replace(microsecond=0)

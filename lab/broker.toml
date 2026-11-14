@@ -1,4 +1,5 @@
-# Broker accounts read by lab/broker.py: Alpaca paper, and Robinhood Crypto, SnapTrade (Fidelity) and Kraken read only.
+# Broker accounts read by lab/broker.py: Alpaca paper, and Robinhood Crypto, SnapTrade (Fidelity), Kraken, Polymarket US and
+# Tastytrade read only.
 # Keys are not here: they come from env, named in lab/broker.py. Every request goes through lab/markets/api.py Api:
 # page_gap_s between one process's requests, retries on a 429 (and a 5xx for a GET or DELETE), and budget_rps, the
 # requests a second every process on the same key may send together (lab/markets/budget.py), about 60% of the limit.
@@ -52,6 +53,16 @@ currency = "USD"
 page_gap_s = 0.5
 budget_rps = 2
 retries = 3
+timeout_s = 30
+
+[tastytrade]
+base_url = "https://api.tastyworks.com"   # the client refuses any other host; GET only, past its one token POST
+# Published limit: none for REST, "reasonable thresholds", and a 429 carries no rate-limit headers; too many failed
+# logins block the IP for about 8 hours (read 2026-11-13, https://developer.tastytrade.com/docs/guides/rate-limits-and-backoff).
+# One token call and two reads per account a run, so a slow pace and few retries.
+page_gap_s = 1
+budget_rps = 1
+retries = 2
 timeout_s = 30
 
 [alpaca_data]

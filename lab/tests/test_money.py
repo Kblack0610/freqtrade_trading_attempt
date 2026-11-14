@@ -22,7 +22,7 @@ from urllib.parse import urlparse
 
 import pandas as pd
 import pytest
-from test_broker import KR_SECRET, PM_SECRET, RH, SEED, ST, Kraken, Paper, Polymarket, Robinhood, Snap
+from test_broker import KR_SECRET, PM_SECRET, RH, SEED, ST, Kraken, Paper, Polymarket, Robinhood, Snap, Tasty
 from test_markets_kalshi_trade import RSA, Demo, pem
 from test_markets_manifold_trade import Manifold
 
@@ -253,6 +253,10 @@ MONEY_MAP = {
         "read", frozenset({"api.polymarket.us"}), lambda: {broker.PolymarketUSRead.host}, _broker("polymarket_us"),
         lambda cfg, s: broker.PolymarketUSRead(cfg, "k", PM_SECRET, s, sleep=lambda _: None), lambda c, conn: c.read(),
         Polymarket),
+    ("lab/broker.py", "TastytradeRead"): Client(
+        "read", frozenset({"api.tastyworks.com"}), lambda: {broker.TastytradeRead.host}, _broker("tastytrade"),
+        lambda cfg, s: broker.TastytradeRead(cfg, "c", "s", "r", s, sleep=lambda _: None), lambda c, conn: c.read(),
+        Tasty, reads=frozenset({"/oauth/token"}), declared_reads=lambda: broker.TastytradeRead.READS),
     ("lab/broker.py", "AlpacaData"): Client(
         "none", why="Alpaca market data on the paper key: GET only, data.alpaca.markets only, no order path"),
     ("lab/markets/api.py", "Api"): Client("none", why="the one paced client: every client built on it has its own row"),

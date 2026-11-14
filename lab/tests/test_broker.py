@@ -12,7 +12,8 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from lab import broker
 from lab.markets import drill
-from lab.broker import AlpacaPaper, KrakenRead, NotPaper, PolymarketUSRead, RobinhoodCrypto, SnapTrade, WrongHost
+from lab.broker import (AlpacaPaper, KrakenRead, NotPaper, PolymarketUSRead, RobinhoodCrypto, SnapTrade,
+                        TastytradeRead, WrongHost)
 
 PAPER = {"base_url": "https://paper-api.alpaca.markets", "timeout_s": 5, "page_gap_s": 0, "retries": 2}
 ACCOUNT = {"id": "a1", "status": "ACTIVE", "currency": "USD", "equity": "100012.50", "cash": "99000.00",
@@ -230,12 +231,20 @@ def test_a_read_only_client_refuses_any_other_host(cls, cfg):
         cls(cfg, "k", base64.b64encode(SEED).decode())
 
 
+@pytest.mark.parametrize("url", ["https://api.cert.tastyworks.com", "http://api.tastyworks.com",
+                                 "https://api.tastyworks.com.evil.example"])
+def test_tastytrade_refuses_any_other_host(url):
+    with pytest.raises(WrongHost):
+        TastytradeRead({"base_url": url}, "c", "s", "r")
+
+
 def test_the_shipped_config_points_at_each_platform():
     cfg = broker.tomllib.loads(broker.CONFIG.read_text())
     RobinhoodCrypto(cfg["robinhood"], "k", base64.b64encode(SEED).decode())
     SnapTrade(cfg["snaptrade"], "c", "k")
     KrakenRead(cfg["kraken"], "k", KR_SECRET)
     PolymarketUSRead(cfg["polymarket_us"], "k", PM_SECRET)
+    TastytradeRead(cfg["tastytrade"], "c", "s", "r")
 
 
 def test_robinhood_signs_key_timestamp_path_and_method_with_the_ed25519_key():
@@ -505,3 +514,101 @@ def test_alpaca_paper_reads_signed_positions_and_fills_newest_first():
     sold, bought = c.fills()
     assert sold == Fill("o2", "QQQ", dt.datetime(2026, 11, 13, 15, 0, 0, 500000, tzinfo=dt.timezone.utc), -2.0, 480.10)
     assert (bought.order_id, bought.count, bought.price) == ("o1", 3.0, 500.10)
+
+
+# Tastytrade: real accounts, read only, GET behind an OAuth refresh-token exchange.
+
+TT = {"base_url": "https://api.tastyworks.com", "timeout_s": 5, "page_gap_s": 0, "retries": 2}
+TT_ACCOUNTS = ["5WJ00001", "5WJ00002"]
+
+
+class Tasty:
+    """Two accounts, the first holding two positions; records every request. `token` answers the token POST,
+    `balances` the second account's balance read."""
+
+    def __init__(self, token=200, balances=200):
+        self.calls, self.token, self.balances = [], token, balances
+
+    def request(self, method, url, json, timeout, headers, params=None):
+        path = url.removeprefix("https://api.tastyworks.com")
+        self.calls.append((method, path, json, headers))
+        if (method, path) == ("POST", "/oauth/token"):
+            if self.token != 200:
+                return Resp(self.token, {"error": "invalid_grant", "error_description": "Grant revoked"})
+            return Resp(200, {"access_token": "at-1", "token_type": "Bearer", "expires_in": 900})
+        if method != "GET" or headers.get("Authorization") != "Bearer at-1":
+            return Resp(401, {"error": {"code": "unauthorized"}})
+        if path == "/customers/me/accounts":
+            return Resp(200, {"data": {"items": [{"account": {"account-number": n, "is-closed": False},
+                                                  "authority-level": "owner"} for n in TT_ACCOUNTS]}})
+        n = path.split("/")[2] if path.startswith("/accounts/") else None
+        if path == f"/accounts/{n}/balances":
+            if n == TT_ACCOUNTS[1] and self.balances != 200:
+                return Resp(self.balances, {"error": {"message": "nope"}})
+            cash = "1000.5" if n == TT_ACCOUNTS[0] else "0.0"
+            return Resp(200, {"data": {"account-number": n, "currency": "USD", "cash-balance": cash,
+                                       "net-liquidating-value": "1250.75" if n == TT_ACCOUNTS[0] else "0.0",
+                                       "equity-buying-power": "900.0" if n == TT_ACCOUNTS[0] else "0.0"}})
+        if path == f"/accounts/{n}/positions":
+            items = [{"symbol": "SPY"}, {"symbol": "QQQ"}] if n == TT_ACCOUNTS[0] else []
+            return Resp(200, {"data": {"items": items}})
+        return Resp(404, {"error": {"message": path}})
+
+
+def tt(s):
+    return TastytradeRead(TT, "cid", "csecret", "rtoken", s, sleep=NO_SLEEP)
+
+
+def test_tastytrade_reads_one_row_per_account_named_by_its_last_four():
+    s = Tasty()
+    assert tt(s).read() == [
+        {"broker": "tastytrade_0001", "paper": False, "status": "open", "currency": "USD", "equity": 1250.75,
+         "cash": 1000.5, "buying_power": 900.0, "positions": 2, "error": None},
+        {"broker": "tastytrade_0002", "paper": False, "status": "open", "currency": "USD", "equity": 0.0,
+         "cash": 0.0, "buying_power": 0.0, "positions": 0, "error": None}]
+
+
+def test_tastytrade_trades_the_refresh_token_for_a_read_scoped_token_once_then_sends_only_get():
+    s = Tasty()
+    tt(s).read()
+    (method, path, body, headers), *rest = s.calls
+    assert (method, path) == ("POST", "/oauth/token")
+    assert body == {"grant_type": "refresh_token", "refresh_token": "rtoken", "client_id": "cid",
+                    "client_secret": "csecret", "scope": "read"}
+    assert headers["User-Agent"]
+    assert {m for m, *_ in rest} == {"GET"} and all(h["User-Agent"] for *_, h in rest)
+
+
+def test_a_refused_tastytrade_login_is_one_row_sent_once_without_the_secrets():
+    s = Tasty(token=401)
+    [row] = tt(s).read()
+    assert row["broker"] == "tastytrade" and row["error"].startswith("tastytrade POST /oauth/token: HTTP 401")
+    assert [(m, p) for m, p, *_ in s.calls] == [("POST", "/oauth/token")]
+    assert not any(x in row["error"] for x in ("rtoken", "csecret"))
+
+
+def test_a_rate_limited_tastytrade_login_backs_off_and_retries():
+    class Once(Tasty):
+        def request(self, method, url, json, timeout, headers, params=None):
+            if self.token == 429:
+                self.token = 200
+                self.calls.append((method, url, json, headers))
+                return Resp(429, {"error": "slow down"})
+            return super().request(method, url, json, timeout, headers, params)
+    assert all(r["error"] is None for r in tt(Once(token=429)).read())
+
+
+def test_one_tastytrade_account_failing_leaves_the_other_row_and_no_account_number_in_the_error():
+    a, b = tt(Tasty(balances=500)).read()
+    assert a["error"] is None
+    assert b["equity"] is None and b["error"].startswith("tastytrade GET /accounts/{n}/balances: HTTP 500")
+    assert TT_ACCOUNTS[1] not in b["error"]
+
+
+def test_main_reads_tastytrade_when_its_keys_are_set(conn, monkeypatch):
+    monkeypatch.setenv("TASTYTRADE_CLIENT_ID", "cid")
+    monkeypatch.setenv("TASTYTRADE_CLIENT_SECRET", "csecret")
+    monkeypatch.setenv("TASTYTRADE_REFRESH_TOKEN", "rtoken")
+    assert broker.main(["read"], session=Tasty(), sleep=NO_SLEEP) == 0
+    assert conn.execute("SELECT broker, paper, equity, positions FROM broker_balances ORDER BY broker").fetchall() == [
+        ("tastytrade_0001", False, 1250.75, 2), ("tastytrade_0002", False, 0.0, 0)]
