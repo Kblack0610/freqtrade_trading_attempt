@@ -44,6 +44,7 @@ Results go to the `trader` database in the cluster's shared Postgres, which the 
 | `lab/mixtures.py` | After the book: strategies run together (1/N, inverse volatility, HRP, each with or without a regime gate), weights and gates fit on earlier walk-forward months and scored on the next, every mixture a `trials` row, PBO across the set; "Running bots together" on `/book`. Spec space and budget: `lab/suggest.toml` [mixtures]. |
 | `lab/shadow.py` | Analysis step before the research loop: opens, marks and retires the shadow paper accounts (Shadow accounts) |
 | `lab/loop.py` | Last step of each analysis, the nightly research loop: which strategies and mixtures entered or left a market climate's passing set, which promote suggestions appeared or went, and monthly retune fit changes, as `research_events`. See Nightly research loop |
+| `lab/calls.py`, `lab/calls.toml` | Every trade idea before its outcome: `add` records a call (who, thesis, ticker, direction, entry close, horizons, benchmark), and the last analysis step scores it at each horizon from Alpaca daily closes (see Calls) |
 | `lab/guard.py` | The live guard every real-money entry point runs, whatever the engine: `GUARD_LIFTED`, stage caps, venue list, ready, the bankroll kill switch. See `docs/live.md` |
 | `lab/live.py` | Live Freqtrade bot entry point: always refuses, nothing deploys it. Its config checks sit on `lab/guard.py`. See `docs/live.md` and the operator rules in `docs/operating-rules.md` |
 | `lab/ingest.py` | Job run every 5 minutes: every bot's trades (closed and open) and a snapshot (profit, balance, dry-run flag, each open pair's newest candle time) into Postgres |
@@ -290,6 +291,12 @@ On razer-laptop, walk-forward (01:00 UTC) adds folds it has not stored and analy
 - **Stop rule**, written before the Saturday 2026-11-07 run: if no strategy reaches ready after that run and the remaining stress tests, the recommendation is core hold only and the live work ends. Results do not move a threshold afterwards.
 - **Trial register**: `trials` counts every strategy, exchange, setup overlay and tuned parameter set ever tried, and keeps a row when its strategy goes, so the bar never falls. The deflated Sharpe uses that count at the window's effective share.
 
+## Calls
+
+A call is any trade idea a person, an agent or a rule makes outside the strategies: `python -m lab.calls add --who human --author <name> --ticker NVDA --direction short --benchmark SMH --thesis "..."` records it in `calls`. It enters at the next regular close still to print (`--entry` picks a later one; one that has printed is refused) and is scored at 1, 5 and 20 sessions (`--horizons`). Rows are append-only (migration 048 refuses UPDATE and DELETE): a changed mind is a new call.
+
+`lab/calls.py` runs last in each analysis and is the only writer of `call_scores`. It reads split- and dividend-adjusted daily closes for every pending symbol from Alpaca market data (`lab/broker.py` AlpacaData on the paper key, GET to `data.alpaca.markets` only, SIP feed: `lab/broker.toml` [alpaca_data]) and scores each horizon whose exit close has settled: `ret` the close-to-close return, `pnl` the call's return after borrow on a short and a per-side cost (`lab/calls.toml`), `excess` the direction times the return beyond the benchmark over the same sessions. A horizon overdue with no score (no key, a failed read, a ticker with no bars) makes the analysis exit 1. Each call is also a `fills` row, source `call`, closed at its longest horizon; `lab/confidence.py` leaves calls out. `/calls` lists every call and the record per who, instrument and horizon with its anytime-valid interval (`lab/metrics.py` confidence_sequence). The analysis CronJob gets the two paper-key variables from the `trader-brokers` Secret (home-config `apps/freqtrade/analysis-cronjob.yaml`).
+
 ## Adding a strategy
 
 Drop the `.py` in `user_data/strategies/` (any subfolder). It must import on the pinned image: Python 3.14, NumPy 2 (`np.nan`, not `np.NaN`), no `ta` package. Check with `freqtrade list-strategies --recursive-strategy-search --userdir user_data -c user_data/config.base.json -c user_data/exchanges/binanceus.json`. The next nightly analysis backtests its whole history and checks it for bias. Give its class a line in `lab/families.toml`, or `/coverage` lists it as untagged and the tests fail.
@@ -365,6 +372,7 @@ The first run fetches full history (5m since 2019 on binanceus is the long pole)
 - `045`: `shadow_accounts` and `shadow_marks`, the shadow paper accounts and their appended daily marks, written by `lab/shadow.py` (Shadow accounts).
 - `046`: `overlay_daily`, each strategy x exchange x overlay's daily returns, rebuilt by the analysis like `strategy_daily`; overlay shadow accounts are marked from it.
 - `047`: the money layer. `fills`, a read-only view of what traded on every engine (`bot_trades`, filled `paper_orders`, executed `demo_orders`), which `lab/confidence.py` scores live trading from; and `bankroll`, the one cross-venue bankroll row `lab/watcher.py` rewrites each pass (Watcher).
+- `048`: `calls` and `call_scores`, append-only, written by `lab.calls add` and the analysis (Calls); `fills` gains the `call` source.
 - `049`: the event-contract walk-forward. `market_backtests` keeps one row per test window (key gains `start_at`, `score` goes, each trade's event and the window's daily returns come in), `market_category_results` follows it, and `market_readiness` holds the markets readiness gate, one row per variant (`lab/markets/families.py`).
 
  A schema change is a new numbered file; never edit an applied one.

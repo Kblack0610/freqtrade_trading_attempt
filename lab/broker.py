@@ -10,6 +10,7 @@ Sources, each with its own env:
 - Robinhood Crypto (ROBINHOOD_API_KEY, ROBINHOOD_PRIVATE_KEY: the base64 Ed25519 seed). A real account, read only.
 - SnapTrade (SNAPTRADE_CLIENT_ID, SNAPTRADE_CONSUMER_KEY: a Personal API key). Reads the accounts the person
   connected with a read connection, Fidelity first. A real account, read only.
+- Alpaca market data on the same paper key (AlpacaData): daily closes for lab/calls.py, GET only, data host only.
 - Kraken (KRAKEN_API_KEY, KRAKEN_API_SECRET: a Query Funds key). A real account, read only.
 - Polymarket US (POLYMARKET_US_KEY_ID, POLYMARKET_US_SECRET_KEY: the base64 Ed25519 key from polymarket.us/developer).
   A real account, read only.
@@ -50,6 +51,7 @@ from lab.markets.venue import Fill, Position
 
 CONFIG = Path(os.environ.get("BROKER_CONFIG", Path(__file__).resolve().parent / "broker.toml"))
 PAPER_HOST = "paper-api.alpaca.markets"
+DATA_HOST = "data.alpaca.markets"
 TERMINAL = frozenset({"canceled", "filled", "expired", "rejected", "replaced", "done_for_day"})
 
 
@@ -115,6 +117,42 @@ class AlpacaPaper:
     def cancel(self, order_id: str, ticker: str) -> None:
         self.call("DELETE", f"/v2/orders/{order_id}")
         await_terminal(self, order_id, self.sleep)
+
+
+class AlpacaData:
+    """Alpaca market data, GET only, on the paper key: daily bars for US stocks and ETFs, the prices lab/calls.py
+    scores calls on. It refuses any host but the data API's and any method but GET before a request leaves, so the key
+    it carries can only read prices from here, never place an order."""
+
+    venue = "alpaca_data"
+    host = DATA_HOST
+
+    def __init__(self, cfg: dict, key_id: str, secret: str, session=None, sleep=None):
+        https_host(cfg, self.host)
+        self.headers = {"APCA-API-KEY-ID": key_id, "APCA-API-SECRET-KEY": secret}
+        self.feed = cfg["feed"]
+        self.api = Api(self.venue, cfg, session, sleep)
+
+    def call(self, method: str, path: str, params: dict | None = None):
+        if method != "GET":
+            raise ValueError(f"refusing {method} {path}: this client sends GET only")
+        r = self.api.request("GET", path, params, headers=self.headers)
+        if r.status_code >= 400:
+            raise RuntimeError(f"alpaca data GET {path}: HTTP {r.status_code}: {str(r.text)[:300]}")
+        return r.json()
+
+    def closes(self, symbols: list[str], start: dt.date) -> dict[str, list[tuple[dt.date, float]]]:
+        """Each symbol's split- and dividend-adjusted daily closes from start, oldest first, as (session date, close)."""
+        out: dict[str, list[tuple[dt.date, float]]] = {s: [] for s in symbols}
+        params = {"symbols": ",".join(symbols), "timeframe": "1Day", "start": start.isoformat(), "adjustment": "all",
+                  "feed": self.feed, "limit": 10000}
+        while True:
+            page = self.call("GET", "/v2/stocks/bars", params)
+            for sym, bars in (page.get("bars") or {}).items():
+                out.setdefault(sym, []).extend((dt.date.fromisoformat(b["t"][:10]), float(b["c"])) for b in bars)
+            if not page.get("next_page_token"):
+                return {s: sorted(v) for s, v in out.items()}
+            params = {**params, "page_token": page["next_page_token"]}
 
 
 class RobinhoodCrypto:

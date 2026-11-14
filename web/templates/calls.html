@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}Calls{% endblock %}
+{% block body %}
+<h1>Calls</h1>
+<p class="muted">Every trade idea, recorded before its entry close and scored after it: return net of borrow and costs, and the return beyond the benchmark over the same sessions. Rows are never edited. Record one with <code>python -m lab.calls add</code>.</p>
+<h2>Record</h2>
+{% if groups %}
+<div class="scroll">
+<table>
+  <thead><tr><th>Who</th><th>Instrument</th><th class="n">Horizon</th><th class="n">Scored</th><th class="n">Hit rate</th><th class="n">Mean net</th><th class="n">95% anytime interval</th></tr></thead>
+  <tbody>
+  {% for g in groups %}
+  <tr><td>{{ g.who }}</td><td>{{ g.instrument }}</td><td class="n">{{ g.horizon }}d</td><td class="n">{{ g.n }}</td>
+      <td class="n">{{ g.hit | pct(0) }}</td><td class="n {{ g.mean | tone }}">{{ g.mean | pct(2) }}</td>
+      <td class="n">{{ g.lo | pct(1) }} to {{ g.hi | pct(1) }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}<p class="muted">Nothing scored yet: a call's first score lands the night after its first horizon's close.</p>{% endif %}
+<h2>Every call</h2>
+{% if calls %}
+<div class="scroll">
+<table>
+  <thead><tr><th>Recorded</th><th>Who</th><th>Call</th><th>Entry close</th><th>Benchmark</th>{% for h in [1, 5, 20] %}<th class="n">{{ h }}d net</th><th class="n">{{ h }}d excess</th>{% endfor %}<th>Thesis</th></tr></thead>
+  <tbody>
+  {% for c in calls %}
+  <tr><td>{{ c.created_at | local }}</td><td>{{ c.who }} <span class="muted">{{ c.author }}</span></td>
+      <td>{{ c.direction }} {{ c.ticker }} <span class="muted">{{ c.instrument }}</span></td><td>{{ c.entry_session }}</td><td>{{ c.benchmark }}</td>
+      {% for h in [1, 5, 20] %}{% set s = c.scores.get(h | string) %}
+      {% if h not in c.horizons %}<td class="n muted" colspan="2">not asked</td>
+      {% elif s %}<td class="n {{ s.pnl | tone }}" title="exit {{ s.exit }}">{{ s.pnl | pct(2) }}</td><td class="n {{ s.excess | tone }}">{{ s.excess | pct(2) }}</td>
+      {% else %}<td class="n muted" colspan="2">pending</td>{% endif %}
+      {% endfor %}
+      <td>{{ c.thesis }}{% if c.source %} <span class="muted">({{ c.source }})</span>{% endif %}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}<p class="muted">No calls yet.</p>{% endif %}
+{% endblock %}

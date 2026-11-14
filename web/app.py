@@ -28,6 +28,7 @@ from starlette.concurrency import run_in_threadpool
 
 from lab import book as book_lab
 from lab import guard as guard_lab
+from lab import calls as calls_lab
 from lab import db, diversity, metrics, suggest, universe
 from web import auth, charts, exporter, nav
 from web import venues as venue_roster
@@ -852,6 +853,21 @@ def markets_book(request: Request):
         a["ret"] = None if a["equity"] is None else a["equity"] / a["capital"] - 1
     return page(request, "markets_book.html", backtests=rows(MARKET_BACKTESTS), categories=rows(MARKET_CATEGORIES), accounts=accounts,
                 fills=rows(PAPER_FILLS), demo=rows(DEMO_ORDERS), hard_stop=hard_stop)
+
+
+# Every call newest first with its scores by horizon (lab/calls.py), and the scored rows groups() summarizes.
+CALLS = """
+SELECT c.*, coalesce(jsonb_object_agg(s.horizon, jsonb_build_object('exit', s.exit_session, 'pnl', s.pnl,
+       'excess', s.excess)) FILTER (WHERE s.call_id IS NOT NULL), '{}') AS scores
+FROM calls c LEFT JOIN call_scores s ON s.call_id = c.id GROUP BY c.id ORDER BY c.created_at DESC, c.id DESC
+"""
+
+
+@app.get("/calls", response_class=HTMLResponse)
+def calls(request: Request):
+    """Every trade idea recorded before its outcome, each horizon's score once its exit close has printed, and the
+    record per who, instrument and horizon."""
+    return page(request, "calls.html", calls=rows(CALLS), groups=calls_lab.groups(rows(calls_lab.SCORED)))
 
 
 @app.get("/accounts", response_class=HTMLResponse)

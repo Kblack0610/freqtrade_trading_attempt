@@ -55,17 +55,18 @@ REGISTER = [
     "FROM strategies WHERE load_error IS NOT NULL ON CONFLICT DO NOTHING",
 ]
 # Live trading as the fills view (migration 047) holds it, on this lane's venues only: a market venue's fills are the
-# betting lane's, and a drill's proves an order path, not a strategy. Both bind market_venues().
+# betting lane's, a drill's proves an order path, not a strategy, and a call (lab/calls.py) is scored on its own
+# page. The venue list binds market_venues().
 LIVE = """
 SELECT strategy, venue, min(open_date), count(*) FILTER (WHERE NOT is_open),
        count(*) FILTER (WHERE NOT is_open AND exit_reason ILIKE '%%stop%%')
-FROM fills WHERE source <> 'drill' AND NOT (venue = ANY(%s)) GROUP BY 1, 2
+FROM fills WHERE source NOT IN ('drill', 'call') AND NOT (venue = ANY(%s)) GROUP BY 1, 2
 """
 
 
 LIVE_RETURNS = """
 SELECT strategy, venue, profit_ratio FROM fills
-WHERE source <> 'drill' AND NOT (venue = ANY(%s)) AND NOT is_open AND profit_ratio IS NOT NULL
+WHERE source NOT IN ('drill', 'call') AND NOT (venue = ANY(%s)) AND NOT is_open AND profit_ratio IS NOT NULL
 ORDER BY close_date, fill_id
 """
 ROSTER = "SELECT strategy, exchange, name FROM bots WHERE last_seen >= %s ORDER BY name"

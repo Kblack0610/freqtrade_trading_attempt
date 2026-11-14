@@ -290,7 +290,7 @@ def test_the_markets_paper_league_is_a_cohort_beside_the_bots(conn, signed_in):
 
 
 def test_pages_render_on_an_empty_database(conn, signed_in):
-    for path in ("/", "/cohorts", "/data", "/runs", "/strategies", "/suggestions", "/walkforward", "/coverage", "/markets", "/links", "/markets/book", "/accounts"):
+    for path in ("/", "/cohorts", "/data", "/runs", "/strategies", "/suggestions", "/walkforward", "/coverage", "/markets", "/links", "/markets/book", "/accounts", "/calls"):
         assert signed_in[1].get(path).status_code == 200, path
 
 
@@ -305,6 +305,19 @@ def test_suggestions_show_each_kind_with_its_gates(conn, signed_in):
         assert needle in text, needle
     assert "1 fix, 2 retire" in signed_in[1].get("/").text
     assert "startup_candle_count" in signed_in[1].get("/strategies/Strategy001").text
+
+
+def test_calls_show_each_call_its_scores_and_the_record(conn, signed_in):
+    assert "No calls yet" in signed_in[1].get("/calls").text
+    cid = conn.execute("INSERT INTO calls (who, author, thesis, ticker, direction, instrument, entry_session, horizons, "
+                       "benchmark) VALUES ('human', 'kenneth', 'board ousted the CEO', 'NVDA', 'short', 'equity', "
+                       "'2026-11-13', '{1,5}', 'SMH') RETURNING id").fetchone()[0]
+    conn.execute("INSERT INTO call_scores (call_id, horizon, exit_session, entry_close, exit_close, bench_entry, "
+                 "bench_exit, ret, pnl, excess) VALUES (%s, 1, '2026-11-16', 100, 90, 200, 201, -0.1, 0.0996, 0.105)",
+                 (cid,))
+    body = signed_in[1].get("/calls").text
+    for needle in ("short NVDA", "board ousted the CEO", "9.96%", "10.50%", "pending", "not asked", "Mean net"):
+        assert needle in body, needle
 
 
 def test_confidence_shows_every_gate_and_the_first_it_fails(conn, signed_in):

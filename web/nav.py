@@ -17,6 +17,7 @@ TABS = (
         ("Cohorts", "/cohorts", ()),
         ("Walk-forward", "/walkforward", ()),
         ("Confidence", "/confidence", ()),
+        ("Calls", "/calls", ()),
         ("Coverage", "/coverage", ()),
     )),
     ("Pipeline", (

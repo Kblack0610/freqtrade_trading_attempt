@@ -26,7 +26,7 @@ event contract clears the same bar a strategy does.
 
 run() registers the trial before it reads any result, in the crypto lab's `trials` register (strategy = the
 family, exchange = the venue, variant = a hash of the params and the window's first day), and stores one
-market_backtests row per family, venue, variant and window (migrations 022, 048). The deflated Sharpe counts every
+market_backtests row per family, venue, variant and window (migrations 022, 049). The deflated Sharpe counts every
 trial on any markets venue (trial_count). Pooling windows into a verdict is lab/markets/families.py gate().
 """
 
