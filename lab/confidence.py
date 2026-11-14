@@ -357,6 +357,8 @@ def gates(pair: tuple, facts: dict, ev: dict | None, score: float | None, trials
     rest = without_best_pair(facts["pairs"].get(pair))
     return [
         gate("bias", ("not clean: " + ", ".join(bias)) if bias else "clean", "lookahead and recursive clean", not bias),
+        gate("survivorship", "not tested: historical pair selection and delisted coverage are missing",
+             "point-in-time universe reruns with measured performance gap and missing-candle coverage", False),
         gate("costs", paid, f"within {c['fee_tolerance']:.0%} of 2 x {fee}",
              paid is not None and bool(fee) and abs(paid / (2 * fee) - 1) <= c["fee_tolerance"]),
         gate("out-of-sample trades", ev["trades"], f">= {c['min_oos_trades']}", ev["trades"] >= c["min_oos_trades"]),

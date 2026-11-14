@@ -249,6 +249,8 @@ Confidence requires seven stress checks. A slippage sweep subtracts each additio
 
 Walk-forward stores scenarios in `walkforward.robustness`; their specification and tuned parameters enter the persistent trial register. Its cache includes experiment settings, implementation and finer-candle digests, so existing folds rerun through the normal budget. The confidence page displays every gate and its evidence. To populate the new evidence, run the usual walk-forward job with finer candles present for every whitelisted pair over the test months, then rescore confidence. No gate authorizes a bot or changes live-entry controls.
 
+The survivorship gate blocks readiness for every strategy while historical universe research is missing. `lab/pairs.py` selects today's liquid survivors, and `lab/universe.py` records that provenance. A provenance label cannot establish performance on pairs chosen at each fold's start. Clearing this gate requires implementing those reruns, including delisted pairs where candles exist, reporting missing coverage and measuring the performance gap. Scores and paper research continue while this gate fails (`lab/tests/test_confidence.py`).
+
 | Symptom | Check and action |
 |---|---|
 | Entry delay, parameter nudges or timeframe detail says missing evidence | Run walk-forward after migration 038; older folds have no scenario evidence. |
