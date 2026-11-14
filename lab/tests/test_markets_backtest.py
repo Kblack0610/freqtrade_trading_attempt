@@ -248,7 +248,7 @@ def seed_markets(conn, ids, venue="kalshi"):
                      (venue, mid, "yes" if i % 3 else "no", 1.0 if i % 3 else 0.0, at(86400 * (i + 1))))
 
 
-def test_run_registers_the_trial_stores_the_result_and_replaces_it(conn):
+def test_run_registers_the_trial_stores_the_window_and_replaces_only_that_window(conn):
     ids = [f"M{i}" for i in range(30)]
     seed_markets(conn, ids)
     b = book(*[(m, i, 0.30, 0.40, 1000, 1000) for i, m in enumerate(ids)])
@@ -258,15 +258,20 @@ def test_run_registers_the_trial_stores_the_result_and_replaces_it(conn):
     assert out["trades"] == 30 and out["trials"] == before + 1
     variant = backtest.variant_of(Once().params)
     assert conn.execute("SELECT 1 FROM trials WHERE strategy = 'test-once' AND exchange = 'kalshi' AND variant = %s",
-                        (variant,)).fetchone()
-    row = conn.execute("SELECT trades, fills, open_fills, cardinality(returns), metrics->>'trades', expectancy "
-                       "FROM market_backtests").fetchone()
+                        (f"{variant}:{T0.date()}",)).fetchone()
+    row = conn.execute("SELECT trades, fills, open_fills, cardinality(returns), metrics->>'trades', expectancy, events, "
+                       "cardinality(daily) FROM market_backtests").fetchone()
     assert row[:5] == (30, 30, 0, 30, "30") and row[5] == pytest.approx(out["expectancy"])
+    assert row[6] == ids and row[7] == 31  # each market its own event; a day to the day after the last settlement
     assert conn.execute("SELECT category, trades FROM market_category_results").fetchall() == [("other", 30)]
     backtest.run(conn, Once(), "kalshi", b, T0, end, CFG)
     assert conn.execute("SELECT count(*) FROM market_category_results").fetchone()[0] == 1
     assert conn.execute("SELECT count(*) FROM market_backtests").fetchone()[0] == 1
     assert conn.execute("SELECT count(*) FROM trials WHERE exchange = 'kalshi'").fetchone()[0] == before + 1
+    later = T0 + dt.timedelta(days=31)
+    backtest.run(conn, Once(), "kalshi", b, later, later + dt.timedelta(days=1), CFG)  # another window is another row
+    assert conn.execute("SELECT count(*) FROM market_backtests").fetchone()[0] == 2
+    assert conn.execute("SELECT count(*) FROM trials WHERE exchange = 'kalshi'").fetchone()[0] == before + 2
 
 
 def test_a_refused_forward_only_run_still_counts_as_a_trial_and_stores_nothing(conn):
@@ -277,20 +282,6 @@ def test_a_refused_forward_only_run_still_counts_as_a_trial_and_stores_nothing(c
         backtest.run(conn, Forecaster(), "kalshi", book(("A", 0, 0.4, 0.5, 100, 100)), T0, T0 + dt.timedelta(days=1), CFG)
     assert conn.execute("SELECT 1 FROM trials WHERE strategy = 'llm-refused'").fetchone()
     assert conn.execute("SELECT count(*) FROM market_backtests").fetchone()[0] == 0
-
-
-def test_scores_come_once_the_population_is_large_enough(conn):
-    ids = [f"M{i}" for i in range(40)]
-    seed_markets(conn, ids)
-    b = book(*[(m, i, 0.30, 0.40, 1000, 1000) for i, m in enumerate(ids)])
-    ccfg = {"expectancy_level": 0.95, "min_member_trades": 30, "min_population": 3}
-    for k in range(2):
-        out = backtest.run(conn, Once(stake=10.0 + k), "kalshi", b, T0, T0 + dt.timedelta(days=1), CFG, ccfg)
-    assert out["scored"] == 0
-    assert conn.execute("SELECT count(*) FROM market_backtests WHERE score IS NULL").fetchone()[0] == 2
-    out = backtest.run(conn, Once(stake=12.0), "kalshi", b, T0, T0 + dt.timedelta(days=1), CFG, ccfg)
-    assert out["scored"] == 3
-    assert conn.execute("SELECT count(*) FROM market_backtests WHERE score BETWEEN 0 AND 100").fetchone()[0] == 3
 
 
 def test_a_series_falls_in_the_category_its_prefix_names():

@@ -373,6 +373,7 @@ The first run fetches full history (5m since 2019 on binanceus is the long pole)
 - `046`: `overlay_daily`, each strategy x exchange x overlay's daily returns, rebuilt by the analysis like `strategy_daily`; overlay shadow accounts are marked from it.
 - `047`: the money layer. `fills`, a read-only view of what traded on every engine (`bot_trades`, filled `paper_orders`, executed `demo_orders`), which `lab/confidence.py` scores live trading from; and `bankroll`, the one cross-venue bankroll row `lab/watcher.py` rewrites each pass (Watcher).
 - `048`: `calls` and `call_scores`, append-only, written by `lab.calls add` and the analysis (Calls); `fills` gains the `call` source.
+- `049`: the event-contract walk-forward. `market_backtests` keeps one row per test window (key gains `start_at`, `score` goes, each trade's event and the window's daily returns come in), `market_category_results` follows it, and `market_readiness` holds the markets readiness gate, one row per variant (`lab/markets/families.py`).
 
  A schema change is a new numbered file; never edit an applied one.
 

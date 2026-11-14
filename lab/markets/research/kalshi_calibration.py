@@ -24,6 +24,7 @@ from pathlib import Path
 import numpy as np
 import requests
 
+from lab import metrics
 from lab.markets.api import Api
 from lab.markets.recorder import load_config
 
@@ -120,16 +121,6 @@ def rows(markets: list[dict], candles: dict[str, list]) -> list[dict]:
     return out
 
 
-def boot_ci(pnl: np.ndarray, groups: np.ndarray, alpha: float, rng) -> tuple[float, float]:
-    """Percentile CI of mean pnl, resampling whole events."""
-    uniq, inv = np.unique(groups, return_inverse=True)
-    sums, counts = np.bincount(inv, pnl), np.bincount(inv)
-    k = len(uniq)
-    pick = rng.integers(0, k, size=(BOOT, k))
-    means = sums[pick].sum(1) / counts[pick].sum(1)
-    return float(np.quantile(means, alpha / 2)), float(np.quantile(means, 1 - alpha / 2))
-
-
 def win_lower(wins: int, n: int, alpha: float) -> float:
     """One-sided Clopper-Pearson lower bound on the win rate: the p where P(X >= wins | n, p) = alpha.
 
@@ -162,7 +153,6 @@ def cells(data: list[dict]) -> list[dict]:
 
 
 def score(all_cells: list[dict], seed: int = 7) -> tuple[list[dict], int]:
-    rng = np.random.default_rng(seed)
     scored = [c for c in all_cells if len(c["rows"]) >= MIN_N]
     trials = len(all_cells)
     for c in scored:
@@ -172,9 +162,10 @@ def score(all_cells: list[dict], seed: int = 7) -> tuple[list[dict], int]:
         c["price"] = float(np.mean([r["entry"] for r in c["rows"]]))
         c["win"] = float(np.mean([r["won"] for r in c["rows"]]))
         c["mean"] = float(pnl.mean())
-        c["lo95"], c["hi95"] = boot_ci(pnl, ev, 0.05, rng)
+        cell = metrics.seed_of(seed, c["cat"], c["h"], c["side"], c["lo"])
+        c["lo95"], c["hi95"] = metrics.cluster_mean_ci(pnl, ev, cell, BOOT, 0.95, min_clusters=2)
         # Bonferroni over every cell defined, scored or not: the bar a cell must clear to count.
-        c["lo_adj"], _ = boot_ci(pnl, ev, 0.05 / trials, rng) if c["lo95"] > 0 else (c["lo95"], 0)
+        c["lo_adj"], _ = metrics.cluster_mean_ci(pnl, ev, cell, BOOT, 1 - 0.05 / trials, min_clusters=2) if c["lo95"] > 0 else (c["lo95"], 0)
         c["breakeven"] = float(np.mean([r["won"] - r["pnl"] for r in c["rows"]]))  # entry + fee
         c["win_lo_adj"] = win_lower(int(sum(r["won"] for r in c["rows"])), c["n"], 0.05 / trials)
         c["survives"] = c["lo_adj"] > 0 and c["win_lo_adj"] > c["breakeven"]

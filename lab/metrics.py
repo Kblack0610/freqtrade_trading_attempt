@@ -137,6 +137,22 @@ def block_mean_ci(x: np.ndarray, seed: int, samples: int = 1000, block: int = 10
     return float(lo), float(hi)
 
 
+def cluster_mean_ci(x: np.ndarray, groups: np.ndarray, seed: int, samples: int = 1000, level: float = 0.95,
+                    min_clusters: int = 20):
+    """The mean's percentile interval resampling whole groups, since the contracts of one event settle together
+    and are not independent draws. (None, None) under min_clusters groups."""
+    x, groups = np.asarray(x, dtype=float), np.asarray(groups)
+    uniq, inv = np.unique(groups, return_inverse=True)
+    k = len(uniq)
+    if k < max(2, min_clusters):
+        return None, None
+    sums, counts = np.bincount(inv, x), np.bincount(inv)
+    pick = np.random.default_rng(seed).integers(0, k, size=(samples, k))
+    means = sums[pick].sum(1) / counts[pick].sum(1)
+    lo, hi = np.quantile(means, [(1 - level) / 2, (1 + level) / 2])
+    return float(lo), float(hi)
+
+
 def diff_ci(a: np.ndarray, b: np.ndarray, seed: int, samples: int = 1000, level: float = 0.90):
     """Bootstrap interval of mean(a) - mean(b) for two independent samples of trades."""
     a, b = np.asarray(a, dtype=float), np.asarray(b, dtype=float)

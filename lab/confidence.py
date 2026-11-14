@@ -132,11 +132,13 @@ def load(conn, cfg: dict, now: dt.datetime | None = None) -> dict:
     return facts
 
 
-def interval(returns, seed: int, cfg: dict) -> dict:
+def interval(returns, seed: int, cfg: dict, groups=None) -> dict:
     """Per-trade net returns in time order with the mean's block-bootstrap interval: what scores() reads. Its callers
-    are walk-forward folds here and event-contract backtests (lab/markets/backtest.py)."""
+    are walk-forward folds here and event-contract backtests (lab/markets/backtest.py). With `groups` (each trade's
+    event) the bootstrap resamples whole events instead of blocks, since contracts on one event move together."""
     x = np.asarray(returns, dtype=float)
-    lo, hi = metrics.block_mean_ci(x, seed, level=cfg["expectancy_level"])
+    lo, hi = (metrics.block_mean_ci(x, seed, level=cfg["expectancy_level"]) if groups is None else
+              metrics.cluster_mean_ci(x, groups, seed, level=cfg["expectancy_level"]))
     return {"returns": x, "trades": len(x), "mean": float(x.mean()) if len(x) else None, "lo": lo, "hi": hi}
 
 
