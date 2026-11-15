@@ -960,6 +960,29 @@ def test_a_crypto_trade_shows_its_markouts_and_reconcile(conn, signed_in):
     assert client.get("/trades/freqtrade/1?bot=other").status_code == 404
 
 
+def test_a_crypto_trade_shows_its_own_bots_entry_decision(conn, signed_in):
+    """A trade id counts per bot: kraken-s001's trade 1 shows its decision, never another bot's trade 1."""
+    from psycopg.types.json import Jsonb
+
+    seed(conn)
+    opened = conn.execute("SELECT open_date FROM bot_trades WHERE bot = 'kraken-s001'").fetchone()[0]
+    conn.execute("INSERT INTO bots (name, exchange, strategy) VALUES ('kraken-x', 'kraken', 'BinHV45')")
+    for bot, rsi, at in (("kraken-x", 91.234, opened), ("kraken-s001", 31.5, opened), ("kraken-s001", 87.654, NOW)):
+        conn.execute("INSERT INTO decisions (league, account, venue, instrument, decided_at, action, rule, inputs, "
+                     "sizing, fill_source, fill_id) VALUES ('crypto', %s, 'kraken', 'BTC/USD', %s, 'enter', "
+                     "'Strategy001: entry signal', %s, %s, 'freqtrade', 1)",
+                     (bot, at, Jsonb([{"name": "rsi", "value": rsi, "source": "kraken 5m candle",
+                                       "as_of": "2026-11-04T12:15:00+00:00"}]),
+                      Jsonb({"stake": 330.0, "amount": 0.004, "price": 78000.0, "fee_rate": 0.0026, "fee": 0.86})))
+    _, client = signed_in
+    body = client.get("/trades/freqtrade/1?bot=kraken-s001").text
+    for needle in ("Strategy001: entry signal", "31.5", "kraken 5m candle", "2026-11-04 12:15:00", "stake 330.00",
+                   "0.26%", "the candle it read is under Inputs"):
+        assert needle in body, needle
+    for absent in ("91.23", "87.65", "Recorded before decisions were traced", "Same pass", "contracts asked"):
+        assert absent not in body, absent
+
+
 def test_a_drill_and_a_call_open_their_page(conn, signed_in):
     did = conn.execute("INSERT INTO demo_orders (venue, ticker, client_id, price, count, placed_at, status) VALUES "
                        "('alpaca', 'SPY', 'c1', 1.0, 1, now(), 'filled') RETURNING id").fetchone()[0]

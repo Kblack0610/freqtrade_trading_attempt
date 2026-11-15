@@ -7,6 +7,7 @@ import numpy as np
 
 import talib.abstract as ta
 import freqtrade.vendor.qtpylib.indicators as qtpylib
+from lab.entry_inputs import EntryInputs
 
 
 def bollinger_bands(stock_price, window_size, num_of_std):
@@ -17,7 +18,7 @@ def bollinger_bands(stock_price, window_size, num_of_std):
     return rolling_mean, lower_band
 
 
-class BinHV45(IStrategy):
+class BinHV45(EntryInputs, IStrategy):
     INTERFACE_VERSION: int = 3
 
     minimal_roi = {
