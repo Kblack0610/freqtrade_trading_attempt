@@ -103,7 +103,7 @@ page_gap_s = 0.1
 budget_rps = 15
 # The recorder lists only markets with at least this many dollars traded (Gamma volume_num_min). On 2026-11-13 Gamma
 # listed 200k active markets, 19.7k at or above 1000 and 35k past their close_time; the full walk took 815-886 s of the
-# 900 s deadline. The paper league is Kalshi only ([paper] venues) and bars_min_volume below is the same 1000, so
+# 900 s deadline. The paper league has no Polymarket book ([paper] venues) and bars_min_volume below is the same 1000, so
 # nothing reads a quote under it.
 open_min_volume = 1000
 retries = 6
@@ -294,8 +294,15 @@ edge = 0.06
 [paper]
 # python -m lab.markets.paper (lab/markets/paper.py): each variant the readiness gate passed (market_readiness, ready) is
 # one paper account, if its family needs no fit and no key (lab/markets/paper.py docstring); the rest are retired.
-# The recorder's books are Kalshi only.
-venues = ["kalshi"]
+# Kalshi's books, and odds_api's sportsbook totals lines (lab/markets/paper.py line_books).
+venues = ["kalshi", "odds_api"]
+# Families that join a venue's league with every variant of their grid, without the readiness gate, as a forward
+# test: tt_totals has no backtest window until a source sells table tennis history (docs/markets.md, Table tennis data).
+forward = { odds_api = ["tt_totals"] }
+# A forward test runs this many days from its first fill and to this many settled bets, whichever is later
+# (paper.report; plan see-my-cousing-betegin-scalable-floyd, phase 5).
+forward_days = 28
+forward_bets = 300
 capital = 1000
 # Open positions an account may hold. At [families.longshot] stake 10 this keeps at most half of capital in open
 # fills; before the cap (2026-11-13) the eight longshot accounts held 77 to 206 each and most were out of cash.
@@ -304,7 +311,8 @@ max_open = 50
 drift_min_trades = 30
 # Only markets closing within this many hours are shown to the league: the longest `hours` any family trades.
 horizon_h = 168
-# No entries when the venue's last good sweep is older than this: three missed 5-min sweeps.
+# No entries when the venue's last good sweep is older than this: three missed 5-min sweeps. odds_api sweeps every
+# 6 h and its pass runs right after the sweep, so the same limit holds there.
 max_book_age_min = 15
 
 [demo.kalshi]

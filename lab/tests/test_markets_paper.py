@@ -219,3 +219,79 @@ def test_a_paper_loss_past_the_day_limit_breaches_without_stopping(conn):
     breached, stopped, seen = conn.execute("SELECT breached_at, stopped_at, seen_at FROM watch WHERE bot = %s",
                                            (ACCOUNT,)).fetchone()
     assert breached is not None and stopped is None and seen == NOW + dt.timedelta(minutes=5)
+
+
+# tt_totals on a sportsbook: the forward test of a family no backtest can judge yet
+def seed_odds(conn, meetings=6):
+    """Ann and Bea met `meetings` times before NOW, every one 75 points (over 70.5 and 72.5); their next game, G,
+    starts in 10 h with two lines at two books, the over at decimal 2.0 and the under at 1.9."""
+    conn.execute("INSERT INTO venues (venue, title, kind) VALUES ('odds_api', 'The Odds API', 'sportsbook')")
+    for i in range(meetings):
+        mid, start = f"P{i}:totals", NOW - dt.timedelta(days=10 - i)
+        conn.execute("INSERT INTO markets (venue, market_id, series_id, title, market_type, status, close_time, "
+                     "first_seen, updated_at) VALUES ('odds_api', %s, 'tt', %s, 'totals', 'settled', %s, %s, %s)",
+                     (mid, "Ann at Bea" if i % 2 else "Bea at Ann", start, start, start))
+        conn.execute("INSERT INTO resolutions (venue, market_id, result, settled_at) VALUES ('odds_api', %s, "
+                     "'Total 75', %s)", (mid, start + dt.timedelta(hours=1)))
+    conn.execute("INSERT INTO markets (venue, market_id, series_id, title, market_type, status, close_time, "
+                 "first_seen, updated_at) VALUES ('odds_api', 'G:totals', 'tt', 'Ann at Bea', 'totals', 'upcoming', "
+                 "%s, %s, %s)", (NOW + dt.timedelta(hours=10), NOW, NOW))
+    for book in ("b1", "b2"):
+        for line in ("70.5", "72.5"):
+            for side, ask in (("Over", 0.5), ("Under", 1 / 1.9)):
+                conn.execute("INSERT INTO outcomes (venue, market_id, outcome, ask, quoted_at) VALUES ('odds_api', "
+                             "'G:totals', %s, %s, %s)", (f"{book}:{side} {line}", ask, NOW - dt.timedelta(hours=3)))
+    sweep(conn, NOW)
+
+
+def sweep(conn, at):
+    conn.execute("INSERT INTO market_sweeps (venue, started_at, finished_at, seen, new_markets, changes, resolved, ok) "
+                 "VALUES ('odds_api', %s, %s, 1, 0, 1, 0, true)", (at - dt.timedelta(minutes=2), at))
+
+
+def test_tt_totals_trades_the_line_book_without_a_gate_row_settles_its_line_and_reports_roi_and_clv(conn):
+    seed_odds(conn)
+    c = load_config()
+    out = paper.run_pass(conn, "odds_api", c, NOW)
+    n = len(paper.variants(c["families"]["tt_totals"]))
+    assert out["fresh"] and out["book"] == 2 and len(out["accounts"]) == n == 4  # every variant, no readiness row
+    # six meetings: the min_h2h 5 variants buy the over of one line, once for the game; min_h2h 10 waits
+    fills = [o for o in orders(conn) if o[3]]
+    assert sorted(out["accounts"][a]["fills"] for a in out["accounts"]) == [0, 0, 1, 1]
+    assert [o[1:6] for o in fills] == [("G:totals|70.5", "yes", 20, 0.5, 0)] * 2
+
+    # the over shortens to 0.55 before the start: the fill's closing line moves our way
+    conn.execute("UPDATE outcomes SET ask = 0.55, quoted_at = %s WHERE outcome LIKE '%%Over 70.5'",
+                 (NOW + dt.timedelta(hours=5),))
+    sweep(conn, NOW + dt.timedelta(hours=6))
+    out = paper.run_pass(conn, "odds_api", c, NOW + dt.timedelta(hours=6))
+    assert sum(a["orders"] for a in out["accounts"].values()) == 0
+    mid = (1 - 1 / 1.9 + 0.55) / 2
+    closes = [r[0] for r in conn.execute("SELECT close_mid FROM paper_orders WHERE contracts > 0")]
+    assert closes == [pytest.approx(mid)] * 2
+
+    # G ends 74: over 70.5 pays one a contract, 20 - 10 = 10 each
+    conn.execute("INSERT INTO resolutions (venue, market_id, result, settled_at) VALUES ('odds_api', 'G:totals', "
+                 "'Total 74', %s)", (NOW + dt.timedelta(hours=12),))
+    out = paper.run_pass(conn, "odds_api", c, NOW + dt.timedelta(hours=12, minutes=5))
+    assert out["settled"] == 2 and {o[7:] for o in orders(conn) if o[3]} == {(1.0, 10.0)}
+
+    lines = paper.report(conn, "odds_api", c["paper"], NOW + dt.timedelta(days=1))
+    assert lines[0] == ("tt_totals on odds_api: 2 accounts, first fill 2026-11-06 (day 1), 2 settled; "
+                        "forward test runs to 2026-12-04 and 300 settled bets")
+    assert len(lines) == 3 and all(l.endswith(f"1 bets, 1-0, ROI +100.0%, CLV {mid - 0.5:+.3f} over 1")
+                                   for l in lines[1:])
+    assert all(l.startswith("  2026-W45 paper-tt_totals-") for l in lines[1:])
+
+
+def test_tt_totals_needs_its_meetings_and_a_fresh_book(conn):
+    seed_odds(conn, meetings=4)
+    c = load_config()
+    gated = copy.deepcopy(c)
+    gated["paper"]["forward"] = {}
+    assert paper.run_pass(conn, "odds_api", gated, NOW)["accounts"] == {}  # without forward, the gate decides
+    out = paper.run_pass(conn, "odds_api", c, NOW)
+    assert len(out["accounts"]) == 4 and not [o for o in orders(conn) if o[3]]  # 4 meetings < every min_h2h
+    out = paper.run_pass(conn, "odds_api", c, NOW + dt.timedelta(hours=1))
+    assert not out["fresh"] and out["book"] == 0
+    assert paper.report(conn, "odds_api", c["paper"], NOW) == ["odds_api: no paper fills yet"]
