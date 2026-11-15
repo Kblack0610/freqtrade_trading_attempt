@@ -13,7 +13,7 @@
   {% set snap %}<td class="{{ 'down' if b.error or stale(b.ts) }}">{{ "unreachable" if b.error else (b.ts | ago) }}</td>{% endset %}
   {% for p in b.positions %}
   <tr>
-    <td><a href="/bots/{{ b.name }}">{{ b.name }}</a></td><td>{{ p.pair }}</td><td>{{ p.open_date | local }}</td>
+    <td><a href="/bots/{{ b.name }}">{{ b.name }}</a></td><td><a href="/trades/freqtrade/{{ p.trade_id }}?bot={{ b.name | urlencode }}">{{ p.pair }}</a></td><td>{{ p.open_date | local }}</td>
     <td class="n">{{ p.open_rate | num(4) }}</td><td class="n">{{ p.last_price | num(4) }}</td>
     <td class="n">{{ p.stake_amount | num(2) }}</td>
     <td class="n {{ p.profit_ratio | tone }}">{{ p.profit_ratio | pct(2) }}</td>

@@ -38,7 +38,7 @@
   <tbody>
   {% for t in trades %}
   <tr>
-    <td>{{ t.trade_id }}</td><td>{{ t.pair }}</td><td>{{ t.open_date | local }}</td>
+    <td><a href="/trades/freqtrade/{{ t.trade_id }}?bot={{ t.bot | urlencode }}">{{ t.trade_id }}</a></td><td>{{ t.pair }}</td><td>{{ t.open_date | local }}</td>
     <td>{{ "open" if t.is_open else (t.close_date | local) }}</td>
     <td class="n">{{ t.stake_amount | num(2) }}</td>
     <td class="n {{ 'up' if (t.profit_ratio or 0) >= 0 else 'down' }}">{{ (t.profit_ratio * 100 if t.profit_ratio is not none else none) | num(2, "%") }}</td>
