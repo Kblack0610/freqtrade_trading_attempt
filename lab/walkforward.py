@@ -35,7 +35,7 @@ after a preemption still stops in time, and so a backlog longer than the job's d
 a recorded run with its post steps; the folds it left (`folds_left`) run next time, skipped by cache_key once stored.
 A run can be split over WF_SHARDS pods (a Kubernetes Indexed Job, each pod's JOB_COMPLETION_INDEX its shard): each
 strategy x venue belongs to one shard by a hash of its names, so every pod plans the same split. Each shard records a
-`walkforward_shard` row named WF_JOB#index; the shard that finishes last (under an advisory lock) runs the post steps
+`walkforward_shard` row named WF_JOB#index, a rescheduled pod reusing its index's unfinished row; the shard that finishes last (under an advisory lock) runs the post steps
 and records the run's `walkforward` row, its counts summed over the shards. A shard killed before it records leaves
 the run without that row, so TraderRunStale tells; its folds run next time.
 Exits 1 when more than a tenth of the folds this shard ran failed, or on a crash.
@@ -449,8 +449,11 @@ def main(runner: Runner | None = None, today: dt.date | None = None) -> int:
     with connect(autocommit=True) as conn:
         started = dt.datetime.now(dt.timezone.utc)
         job = JOB or f"{started:%Y-%m-%d %H:%M:%S.%f}"
-        shard_id = conn.execute("INSERT INTO runs (kind, name, raw, started_at) VALUES ('walkforward_shard', %s, '{}', %s) "
-                                "RETURNING id", (f"{job}#{SHARD}", started)).fetchone()[0]
+        name = f"{job}#{SHARD}"
+        shard_id = (conn.execute("SELECT id FROM runs WHERE kind = 'walkforward_shard' AND name = %s AND finished_at IS NULL",
+                                 (name,)).fetchone()
+                    or conn.execute("INSERT INTO runs (kind, name, raw, started_at) VALUES ('walkforward_shard', %s, '{}', %s) "
+                                    "RETURNING id", (name, started)).fetchone())[0]
         spent = conn.execute("SELECT extract(epoch FROM %s - min(started_at))::float FROM runs WHERE kind = 'walkforward_shard' "
                              "AND split_part(name, '#', 1) = %s", (started, job)).fetchone()[0]
         report: dict = {"exchanges": EXCHANGES, "universe": universe.describe_all(analyze.USER_DATA, EXCHANGES), "folds": FOLDS,
