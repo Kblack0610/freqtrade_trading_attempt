@@ -205,6 +205,14 @@ def test_main_without_a_key_runs_rules_and_the_check(conn, monkeypatch, capsys):
     assert "LITELLM_API_KEY not set" in out and "resolutions:" in out
 
 
+def test_outcomes_are_read_only_for_the_markets_asked(conn):
+    close = NOW + dt.timedelta(days=1)
+    market(conn, "kalshi", "KX-A", "Phoenix wins", outcomes=("yes", "no"), close=close)
+    market(conn, "kalshi", "KX-B", "Boston wins", outcomes=("yes", "no"), close=close)
+    assert links._outcomes(conn, "kalshi", ["KX-A"]) == {"KX-A": ["no", "yes"]}
+    assert links._outcomes(conn, "kalshi", []) == {}
+
+
 def test_a_down_route_ends_the_pass_after_max_failures_asks_in_a_row(conn):
     close = NOW + dt.timedelta(days=1)
     for i in range(5):

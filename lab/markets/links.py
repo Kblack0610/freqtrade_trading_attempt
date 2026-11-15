@@ -154,7 +154,8 @@ def parse(reply: str, a: dict, cands: list[dict]) -> list[tuple[dict, str, str, 
 
 
 def _outcomes(conn, venue: str, market_ids: list[str]) -> dict[str, list[str]]:
-    """The outcome words of these markets only: a venue's whole outcomes table is millions of rows and OOM-killed the pass at 1Gi."""
+    """The outcome words of these markets only (an ask's market and its candidates): a venue's whole outcomes table is
+    millions of rows and OOM-killed the pass at 1Gi."""
     by = defaultdict(set)
     for mid, o in conn.execute("SELECT market_id, outcome FROM outcomes WHERE venue = %s AND market_id = ANY(%s)",
                                (venue, market_ids)):
@@ -201,8 +202,6 @@ def run_llm(conn, cfg: dict, llm: Llm, now: dt.datetime) -> tuple[int, int]:
         for i, m in enumerate(pool):
             for w in set(words(f"{m['title']} {m['subtitle'] or ''}")) - stop:
                 index[w].append(i)
-        out_a = _outcomes(conn, va, [m["market_id"] for m in todo])
-        out_b = _outcomes(conn, vb, [m["market_id"] for m in pool])
         for m in todo:
             if asks >= max_asks:
                 break
@@ -214,6 +213,8 @@ def run_llm(conn, cfg: dict, llm: Llm, now: dt.datetime) -> tuple[int, int]:
             best = sorted(hits, key=lambda i: (-hits[i], pool[i]["close_time"]))[:lcfg.get("candidates", 15)]
             if not best:
                 continue  # nothing shares a word yet; ask again once something does
+            out_a = _outcomes(conn, va, [m["market_id"]])  # per ask: a few rows, never the venue's table
+            out_b = _outcomes(conn, vb, [pool[i]["market_id"] for i in best])
             a = {**_view(m), "venue": va, "outcomes": out_a.get(m["market_id"], ["yes"])}
             cands = [{**_view(pool[i]), "venue": vb, "outcomes": out_b.get(pool[i]["market_id"], ["yes"])} for i in best]
             try:
