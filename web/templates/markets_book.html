@@ -3,6 +3,7 @@
 {% block body %}
 <h1>Markets book</h1>
 {% include "_markets_nav.html" %}
+{% include "_signal_filter.html" %}
 <p class="muted">The event-contract strategy families: every backtested variant, then the paper league that trades them against the recorder's live books. Paper money only: nothing here can reach a venue's order API.</p>
 
 <h2>Backtests</h2>
@@ -10,10 +11,10 @@
 {% if backtests %}
 <div class="scroll">
 <table>
-  <thead><tr><th>Family</th><th>Venue</th><th>Variant</th><th>Window</th><th class="n">Orders</th><th class="n">Fills</th><th class="n">Settled</th><th class="n">Open</th><th class="n">Per trade (interval)</th><th class="n">Win rate</th><th class="n" title="Deflated Sharpe at the trial count">DSR</th><th class="n">Trials</th><th>Run</th></tr></thead>
+  <thead><tr><th>Family</th><th>Signal source</th><th>Instrument</th><th>Horizon</th><th>Venue</th><th>Variant</th><th>Window</th><th class="n">Orders</th><th class="n">Fills</th><th class="n">Settled</th><th class="n">Open</th><th class="n">Per trade (interval)</th><th class="n">Win rate</th><th class="n" title="Deflated Sharpe at the trial count">DSR</th><th class="n">Trials</th><th>Run</th></tr></thead>
   <tbody>
   {% for b in backtests %}
-  <tr><td>{{ b.family }}</td><td>{{ b.venue }}</td><td><span title="{{ b.params | tojson }}">{{ b.variant[:8] }}</span></td>
+  <tr><td>{{ b.family }}</td>{% set category = family_categories.get(b.family, {}) %}<td>{{ category.signal_source or "-" }}</td><td>{{ category.instrument or "-" }}</td><td>{{ category.horizon or "-" }}</td><td>{{ b.venue }}</td><td><span title="{{ b.params | tojson }}">{{ b.variant[:8] }}</span></td>
     <td>{{ b.start_at | local("%Y-%m-%d") }} to {{ b.end_at | local("%Y-%m-%d") }}</td>
     <td class="n">{{ "{:,}".format(b.orders) }}</td><td class="n">{{ "{:,}".format(b.fills) }}</td><td class="n">{{ "{:,}".format(b.trades) }}</td><td class="n">{{ "{:,}".format(b.open_fills) }}</td>
     <td class="n {{ b.expectancy | tone }}">{{ b.expectancy | pct(2) }} <span class="muted">{{ b.expectancy_lo | pct(2) }} to {{ b.expectancy_hi | pct(2) }}</span></td>
@@ -30,10 +31,10 @@
 {% if categories %}
 <div class="scroll">
 <table>
-  <thead><tr><th>Category</th><th>Family</th><th>Venue</th><th>Variant</th><th class="n">Trades</th><th class="n">Per trade (interval)</th></tr></thead>
+  <thead><tr><th>Category</th><th>Family</th><th>Signal source</th><th>Instrument</th><th>Horizon</th><th>Venue</th><th>Variant</th><th class="n">Trades</th><th class="n">Per trade (interval)</th></tr></thead>
   <tbody>
   {% for c in categories %}
-  <tr><td>{{ c.category }}</td><td>{{ c.family }}</td><td>{{ c.venue }}</td><td>{{ c.variant[:8] }}</td><td class="n">{{ "{:,}".format(c.trades) }}</td>
+  <tr><td>{{ c.category }}</td><td>{{ c.family }}</td>{% set category = family_categories.get(c.family, {}) %}<td>{{ category.signal_source or "-" }}</td><td>{{ category.instrument or "-" }}</td><td>{{ category.horizon or "-" }}</td><td>{{ c.venue }}</td><td>{{ c.variant[:8] }}</td><td class="n">{{ "{:,}".format(c.trades) }}</td>
     <td class="n {{ c.mean | tone }}">{{ c.mean | pct(2) }} <span class="muted">{{ c.lo | pct(2) if c.lo is not none else "-" }} to {{ c.hi | pct(2) if c.hi is not none else "-" }}</span></td></tr>
   {% endfor %}
   </tbody>
@@ -46,10 +47,10 @@
 {% if accounts %}
 <div class="scroll">
 <table>
-  <thead><tr><th>Account</th><th>Family</th><th>Venue</th><th class="n">Capital</th><th class="n">Equity</th><th class="n">Return</th><th class="n">Realized</th><th class="n">Open</th><th class="n">Fills</th><th class="n">Settled</th><th>Watch</th><th>Marked</th></tr></thead>
+  <thead><tr><th>Account</th><th>Family</th><th>Signal source</th><th>Instrument</th><th>Horizon</th><th>Venue</th><th class="n">Capital</th><th class="n">Equity</th><th class="n">Return</th><th class="n">Realized</th><th class="n">Open</th><th class="n">Fills</th><th class="n">Settled</th><th>Watch</th><th>Marked</th></tr></thead>
   <tbody>
   {% for a in accounts %}
-  <tr><td><span title="{{ a.params | tojson }}">{{ a.account }}</span></td><td>{{ a.family }}</td><td>{{ a.venue }}</td>
+  <tr><td><span title="{{ a.params | tojson }}">{{ a.account }}</span></td><td>{{ a.family }}</td>{% set category = family_categories.get(a.family, {}) %}<td>{{ category.signal_source or "-" }}</td><td>{{ category.instrument or "-" }}</td><td>{{ category.horizon or "-" }}</td><td>{{ a.venue }}</td>
     <td class="n">{{ a.capital | num(0) }}</td><td class="n">{{ a.equity | num(2) }}</td><td class="n {{ a.ret | tone }}">{{ a.ret | pct(2) }}</td>
     <td class="n {{ a.realized | tone }}">{{ a.realized | num(2) }}</td><td class="n">{{ a.open_positions if a.open_positions is not none else "-" }}</td>
     <td class="n">{{ a.fills }}</td><td class="n">{{ a.settled }}</td>

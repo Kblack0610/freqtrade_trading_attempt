@@ -2,7 +2,7 @@
 """Calls: every trade idea, written down before its outcome and scored after it, whoever made it.
 
   python -m lab.calls add --who human --author kenneth --ticker NVDA --direction short --benchmark SMH \\
-      --thesis "..." [--instrument equity] [--horizons 1,5,20] [--entry YYYY-MM-DD] [--source URL]
+      --thesis "..." --signal-source event [--instrument equity] [--horizons 1,5,20] [--entry YYYY-MM-DD] [--source URL]
 
 A call enters at a session's regular close (by default the next one still to print) and is scored at each horizon,
 in trading sessions after it, against a benchmark over the same sessions. `add` refuses an entry close that has
@@ -15,7 +15,7 @@ short pays borrow on the calendar days held, and both directions pay the per-sid
 exit is past due with no close to score it (no data key, a failed read, a ticker with no bars) counts in
 calls_unscored, and the analysis exits 1 for it, so the job's alert fires.
 
-groups() is the scored record per (who, instrument, horizon): the mean net return and its anytime-valid interval
+groups() is the scored record per (who, signal_source, instrument, horizon): the mean net return and its anytime-valid interval
 (lab/metrics.py confidence_sequence), as the site's /calls shows it.
 """
 
@@ -30,7 +30,7 @@ from zoneinfo import ZoneInfo
 
 import requests
 
-from lab import broker, metrics
+from lab import broker, metrics, taxonomy
 from lab.db import connect
 
 CONFIG = Path(__file__).resolve().parent / "calls.toml"
@@ -44,7 +44,7 @@ WHERE NOT EXISTS (SELECT 1 FROM call_scores s WHERE s.call_id = c.id AND s.horiz
 ORDER BY c.id, h
 """
 SCORED = """
-SELECT c.who, c.instrument, s.horizon, s.pnl FROM call_scores s JOIN calls c ON c.id = s.call_id
+SELECT c.who, c.signal_source, c.instrument, s.horizon, s.pnl FROM call_scores s JOIN calls c ON c.id = s.call_id
 ORDER BY s.exit_session, s.call_id
 """
 
@@ -140,16 +140,16 @@ def run(conn, data=None, now: dt.datetime | None = None, cfg: dict | None = None
 
 
 def groups(rows: list[dict], cfg: dict | None = None) -> list[dict]:
-    """The scored record per (who, instrument, horizon), in scoring order: count, hit rate, mean net return and its
+    """The scored record per (who, signal_source, instrument, horizon), in scoring order: count, hit rate, mean net return and its
     anytime-valid interval over [-bound, bound]."""
     cfg = cfg or load_config()
     by: dict = {}
     for r in rows:
-        by.setdefault((r["who"], r["instrument"], r["horizon"]), []).append(r["pnl"])
+        by.setdefault((r["who"], r["signal_source"], r["instrument"], r["horizon"]), []).append(r["pnl"])
     out = []
-    for (who, instrument, horizon), pnl in sorted(by.items()):
+    for (who, signal_source, instrument, horizon), pnl in sorted(by.items()):
         lo, hi = metrics.confidence_sequence(pnl, -cfg["bound"], cfg["bound"], cfg["alpha"])
-        out.append({"who": who, "instrument": instrument, "horizon": horizon, "n": len(pnl),
+        out.append({"who": who, "signal_source": signal_source, "instrument": instrument, "horizon": horizon, "n": len(pnl),
                     "hit": sum(x > 0 for x in pnl) / len(pnl), "mean": sum(pnl) / len(pnl),
                     "lo": float(lo[-1]), "hi": float(hi[-1])})
     return out
@@ -160,11 +160,12 @@ def add(conn, a: argparse.Namespace, now: dt.datetime) -> int:
     if close_at(entry) <= now:
         raise SystemExit(f"calls: refusing entry {entry}: its close has printed, so the call would know its entry")
     horizons = sorted({int(h) for h in a.horizons.split(",")})
+    taxonomy.validate({"signal_source": a.signal_source, "instrument": a.instrument, "horizon": horizons})
     return conn.execute(
         "INSERT INTO calls (who, author, thesis, ticker, direction, instrument, entry_session, horizons, benchmark, "
-        "source) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
+        "source, signal_source) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
         (a.who, a.author, a.thesis, a.ticker.upper(), a.direction, a.instrument, entry, horizons, a.benchmark.upper(),
-         a.source)).fetchone()[0]
+         a.source, a.signal_source)).fetchone()[0]
 
 
 def main(argv: list[str] | None = None, now: dt.datetime | None = None) -> int:
@@ -181,6 +182,7 @@ def main(argv: list[str] | None = None, now: dt.datetime | None = None) -> int:
     p.add_argument("--horizons", default="1,5,20")
     p.add_argument("--entry", type=dt.date.fromisoformat)
     p.add_argument("--source")
+    p.add_argument("--signal-source", required=True, choices=taxonomy.load()["signal_sources"])
     a = ap.parse_args(argv)
     now = now or dt.datetime.now(dt.timezone.utc)
     with connect(autocommit=True) as conn:
