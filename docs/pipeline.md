@@ -13,7 +13,7 @@ The stop rule set before the 2026-11-07 run said: if no strategy is ready after 
 ```
 exchanges --backfill--> candle files --analysis--> backtest chunks --> windows and statistics
                                     \--walk-forward--> tuned months (out of sample) --> stress scenarios
-windows + tuned months --> suggestions, confidence, book, mixtures --> research loop --> board rows and roster PRs
+windows + tuned months --> suggestions, confidence, book, mixtures --> research loop --> board rows
 roster --> paper bots (the league) --ingest--> Postgres --> drift, watcher, decay test --> back into confidence
 ```
 
@@ -36,7 +36,7 @@ All times UTC. Backfill and analysis run on razer-laptop, because the candle fil
 | 02:45 | `freqtrade-analysis` | Backtests everything, then scores everything | 1.6 h on 2026-11-10; 7.1 h on 2026-11-09 and 7.7 h on 2026-11-11 after big changes. Not "under an hour" |
 | 05:35 | `freqtrade-futures` | Funding rates and open interest | under a minute (0.01 h) |
 | Saturday 10:00 | `freqtrade-calibration` | Gate calibration: null and planted-edge strategies through the whole pipeline on synthetic candles, resumed week to week | not measured yet |
-| 10:00 | `trader-research-sync` (fleet machine) | Turns the night's changes into board rows and roster PRs | minutes |
+| 10:00 | `trader-research-sync` (fleet machine) | Turns the night's changes into board rows (no roster PR) | minutes |
 | Sunday 02:50 | `freqtrade-lab-backup` | Tars the lab volume to the NAS | 0.11 h (2026-11-08) |
 
 Schedules are read from home-config `apps/freqtrade`; the markets jobs are described in [markets.md](markets.md). Lengths are start to completion of the Jobs `kubectl -n freqtrade get jobs` still holds (about 6 days, 2026-11-06 to 12); a Job past its deadline has no completion time and the column says so.

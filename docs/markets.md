@@ -78,14 +78,17 @@ The gate pools each variant's windows before the lockbox and applies `suggest.to
 
 ## Paper league
 
-`python -m lab.markets.paper [--venue kalshi]` (same cwd as the recorder) is one pass of the paper league; it is meant to run after each recorder sweep. Each variant of each family in `[paper] families` (`lab/markets.toml`) is one account, `paper-<family>-<md5[:8]>`, with `[paper] capital` (1000) of paper money. Results are `paper_accounts` and `paper_orders` (migration 023). A pass:
+`python -m lab.markets.paper [--venue kalshi]` (same cwd as the recorder) is one pass of the paper league; it is meant to run after each recorder sweep. The league follows the readiness gate: each variant with a ready `market_readiness` row on the venue (Families, the gate) is one account, `paper-<family>-<md5[:8]>`, with `[paper] capital` (1000) of paper money, trading the params the gate judged. Results are `paper_accounts` and `paper_orders` (migrations 023, 050). A pass:
+
+- Opens an account for each ready variant and retires (`retired_at`) every account whose variant is no longer ready. A retired account takes no entries, its open fills still settle and mark, and it comes back if its variant passes again.
 
 - Settles every open fill whose market has a resolution, with the backtest's payout and fees.
 - Shows each account the latest recorded book (`outcomes`, the recorder's last quote) of every unresolved open market closing within `horizon_h` (168), but only when the venue's last good sweep finished under `max_book_age_min` (15) ago. A dead recorder means no entries, not entries at old prices.
-- Fills through `backtest.take`, the backtest's own fill model: the spread is crossed and at most `depth_share` of the side's top-of-book size is taken. Fees come from `fees.entry`, so a paper fill and a backtest fill of one book cost the same. Every order is stored, filled or not, so an account enters a market once, as in a backtest. An order the account's cash cannot cover is dropped unstored and asked again next pass.
+- Fills through `backtest.take`, the backtest's own fill model: the spread is crossed and at most `depth_share` of the side's top-of-book size is taken. Fees come from `fees.entry`, so a paper fill and a backtest fill of one book cost the same. Every order is stored, filled or not, so an account enters a market once, as in a backtest. An order the account's cash cannot cover, or one past `max_open` (50) open positions, is dropped unstored and asked again next pass. Before the cap the longshot accounts held 77 to 206 positions each and sat out of cash.
 - Marks equity: capital, plus realized profit, plus each open position at its exit price (a yes at the bid, a no at one minus the ask) less its cost.
+- Checks each account forward: its settled per-trade returns against its variant's `market_backtests` returns, the difference of means bootstrapped (`metrics.diff_ci`, 90%) once `drift_min_trades` (30) have settled. `drifted` is true when that interval excludes zero.
 
-The league runs `longshot` only (8 accounts). `calibration` needs a bars fit each pass, `gap` needs a recorded `odds_api`, and `llm` needs a LiteLLM key. The forecaster's paper scores are its only scores, so it joins once the key is in SOPS. `lab/watcher.py` watches each account for the daily loss limit and runs the kill drill on it; see the README, Watcher. Deploy: a CronJob in home-config `apps/freqtrade/`, not yet scheduled.
+Only `longshot` can run here. A ready variant of another family is reported under `unrunnable` and not traded: `calibration` needs a bars fit each pass, `gap` needs a recorded `odds_api`, and `llm` needs a LiteLLM key. The forecaster's paper scores are its only scores, so it joins once the key is in SOPS. `lab/watcher.py` watches each account for the daily loss limit and runs the kill drill on it; see the README, Watcher. Deploy: a CronJob in home-config `apps/freqtrade/`, not yet scheduled.
 
 ## Demo orders
 

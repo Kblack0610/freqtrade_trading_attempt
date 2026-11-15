@@ -10,7 +10,7 @@ action digest (training dates and parameters), so a new fit is reported once, ev
 The first run has no previous set, so everything passing enters.
 
 ci/research_sync.py, on the fleet machine, reads the unreported events (`python -m lab.loop pending`), files
-them on the agent board with the avenues register link and marks them reported
+them on the agent board with the avenues register link (a promotion gets a board row, no roster PR) and marks them reported
 (`python -m lab.loop ack <id>...`). Nothing here trades or edits the roster.
 """
 

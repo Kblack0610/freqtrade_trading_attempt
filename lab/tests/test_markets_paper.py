@@ -3,6 +3,7 @@ import datetime as dt
 
 import pandas as pd
 import pytest
+from psycopg.types.json import Jsonb
 
 from lab import watcher
 from lab.markets import backtest, paper
@@ -20,11 +21,21 @@ def cfg(**paper_over):
     return c
 
 
-ACCOUNT = paper.account_of("longshot", {"stake": 10, "max_spread": 0.05, "hours": 24, "buy": "no", "lo": 0.01,
-                                        "hi": 0.10})
+PARAMS = {"stake": 10, "max_spread": 0.05, "hours": 24, "buy": "no", "lo": 0.01, "hi": 0.10}
+VARIANT = backtest.variant_of(PARAMS)
+ACCOUNT = paper.account_of("longshot", VARIANT)
 
 
-def seed(conn, sweep_age=dt.timedelta(minutes=5)):
+def ready(conn, family="longshot", params=PARAMS, ok=True):
+    """The readiness gate's row for one variant (lab/markets/families.py gate())."""
+    conn.execute("DELETE FROM market_readiness WHERE family = %s AND variant = %s",
+                 (family, backtest.variant_of(params)))
+    conn.execute("INSERT INTO market_readiness (family, venue, variant, params, windows, trades, trials, ready, passed, "
+                 "gates) VALUES (%s, 'kalshi', %s, %s, 6, 400, 30, %s, 7, '[]')",
+                 (family, backtest.variant_of(params), Jsonb(params), ok))
+
+
+def seed(conn, sweep_age=dt.timedelta(minutes=5), gate=True):
     """A: a longshot closing in 12 h (enters, buys no at 0.95); B: the same price closing in 48 h (outside hours);
     C: a coin flip closing in 12 h (outside the band)."""
     conn.execute("INSERT INTO venues (venue, title, kind) VALUES ('kalshi', 'Kalshi', 'exchange')")
@@ -36,6 +47,8 @@ def seed(conn, sweep_age=dt.timedelta(minutes=5)):
                      "VALUES ('kalshi', %s, 'yes', %s, %s, 100, 100, %s)", (mid, bid, ask, NOW - dt.timedelta(minutes=7)))
     conn.execute("INSERT INTO market_sweeps (venue, started_at, finished_at, seen, new_markets, changes, resolved, ok) "
                  "VALUES ('kalshi', %s, %s, 3, 3, 3, 0, true)", (NOW - sweep_age, NOW - sweep_age))
+    if gate:
+        ready(conn)
 
 
 def orders(conn):
@@ -51,7 +64,7 @@ def equity(conn, account=ACCOUNT):
 def test_an_account_enters_a_market_once_at_the_backtest_fill_and_marks_at_the_exit_price(conn):
     seed(conn)
     out = paper.run_pass(conn, "kalshi", cfg(), NOW)
-    assert out["fresh"] and out["accounts"][ACCOUNT] == {"orders": 1, "fills": 1, "no_cash": 0}
+    assert out["fresh"] and out["accounts"][ACCOUNT] == {"orders": 1, "fills": 1, "no_cash": 0, "capped": 0}
     # no at 1 - bid = 0.95; 10 contracts in a 10 dollar stake; Kalshi fee ceil(0.07 * 10 * 0.95 * 0.05) = 0.04
     [o] = orders(conn)
     assert o[:6] == (ACCOUNT, "A", "no", 10, pytest.approx(0.95), pytest.approx(0.04))
@@ -90,15 +103,87 @@ def test_a_dead_recorder_means_no_entries(conn):
 def test_an_order_the_cash_cannot_pay_for_is_not_stored_and_asked_again(conn):
     seed(conn)
     out = paper.run_pass(conn, "kalshi", cfg(capital=5), NOW)
-    assert out["accounts"][ACCOUNT] == {"orders": 0, "fills": 0, "no_cash": 1} and orders(conn) == []
+    assert out["accounts"][ACCOUNT] == {"orders": 0, "fills": 0, "no_cash": 1, "capped": 0} and orders(conn) == []
     conn.execute("UPDATE paper_accounts SET capital = 1000")
     out = paper.run_pass(conn, "kalshi", cfg(), NOW + dt.timedelta(minutes=5))
     assert out["accounts"][ACCOUNT]["fills"] == 1
 
 
-def test_families_that_need_a_fit_or_a_key_are_refused():
-    with pytest.raises(ValueError, match="cannot run in the paper league"):
-        paper.accounts(cfg(families=["gap"]))
+def test_only_ready_variants_trade_and_one_that_stops_passing_retires_and_comes_back(conn):
+    seed(conn, gate=False)
+    out = paper.run_pass(conn, "kalshi", cfg(), NOW)
+    assert out["accounts"] == {} and orders(conn) == []  # nothing passed the gate: no league
+
+    ready(conn)
+    paper.run_pass(conn, "kalshi", cfg(), NOW + dt.timedelta(minutes=1))
+    assert [o[1] for o in orders(conn)] == ["A"]
+
+    ready(conn, ok=False)
+    conn.execute("UPDATE outcomes SET bid = 0.05, ask = 0.07 WHERE market_id = 'C'")
+    later = NOW + dt.timedelta(minutes=2)
+    out = paper.run_pass(conn, "kalshi", cfg(), later)
+    assert out["retired"] == [ACCOUNT] and out["accounts"] == {} and len(orders(conn)) == 1
+    assert conn.execute("SELECT retired_at FROM paper_accounts").fetchone()[0] == later
+    assert equity(conn)[3] == later  # a retired account still marks
+
+    ready(conn)
+    out = paper.run_pass(conn, "kalshi", cfg(), NOW + dt.timedelta(minutes=3))
+    assert out["retired"] == [] and out["accounts"][ACCOUNT]["fills"] == 1
+    assert conn.execute("SELECT retired_at FROM paper_accounts").fetchone()[0] is None
+
+
+def test_a_ready_variant_of_a_family_that_needs_a_fit_is_reported_not_traded(conn):
+    seed(conn, gate=False)
+    ready(conn, family="calibration", params={"edge": 0.05})
+    out = paper.run_pass(conn, "kalshi", cfg(), NOW)
+    assert out["accounts"] == {} and out["unrunnable"] == [f"calibration/{backtest.variant_of({'edge': 0.05})[:8]}"]
+
+
+def test_an_account_at_max_open_takes_no_entry_and_asks_again_once_one_settles(conn):
+    seed(conn)
+    conn.execute("UPDATE outcomes SET bid = 0.05, ask = 0.07 WHERE market_id = 'C'")
+    out = paper.run_pass(conn, "kalshi", cfg(max_open=1), NOW)
+    assert out["accounts"][ACCOUNT] == {"orders": 1, "fills": 1, "no_cash": 0, "capped": 1}
+    assert [o[1] for o in orders(conn)] == ["A"]
+    conn.execute("INSERT INTO resolutions (venue, market_id, result, value, settled_at) "
+                 "VALUES ('kalshi', 'A', 'no', 0, %s)", (NOW,))
+    out = paper.run_pass(conn, "kalshi", cfg(max_open=1), NOW + dt.timedelta(minutes=5))
+    assert out["accounts"][ACCOUNT]["fills"] == 1 and [o[1] for o in orders(conn)] == ["A", "C"]
+
+
+def check(conn):
+    return conn.execute("SELECT paper_trades, paper_expectancy, backtest_trades, gap_lo, gap_hi, drifted "
+                        "FROM paper_accounts WHERE account = %s", (ACCOUNT,)).fetchone()
+
+
+def backtested(conn, returns):
+    conn.execute("INSERT INTO market_backtests (family, venue, variant, params, start_at, end_at, orders, fills, "
+                 "trades, open_fills, metrics, returns, trials) VALUES ('longshot', 'kalshi', %s, %s, %s, %s, 0, 0, 0, "
+                 "0, '{}', %s, 30)", (VARIANT, Jsonb(PARAMS), NOW - dt.timedelta(days=60), NOW - dt.timedelta(days=30),
+                               returns))
+
+
+def settled_fills(conn, profits, first=0):
+    for i, p in enumerate(profits, first):
+        conn.execute("INSERT INTO paper_orders (account, market_id, side, stake, sent_at, quoted_at, contracts, price, "
+                     "fee, settled_at, payout, profit) VALUES (%s, %s, 'no', 10, %s, %s, 10, 0.95, 0.05, %s, 1, %s)",
+                     (ACCOUNT, f"S{i}", NOW, NOW, NOW, p))
+
+
+@pytest.mark.parametrize("paper_profit, drifted", [(0.46, False), (-9.5, True)])
+def test_the_forward_check_flags_paper_that_parts_from_its_backtest(conn, paper_profit, drifted):
+    seed(conn)
+    paper.run_pass(conn, "kalshi", cfg(), NOW)
+    assert check(conn)[3:] == (None, None, None)  # nothing settled, no backtest: no verdict
+    backtested(conn, [0.096, 0.0] * 50)  # mean 0.048, paper's 0.46 / 9.55
+    settled_fills(conn, [paper_profit] * 29)
+    paper.run_pass(conn, "kalshi", cfg(drift_min_trades=30), NOW + dt.timedelta(minutes=1))
+    assert check(conn)[0] == 29 and check(conn)[5] is None  # under drift_min_trades
+    settled_fills(conn, [paper_profit], first=29)
+    out = paper.run_pass(conn, "kalshi", cfg(drift_min_trades=30), NOW + dt.timedelta(minutes=2))
+    n, mean, bt, lo, hi, flag = check(conn)
+    assert (n, bt, flag, out["drifted"]) == (30, 100, drifted, int(drifted))
+    assert mean == pytest.approx(paper_profit / 9.55) and lo <= hi
 
 
 def test_the_watcher_drill_stops_a_paper_account_and_ending_it_starts_it_again(conn):
