@@ -3,6 +3,7 @@ import hashlib
 import json
 import os
 import threading
+import types
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -701,3 +702,40 @@ def test_shards_split_the_backtests_by_strategy_and_venue_and_the_last_one_finis
     raw = one(lab, "SELECT raw FROM runs WHERE kind = 'analysis'")
     assert raw["shards"] == 2 and raw["chunks_run"] == 100 and raw["series"] == 8
     assert one(lab, "SELECT count(*) FROM runs WHERE kind = 'analysis_shard'") == 2
+
+
+def test_a_spent_budget_starts_no_more_chunks_keeps_the_stored_ones_and_still_derives(lab, monkeypatch):
+    now = [0.0]
+
+    class Slow(FakeRunner):
+        def backtest(self, *args, **kw):
+            now[0] += 10.0  # each chunk takes 10 s on the fake clock
+            return super().backtest(*args, **kw)
+
+    monkeypatch.setattr(analyze, "WORKERS", 1)
+    monkeypatch.setattr(analyze, "BUDGET_S", 25.0)  # chunks start at 0, 10 and 20; the rest would start past it
+    monkeypatch.setattr(analyze, "time", types.SimpleNamespace(monotonic=lambda: now[0]))
+    r = Slow([strat("Other")])
+    assert analyze.main(r, TODAY) == 0
+    assert len(r.backtests) == 3 and one(lab, "SELECT count(*) FROM backtest_chunks") == 3
+    raw = one(lab, "SELECT raw FROM runs WHERE kind = 'analysis'")
+    assert raw["chunks_run"] == 3 and raw["chunks_left"] == 22 and raw["series"] == 2, "derive ran over what was stored"
+    monkeypatch.setattr(analyze, "BUDGET_S", 0.0)
+    rest = FakeRunner([strat("Other")])
+    assert analyze.main(rest, TODAY) == 0 and len(rest.backtests) == 22, "the next night carries on where this one stopped"
+
+
+def test_a_shard_counts_the_budget_from_the_jobs_first_shard_start(lab, monkeypatch):
+    monkeypatch.setattr(analyze, "SHARDS", 2)
+    monkeypatch.setattr(analyze, "SHARD", 1)
+    monkeypatch.setattr(analyze, "JOB", "night")
+    monkeypatch.setattr(analyze, "BUDGET_S", 3600.0)
+    lab.execute("INSERT INTO runs (kind, name, raw, started_at) VALUES ('analysis_shard', 'night#0', '{}', "
+                "now() - interval '2 hours')")
+    found = [strat("Good"), strat("Other"), strat("Planted"), strat("Third")]
+    r = FakeRunner(found)
+    analyze.FINISHER[0] = True
+    assert analyze.main(r, TODAY) == 0
+    assert r.backtests == [] and r.checks == []
+    raw = one(lab, "SELECT raw FROM runs WHERE kind = 'analysis_shard' AND name = 'night#1'")
+    assert raw["chunks_run"] == 0 and raw["chunks_left"] > 0

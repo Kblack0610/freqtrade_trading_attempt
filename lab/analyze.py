@@ -43,6 +43,9 @@ every pod plans the same split. Each pod runs its share of steps 2 and 3 and rec
 ANALYZE_JOB#index; the pod that finishes last (under an advisory lock) runs steps 4 to 6 and records the night's
 `analysis` row, its chunk counts summed over the shards. A drift backtest belongs to its bot's strategy x exchange.
 A shard killed before it records leaves no `analysis` row for the night: rerun the Job, finished chunks are cached.
+A run starts no backtest, bias check or drift backtest after ANALYZE_BUDGET_S seconds from its Job's first shard start
+(0: no limit), so a backlog longer than the job's deadline still ends in a recorded run with steps 4 to 6; the chunks
+it left (`chunks_left`) run the next night, the stored ones skipped by cache_key.
 Exits 1 when more than a tenth of the chunks run this time failed, or on a crash.
 
 `python lab/analyze.py bias-one <lookahead|recursive> <strategy> [--strategy-path DIR]` runs one bias
@@ -96,6 +99,7 @@ RECURSIVE_DAYS = int(os.environ.get("RECURSIVE_DAYS", "30"))
 RECURSIVE_TOL = float(os.environ.get("RECURSIVE_TOL", "0.001"))  # relative indicator change still called converged
 REGIME_EXCHANGE = os.environ.get("REGIME_EXCHANGE", "coinbase")
 CHUNK_TIMEOUT = int(os.environ.get("CHUNK_TIMEOUT", "3600"))
+BUDGET_S = float(os.environ.get("ANALYZE_BUDGET_S", "0"))  # under the job's deadline by CHUNK_TIMEOUT and steps 4 to 6
 MAX_ATTEMPTS = 3
 WINDOWS = {"30d": 30, "90d": 90, "180d": 180, "365d": 365, "all": None}
 OVERFIT_BLOCKS = 16  # CSCV splits: C(16, 8) = 12,870 in-sample halves
@@ -943,6 +947,10 @@ def main(runner: Runner | None = None, today: dt.date | None = None) -> int:
         run_id = conn.execute("INSERT INTO runs (kind, name, raw, started_at) VALUES (%s, %s, '{}', %s) RETURNING id",
                               ("analysis_shard" if sharded else "analysis",
                                f"{job}#{SHARD}" if sharded else started.strftime("%Y-%m-%d %H:%M:%S"), started)).fetchone()[0]
+        # the budget counts from the Job's first shard start, so a shard pod started late still stops in time
+        spent = conn.execute("SELECT extract(epoch FROM %s - min(started_at))::float FROM runs WHERE kind = 'analysis_shard' "
+                             "AND split_part(name, '#', 1) = %s", (started, job)).fetchone()[0] if sharded else 0.0
+        stop_at = time.monotonic() + BUDGET_S - spent if BUDGET_S else None
         ok = False
         stage_s: dict[str, float] = {}  # wall seconds per step, so a cut shows where the night went
         summary["stage_s"] = stage_s
@@ -977,11 +985,14 @@ def main(runner: Runner | None = None, today: dt.date | None = None) -> int:
                            overlay_chunks_waiting=waiting)
             print(f"analyze: {len(found)} strategies, {len(todo)} chunks to run, {cached} cached, "
                   f"{len(bias)} bias checks, {WORKERS} workers", flush=True)
-            failed, empty, done, failures = 0, 0, 0, []
+            failed, empty, done, overlaid, failures = 0, 0, 0, 0, []
+            left = {"chunk": 0, "bias": 0, "drift": 0}
             budget, tf = Budget(MEMORY_GB), {s["name"]: s["timeframe"] for s in found}
 
             def held(gb, fn, *args):
                 with budget.hold(gb):
+                    if stop_at is not None and time.monotonic() >= stop_at:
+                        return None  # out of time: left for the next night
                     return fn(*args)
 
             def bt(t):
@@ -1007,6 +1018,9 @@ def main(runner: Runner | None = None, today: dt.date | None = None) -> int:
                             res = fut.result()
                         except Exception as e:  # a runner bug in one task must not lose the others
                             res = {"ok": False, "has_bias": None, "error": f"{type(e).__name__}: {e}"}
+                        if res is None:
+                            left[what] += 1
+                            continue
                         if what == "bias":
                             store_bias(conn, task[0], task[1], task[2], res)
                             continue
@@ -1015,6 +1029,7 @@ def main(runner: Runner | None = None, today: dt.date | None = None) -> int:
                             continue
                         store_chunk(conn, task, res, run_id)
                         done += 1
+                        overlaid += bool(task["overlay"])
                         if res.get("no_data"):
                             empty += 1
                         elif not res["ok"]:
@@ -1029,9 +1044,13 @@ def main(runner: Runner | None = None, today: dt.date | None = None) -> int:
                     pool.shutdown(cancel_futures=True)
                     raise
             lap("backtests")
-            summary.update(chunks_failed=failed, chunks_empty=empty, failures=failures)
+            if left["chunk"]:
+                print(f"analyze: budget of {BUDGET_S:.0f}s spent, {left['chunk']} chunks left for the next night", flush=True)
+            ran = done
+            summary.update(chunks_run=ran, overlay_chunks_run=overlaid, chunks_left=left["chunk"],
+                           bias_run=len(bias) - left["bias"], drift_run=len(drifts) - left["drift"],
+                           chunks_failed=failed, chunks_empty=empty, failures=failures)
             if sharded:
-                ran = len(todo)
                 shards = close_shard(conn, run_id, job, {**summary, "chunks_total": ran}, failed <= FAIL_SHARE * max(ran, 1), SHARDS)
                 if shards is None:
                     ok = failed <= FAIL_SHARE * max(ran, 1)
@@ -1041,11 +1060,12 @@ def main(runner: Runner | None = None, today: dt.date | None = None) -> int:
                 # the last shard: the night's `analysis` row carries every shard's counts, then the steps over all chunks
                 run_id = conn.execute("INSERT INTO runs (kind, name, raw, started_at) VALUES ('analysis', %s, '{}', %s) "
                                       "RETURNING id", (started.strftime("%Y-%m-%d %H:%M:%S"), started)).fetchone()[0]
-                for k in ("chunks_run", "chunks_failed", "chunks_empty", "bias_run", "drift_run", "overlay_chunks_run"):
+                for k in ("chunks_run", "chunks_left", "chunks_failed", "chunks_empty", "bias_run", "drift_run",
+                          "overlay_chunks_run"):
                     summary[k] = sum(r.get(k) or 0 for r in shards)
                 summary["failures"] = [f for r in shards for f in r.get("failures") or []][:100]
                 summary["shards"] = len(shards)
-                failed, todo = summary["chunks_failed"], range(summary["chunks_run"])
+                failed, ran = summary["chunks_failed"], summary["chunks_run"]
             summary["bias_failed"] = conn.execute("SELECT count(*) FROM bias_checks WHERE has_bias IS NULL").fetchone()[0]
             summary.update(derive(conn))
             lap("derive")
@@ -1057,7 +1077,7 @@ def main(runner: Runner | None = None, today: dt.date | None = None) -> int:
             for step in (vol_target, suggest, confidence, book, mixtures, scorecard, horizon, shadow, loop, calls):
                 summary.update(step.run(conn))
                 lap(step.__name__.removeprefix("lab."))
-            ok = failed <= FAIL_SHARE * max(len(todo), 1)
+            ok = failed <= FAIL_SHARE * max(ran, 1)
             print(f"analyze: done: {json.dumps({k: v for k, v in summary.items() if k not in ('failures', 'skipped')})}",
                   flush=True)
         except Exception as e:
