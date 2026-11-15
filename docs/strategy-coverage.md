@@ -62,11 +62,16 @@ Status is `scanned` (in `user_data/strategies/`, backtested nightly, a counted t
 | Time based | scanned | HourBasedStrategy; `user_data/strategies/clock/` a set UTC hour (20:00, held 8 h) and the weekend (Saturday 00:00, held 48 h), each on the timeframes whose candles close then |
 | Volume flow | scanned | `user_data/strategies/flow/` a volume surge on an up close and on-balance volume at a new high before the close, on 4 timeframes |
 | FreqAI ML | scanned | `user_data/strategies/ml/` LightGBM, over the last `ML_DAYS` on the trader-ml image (a load failure on the plain one); no walk-forward or bias check yet (README, Generated families) |
+
 | Pairs, market neutral | blocked | the short leg needs margin or futures; `lab/league.py` runs spot only |
 | Funding carry and basis | blocked | long spot, short perpetual: needs a futures short. Funding is recorded (`funding_rates`, `lab/futures.py`), so carry can be measured offline |
 | Shorts on a trend or a bust | blocked | futures; research only in `lab/research/` (BustShort, DonchianLongShort, docs/short-bust.md) |
 | Cross-venue spread | blocked | needs inventory on two exchanges and two legs at once; a freqtrade bot trades one exchange. The event-contract version is `lab/markets/` cross-venue gaps |
 | Market making | blocked by the backtester | freqtrade fills a limit order when price touches it, with no queue position, so a maker's edge cannot be measured; it would read as free money |
+
+
+Verified on home-k3s (2026-11-15 UTC): `MLLightGBMBaseline` has five `strategy_windows` and one `as-is` trial on each of binanceus, coinbase, okx and kucoin, with 12 successful chunks each. Kraken has no ML chunks: FreqAI needs OHLCV history its API lacks. The deployed `/strategies` route renders the four ML entries and the Kraken skip. Analysis run 38 (2026-11-14) finished with `ok=true` in 54m02s, using 16,489 cached chunks and running 1,009. A soft analysis budget to leave time for derived tables before the 18h guard is queued as `trader-analysis-soft-budget`.
+
 
 ## Diversity: what "different" means here
 
