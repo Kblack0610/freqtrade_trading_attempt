@@ -12,7 +12,7 @@ Tier is the highest rung we can use: **API** (an official API covers the job), *
 
 | Platform | Status | Group | Tier for reads | Tier for orders | Paper path | Next |
 |---|---|---|---|---|---|---|
-| Kraken | held | crypto exchange | API | API | dry-run league | P2, trade path tr-21 |
+| Kraken | connected for reads | crypto exchange | API | API | dry-run league | full-permission key deployed (home-config #937, ask aPbc4G); trade path tr-21 |
 | Binance.US | used before | crypto exchange | API | API | dry-run league | P2 |
 | Coinbase | candidate | crypto exchange | API | API, manual only | dry-run league | P2 |
 | Gemini | candidate | crypto exchange | API | API | Gemini sandbox | P2 |
@@ -87,7 +87,7 @@ Freqtrade's official spot list includes Kraken, OKX, Kucoin and others. Binance.
 
 ### Kraken
 
-- Status: held.
+- Status: connected for reads with the person's full-permission key (home-config #937, ask aPbc4G).
 - Strategy fit: The likely first live venue for the league, because it has the deep book: calm-lagoon measured $384M of BTC 24h volume against $3.6M on Binance.US. Kraken Derivatives US perps, launched 2026-06-15 (snippet), are a possible US route for [short-bust.md](short-bust.md).
 - API: REST and WebSocket.
   - Key permissions are granular, and Withdraw Funds is its own toggle (doc).
@@ -97,12 +97,12 @@ Freqtrade's official spot list includes Kraken, OKX, Kucoin and others. Binance.
   - The API serves only 720 candles; we read history from the OHLCVT archive (README).
   - Spot sandbox: Not verified.
 - Agent machine: Not needed for trading. ToS on bots and site automation: Not verified.
-- The person: creates the read key now and a trade key at Stage 1; funds the account.
+- The person: supplied the full-permission key now deployed for reads (home-config #937, ask aPbc4G); funds the account. Trading remains behind the Stage 1 gate in [live.md](live.md).
 - Sign-in and 2FA: 2FA can also be set on an API key itself (snippet). Sign-in methods: Not verified.
 - Risk controls: IP allowlist (doc), `CancelAllOrdersAfter`, key expiry and subaccounts (snippet). Ours: the `lab/live.py` checks, including stoploss on exchange.
 - Cost: no API fee found. Perps charge 0.25% of notional to open and to close (doc, product unclear). Spot fee tiers: Not verified here; calm-lagoon quotes a 0.8 to 1.6% round trip.
 - Paper: the dry-run league already runs Kraken bots.
-- Read path: `KrakenRead` in `lab/broker.py`. `python -m lab.broker read` writes one `broker_balances` row named `kraken`: cash is the ZUSD balance, equity is `TradeBalance` `eb` (Kraken's own USD value of the whole account), positions the other assets held. Every private call is a POST, so the client sends only to `/0/private/Balance` and `/0/private/TradeBalance` and refuses any other path before sending; `lab/tests/test_money.py` pins those two. The body is JSON, and the nonce is in nanoseconds because the `kraken-read` key had already seen nanosecond nonces and Kraken refuses any lower one (measured 2026-11-12). Keys: `KRAKEN_API_KEY`, `KRAKEN_API_SECRET` in the `trader-brokers` Secret.
+- Read path: `KrakenRead` in `lab/broker.py`. `python -m lab.broker read` writes one `broker_balances` row named `kraken`: cash is the ZUSD balance, equity is `TradeBalance` `eb` (Kraken's own USD value of the whole account), positions the other assets held. Every private call is a POST, so the client sends only to `/0/private/Balance` and `/0/private/TradeBalance` and refuses any other path before sending; `lab/tests/test_money.py` pins those two. The body is JSON, and the nonce is in nanoseconds because the `kraken-read` key had already seen nanosecond nonces and Kraken refuses any lower one (measured 2026-11-12). Keys: `KRAKEN_API_KEY`, `KRAKEN_API_SECRET` in the `trader-brokers` Secret hold the person's full-permission key, deployed via home-config #937 (ask aPbc4G). Read-only describes the client's allowed calls; the key itself can do more.
 - Verified: 2026-11-06. Sources: https://docs.kraken.com/exchange/guides/rest/api-keys, https://docs.kraken.com/api/docs/guides/spot-rest-ratelimits, https://www.kraken.com/features/fee-schedule, https://blog.kraken.com/product/kraken-derivatives/announcing-cftc-regulated-us-perps.
 
 ### Binance.US
@@ -157,7 +157,7 @@ Freqtrade's official spot list includes Kraken, OKX, Kucoin and others. Binance.
 
 ### Read-only key checklist (crypto exchanges)
 
-Verified 2026-11-06 from each venue's docs. The person creates every key. No agent does, and none is created until the person decides to connect the venue. A key is read-only when no trade, cancel, deposit, withdraw or earn permission is ticked.
+Verified 2026-11-06 from each venue's docs. This checklist describes restricted read keys. Kraken currently uses the person's full-permission key (home-config #937, ask aPbc4G); its client enforces the read boundary described above. The person creates every key. No agent does, and none is created until the person decides to connect the venue. A key is read-only when no trade, cancel, deposit, withdraw or earn permission is ticked.
 
 | Venue | Tick for the read key | Leave off | IP binding | Native kill switch (for the Stage 1 trade key) |
 |---|---|---|---|---|

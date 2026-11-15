@@ -11,7 +11,7 @@ Sources, each with its own env:
 - SnapTrade (SNAPTRADE_CLIENT_ID, SNAPTRADE_CONSUMER_KEY: a Personal API key). Reads the accounts the person
   connected with a read connection, Fidelity first. A real account, read only.
 - Alpaca market data on the same paper key (AlpacaData): daily closes for lab/calls.py, GET only, data host only.
-- Kraken (KRAKEN_API_KEY, KRAKEN_API_SECRET: a Query Funds key). A real account, read only.
+- Kraken (KRAKEN_API_KEY, KRAKEN_API_SECRET: the person's full-permission key, deployed via home-config #937 (ask aPbc4G)). A real account, read only.
 - Polymarket US (POLYMARKET_US_KEY_ID, POLYMARKET_US_SECRET_KEY: the base64 Ed25519 key from polymarket.us/developer).
   A real account, read only.
 - Tastytrade (TASTYTRADE_CLIENT_ID, TASTYTRADE_CLIENT_SECRET, TASTYTRADE_REFRESH_TOKEN: a personal OAuth app and its
@@ -293,7 +293,7 @@ class SnapTrade:
 
 
 class KrakenRead:
-    """Kraken spot balances with a Query Funds key. Every private call is a POST signed with API-Sign, the base64
+    """Kraken spot balances with the person's full-permission key; this client permits only balance reads. Every private call is a POST signed with API-Sign, the base64
     HMAC-SHA512 under the base64-decoded secret of path + SHA256(nonce + body), the body JSON with a nonce in
     nanoseconds that rises on every request, retries included (docs.kraken.com/api/docs/guides/spot-rest-auth)."""
 
