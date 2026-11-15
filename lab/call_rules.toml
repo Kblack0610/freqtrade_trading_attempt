@@ -1,0 +1,42 @@
+# Event-to-call rules (lab/call_rules.py). Each rule is one trial: its name and a hash of its settings below are
+# registered in `trials` (exchange 'calls') before it makes a call, so every rule tried, and every edit of one, raises
+# the deflated-Sharpe bar all rules are judged against. Add a rule only with a reason in docs/avenues.md: an extra rule
+# costs every rule some of its evidence. A call made here is a scored paper call, never an order and never a reason to
+# promote a bot (docs/operating-rules.md).
+
+# An event first seen this many hours after feed-ingest stored it makes no call: after downtime the runner does not
+# turn a day of backlog into calls on news the market has already priced.
+max_age_hours = 24
+
+# The benchmark a ticker's call is scored against, and its instrument. A ticker not listed is an equity against SPY.
+[tickers]
+NVDA = { benchmark = "SMH" }
+AMD = { benchmark = "SMH" }
+SMH = { benchmark = "SPY", instrument = "etf" }
+
+# records(): a rule shows an edge at a horizon once it has min_calls scored calls and a deflated Sharpe of at least
+# dsr_min over every rule trial. Until then its record is evidence, not a verdict.
+[record]
+min_calls = 30
+dsr_min = 0.95
+
+# A rule matches a feed item from one of `sources` whose watchlist tickers are set (feed-ingest tier 1) and whose
+# tier-2 tags carry one of `event_types` with abs(sentiment) of at least `min_abs_sentiment`. The call is short on
+# negative sentiment and long on positive. Tickers come from the watchlist match, never from the model's own list.
+[[rules]]
+name = "filing-shock"
+thesis = "An 8-K with strong sentiment on a corporate event moves the stock in that direction over the next sessions."
+sources = ["edgar"]
+event_types = ["management", "m_and_a", "legal", "regulatory", "earnings", "guidance"]
+min_abs_sentiment = 0.5
+signal_source = "event"
+horizons = [1, 5, 20]
+
+[[rules]]
+name = "news-shock"
+thesis = "A news item with strong sentiment on a corporate event moves the stock in that direction over the next sessions."
+sources = ["gdelt", "rss"]
+event_types = ["management", "m_and_a", "legal", "regulatory", "earnings", "guidance"]
+min_abs_sentiment = 0.5
+signal_source = "event"
+horizons = [1, 5, 20]
