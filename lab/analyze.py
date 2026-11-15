@@ -884,7 +884,8 @@ WINDOW_COLS = ["strategy", "exchange", "win", "days", "start_day", "end_day", "t
                "sharpe_lo", "sharpe_hi", "sortino", "calmar", "max_drawdown", "profit_factor", "expectancy",
                "expectancy_lo", "expectancy_hi", "gross_expectancy", "gross_expectancy_lo", "gross_expectancy_hi",
                "fee_per_trade", "winrate", "exposure", "worst_open", "capital_exposure", "hold_excess", "hold_excess_lo", "hold_excess_hi",
-               "months_profitable", "dsr", "trials", "trials_raw", "trades_needed", "median_hold_hours", "avg_win", "avg_loss"]
+               "months_profitable", "dsr", "trials", "trials_raw", "trades_needed", "median_hold_hours", "avg_win", "avg_loss",
+               "wins", "losses", "breakeven_winrate"]
 ESTIMATE_COLS = ["strategy", "exchange", "horizon_days", "p10", "p50", "p90", "prob_loss", "exp_max_drawdown", "paths",
                  "seed", "basis_days"]
 

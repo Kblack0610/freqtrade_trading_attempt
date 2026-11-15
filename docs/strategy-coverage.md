@@ -103,7 +103,7 @@ Each cohort's roster names start with its first three letters, so `lab/cohorts.p
 
 ### The strategy card
 
-What a strategy's page answers at a glance (its "At a glance" card, per venue): return a year over the 365-day window with the 90% intervals of its Sharpe and of its return per trade, win rate beside the payoff ratio (average win over average loss) and the return per trade again with every win cut to half its size (`[diversity] payoff_haircut`, since backtest wins shrink out of sample), trades a month, median holding time, timeframe, the climates where its low end is above 0, walk-forward months out of sample, and which gates it passes or misses. Each field comes from a table above. A missing input reads as missing ("no out-of-sample months"), never as a blank or a zero.
+What a strategy's page answers at a glance (its "At a glance" card, per venue): return a year over the 365-day window with the 90% intervals of its Sharpe and of its return per trade, win rate (wins-losses, against the breakeven win rate its prices imply: 1 over the average decimal odds for an event contract) beside the payoff ratio (average win over average loss) and the return per trade again with every win cut to half its size (`[diversity] payoff_haircut`, since backtest wins shrink out of sample), trades a month, median holding time, timeframe, the climates where its low end is above 0, walk-forward months out of sample, and which gates it passes or misses. Each field comes from a table above. A missing input reads as missing ("no out-of-sample months"), never as a blank or a zero.
 
 ## Every added strategy raises the bar
 

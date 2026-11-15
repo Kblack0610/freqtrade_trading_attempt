@@ -11,14 +11,14 @@
 {% if backtests %}
 <div class="scroll">
 <table>
-  <thead><tr><th>Family</th><th>Signal source</th><th>Instrument</th><th>Horizon</th><th>Venue</th><th>Variant</th><th>Window</th><th class="n">Orders</th><th class="n">Fills</th><th class="n">Settled</th><th class="n">Open</th><th class="n">Per trade (interval)</th><th class="n">Win rate</th><th class="n" title="Deflated Sharpe at the trial count">DSR</th><th class="n">Trials</th><th>Run</th></tr></thead>
+  <thead><tr><th>Family</th><th>Signal source</th><th>Instrument</th><th>Horizon</th><th>Venue</th><th>Variant</th><th>Window</th><th class="n">Orders</th><th class="n">Fills</th><th class="n">Settled</th><th class="n">Open</th><th class="n">Per trade (interval)</th><th class="n">W-L, win% vs breakeven%</th><th class="n" title="Mean closing fair price minus our fill price">CLV</th><th class="n" title="Deflated Sharpe at the trial count">DSR</th><th class="n">Trials</th><th>Run</th></tr></thead>
   <tbody>
   {% for b in backtests %}
   <tr><td>{{ b.family }}</td>{% set category = family_categories.get(b.family, {}) %}<td>{{ category.signal_source or "-" }}</td><td>{{ category.instrument or "-" }}</td><td>{{ category.horizon or "-" }}</td><td>{{ b.venue }}</td><td><span title="{{ b.params | tojson }}">{{ b.variant[:8] }}</span></td>
     <td>{{ b.start_at | local("%Y-%m-%d") }} to {{ b.end_at | local("%Y-%m-%d") }}</td>
     <td class="n">{{ "{:,}".format(b.orders) }}</td><td class="n">{{ "{:,}".format(b.fills) }}</td><td class="n">{{ "{:,}".format(b.trades) }}</td><td class="n">{{ "{:,}".format(b.open_fills) }}</td>
     <td class="n {{ b.expectancy | tone }}">{{ b.expectancy | pct(2) }} <span class="muted">{{ b.expectancy_lo | pct(2) }} to {{ b.expectancy_hi | pct(2) }}</span></td>
-    <td class="n">{{ b.metrics.winrate | pct(0) }}</td><td class="n">{{ b.dsr | num(2) }}</td><td class="n">{{ b.trials }}</td>
+    <td class="n">{{ b.metrics.wins }}-{{ b.metrics.losses }}, {{ b.metrics.winrate | pct(0) }} <span class="muted">vs {{ b.metrics.breakeven_winrate | pct(0) }}</span></td><td class="n {{ b.metrics.clv | tone }}">{{ b.metrics.clv | pct(2) }}</td><td class="n">{{ b.dsr | num(2) }}</td><td class="n">{{ b.trials }}</td>
     <td>{{ b.computed_at | ago }}</td></tr>
   {% endfor %}
   </tbody>
