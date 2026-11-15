@@ -137,15 +137,18 @@ timeout_s = 60
 [venues.odds_api]
 # Swept every 6 h (home-config markets-venue-recorders, "7 */6 * * *"): stale after one missed run and 30 min of slack.
 stale_after_min = 390
-# Sportsbook implied odds, read-only; the key comes from ODDS_API_KEY. Credits a run: per sport, 1 per region for the
-# odds plus 2 for /scores, 3 a run for one sport. Every 5 min is about 26,000 a month against the free tier's 500, so the cadence
-# and the sports list wait on the plan the human buys (docs/markets.md, The Odds API).
+# Sportsbook implied odds, read-only; the key comes from ODDS_API_KEY. Credits a run: per sport, 1 per region per
+# market for the odds plus 2 for /scores. One sport with h2h and totals is 4 a run, 480 a month every 6 h, inside the
+# free tier's 500 (read 2026-11-14); adding spreads makes it 600, so spreads, the cadence and the sports list wait on
+# the plan the human buys (docs/markets.md, The Odds API). /v4/sports?all=true lists no table tennis (2026-11-14).
 title = "The Odds API"
 kind = "sportsbook"
 url = "https://the-odds-api.com"
 base_url = "https://api.the-odds-api.com"
 sports = ["basketball_nba"]
 regions = "us"
+# Odds API market keys, all in one call; the adapter also reads "spreads".
+markets = ["h2h", "totals"]
 page_gap_s = 1
 # The plan limits credits, not rate; one request a second across every process.
 budget_rps = 1

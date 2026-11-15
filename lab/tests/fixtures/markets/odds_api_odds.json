@@ -24,7 +24,9 @@
           {"key": "h2h", "last_update": "2026-11-06T07:09:40Z",
            "outcomes": [{"name": "Phoenix Suns", "price": 2.5}, {"name": "San Antonio Spurs", "price": 1.56}]},
           {"key": "spreads", "last_update": "2026-11-06T07:09:40Z",
-           "outcomes": [{"name": "Phoenix Suns", "price": 1.91, "point": 4.5}, {"name": "San Antonio Spurs", "price": 1.91, "point": -4.5}]}
+           "outcomes": [{"name": "Phoenix Suns", "price": 1.91, "point": 4.5}, {"name": "San Antonio Spurs", "price": 1.91, "point": -4.5}]},
+          {"key": "totals", "last_update": "2026-11-06T07:09:40Z",
+           "outcomes": [{"name": "Over", "price": 1.87, "point": 216.5}, {"name": "Under", "price": 1.95, "point": 216.5}]}
         ]
       }
     ]

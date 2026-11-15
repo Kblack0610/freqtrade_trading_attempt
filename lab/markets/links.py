@@ -10,7 +10,7 @@ rejects disagreeing ones, rule links included, so a broken rule shows as rejecti
 skipped and says so; rules and the check still run. The only writer of market_links and market_link_asks
 (migration 020). Reads markets, outcomes and resolutions, which lab/markets/recorder.py writes.
 
-Rule kalshi_game: an odds_api game links to the Kalshi game-winner event of its series ([links.rules.kalshi_game])
+Rule kalshi_game: an odds_api game's h2h market links to the Kalshi game-winner event of its series ([links.rules.kalshi_game])
 whose ticker date (KXNBAGAME-26NOV09SASPHX) is the game's date in US Eastern time, when each team names exactly one
 Kalshi market by its yes subtitle ("San Antonio" for San Antonio Spurs, "Los Angeles C" for Los Angeles Clippers).
 More than one such event on the date (a doubleheader) is ambiguous, and the rule leaves it to the LLM.
@@ -76,7 +76,7 @@ def rule_kalshi_game(conn, rcfg: dict) -> list[tuple]:
     links = []
     for gid, sport, title, close in conn.execute(
             "SELECT market_id, series_id, title, close_time FROM markets WHERE venue = 'odds_api' AND series_id = ANY(%s)"
-            " AND close_time IS NOT NULL", (list(series),)):
+            " AND market_type = 'h2h' AND close_time IS NOT NULL", (list(series),)):
         away, home = title.rsplit(" at ", 1)
         found = []
         for markets in events[(series[sport], close.astimezone(EASTERN).date())].values():
@@ -233,11 +233,28 @@ def _view(m: dict) -> dict:
             "closes": m["close_time"].isoformat() if m["close_time"] else None}
 
 
+LINE = re.compile(r"(.+) ([+-]?\d+(?:\.\d+)?)")
+
+
 def pays(outcome: str, result: str) -> bool | None:
-    """Did this outcome word pay, given the market's resolution? None when the market was void or split."""
+    """Did this outcome word pay, given the market's resolution? None when the market was void or split, or a line
+    pushed. A line market (lab/markets/odds.py) settles its line against the score: totals `Over 216.5` on
+    `Total 216`, spreads `San Antonio Spurs +4.5` on the home margin `Phoenix Suns -8`."""
     if result in ("void", "split"):
         return None
-    return result == "yes" if outcome == "yes" else result == outcome
+    if outcome == "yes":
+        return result == "yes"
+    o, r = LINE.fullmatch(outcome), LINE.fullmatch(result)
+    if o and r:
+        side, point, name, n = o[1], float(o[2]), r[1], float(r[2])
+        if name == "Total":
+            edge = {"Over": n - point, "Under": point - n}.get(side)
+            if edge is None:
+                return False
+        else:
+            edge = (n if side == name else -n) + point
+        return None if edge == 0 else edge > 0
+    return result == outcome
 
 
 def check_resolutions(conn) -> dict:
