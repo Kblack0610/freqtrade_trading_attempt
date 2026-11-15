@@ -1,5 +1,6 @@
 import datetime as dt
 
+import numpy as np
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -9,7 +10,7 @@ from pyarrow import fs as pafs
 from lab import grid
 from lab.markets import backtest, families
 from lab.markets.backtest import Lookahead, Market
-from lab.markets.families import Calibration, Forecaster, Gap, Longshot, RefBook
+from lab.markets.families import Calibration, Forecaster, Gap, Longshot, RefBook, day
 from lab.markets.history import SCHEMAS
 from lab.markets.recorder import load_config
 from lab.markets.venue import Resolution
@@ -297,3 +298,164 @@ def test_no_edge_fails_the_gate_and_never_reads_the_lockbox(conn, tmp_path):
     traded = conn.execute("SELECT gates FROM market_readiness WHERE family = 'longshot' AND trades > 0").fetchall()
     assert traded and all(next(g for g in r[0] if g["gate"].startswith("expectancy"))["pass"] is False for r in traded)
     assert conn.execute("SELECT count(*) FROM market_backtests WHERE start_at >= '2026-10-01'").fetchone()[0] == 0
+
+
+# tt_totals: a sportsbook's totals lines and the pair's earlier finals
+def totals_market(mid, close_h, title="Ann at Bea", series="tabletennis_x"):
+    return Market(mid, None, series, title, None, "totals", at(close_h - 48), at(close_h))
+
+
+def totals_quotes(mid, h, over, under, books=("b1",), line="70.5"):
+    """One recorded row per book and side, priced as odds.py writes a decimal price d: ask 1/d."""
+    return [{"market_id": mid, "outcome": f"{b}:{w} {line}", "ts": at(h), "bid": None, "ask": a, "bid_size": None,
+             "ask_size": None} for b in books for w, a in (("Over", over), ("Under", under))]
+
+
+def test_features_read_meetings_that_did_not_push_against_the_line():
+    f = families.features(np.array([60.0, 70.5, 75, 80, 72, 66, 74, 71]), 70.5)
+    assert f == {"h2h": 7, "over_rate": pytest.approx(5 / 7), "last5_rate": pytest.approx(4 / 5),
+                 "mean_gap": pytest.approx(np.mean([60, 70.5, 75, 80, 72, 66, 74, 71]) - 70.5)}
+    assert families.features(np.array([70.5]), 70.5) is None
+
+
+def test_line_book_takes_the_best_book_each_side_and_settles_the_line():
+    m = {"G": totals_market("G", 48)}
+    q = pd.DataFrame(totals_quotes("G", 0, 0.55, 0.50, ("b1",)) + totals_quotes("G", 0, 0.52, 0.53, ("b2",))
+                     + totals_quotes("G", 0, 0.52, 0.52, ("b1",), line="80.5")[:1])  # 80.5 has no under: no row
+    book, lm, lr, fair = families.line_book(q, m, {"G": res("G", "Total 75")}, 1000.0)
+    assert list(book["market_id"]) == ["G|70.5"]
+    r = book.iloc[0]
+    assert (r["bid"], r["ask"], r["depth_yes"]) == (pytest.approx(0.50), 0.52, 1000.0)  # 1 - best under, best over
+    assert lm["G|70.5"].event_id == "G" and lm["G|70.5"].subtitle == "Over 70.5"
+    assert lr["G|70.5"].result == "yes"
+    # each book devigged, then the median: b1 0.55/1.05, b2 0.52/1.05
+    assert fair[("G|70.5", at(0).value)] == pytest.approx((0.55 / 1.05 + 0.52 / 1.05) / 2)
+    assert families.line_book(pd.DataFrame(totals_quotes("G", 0, 0.5, 0.5, line="75")), m,
+                              {"G": res("G", "Total 75")}, 1.0)[2]["G|75"].result == "void"  # a push
+
+
+def meetings(*finals):
+    """Past games of Ann and Bea, the n-th settling n hours after T0, with the given totals."""
+    ms = {f"P{i}": totals_market(f"P{i}", i, "Bea at Ann" if i % 2 else "Ann at Bea") for i in range(len(finals))}
+    return families.Meetings(ms, {f"P{i}": res(f"P{i}", f"Total {t:g}", settled_h=i) for i, t in enumerate(finals)})
+
+
+def test_meetings_show_only_games_settled_before_the_row_and_refuse_a_later_score():
+    mt, m = meetings(75, 60, 80), totals_market("G", 10)
+    assert list(mt.before(m, at(1.5))) == [75, 60]  # P2 settles at 2h
+    assert list(mt.before(m, at(3))) == [75, 60, 80]
+    assert list(mt.before(totals_market("H", 10, "Ann at Cat"), at(3))) == []
+    assert mt.score("P0", at(1)) == 75
+    with pytest.raises(Lookahead):
+        mt.score("P2", at(2))
+
+
+TT = {**BASE, "max_spread": 0.08, "hours": 24, "prior": 10, "last5": 0.6, "min_h2h": 5, "edge": 0.03}
+
+
+def tt_row(h, bid=0.48, ask=0.52, mid="G|70.5"):
+    return next(backtest._book(pd.DataFrame([{"market_id": mid, "ts": at(h), "bid": bid, "ask": ask,
+                                              "depth_yes": 100.0, "depth_no": 100.0}])).itertuples(index=False))
+
+
+def line_market(close_h=30, line="70.5"):
+    return Market(f"G|{line}", "G", "tabletennis_x", "Ann at Bea", f"Over {line}", "total_line", at(0), at(close_h))
+
+
+def test_tt_totals_buys_the_side_its_head_to_head_backs_once_per_game():
+    fairs = {("G|70.5", at(h).value): 0.5 for h in (10, 11, 12)} | {("G|72.5", at(11).value): 0.5}
+    s = families.TTTotals(TT, meetings(75, 80, 74, 66, 76, 79, 73, 77), fairs)
+    assert s.on_book(tt_row(1), line_market()) == []  # 29h before the start
+    assert sides(s.on_book(tt_row(10), line_market())) == [("G|70.5", "yes")]  # 7 of 8 over, the last five all
+    assert s.on_book(tt_row(11, mid="G|72.5"), line_market(line="72.5")) == []  # once per game
+    unders = families.TTTotals(TT, meetings(60, 62, 75, 61, 63, 64, 65, 66), fairs)
+    assert sides(unders.on_book(tt_row(10), line_market())) == [("G|70.5", "no")]
+
+
+def test_tt_totals_needs_the_meetings_the_fair_and_the_last_five_to_agree():
+    fairs = {("G|70.5", at(10).value): 0.5}
+    assert families.TTTotals(TT, meetings(75, 80, 74, 76), fairs).on_book(tt_row(10), line_market()) == []  # 4 < 5
+    assert families.TTTotals(TT, meetings(75, 80, 74, 76, 79, 77), {}).on_book(tt_row(10), line_market()) == []
+    # 6 of 9 over, but the last five only 2 over
+    late = meetings(75, 80, 74, 76, 79, 60, 61, 77, 62)
+    assert families.TTTotals(TT, late, fairs).on_book(tt_row(10), line_market()) == []
+
+
+class Peek(families.TTTotals):
+    """The negative control: a variant that reads its own game's final score."""
+
+    def on_book(self, row, m):
+        total = self.meetings.score(m.event_id, row.ts)
+        return self.order(row, "yes" if total and total > float(m.subtitle.split()[-1]) else "no")
+
+
+def test_a_variant_that_reads_the_final_score_is_refused():
+    mt = families.Meetings({"G": totals_market("G", 30)}, {"G": res("G", "Total 75", settled_h=32)})
+    book = backtest._book(pd.DataFrame([{"market_id": "G|70.5", "ts": at(10), "bid": 0.48, "ask": 0.52,
+                                         "depth_yes": 100.0, "depth_no": 100.0}]))
+    with pytest.raises(Lookahead):
+        backtest.replay(book, {"G|70.5": line_market()}, {}, Peek(TT, mt, {}), CFG["backtest"], None)
+
+
+@pytest.fixture
+def odds_trials(conn):
+    """The trials register outlives the truncate, and the betting lane's count spans venues: leave none behind."""
+    yield conn
+    conn.execute("DELETE FROM trials WHERE exchange = 'odds_api'")
+
+
+def tt_walkforward(conn, fs, over_rate):
+    """A game of Ann and Bea every day of August to October, its 70.5 line quoted at 0.526 a side by two books at
+    06:00, the over at 0.588 and the under at 0.476 by 10:00, and settled at 14:00, `over_rate` of them over (75), the rest under (66)."""
+    root = f"{CFG['recorder']['bucket']}/{CFG['recorder']['prefix']}/venue=odds_api"
+    conn.execute("DELETE FROM trials WHERE exchange = 'odds_api'")
+    conn.execute("INSERT INTO venues (venue, title, kind) VALUES ('odds_api', 'odds_api', 'sportsbook') "
+                 "ON CONFLICT DO NOTHING")
+    first = dt.date(2026, 8, 1)
+    for i in range((dt.date(2026, 11, 1) - first).days):
+        d, mid = first + dt.timedelta(days=i), f"T{i}:totals"
+        close = pd.Timestamp(d, tz="UTC") + pd.Timedelta(hours=12)
+        total = 75 if (i * over_rate) % 1 + over_rate >= 1 else 66
+        conn.execute("INSERT INTO markets (venue, market_id, series_id, title, market_type, status, open_time, "
+                     "close_time, first_seen, updated_at) VALUES ('odds_api', %s, 'tabletennis_x', %s, 'totals', "
+                     "'settled', %s, %s, now(), now())", (mid, "Ann at Bea" if i % 2 else "Bea at Ann",
+                                                          close - pd.Timedelta(days=1), close))
+        conn.execute("INSERT INTO resolutions (venue, market_id, result, settled_at) VALUES ('odds_api', %s, %s, %s)",
+                     (mid, f"Total {total}", close + pd.Timedelta(hours=2)))
+        rows = [{**r, "ts": close - pd.Timedelta(hours=6)} for r in
+                totals_quotes(mid, 0, 1 / 1.9, 1 / 1.9, ("b1", "b2"))]
+        rows += [{**r, "ts": close - pd.Timedelta(hours=2)} for r in  # the over shortens toward the start
+                 totals_quotes(mid, 0, 1 / 1.7, 1 / 2.1, ("b1", "b2"))]
+        fs.create_dir(f"{root}/date={d}", recursive=True)
+        pq.write_table(pa.Table.from_pandas(pd.DataFrame(rows), preserve_index=False),
+                       f"{root}/date={d}/060000Z.parquet", filesystem=fs)
+
+
+def test_tt_totals_walks_forward_on_a_sportsbook_and_counts_every_variant_as_a_trial(odds_trials, tmp_path):
+    conn = odds_trials
+    fs = pafs.SubTreeFileSystem(str(tmp_path), pafs.LocalFileSystem())
+    tt_walkforward(conn, fs, 0.9)
+    with pytest.raises(SystemExit):  # an exchange family on a sportsbook
+        families.main(["--venue", "odds_api", "--family", "longshot"], fs=fs, today=TODAY)
+    assert families.main(["--venue", "odds_api"], fs=fs, today=TODAY) == 0
+    n = len(grid.variants(CFG["families"]["tt_totals"]))
+    test = conn.execute("SELECT variant, start_at, trades, expectancy_lo, (metrics->>'clv')::float FROM market_backtests "
+                        "WHERE family = 'tt_totals' AND start_at < '2026-10-01'").fetchall()
+    assert len(test) == 2 * n  # August and September; October is the lockbox
+    trials = conn.execute("SELECT count(*) FROM trials WHERE exchange = 'odds_api' AND strategy = 'tt_totals'")
+    assert trials.fetchone()[0] == conn.execute("SELECT count(*) FROM market_backtests WHERE family = 'tt_totals'"
+                                                ).fetchone()[0]
+    september = [r for r in test if day(r[1]) == dt.date(2026, 9, 1)]
+    assert all(r[2] == 30 and r[3] > 0 for r in september)  # one bet a game, overs paying 0.9 x 1.9
+    # bought at 0.526, closing mid (0.588 + 1 - 0.476) / 2
+    assert all(r[4] == pytest.approx((0.588 + 0.524) / 2 - 1 / 1.9, abs=2e-3) for r in september)
+    assert conn.execute("SELECT count(*) FROM market_readiness WHERE family = 'tt_totals'").fetchone()[0] == n
+
+
+def test_a_lookahead_variant_is_refused_in_the_walk_forward(odds_trials, tmp_path, monkeypatch):
+    conn = odds_trials
+    fs = pafs.SubTreeFileSystem(str(tmp_path), pafs.LocalFileSystem())
+    tt_walkforward(conn, fs, 0.5)
+    monkeypatch.setattr(families, "TTTotals", Peek)
+    with pytest.raises(Lookahead):
+        families.main(["--venue", "odds_api"], fs=fs, today=TODAY)
