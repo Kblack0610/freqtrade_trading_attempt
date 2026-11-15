@@ -348,3 +348,33 @@ def test_near_misses_and_funnel_rows_past_trace_days_are_cut(conn):
     paper.run_pass(conn, "kalshi", cfg(near_misses=0, trace_days=1), NOW + dt.timedelta(days=2))
     assert [r[2] for r in decisions(conn)] == ["enter"]  # the fill's decision stays with its fill
     assert funnel(conn) == {}
+
+
+WEATHER = {"stake": 10, "max_spread": 0.05, "hours": 24, "sd": 2.0, "edge": 0.05}
+
+
+def test_weather_joins_the_league_only_once_a_variant_passes_and_trades_on_the_newest_forecast(conn):
+    """W: New York's high on Nov 7 is 57 or above, the yes at 0.30 / 0.32; NWS read 60 an hour ago, so about 0.96."""
+    from lab import inputs
+
+    conn.execute("INSERT INTO venues (venue, title, kind) VALUES ('kalshi', 'Kalshi', 'exchange')")
+    conn.execute("INSERT INTO markets (venue, market_id, event_id, series_id, title, subtitle, market_type, status, "
+                 "close_time, first_seen, updated_at) VALUES ('kalshi', 'W', 'KXHIGHNY-26NOV07', 'KXHIGHNY', 'W', "
+                 "'57° or above', 'binary', 'active', %s, %s, %s)", (NOW + dt.timedelta(hours=20), NOW, NOW))
+    conn.execute("INSERT INTO outcomes (venue, market_id, outcome, bid, ask, bid_size, ask_size, quoted_at) "
+                 "VALUES ('kalshi', 'W', 'yes', 0.30, 0.32, 100, 100, %s)", (NOW - dt.timedelta(minutes=7),))
+    conn.execute("INSERT INTO market_sweeps (venue, started_at, finished_at, seen, new_markets, changes, resolved, ok) "
+                 "VALUES ('kalshi', %s, %s, 1, 1, 1, 0, true)", (NOW - dt.timedelta(minutes=5),) * 2)
+    read_at = NOW - dt.timedelta(hours=1)
+    inputs.write(conn, "nws_high", "KNYC", read_at, {"highs": {"2026-11-07": 60}, "grid": "OKX/33,37"})
+    ready(conn, "weather", WEATHER, ok=False)
+    assert paper.run_pass(conn, "kalshi", cfg(), NOW)["accounts"] == {}  # failed the gate: not in the league
+    ready(conn, "weather", WEATHER)
+    account = paper.account_of("weather", backtest.variant_of(WEATHER))
+    out = paper.run_pass(conn, "kalshi", cfg(), NOW + dt.timedelta(minutes=1))
+    assert out["accounts"][account]["fills"] == 1 and orders(conn)[0][:3] == (account, "W", "yes")
+    [d] = [r for r in decisions(conn) if r[2] == "enter"]
+    assert all(c["pass"] for c in d[5]) and {c["name"] for c in d[5]} == set(paper.Weather.CHECKS)
+    [nws] = [i for i in d[4] if i["name"] == "nws_high"]
+    assert nws["value"]["high"] == 60 and nws["source"] == "api.weather.gov gridpoint forecast"
+    assert pd.Timestamp(nws["as_of"]) == pd.Timestamp(read_at)

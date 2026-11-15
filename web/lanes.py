@@ -12,6 +12,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from lab import calls as calls_lab
+from lab import inputs as inputs_lab
 
 CONFIG = Path(__file__).resolve().parent / "lanes.toml"
 LEVELS = ("red", "amber", "nodata", "green")  # first is worst
@@ -156,9 +157,15 @@ def recorder(read: dict, now: dt.datetime, cfg: dict) -> dict:
     parts += [part("never swept", len(found) - len(swept))] if len(swept) < len(found) else []
     first = [row(v["venue"], f"sweep failed: {v['error']}" if v["ok"] is False else "last good sweep" if v["last_ok"] else "no good sweep", "amber",
                  "/markets", v["last_ok"]) for v in late]
-    level = "amber" if late or failing else "green" if swept else "nodata"
+    fed = inputs_lab.freshness(read["inputs"], now)
+    stale = [i for i in fed if i["stale"]]
+    parts += [part("inputs fresh", f"{len(fed) - len(stale)} of {len(fed)}", "amber" if stale else "")] if fed else []
+    first += [row(i["input"], f"{i['title']}: newest reading" if i["newest"] else f"{i['title']}: never read", "amber",
+                  "/markets", i["newest"]) for i in stale]
+    level = "amber" if late or failing or stale else "green" if swept else "nodata"
     return card(len(swept) - len(late), f"of {len(found)} venues fresh", level,
-                f"each venue's newest good sweep; stale past {max_min} min or its stale_after_min (lab/markets.toml)", parts, first)
+                f"each venue's newest good sweep; stale past {max_min} min or its stale_after_min (lab/markets.toml); "
+                "each input's newest reading, stale past its fresh_min (lab/inputs.toml)", parts, first)
 
 
 def prices(read: dict, now: dt.datetime, cfg: dict) -> dict:
