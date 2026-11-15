@@ -160,10 +160,11 @@ timeout_s = 30
 series = { basketball_nba = "KXNBAGAME", americanfootball_nfl = "KXNFLGAME", icehockey_nhl = "KXNHLGAME", baseball_mlb = "KXMLBGAME" }
 
 [links.llm]
-# Proposals only, through the LiteLLM gateway with a scoped key (LITELLM_API_KEY). A local model: free, and the
-# market titles never leave the house.
+# Proposals only, through the LiteLLM gateway with a scoped key (LITELLM_API_KEY) that may call this one route.
+# The route is llama-server on the workstation's RTX 4060 Ti: free, and the market titles never leave the house.
+# It has no fallback edge, so with the workstation off each ask logs an error and nothing is proposed that run.
 base_url = "https://llm.kblab.me"
-model = "reasoning (Qwen3.6-35B-A3B-4bit)"
+model = "local (qwen3.5-9b)"
 timeout_s = 120
 # Each [a, b]: open markets of a that are not yet linked or asked about, each asked against b's candidates.
 pairs = [["odds_api", "kalshi"], ["polymarket_us", "kalshi"]]
