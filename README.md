@@ -434,7 +434,7 @@ Sign-in cannot complete against a fake Forgejo; mint a cookie with `auth.make_se
 
 ### Watcher
 
-`lab/watcher.py` is a Deployment, not a job. Every 60 seconds it reads `/show_config`, `/profit` and `/balance` from each bot and writes one `watch` row per bot. Equity is `starting_capital` plus `profit_all_coin`, which values open trades at the current rate. The bot's `/balance` total is not used, since its wallet refreshes at most hourly.
+`lab/watcher.py` is a Deployment, not a job. Every 60 seconds it reads `/show_config`, `/profit` and `/balance` from each bot and writes one `watch` row per bot. A bot gone from the roster or a league keeps its row, breach and stop included, but the exporter skips any row the newest pass did not write, so it never reads as a blind bot. Equity is `starting_capital` plus `profit_all_coin`, which values open trades at the current rate. The bot's `/balance` total is not used, since its wallet refreshes at most hourly.
 
 A bot is breached when equity falls `[watcher] day_loss` of capital below the first reading of the UTC day, and stays breached until the next one. This is Stage 0, so a day-loss breach only raises an alert. The day opens at the first reading, so a bot unseen at 00:00 UTC opens late, and a watcher started mid-day counts from then.
 
@@ -471,6 +471,7 @@ The event-contract paper league's accounts (`paper-<family>-<variant>`) get watc
 | `trader_ingest_age_seconds` | | Since any snapshot was written |
 | `trader_watch_age_seconds` | | Since the watcher last finished a pass |
 | `trader_watch_unseen_seconds`, `trader_watch_running`, `trader_watch_breached`, `trader_watch_day_loss_ratio` | `bot` | Since the last good read, 1 when taking entries, 1 after a daily loss breach, and the loss so far today as a share of capital |
+| `trader_watch_unseen_limit_seconds` | `bot` | Unread past this, the bot is blind (TraderWatchBotBlind): `[watcher] unseen_after_seconds`, or for a paper account on a venue swept slower than the paper book age, that venue's `stale_after_min` |
 | `trader_run_started_timestamp_seconds`, `trader_run_finished_timestamp_seconds`, `trader_run_ok`, `trader_run_last_ok_timestamp_seconds` | `kind` (`analysis`, `walkforward`, `reproduce`, `calibration`) | Newest run started, newest run finished and whether it succeeded, newest success |
 | `trader_candle_age_seconds`, `trader_coverage_age_seconds`, `trader_coverage_series` | `exchange` | Newest stored candle, newest backfill write, series stored |
 | `trader_futures_age_seconds` | `kind`, `exchange` | Newest funding (`funding`) or open interest (`open_interest`) row |

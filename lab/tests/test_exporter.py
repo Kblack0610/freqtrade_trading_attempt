@@ -108,6 +108,45 @@ def test_watch_metrics(conn):
     assert m['trader_watch_breached{bot="a"}'] == 1 and m['trader_watch_breached{bot="new"}'] == 0
     assert m['trader_watch_running{bot="a"}'] == 0 and 'trader_watch_running{bot="new"}' not in m
     assert m['trader_watch_unseen_seconds{bot="a"}'] >= 360 and m["trader_watch_age_seconds"] < 60
+    assert m['trader_watch_unseen_limit_seconds{bot="a"}'] == 300
+
+
+def test_a_bot_the_newest_pass_did_not_write_is_not_exported_and_a_down_one_is(conn):
+    """A renamed bot's old row is read by no pass, so it aged as unseen forever (TraderWatchBotBlind on the 2026-11-10
+    renames, still firing five days later). The row stays, with its stop, for the kill switch."""
+    from lab import db
+    from web.exporter import TraderCollector
+
+    now = dt.datetime.now(dt.timezone.utc)
+    old = now - dt.timedelta(days=5)
+    conn.execute("INSERT INTO watch (bot, checked_at, seen_at, stopped_at) VALUES ('old', %s, %s, %s)", (old, old, old))
+    conn.execute("INSERT INTO watch (bot, checked_at, seen_at, error) VALUES ('down', %s, %s, 'refused'), "
+                 "('up', %s, %s, NULL)", (now, now - dt.timedelta(minutes=6), now, now))
+    conn.commit()
+    m = scrape(TraderCollector(db.connect))
+    assert not [k for k in m if 'bot="old"' in k]
+    assert m['trader_watch_unseen_seconds{bot="down"}'] >= 360 and m['trader_watch_unseen_seconds{bot="up"}'] < 60
+    assert conn.execute("SELECT stopped_at FROM watch WHERE bot = 'old'").fetchone()[0] == old
+
+
+def test_a_paper_account_on_a_slow_venue_is_blind_only_past_its_venue_limit(conn):
+    """odds_api is swept every 6 h, so its accounts are marked every 6 h: a 5-minute limit called them blind all day."""
+    from lab import db
+    from web.exporter import TraderCollector
+
+    now = dt.datetime.now(dt.timezone.utc)
+    conn.execute("INSERT INTO paper_accounts (account, family, venue, variant, params, capital, started_at) VALUES "
+                 "('paper-tt', 'tt_totals', 'odds_api', 'v', '{}', 100, %s), ('paper-ls', 'longshot', 'kalshi', 'v', '{}', 100, %s)",
+                 (now, now))
+    conn.execute("INSERT INTO watch (bot, checked_at, seen_at) VALUES ('paper-tt', %s, %s), ('paper-ls', %s, %s)",
+                 (now, now - dt.timedelta(hours=1), now, now))
+    conn.commit()
+    m = scrape(TraderCollector(db.connect))
+    from lab.markets import sweep_ages
+    book, venues = sweep_ages()
+    assert venues["odds_api"] > book  # the premise: odds_api is swept slower than the paper book age
+    assert m['trader_watch_unseen_limit_seconds{bot="paper-tt"}'] == venues["odds_api"] * 60
+    assert m['trader_watch_unseen_limit_seconds{bot="paper-ls"}'] == 300  # kalshi, at the book age: the watcher's own
 
 
 def test_market_metrics(conn):

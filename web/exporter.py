@@ -14,6 +14,7 @@ from psycopg.rows import dict_row
 from lab import inputs
 from lab.db import connect
 from lab.markets import sweep_ages
+from lab.suggest import load_config
 
 RUN_KINDS = ("analysis", "walkforward", "reproduce", "calibration")
 
@@ -22,7 +23,13 @@ SELECT DISTINCT ON (s.bot) s.bot, b.cohort, s.ts, s.dry_run, s.error, s.open_tra
        s.profit_all_pct, s.balance_total
 FROM bot_snapshots s JOIN bots b ON b.name = s.bot ORDER BY s.bot, s.ts DESC
 """
-WATCH = "SELECT bot, checked_at, seen_at, state, capital, equity, day_open, breached_at FROM watch"
+# Every row one watcher pass writes, read or failed, gets that pass's checked_at. A row the newest pass did not write
+# is a bot gone from the roster or an account gone from its league: no pass reads it again, so it would age as blind
+# forever (the agg bots renamed 2026-11-10). It stays in the table with its breach and stop state; only the
+# per-bot series skip it, and a dead watcher still ages every row of its last pass.
+WATCH = ("SELECT w.bot, w.checked_at, w.seen_at, w.state, w.capital, w.equity, w.day_open, w.breached_at, p.venue, "
+         "w.checked_at = max(w.checked_at) OVER () AS current "
+         "FROM watch w LEFT JOIN paper_accounts p ON p.account = w.bot")
 RUNS = """
 SELECT k AS kind,
        (SELECT max(started_at) FROM runs WHERE kind = k) AS started_at,
@@ -199,8 +206,15 @@ def bot_metrics(now, bots):
 def watch_metrics(now, watch):
     yield family("trader_watch_age_seconds", "Seconds since the watcher last finished a pass", [],
                  [([], age(now, max((w["checked_at"] for w in watch), default=None)))])
+    watch = [w for w in watch if w["current"]]
     yield family("trader_watch_unseen_seconds", "Seconds since the watcher last read the bot", ["bot"],
                  (([w["bot"]], age(now, w["seen_at"])) for w in watch))
+    unseen = load_config()["watcher"].get("unseen_after_seconds", 300)
+    book, venues = sweep_ages()
+    slow = {v: m * 60 for v, m in venues.items() if m > book}  # swept slower than the paper book age
+    yield family("trader_watch_unseen_limit_seconds", "Seconds unread past which the bot is blind: [watcher] "
+                 "unseen_after_seconds, or a paper account's venue limit when that venue is swept slower", ["bot"],
+                 (([w["bot"]], max(unseen, slow.get(w["venue"], 0))) for w in watch))
     yield family("trader_watch_running", "1 when the bot takes entries, 0 when it is paused or stopped", ["bot"],
                  (([w["bot"]], None if w["state"] is None else int(w["state"] == "running")) for w in watch))
     yield family("trader_watch_breached", "1 when the bot broke the daily loss limit this UTC day", ["bot"],
