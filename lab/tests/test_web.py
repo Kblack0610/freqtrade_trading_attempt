@@ -579,8 +579,14 @@ def seed_markets(c):
               (Jsonb({"edge": 0.06}), Jsonb({"winrate": 0.61})))
     c.execute("INSERT INTO market_category_results (family, venue, variant, start_at, category, trades, mean, lo, hi) "
               "VALUES ('longshot', 'kalshi', 'abcdef0123456789', '2025-01-01', 'sports', 450, 0.0211, 0.0043, 0.0377)")
-    c.execute("INSERT INTO paper_accounts (account, family, venue, variant, params, capital, started_at, equity, realized, open_positions, marked_at) "
-              "VALUES ('paper-longshot-abcdef01', 'longshot', 'kalshi', 'abcdef0123456789', %s, 1000, now(), 987.5, -4.25, 3, now())",
+    c.execute("INSERT INTO market_readiness (family, venue, variant, params, windows, trades, expectancy, expectancy_lo, expectancy_hi, "
+              "dsr, pbo, trials, ready, passed, gates) VALUES ('longshot', 'kalshi', 'abcdef0123456789', %s, 3, 800, 0.0123, -0.004, 0.031, "
+              "0.42, 0.2, 16, false, 1, %s)",
+              (Jsonb({"edge": 0.06}), Jsonb([{"gate": "out-of-sample trades", "value": 800, "need": ">= 100", "pass": True},
+                                            {"gate": "expectancy interval low", "value": -0.004, "need": "> 0 at 90%", "pass": False}])))
+    c.execute("INSERT INTO paper_accounts (account, family, venue, variant, params, capital, started_at, equity, realized, open_positions, marked_at, "
+              "gap_lo, gap_hi, drifted) VALUES ('paper-longshot-abcdef01', 'longshot', 'kalshi', 'abcdef0123456789', %s, 1000, now(), 987.5, "
+              "-4.25, 3, now(), -0.081, -0.012, true)",
               (Jsonb({"edge": 0.06}),))
     c.execute("INSERT INTO paper_orders (account, market_id, side, stake, sent_at, quoted_at, contracts, price, fee) VALUES "
               "('paper-longshot-abcdef01', 'KXNBAGAME-26NOV09SASPHX-SAS', 'no', 10, now(), now(), 11, 0.91, 0.07)")
@@ -600,7 +606,8 @@ def test_markets_pages_render_with_data(conn, signed_in):
              "/links": ["rule:kalshi_game", "San Antonio at Phoenix", "Spurs at Suns", "by rule", "claude-haiku"],
              "/links?status=rejected": ["No rejected links."],
              "/markets/book": ["longshot", "abcdef01", "1.23%", "-0.40% to 3.10%", "61%", "0.42", "By contract category", "2.11%", "0.43% to 3.77%", "paper-longshot-abcdef01",
-                               "987.50", "-1.25%", "stopped", "San Antonio at Phoenix", "0.91", "KXDEMO-1", "canceled", "15%"]}
+                               "Readiness gate", "0 of 1 variants are ready", "not ready: expectancy interval low", "1 of 2 gates, 3 windows",
+                               "-8.10% to -1.20% drifted", "987.50", "-1.25%", "stopped", "San Antonio at Phoenix", "0.91", "KXDEMO-1", "canceled", "15%"]}
     for path, needles in pages.items():
         r = client.get(path)
         assert r.status_code == 200, path

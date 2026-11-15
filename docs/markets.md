@@ -90,6 +90,10 @@ The gate pools each variant's windows before the lockbox and applies `suggest.to
 
 Only `longshot` can run here. A ready variant of another family is reported under `unrunnable` and not traded: `calibration` needs a bars fit each pass, `gap` needs a recorded `odds_api`, and `llm` needs a LiteLLM key. The forecaster's paper scores are its only scores, so it joins once the key is in SOPS. `lab/watcher.py` watches each account for the daily loss limit and runs the kill drill on it; see the README, Watcher. Deploy: a CronJob in home-config `apps/freqtrade/`, not yet scheduled.
 
+## Board
+
+The nightly research loop (`lab/loop.py`, the analysis's last step; README, Nightly research loop) keeps two betting sets beside the crypto ones: every ready `market_readiness` variant (`bet-ready`) and every unretired paper account whose forward check drifted (`bet-drift`). A member entering or leaving is a `research_events` row carrying the markets trial count, and `ci/research_sync.py` files one agent-board row a night per set. The loop reads the gate the 12:30 UTC families run left, so a gate change reaches the board the morning after the next analysis.
+
 ## Demo orders
 
 `python -m lab.markets.kalshi_trade {balance,drill [--ticker T]}` is the order path, on the Kalshi demo exchange only. `KalshiDemo` refuses any base URL whose host is not `external-api.demo.kalshi.co` or `demo-api.kalshi.co`, so no config can point it at real money; P9 adds Kalshi to the live path behind that path's own guard. Keys are the demo account's: `KALSHI_DEMO_KEY_ID` and `KALSHI_DEMO_KEY_FILE` (an RSA or Ed25519 PEM).
@@ -105,7 +109,7 @@ Only `longshot` can run here. A ready variant of another family is reported unde
 
 ## Site and telemetry
 
-The site's Markets pages read the same tables, behind the same sign-in. `/markets` is each venue's newest recorder sweep (red once the last good one is over `[paper] max_book_age_min` old, the moment the paper league stops entries), the failed sweeps of the last week with their errors, and the history backfill per venue and job. `/links` counts links by source and status, lists the newest 200 (filter with `?status=`) and the LLM asks. `/markets/book` is every `market_backtests` row, the paper accounts with their watch state, the newest paper fills and the demo orders. Counts come from `market_sweeps`, never `count(*)` over `markets`, which holds the settled archive too.
+The site's Markets pages read the same tables, behind the same sign-in. `/markets` is each venue's newest recorder sweep (red once the last good one is over `[paper] max_book_age_min` old, the moment the paper league stops entries), the failed sweeps of the last week with their errors, and the history backfill per venue and job. `/links` counts links by source and status, lists the newest 200 (filter with `?status=`) and the LLM asks. `/markets/book` is every `market_backtests` row (one per walk-forward window), the readiness gate per variant with each gate's value, the paper accounts with their watch state and forward check (paper minus backtest per trade, red when it drifted), the newest paper fills and the demo orders. Counts come from `market_sweeps`, never `count(*)` over `markets`, which holds the settled archive too.
 
 The exporter adds `trader_markets_*` and `trader_paper_*` (README, Metrics). home-config alerts on them in `apps/monitoring/prometheus-rules-freqtrade.yaml`: a venue's last good sweep over 15 minutes old, three or more failed sweeps of one venue in an hour, and a paper account down `[book] hard_stop` (15%) of its capital from its 30-day peak. The Grafana dashboard "Freqtrade league and lab" has a Markets row over the same series.
 

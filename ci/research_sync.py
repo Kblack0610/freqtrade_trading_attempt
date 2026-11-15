@@ -10,7 +10,10 @@ the deployed image (`kubectl exec deploy/trader-web -- python -m lab.loop pendin
 - a promotion that enters or leaves: a board row. Forward testing is lab/shadow.py's shadow accounts, database rows
   with no pod; a pod is a person's pick through ci/cohort_roster.py, so this sync opens no roster PR;
 - a monthly retune fit entering or leaving qualification: a review row with its parameter artifact. Parameters
-  are never saved to a strategy or applied to a bot by this sync.
+  are never saved to a strategy or applied to a bot by this sync;
+- betting: one row per night for the event-contract variants that entered or left the markets readiness gate's
+  ready set (the paper league follows that set), and one for the paper accounts whose forward check drifted from
+  their backtest or came back in line. Paper money only; a live stage stays a person's pick.
 
 Each event is acked (`python -m lab.loop ack`, in deploy/freqtrade-watcher: the site's role cannot write) once its
 row is filed, so a failed night retries the rest.
@@ -42,6 +45,33 @@ def climate_row(events: list[dict]) -> tuple[str, list[str]]:
         details.append(f"and {len(events) - MOST_DETAILS} more: https://trader.kblab.me/book")
     details.append(f"trial register at {events[-1]['trials']}: the interval is per cell, not corrected for the search; "
                    f"avenues: {AVENUES}")
+    return text, details
+
+
+BETTING = {
+    "bet-ready": ("betting gate {day}: {enters} enter and {leaves} leave the markets readiness gate's ready set; "
+                  "the paper league follows it", "https://trader.kblab.me/markets/book"),
+    "bet-drift": ("paper drift {day}: {enters} paper accounts drifted from their backtest and {leaves} came back in "
+                  "line; say whether the fill model or the variant is wrong", "https://trader.kblab.me/markets/book"),
+}
+
+
+def bet_label(e: dict) -> str:
+    who = f"{e['name']}/{e['variant'][:8]} on {e['exchange']}" + (f" ({e['cell']})" if e["cell"] else "")
+    nums = "" if e["lo"] is None else (f", low end {e['lo']:+.2%} per trade" if e["signal"] == "bet-ready"
+                                       else f", gap low end {e['lo']:+.2%}")
+    return f"{e['change']}: {who}{nums}" + (f": {e['action']}" if e["signal"] == "bet-drift" and e["action"] else "")
+
+
+def bet_row(signal: str, events: list[dict]) -> tuple[str, list[str]]:
+    head, page = BETTING[signal]
+    enters = sum(e["change"] == "enters" for e in events)
+    text = "check(trader): " + head.format(day=min(e["at"] for e in events)[:10], enters=enters,
+                                           leaves=len(events) - enters) + " #size/s"
+    details = [bet_label(e) for e in events[:MOST_DETAILS]]
+    if len(events) > MOST_DETAILS:
+        details.append(f"and {len(events) - MOST_DETAILS} more: {page}")
+    details += [page, f"markets trial register at {events[-1]['trials']}; avenues: {AVENUES}"]
     return text, details
 
 
@@ -105,6 +135,14 @@ def main() -> int:
         if not dry:
             board(text, details)
             done.append(e["id"])
+    for signal in BETTING:
+        bets = [e for e in events if e["signal"] == signal]
+        if bets:
+            text, details = bet_row(signal, bets)
+            print(text, *details, sep="\n  ")
+            if not dry:
+                board(text, details)
+                done += [e["id"] for e in bets]
     if done:
         print(kubectl_research("ack", *map(str, done)).strip())
     return 0
