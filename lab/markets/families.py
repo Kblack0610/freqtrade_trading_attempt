@@ -108,18 +108,51 @@ def side_for(fair: float, bid: float, ask: float, edge: float) -> str | None:
 
 
 class Family:
-    """One entry per market, held to resolution."""
+    """One entry per market, held to resolution.
+
+    Traced (the paper league sets `checks` and `inputs` to lists before each row; a backtest leaves them None), each
+    rule check is recorded as {name, value, threshold, pass} and each input it read as {name, value, source}, and
+    the checks run on past the first failure where they can, so the paper league sees a near-miss. A traced and an
+    untraced strategy make the same orders. `CHECKS` names every check a full trace holds."""
     name = ""
     cutoff = None
+    CHECKS: tuple = ("new market", "hours to close", "quote valid", "spread")
 
     def __init__(self, params: dict):
         self.params, self.seen = params, set()
+        self.checks: list | None = None
+        self.inputs: list | None = None
+        self.quoted: tuple[float, float] | None = None
+
+    def passes(self, name: str, value, threshold, ok: bool) -> bool:
+        if self.checks is not None:
+            self.checks.append({"name": name, "value": value, "threshold": threshold, "pass": bool(ok)})
+        return bool(ok)
+
+    def read(self, name: str, value, source: str) -> None:
+        if self.inputs is not None:
+            self.inputs.append({"name": name, "value": value, "source": source})
+
+    def rule(self) -> str:
+        """The family's rule in words, from its params."""
+        return self.name
 
     def entry(self, row, m: Market) -> tuple[float, float] | None:
-        if row.market_id in self.seen or not closing(row, m, self.params.get("hours")):
+        self.quoted, p = None, self.params
+        new = row.market_id not in self.seen
+        if not self.passes("new market", new, True, new):
             return None
-        q = quote(row)
-        return q if q and q[1] - q[0] <= self.params["max_spread"] else None
+        timely = closing(row, m, p.get("hours"))
+        if self.checks is None and not timely:
+            return None
+        if self.checks is not None:
+            left = None if m.close_time is None else (pd.Timestamp(m.close_time) - row.ts).total_seconds() / 3600
+            self.passes("hours to close", left, p.get("hours"), timely)
+        self.quoted = q = quote(row)
+        if not self.passes("quote valid", [float(row.bid), float(row.ask)], "0 < bid <= ask < 1", q is not None):
+            return None
+        tight = self.passes("spread", q[1] - q[0], p["max_spread"], q[1] - q[0] <= p["max_spread"])
+        return q if timely and tight else None
 
     def order(self, row, side: str | None) -> list[Order]:
         if side is None:
@@ -130,10 +163,18 @@ class Family:
 
 class Longshot(Family):
     name = "longshot"
+    CHECKS = Family.CHECKS + ("mid in band",)
+
+    def rule(self) -> str:
+        p = self.params
+        return f"longshot: buy {p['buy']} when the yes mid is {p['lo']:.2f}-{p['hi']:.2f}, within {p['hours']} h of close"
 
     def on_book(self, row, m):
         q, p = self.entry(row, m), self.params
-        return self.order(row, p["buy"] if q and p["lo"] <= (q[0] + q[1]) / 2 <= p["hi"] else None)
+        if (got := q or (self.checks is not None and self.quoted)) and self.passes(
+                "mid in band", (got[0] + got[1]) / 2, [p["lo"], p["hi"]], p["lo"] <= (got[0] + got[1]) / 2 <= p["hi"]):
+            return self.order(row, p["buy"] if q else None)
+        return []
 
 
 def _key(m: Market, key: str) -> str:
@@ -369,23 +410,37 @@ class TTTotals(Family):
     times: the over-rate shrunk by `prior` games toward the no-vig fair is the probability, and it buys the over
     (yes) or the under (no) when that beats the price by `edge` and the last five and the mean total agree."""
     name = "tt_totals"
+    CHECKS = ("new game",) + Family.CHECKS + ("head to head", "fair price", "edge", "form agrees")
 
     def __init__(self, params: dict, meetings: Meetings, fairs: dict):
         super().__init__(params)
         self.meetings, self.fairs = meetings, fairs
 
+    def rule(self) -> str:
+        p = self.params
+        return (f"tt_totals: buy the over or the under when the pair's over-rate at the line, over {p['min_h2h']}+ "
+                f"meetings shrunk by {p['prior']} games toward the no-vig fair, beats the price by {p['edge']}, and "
+                f"the last five ({p['last5']} on that side) and the mean total agree, within {p['hours']} h of the start")
+
     def on_book(self, row, m):
-        if m.event_id in self.seen or not (q := self.entry(row, m)):
+        new = m.event_id not in self.seen
+        if not self.passes("new game", new, True, new) or not (q := self.entry(row, m)):
             return []
         p, line = self.params, float(m.subtitle.split()[-1])
         f, fair = features(self.meetings.before(m, row.ts), line), self.fairs.get((row.market_id, row.ts.value))
-        if f is None or f["h2h"] < p["min_h2h"] or fair is None:
+        self.read("head to head", f, "results")
+        self.read("no-vig fair", fair, "line book")
+        if not self.passes("head to head", f and f["h2h"], p["min_h2h"], f is not None and f["h2h"] >= p["min_h2h"]) \
+                or not self.passes("fair price", fair, "known", fair is not None):
             return []
         prob = (f["over_rate"] * f["h2h"] + p["prior"] * fair) / (f["h2h"] + p["prior"])
         side = side_for(prob, *q, p["edge"])
+        if not self.passes("edge", {"prob": prob, "bid": q[0], "ask": q[1]}, p["edge"], side is not None):
+            return []
         agree = {"yes": f["last5_rate"] >= p["last5"] and f["mean_gap"] > 0,
                  "no": 1 - f["last5_rate"] >= p["last5"] and f["mean_gap"] < 0}
-        if side is None or not agree[side]:
+        if not self.passes("form agrees", {"side": side, "last5_rate": f["last5_rate"], "mean_gap": f["mean_gap"]},
+                           p["last5"], agree[side]):
             return []
         self.seen.add(m.event_id)
         return self.order(row, side)

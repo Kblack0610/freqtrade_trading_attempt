@@ -29,6 +29,7 @@ from test_markets_manifold_trade import Manifold
 from lab import broker, league
 from lab.markets import backtest, fees, kalshi_trade, manifold_trade, paper
 from lab.markets.backtest import Market, Order
+from lab.markets.families import Family
 from lab.markets.recorder import load_config
 
 REPO = Path(__file__).resolve().parents[2]
@@ -39,13 +40,14 @@ CREDENTIALS = ("key", "secret", "password", "uid", "private_key", "walletAddress
 # 1. Ledger ----------------------------------------------------------------------------------------------------------
 
 
-class Script:
+class Script(Family):
     """A strategy that sends one fixed order per market, once: the ledger is the paper broker's, not a family's."""
 
-    name, params, cutoff = "script", {}, None
+    name = "script"
 
     def __init__(self, orders: dict[str, Order]):
-        self.orders, self.seen = orders, set()
+        super().__init__({})
+        self.orders = orders
 
     def on_book(self, row, market):
         o = self.orders.get(row.market_id)
@@ -130,7 +132,7 @@ def test_paper_money_adds_up_through_fills_fees_and_settlement(conn, v):
 
     # pass 1: four fills; X would cost more than the cash those four left, so it is refused and not stored
     out = paper.trade(conn, ACCOUNT, Script({m: b[3] for m, b in BOOKS.items()}), book, CAPITAL, 0.5, fee_cfg, NOW,
-                      load_config()["paper"]["max_open"])
+                      load_config()["paper"]["max_open"], v.name, 0)
     paper.mark(conn, v.name, NOW)
     assert out == {"orders": 4, "fills": 4, "no_cash": 1, "capped": 0}
     f = fills(conn)

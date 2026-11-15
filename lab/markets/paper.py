@@ -20,6 +20,10 @@ reported under "unrunnable". A pass:
    the side's size) and fees.entry, so a paper fill and a backtest fill of the same book cost the same. Every order
    is stored, filled or not, so an account enters a market once, as in a backtest. An order the account's cash
    cannot pay for, or one past `[paper] max_open` open positions, is dropped unstored and asked again next pass.
+   Each stored order gets a `decisions` row in the same transaction (the family's rule in words, every check it ran
+   with its value and threshold, the inputs it read and the sizing), every book row is counted per account in
+   `decision_funnel` by the first check it failed or what became of its order, and up to `[paper] near_misses` rows
+   a pass that failed one check of a full trace are kept as near-misses (families.Family, traced).
 4. Records each open fill's closing line so far (closing_line), for its CLV, and marks each account: capital, plus
    realized profit, plus each open position at its exit price (a yes at the bid, a no at one minus the ask) less its
    cost. A sportsbook bet has no exit, so it marks at its cost. A line settles off its game's `Total N`.
@@ -37,7 +41,7 @@ import argparse
 import datetime as dt
 import math
 import sys
-from collections import namedtuple
+from collections import Counter, namedtuple
 
 import pandas as pd
 from psycopg.types.json import Jsonb
@@ -49,9 +53,11 @@ from lab.markets import backtest, fees
 from lab.markets.backtest import Market
 from lab.markets.families import Longshot, TTTotals, line_book, line_resolution, meetings_of
 from lab.markets.recorder import load_config
+from lab.util import finite
 
 UTC = dt.timezone.utc
 FAMILIES = ("longshot", "tt_totals")
+LEAGUE = "event_contracts"  # decisions.league
 Row = namedtuple("Row", backtest.BOOK)
 
 
@@ -185,38 +191,100 @@ def held(conn, account: str) -> int:
                         (account,)).fetchone()[0]
 
 
+def _json(v):
+    """A trace value jsonb can hold: finite numbers, timestamps as ISO strings."""
+    if isinstance(v, (dt.datetime, pd.Timestamp)):
+        return v.isoformat()
+    if isinstance(v, dict):
+        return {k: _json(x) for k, x in v.items()}
+    if isinstance(v, (list, tuple)):
+        return [_json(x) for x in v]
+    return finite(v)
+
+
+def traced(strategy, row: Row, m: Market, venue: str) -> tuple[list, list, list]:
+    """The strategy's orders on one book row, the checks it ran and the inputs it read: the row's quote and the
+    market's close from the recorder, then whatever the family read, each as of the row."""
+    strategy.checks, strategy.inputs = [], []
+    orders = list(strategy.on_book(row, m) or ())
+    src = f"{venue} recorder"
+    inputs = [{"name": "bid", "value": row.bid, "source": src}, {"name": "ask", "value": row.ask, "source": src},
+              {"name": "yes depth", "value": row.depth_yes, "source": src},
+              {"name": "no depth", "value": row.depth_no, "source": src},
+              {"name": "close time", "value": m.close_time, "source": f"{venue} markets"}] + strategy.inputs
+    return orders, strategy.checks, [dict(i, as_of=row.ts) for i in inputs]
+
+
+def decide(conn, account: str, venue: str, instrument: str, now: dt.datetime, action: str, rule: str, inputs: list,
+           checks: list, sizing: dict | None = None, fill_id: int | None = None) -> None:
+    conn.execute(
+        "INSERT INTO decisions (league, account, venue, instrument, decided_at, action, rule, inputs, checks, sizing, "
+        "fill_source, fill_id) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+        (LEAGUE, account, venue, instrument, now, action, rule, Jsonb(_json(inputs)), Jsonb(_json(checks)),
+         None if sizing is None else Jsonb(_json(sizing)), None if fill_id is None else "paper", fill_id))
+
+
+def funnel(conn, venue: str, now: dt.datetime, counts: dict) -> None:
+    """One decision_funnel row per (account, reason) of this pass."""
+    conn.cursor().executemany(
+        "INSERT INTO decision_funnel (league, account, venue, pass_at, reason, n) VALUES (%s, %s, %s, %s, %s, %s)",
+        [(LEAGUE, a, venue, now, reason, n) for (a, reason), n in sorted(counts.items())])
+
+
 def trade(conn, account: str, strategy, book: list[tuple[Row, Market]], capital: float, share: float,
-          fee_cfg: dict | None, now: dt.datetime, max_open: int) -> dict:
+          fee_cfg: dict | None, now: dt.datetime, max_open: int, venue: str, near_misses: int) -> dict:
+    """One account's pass over the book. Each order stored gets its decision row; every book row is counted in the
+    funnel where it stopped; up to `near_misses` rows whose full trace failed one check are kept as near-misses."""
     entered = [m for (m,) in conn.execute("SELECT market_id FROM paper_orders WHERE account = %s", (account,))]
     strategy.seen = set(entered) | {m.split("|")[0] for m in entered}  # a line's game, which tt_totals enters once
     left, sent, filled, broke, capped, open_ = cash(conn, account, capital), 0, 0, 0, 0, held(conn, account)
     taken: dict = {}
+    counts: Counter = Counter()
+    near, rule = 0, strategy.rule()
     for row, m in book:
-        for o in strategy.on_book(row, m) or ():
-            got = backtest.take(o, row.bid, row.ask, row.depth_yes, row.depth_no, taken.get((o.market_id, o.side), 0),
-                                share)
+        orders, checks, inputs = traced(strategy, row, m, venue)
+        if not orders:
+            failed = [c["name"] for c in checks if not c["pass"]]
+            counts[(account, failed[0] if failed else "no order")] += 1
+            if len(failed) == 1 and near < near_misses and set(strategy.CHECKS) <= {c["name"] for c in checks}:
+                decide(conn, account, venue, row.market_id, now, "near_miss", rule, inputs, checks)
+                near += 1
+            continue
+        for o in orders:
+            before = taken.get((o.market_id, o.side), 0)
+            got = backtest.take(o, row.bid, row.ask, row.depth_yes, row.depth_no, before, share)
             n, price = got or (0, None)
             fee = fees.entry(fee_cfg, n, price) if n else 0.0
             if n and open_ >= max_open:
                 strategy.seen -= {o.market_id, m.event_id}
                 capped += 1
+                counts[(account, "max_open")] += 1
                 continue
             if n and n * price + fee > left:
                 strategy.seen -= {o.market_id, m.event_id}
                 broke += 1
+                counts[(account, "no_cash")] += 1
                 continue
-            conn.execute(
+            stored = conn.execute(
                 """INSERT INTO paper_orders (account, market_id, side, stake, max_price, sent_at, quoted_at, bid, ask,
                        contracts, price, fee) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                   ON CONFLICT (account, market_id) DO NOTHING""",
+                   ON CONFLICT (account, market_id) DO NOTHING RETURNING id""",
                 (account, o.market_id, o.side, o.stake, o.limit, now, row.ts.to_pydatetime(),
-                 None if math.isnan(row.bid) else row.bid, None if math.isnan(row.ask) else row.ask, n, price, fee))
+                 None if math.isnan(row.bid) else row.bid, None if math.isnan(row.ask) else row.ask, n, price,
+                 fee)).fetchone()
+            counts[(account, "ordered" if stored else "already entered")] += 1
+            if stored:
+                decide(conn, account, venue, o.market_id, now, "enter", rule, inputs, checks,
+                       {"side": o.side, "stake": o.stake, "limit": o.limit, "share": share, "taken": before,
+                        "depth": row.depth_yes if o.side == "yes" else row.depth_no, "cash": left, "contracts": n,
+                        "price": price, "fee": fee, "fees": fee_cfg}, stored[0])
             sent += 1
             if n:
                 filled += 1
                 open_ += 1
                 left -= n * price + fee
-                taken[(o.market_id, o.side)] = taken.get((o.market_id, o.side), 0) + n
+                taken[(o.market_id, o.side)] = before + n
+    funnel(conn, venue, now, counts)
     return {"orders": sent, "fills": filled, "no_cash": broke, "capped": capped}
 
 
@@ -280,10 +348,17 @@ def run_pass(conn, venue: str, cfg: dict, now: dt.datetime) -> dict:
         capital = dict(conn.execute("SELECT account, capital FROM paper_accounts WHERE venue = %s", (venue,)).fetchall())
         out = {"settled": settled, "book": len(book), "fresh": fresh, "stopped": sorted(stopped & capital.keys()),
                "retired": sorted(retired), "unrunnable": unrunnable, "accounts": {}}
-        for a, f, p in league:
-            if a not in stopped:
-                out["accounts"][a] = trade(conn, a, strategy_of(f, p, meetings, fairs), book, capital[a],
-                                           bcfg["depth_share"], fee_cfg, now, pcfg["max_open"])
+        trading = [(a, f, p) for a, f, p in league if a not in stopped]
+        for a, f, p in trading:
+            out["accounts"][a] = trade(conn, a, strategy_of(f, p, meetings, fairs), book, capital[a],
+                                       bcfg["depth_share"], fee_cfg, now, pcfg["max_open"], venue, pcfg["near_misses"])
+        if not fresh:
+            funnel(conn, venue, now, {(a, "stale_book"): 1 for a, _, _ in trading})
+        keep = now - dt.timedelta(days=pcfg["trace_days"])
+        conn.execute("DELETE FROM decisions WHERE league = %s AND venue = %s AND action = 'near_miss' "
+                     "AND decided_at < %s", (LEAGUE, venue, keep))
+        conn.execute("DELETE FROM decision_funnel WHERE league = %s AND venue = %s AND pass_at < %s",
+                     (LEAGUE, venue, keep))
         closing_line(conn, venue, book, now)
         mark(conn, venue, now)
         out["drifted"] = forward(conn, venue, pcfg["drift_min_trades"], now)

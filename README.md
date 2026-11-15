@@ -382,6 +382,7 @@ The first run fetches full history (5m since 2019 on binanceus is the long pole)
 - `048`: `calls` and `call_scores`, append-only, written by `lab.calls add` and the analysis (Calls); `fills` gains the `call` source.
 - `050`: required signal source on calls; classifies the Phase 1 event seed and refuses unclassified legacy calls.
 - `052`: permits the betting signals (`bet-ready`, `bet-drift`) in the research loop state.
+- `055`: `decisions` (why each paper order was made: rule, checks, inputs, sizing, its `fills` row; and capped near-misses) and `decision_funnel` (book rows per pass and account by the first check failed), written by `lab/markets/paper.py`.
 - `049`: the event-contract walk-forward. `market_backtests` keeps one row per test window (key gains `start_at`, `score` goes, each trade's event and the window's daily returns come in), `market_category_results` follows it, and `market_readiness` holds the markets readiness gate, one row per variant (`lab/markets/families.py`).
 
  A schema change is a new numbered file; never edit an applied one.

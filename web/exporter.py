@@ -66,6 +66,19 @@ MARKOUTS = ("SELECT bot, horizon_min, count(net) AS n, avg(net) AS net, avg(null
 RECONCILE = ("SELECT bot, kind, count(*) AS n, avg(delay_s) AS delay_s, avg(price_gap) AS price, avg(fee_gap) AS fee, "
              "avg(profit_gap) AS profit FROM reconcile GROUP BY 1, 2")
 PAPER = "SELECT account, capital, equity, open_positions, marked_at FROM paper_accounts WHERE marked_at IS NOT NULL"
+# The decision record (lab/markets/paper.py trade, migration 055): decisions per action, each account's newest pass
+# through the funnel, and the fills since a league's first traced entry that have no decision.
+DECISIONS = "SELECT league, account, action, count(*) AS n FROM decisions GROUP BY 1, 2, 3"
+FUNNEL = """
+SELECT f.league, f.account, f.reason, f.n FROM decision_funnel f
+JOIN (SELECT league, account, max(pass_at) AS pass_at FROM decision_funnel GROUP BY 1, 2) l USING (league, account, pass_at)
+"""
+UNTRACED = """
+SELECT 'event_contracts' AS league, count(*) AS n FROM paper_orders o
+WHERE o.contracts > 0
+  AND o.sent_at >= (SELECT min(decided_at) FROM decisions WHERE league = 'event_contracts' AND action = 'enter')
+  AND NOT EXISTS (SELECT 1 FROM decisions d WHERE d.fill_source = 'paper' AND d.fill_id = o.id)
+"""
 # lab/shadow.py: accounts per cohort and state, and the newest day marked (a day's mark lands after it ends).
 SHADOW = "SELECT cohort, state, count(*) AS n FROM shadow_accounts GROUP BY 1, 2"
 SHADOW_MARKED = "SELECT max(day) + 1 AS newest FROM shadow_marks"
@@ -106,6 +119,9 @@ class TraderCollector:
                 last_sweep = cur.execute(LAST_SWEEP).fetchall()
                 links = cur.execute(LINKS).fetchall()
                 paper = cur.execute(PAPER).fetchall()
+                decisions = cur.execute(DECISIONS).fetchall()
+                funnel = cur.execute(FUNNEL).fetchall()
+                untraced = cur.execute(UNTRACED).fetchall()
                 shadow = cur.execute(SHADOW).fetchall()
                 shadow_marked = cur.execute(SHADOW_MARKED).fetchone()["newest"]
                 brokers = cur.execute(BROKERS).fetchall()
@@ -133,6 +149,7 @@ class TraderCollector:
                      "clears zero at its low end", ["regime", "kind"], (([c["cell"], c["kind"]], c["n"]) for c in climate))
         yield from market_metrics(now, sweeps, last_sweep, links)
         yield from paper_metrics(now, paper)
+        yield from decision_metrics(decisions, funnel, untraced)
         yield from shadow_metrics(now, shadow, shadow_marked)
         yield from broker_metrics(now, brokers)
         yield from markout_metrics(marks, rec)
@@ -230,6 +247,16 @@ def market_metrics(now, sweeps, last_sweep, links):
                  ["venue"], (([s["venue"]], s["took"]) for s in last_sweep))
     yield family("trader_markets_links", "Cross-venue links by how they were made (rule, llm) and their status",
                  ["source", "status"], (([r["source"], r["status"]], r["n"]) for r in links))
+
+
+def decision_metrics(decisions, funnel, untraced):
+    yield family("trader_decisions_total", "Recorded decisions of each paper account: enter, exit or near_miss",
+                 ["league", "account", "action"], (([d["league"], d["account"], d["action"]], d["n"]) for d in decisions))
+    yield family("trader_decision_funnel", "Book rows of the account's newest pass by the first check they failed, or "
+                 "what became of their order", ["league", "account", "check"],
+                 (([f["league"], f["account"], f["reason"]], f["n"]) for f in funnel))
+    yield family("trader_fills_untraced", "Fills since the league's first traced entry with no decision row",
+                 ["league"], (([u["league"]], u["n"]) for u in untraced))
 
 
 def paper_metrics(now, paper):

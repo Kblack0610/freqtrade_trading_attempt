@@ -459,3 +459,46 @@ def test_a_lookahead_variant_is_refused_in_the_walk_forward(odds_trials, tmp_pat
     monkeypatch.setattr(families, "TTTotals", Peek)
     with pytest.raises(Lookahead):
         families.main(["--venue", "odds_api"], fs=fs, today=TODAY)
+
+
+def run(s, book, traced):
+    out = []
+    for r, m in book:
+        if traced:
+            s.checks, s.inputs = [], []
+        out.append(sides(s.on_book(r, m)))
+    return out
+
+
+def test_a_traced_family_makes_the_same_orders_as_an_untraced_one_and_names_each_check():
+    """The paper league traces; a backtest does not. Every branch of longshot and tt_totals, both ways."""
+    m = market("A", close_h=48)
+    book = [(row("A", 0, 0.04, 0.06), m), (row("A", 30, 0.20, 0.22), m), (row("A", 30, 0.02, 0.10), m),
+            (row("A", 30, float("nan"), 0.06), m), (row("A", 30, 0.04, 0.06), m), (row("A", 31, 0.04, 0.06), m),
+            (row("B", 50, 0.04, 0.06), market("B")), (row("C", 30, 0.04, 0.06), Market("C", "EV", "S", "C", None, "binary", at(-240), None))]
+    params = {**BASE, "hours": 24, "buy": "no", "lo": 0.01, "hi": 0.10}
+    assert run(Longshot(params), book, True) == run(Longshot(params), book, False)
+    assert run(Longshot(params), book, False)[4] == [("A", "no")]
+
+    s = Longshot(params)
+    s.checks, s.inputs = [], []
+    s.on_book(row("A", 0, 0.04, 0.06), m)  # 48 h out: fails the window, the rest still run
+    assert [(c["name"], c["pass"]) for c in s.checks] == [("new market", True), ("hours to close", False),
+                                                          ("quote valid", True), ("spread", True), ("mid in band", True)]
+    assert s.checks[1]["value"] == pytest.approx(48) and s.checks[1]["threshold"] == 24
+    assert {c["name"] for c in s.checks} == set(Longshot.CHECKS)
+    assert "buy no when the yes mid is 0.01-0.10, within 24 h" in s.rule()
+
+    fairs = {("G|70.5", at(h).value): 0.5 for h in (10, 11, 12)} | {("G|72.5", at(11).value): 0.5}
+    tt_book = [(tt_row(1), line_market()), (tt_row(10), line_market()),
+               (tt_row(11, mid="G|72.5"), line_market(line="72.5"))]
+    for finals in ((75, 80, 74, 66, 76, 79, 73, 77), (60, 62, 75, 61, 63, 64, 65, 66), (75, 80, 74, 76),
+                   (75, 80, 74, 76, 79, 60, 61, 77, 62)):
+        assert run(families.TTTotals(TT, meetings(*finals), fairs), tt_book, True) == \
+            run(families.TTTotals(TT, meetings(*finals), fairs), tt_book, False)
+    s = families.TTTotals(TT, meetings(75, 80, 74, 76, 79, 60, 61, 77, 62), fairs)
+    s.checks, s.inputs = [], []
+    assert s.on_book(tt_row(10), line_market()) == []
+    assert [c["name"] for c in s.checks if not c["pass"]] == ["form agrees"]
+    assert {c["name"] for c in s.checks} == set(families.TTTotals.CHECKS)
+    assert [i["name"] for i in s.inputs] == ["head to head", "no-vig fair"]
