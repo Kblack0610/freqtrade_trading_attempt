@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+{% block title %}{{ source }} fill {{ fill.fill_id }}{% endblock %}
+{% block body %}
+{% set league = {"paper": "Event contracts", "freqtrade": "Crypto", "drill": "Order drill", "call": "Calls"}[source] %}
+<h1>Fill {{ fill.fill_id }} - {% if source == "freqtrade" %}<a href="/bots/{{ fill.account }}">{{ fill.account }}</a>{% else %}{{ fill.account }}{% endif %} <span class="tag">{{ league }}</span></h1>
+{% if order %}<p>{{ order.title or order.market_id }}{% if order.subtitle %} <span class="muted">{{ order.subtitle }}</span>{% endif %} <strong>{{ order.side }} {{ order.contracts }} @ {{ order.price | num(2) }}</strong></p>
+{% elif bot_trade %}<p>{{ bot_trade.pair }} <strong>{{ bot_trade.amount | num(6) }} @ {{ bot_trade.open_rate | num(4) }}</strong>, stake {{ bot_trade.stake_amount | num(2) }} on {{ fill.venue }}{% if fill.strategy %} <span class="muted">{{ fill.strategy }}</span>{% endif %}</p>
+{% elif drill %}<p>{{ drill.ticker }} <strong>{{ drill.count }} @ {{ drill.price | num(2) }}</strong> on {{ drill.venue }}, status {{ drill.status or "-" }}</p>
+{% elif call %}<p>{{ call.direction }} {{ call.ticker }} <span class="muted">{{ call.instrument }}</span> vs {{ call.benchmark }}: {{ call.thesis }}{% if call.source %} <span class="muted">({{ call.source }})</span>{% endif %}</p>{% endif %}
+
+<div class="scroll">
+<table>
+  <tbody>
+  <tr><th>Opened</th><td>{{ fill.open_date | local }}</td></tr>
+  <tr><th>Closed</th><td>{{ fill.close_date | local if fill.close_date else "open" }}{% if fill.exit_reason %} <span class="muted">{{ fill.exit_reason }}</span>{% endif %}</td></tr>
+  <tr><th>Stake</th><td>{{ fill.stake | num(2) }}</td></tr>
+  <tr><th>Profit</th><td class="{{ fill.profit_abs | tone }}">{{ fill.profit_abs | num(2) }} <span class="muted">{{ fill.profit_ratio | pct(2) }}</span></td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2>Decision</h2>
+{% if decision %}
+<p><strong>Rule</strong> {{ decision.rule }} <span class="muted">decided {{ decision.decided_at | local("%b %d %H:%M:%S") }}</span></p>
+<h3>Checks</h3>
+<div class="scroll">
+<table>
+  <thead><tr><th>Check</th><th class="n">Value</th><th class="n">Threshold</th><th>Pass</th></tr></thead>
+  <tbody>
+  {% for c in decision.checks %}<tr><td>{{ c.name }}</td><td class="n">{{ c.value | tv }}</td><td class="n">{{ c.threshold | tv }}</td><td class="{{ 'up' if c.pass else 'down' }}">{{ "yes" if c.pass else "no" }}</td></tr>
+  {% else %}<tr><td colspan="4" class="muted">The family ran no checks.</td></tr>{% endfor %}
+  </tbody>
+</table>
+</div>
+<h3>Inputs</h3>
+<div class="scroll">
+<table>
+  <thead><tr><th>Input</th><th class="n">Value</th><th>Source</th><th>As of</th></tr></thead>
+  <tbody>
+  {% for i in decision.inputs %}<tr><td>{{ i.name }}</td><td class="n">{{ i.value | tv }}</td><td>{{ i.source }}</td><td>{{ (i.as_of or "-")[:19] | replace("T", " ") }}</td></tr>
+  {% else %}<tr><td colspan="4" class="muted">No inputs recorded.</td></tr>{% endfor %}
+  </tbody>
+</table>
+</div>
+{% set z = decision.sizing %}
+{% if z %}
+<h3>Sizing and fees</h3>
+<ul class="plain">
+  <li>stake {{ z.stake | num(2) }}{% if z.price %} / {{ z.price | num(2) }} = {{ (z.stake / z.price) | num(1) }} contracts asked{% endif %}{% if z.limit is not none %}, limit {{ z.limit | num(2) }}{% endif %}</li>
+  {% if z.depth is not none and z.share is not none %}<li>depth cap {{ z.share | tv }} x {{ z.depth | tv }}{% if z.taken %} less {{ z.taken }} taken this pass{% endif %}, filled {{ z.contracts }}</li>{% endif %}
+  {% if z.cash is not none %}<li>cash {{ z.cash | num(2) }} before, cost {{ cost | num(2) if cost is defined else "-" }}</li>{% endif %}
+  <li>fee {{ z.fee | num(2) }}{% if z.fees %} <span class="muted">{{ z.fees | tv }}</span>{% endif %}</li>
+</ul>
+{% endif %}
+<h3>Same pass</h3>
+{% if funnel %}<p>Where each book row stopped for this account: {% for f in funnel %}{{ f.reason }} {{ "{:,}".format(f.n) }}{{ ", " if not loop.last }}{% endfor %}.</p>{% endif %}
+{% if near %}
+<p>{{ near | length }} near-miss{{ "es" if near | length != 1 }}: {% for name, n in near_reasons %}{{ name }} ({{ n }}){{ ", " if not loop.last }}{% endfor %}</p>
+<details><summary>Show near-misses</summary>
+<div class="scroll">
+<table>
+  <thead><tr><th>Market</th><th>Failed check</th><th class="n">Value</th><th class="n">Threshold</th></tr></thead>
+  <tbody>
+  {% for d in near %}<tr><td>{{ d.title or d.instrument }}</td><td>{{ d.failed.name if d.failed else "-" }}</td><td class="n">{{ d.failed.value | tv if d.failed else "-" }}</td><td class="n">{{ d.failed.threshold | tv if d.failed else "-" }}</td></tr>{% endfor %}
+  </tbody>
+</table>
+</div>
+</details>
+{% else %}<p class="muted">No near-miss kept from this pass.</p>{% endif %}
+{% else %}
+<p class="muted">Recorded before decisions were traced: this fill has no decision row, so its checks, inputs and sizing were not saved.</p>
+{% endif %}
+
+<h2>Outcome</h2>
+{% if order %}
+<ul class="plain">
+  <li>cost {{ cost | num(2) }} ({{ order.contracts }} x {{ order.price | num(2) }} + fee {{ order.fee | num(2) }}), quoted {{ order.bid | num(2) }} / {{ order.ask | num(2) }} at {{ order.quoted_at | local("%H:%M:%S") }}</li>
+  {% if order.settled_at %}<li>settled {{ order.settled_at | local }}{% if order.result %}: {{ order.result }}{% endif %}, payout {{ order.payout | num(2) }} a contract, profit <span class="{{ order.profit | tone }}">{{ order.profit | num(2) }}</span></li>
+  {% else %}<li>open{% if order.close_time %}, closes {{ order.close_time | local }}{% endif %}: profit if {{ order.side }} <span class="up">{{ if_win | num(2) }}</span>, otherwise <span class="down">{{ if_lose | num(2) }}</span></li>{% endif %}
+  {% if order.close_mid is not none %}<li>closing line {{ order.close_mid | num(2) }} at {{ order.close_at | local }}</li>{% endif %}
+</ul>
+{% elif bot_trade %}
+<ul class="plain">
+  <li>{{ "open" if bot_trade.is_open else "closed at " ~ (bot_trade.close_rate | num(4)) }}{% if bot_trade.enter_tag %}, entry tag {{ bot_trade.enter_tag }}{% endif %}</li>
+</ul>
+<h3>Markouts</h3>
+{% if markouts %}
+<div class="scroll">
+<table>
+  <thead><tr><th class="n">Horizon</th><th class="n">Fill slip</th><th class="n">Move</th><th class="n">BTC</th><th class="n">Beta</th><th class="n">Net</th><th class="n">Random entries net</th></tr></thead>
+  <tbody>
+  {% for m in markouts %}<tr><td class="n">{{ m.horizon_min }} min</td><td class="n">{{ m.fill_slip | pct(2) }}</td><td class="n">{{ m.ret | pct(2) }}</td><td class="n">{{ m.btc_ret | pct(2) }}</td><td class="n">{{ m.beta | num(2) }}</td><td class="n {{ m.net | tone }}">{{ m.net | pct(2) }}</td><td class="n">{{ m.null_net | pct(2) }} <span class="muted">{{ m.null_draws }} draws</span></td></tr>{% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}<p class="muted">No markout yet: it is written once the candles cover the entry and its null window.</p>{% endif %}
+<h3>Against the backtest</h3>
+{% if reconcile %}
+<div class="scroll">
+<table>
+  <thead><tr><th>Match</th><th>Backtest entry</th><th class="n">Delay</th><th class="n">Price gap</th><th class="n">Fee gap</th><th class="n">Profit gap</th></tr></thead>
+  <tbody>
+  {% for r in reconcile %}<tr><td>{{ r.kind }}</td><td>{{ r.bt_open | local }}</td><td class="n">{{ r.delay_s | num(0, " s") }}</td><td class="n">{{ r.price_gap | pct(3) }}</td><td class="n">{{ r.fee_gap | pct(3) }}</td><td class="n {{ r.profit_gap | tone }}">{{ r.profit_gap | pct(2) }}</td></tr>{% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}<p class="muted">Not reconciled yet: the bot's drift row has not matched this trade against its backtest.</p>{% endif %}
+{% elif drill %}
+<p class="muted">A drill rests one order far from the market and cancels it; it tests the order path, not a strategy.{% if drill.error %} <code class="down">{{ drill.error }}</code>{% endif %}</p>
+{% elif call %}
+{% if scores %}
+<div class="scroll">
+<table>
+  <thead><tr><th class="n">Horizon</th><th>Exit close</th><th class="n">Entry</th><th class="n">Exit</th><th class="n">Net</th><th class="n">Excess</th></tr></thead>
+  <tbody>
+  {% for s in scores %}<tr><td class="n">{{ s.horizon }}d</td><td>{{ s.exit_session }}</td><td class="n">{{ s.entry_close | num(2) }}</td><td class="n">{{ s.exit_close | num(2) }}</td><td class="n {{ s.pnl | tone }}">{{ s.pnl | pct(2) }}</td><td class="n {{ s.excess | tone }}">{{ s.excess | pct(2) }}</td></tr>{% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}<p class="muted">No horizon scored yet.</p>{% endif %}
+{% endif %}
+{% endblock %}
