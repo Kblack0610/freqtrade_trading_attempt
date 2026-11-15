@@ -1,7 +1,9 @@
-"""Signal categories are independent of the data a strategy reads."""
+"""Signal categories are independent of the data a strategy reads; the data itself is lab/inputs.toml's."""
 
 import tomllib
 from pathlib import Path
+
+from lab import inputs
 
 CONFIG = Path(__file__).with_name("families.toml")
 
@@ -13,9 +15,15 @@ def load(path: Path = CONFIG) -> dict:
             validate(category, cfg)
     if cfg["families"].keys() != cfg["family_categories"].keys():
         raise ValueError("every method family needs a category")
-    for tag in cfg["strategies"].values():
+    registry = inputs.load()
+    for name, entry in registry.items():
+        if entry["signal_source"] not in cfg["signal_sources"]:
+            raise ValueError(f"input {name}: signal_source must name a configured signal source")
+    for name, tag in cfg["strategies"].items():
         if tag["family"] not in cfg["family_categories"]:
             raise ValueError(f"uncategorized family: {tag['family']}")
+        if unknown := set(tag.get("inputs", [])) - registry.keys():
+            raise ValueError(f"{name} reads {sorted(unknown)}, not in lab/inputs.toml")
     return cfg
 
 

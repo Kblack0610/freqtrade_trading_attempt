@@ -282,6 +282,17 @@ last5 = 0.6
 min_h2h = [5, 10]
 edge = [0.03, 0.06]
 
+[families.weather]
+# A Kalshi daily high market against the NWS forecast high of its station (lab/inputs.toml nws_high), run on the bars
+# like the others but only on whole months with a forecast read every day. sd is how far off a same-day NWS high
+# runs, in degrees F; 2 to 3 is a guess to be judged by the gate, not a measured error. Kalshi closes a day's market
+# about 1 am local the next day, so 24 h is the day itself.
+stake = 10
+max_spread = 0.05
+hours = 24
+sd = [2.0, 3.0]
+edge = [0.05, 0.10]
+
 [families.llm]
 # The forecaster is forward only: backtest.replay refuses any book that starts before this, the model's training
 # cutoff. The model's own cutoff is not published, so this is the day forward scoring starts, which is no earlier.

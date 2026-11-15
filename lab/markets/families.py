@@ -43,6 +43,11 @@ than `max_spread`.
   games toward the no-vig fair (RefBook.fairs) is the probability; buy the over or under when it beats the best
   book by `edge` and the last five and the mean agree. Its venue needs a totals adapter writing odds.py's shape;
   table tennis has none yet (docs/markets.md, Table tennis data).
+- weather (NWS forecast): a Kalshi daily high market (a series of lab/inputs.toml nws_high, its range from the
+  subtitle and its day from the event) against the station's NWS forecast high, the newest one read at or before the
+  row and no older than its fresh_min (input_readings, lab/nws.py). The high is read as normal around the forecast
+  with `sd`; buy yes or no when the range's chance beats the price by `edge`. NWS keeps no forecast archive, so a
+  window runs only once every day of it has a reading (Loader.forecasts): the first is the first whole month read.
 - llm (forecaster): forward only. Its `cutoff` is the model's training cutoff, and backtest.replay refuses any
   book that starts before it; it has no command here and is scored by the paper league.
 """
@@ -63,7 +68,7 @@ from pyarrow import fs as pafs
 
 from psycopg.types.json import Jsonb
 
-from lab import confidence, metrics, suggest, taxonomy
+from lab import confidence, inputs, metrics, suggest, taxonomy
 from lab.db import connect
 from lab.grid import variants
 from lab.markets import backtest
@@ -77,7 +82,7 @@ from lab.util import s3_from_env
 
 UTC = dt.timezone.utc
 LEAD = dt.timedelta(days=2)  # a line book reads quotes from this long before its window, for games early in it
-COMMANDS = ("longshot", "calibration", "gap")
+COMMANDS = ("longshot", "calibration", "gap", "weather")
 LINES = ("tt_totals",)  # a sportsbook venue's families, on its line book (line_book)
 
 
@@ -111,12 +116,14 @@ class Family:
     """One entry per market, held to resolution.
 
     Traced (the paper league sets `checks` and `inputs` to lists before each row; a backtest leaves them None), each
-    rule check is recorded as {name, value, threshold, pass} and each input it read as {name, value, source}, and
-    the checks run on past the first failure where they can, so the paper league sees a near-miss. A traced and an
-    untraced strategy make the same orders. `CHECKS` names every check a full trace holds."""
+    rule check is recorded as {name, value, threshold, pass} and each input it read as {name, value} (with as_of
+    when the input is older than the row), and the checks run on past the first failure where they can, so the
+    paper league sees a near-miss. A traced and an untraced strategy make the same orders. `CHECKS` names every
+    check a full trace holds; `INPUTS` every input it reads, each an entry of lab/inputs.toml, which gives its source."""
     name = ""
     cutoff = None
     CHECKS: tuple = ("new market", "hours to close", "quote valid", "spread")
+    INPUTS: tuple = ("bid", "ask", "yes_depth", "no_depth", "close_time")  # the book row's (paper.traced)
 
     def __init__(self, params: dict):
         self.params, self.seen = params, set()
@@ -129,9 +136,11 @@ class Family:
             self.checks.append({"name": name, "value": value, "threshold": threshold, "pass": bool(ok)})
         return bool(ok)
 
-    def read(self, name: str, value, source: str) -> None:
+    def read(self, name: str, value, as_of=None) -> None:
+        if name not in self.INPUTS:
+            raise ValueError(f"{self.name} reads {name}, which it does not declare in INPUTS")
         if self.inputs is not None:
-            self.inputs.append({"name": name, "value": value, "source": source})
+            self.inputs.append({"name": name, "value": value} | ({} if as_of is None else {"as_of": as_of}))
 
     def rule(self) -> str:
         """The family's rule in words, from its params."""
@@ -411,6 +420,7 @@ class TTTotals(Family):
     (yes) or the under (no) when that beats the price by `edge` and the last five and the mean total agree."""
     name = "tt_totals"
     CHECKS = ("new game",) + Family.CHECKS + ("head to head", "fair price", "edge", "form agrees")
+    INPUTS = Family.INPUTS + ("head_to_head", "no_vig_fair")
 
     def __init__(self, params: dict, meetings: Meetings, fairs: dict):
         super().__init__(params)
@@ -428,8 +438,8 @@ class TTTotals(Family):
             return []
         p, line = self.params, float(m.subtitle.split()[-1])
         f, fair = features(self.meetings.before(m, row.ts), line), self.fairs.get((row.market_id, row.ts.value))
-        self.read("head to head", f, "results")
-        self.read("no-vig fair", fair, "line book")
+        self.read("head_to_head", f)
+        self.read("no_vig_fair", fair)
         if not self.passes("head to head", f and f["h2h"], p["min_h2h"], f is not None and f["h2h"] >= p["min_h2h"]) \
                 or not self.passes("fair price", fair, "known", fair is not None):
             return []
@@ -444,6 +454,95 @@ class TTTotals(Family):
             return []
         self.seen.add(m.event_id)
         return self.order(row, side)
+
+
+TEMP = re.compile(r"(-?\d+)° (?:or (above|below)|to (-?\d+)°)")
+
+
+def degrees(subtitle: str | None) -> tuple[int | None, int | None] | None:
+    """The yes range of a temperature market, in whole degrees, from its subtitle: `57° or above` (57, None),
+    `48° or below` (None, 48), `55° to 56°` (55, 56)."""
+    hit = TEMP.fullmatch((subtitle or "").strip())
+    if not hit:
+        return None
+    n = int(hit[1])
+    return (n, None) if hit[2] == "above" else (None, n) if hit[2] == "below" else (n, int(hit[3]))
+
+
+def day_of(event_id: str | None) -> dt.date | None:
+    """The date a Kalshi daily event is for: KXHIGHNY-26NOV15 is 2026-11-15."""
+    try:
+        return dt.datetime.strptime((event_id or "").rsplit("-", 1)[-1], "%y%b%d").date()
+    except ValueError:
+        return None
+
+
+def chance(lo: int | None, hi: int | None, mean: float, sd: float) -> float:
+    """P(lo <= high <= hi) for a whole-degree high read as normal around `mean` with `sd`, half a degree each side."""
+    cdf = lambda x: 0.5 * (1 + math.erf((x - mean) / (sd * math.sqrt(2))))  # noqa: E731
+    return (1.0 if hi is None else cdf(hi + 0.5)) - (0.0 if lo is None else cdf(lo - 0.5))
+
+
+class Forecasts:
+    """Each station's recorded NWS forecast (input_readings of nws_high: key, as_of, value) as it stood at any time:
+    the newest reading as of at or before the time asked about, so no row sees a forecast made after it."""
+
+    def __init__(self, rows: list[tuple]):
+        by = defaultdict(list)
+        for key, as_of, value in rows:
+            by[key].append((pd.Timestamp(as_of).value, value))
+        self.by = {k: (np.array([t for t, _ in v], dtype=np.int64), [x for _, x in v])
+                   for k, v in ((k, sorted(v, key=lambda r: r[0])) for k, v in by.items())}
+
+    def at(self, key: str, ts: pd.Timestamp) -> tuple[dict, pd.Timestamp] | None:
+        s = self.by.get(key)
+        i = -1 if s is None else int(np.searchsorted(s[0], ts.value, side="right")) - 1
+        return None if i < 0 else (s[1][i], pd.Timestamp(int(s[0][i]), tz="UTC"))
+
+
+class Weather(Family):
+    """A Kalshi daily high market against the NWS forecast high of the station it settles on (lab/inputs.toml
+    nws_high): the high read as normal around the forecast with `sd` degrees, the market's range has a chance, and
+    it buys yes or no when that beats the price by `edge`. The forecast is the newest read at or before the row and
+    no older than the input's fresh_min."""
+    name = "weather"
+    CHECKS = ("temperature market",) + Family.CHECKS + ("forecast known", "forecast fresh", "edge")
+    INPUTS = Family.INPUTS + ("nws_high",)
+
+    def __init__(self, params: dict, forecasts: Forecasts, reg: dict):
+        super().__init__(params)
+        e = reg["nws_high"]
+        self.forecasts, self.fresh_min = forecasts, e["fresh_min"]
+        self.stations = {st["series"]: key for key, st in e["stations"].items()}
+
+    def rule(self) -> str:
+        p = self.params
+        return (f"weather: buy yes or no when the chance of the market's range, the high read as normal around the NWS "
+                f"forecast high with sd {p['sd']} F, beats the price by {p['edge']}, within {p['hours']} h of close")
+
+    def on_book(self, row, m):
+        p, st = self.params, self.stations.get(m.series_id or "")
+        day, rng = day_of(m.event_id), degrees(m.subtitle)
+        if not self.passes("temperature market", m.series_id, "a series of lab/inputs.toml nws_high",
+                           st is not None and day is not None and rng is not None):
+            return []
+        q = self.entry(row, m)
+        if not (got := q or (self.checks is not None and self.quoted)):
+            return []
+        hit = self.forecasts.at(st, row.ts)
+        high = None if hit is None else hit[0]["highs"].get(day.isoformat())
+        self.read("nws_high", None if hit is None else {"station": st, "day": day.isoformat(), "high": high,
+                                                         "grid": hit[0].get("grid")}, None if hit is None else hit[1])
+        if not self.passes("forecast known", high, f"a forecast high for {day}", high is not None):
+            return []
+        age = (row.ts - hit[1]).total_seconds() / 60
+        if not self.passes("forecast fresh", age, self.fresh_min, age <= self.fresh_min):
+            return []
+        prob = chance(*rng, high, p["sd"])
+        side = side_for(prob, *got, p["edge"])
+        if not self.passes("edge", {"prob": prob, "bid": got[0], "ask": got[1]}, p["edge"], side is not None):
+            return []
+        return self.order(row, side if q else None)
 
 
 FORECAST = ("You forecast the probability that a prediction market resolves yes, from its question alone. "
@@ -561,6 +660,15 @@ class Loader:
             self.cache[key] = (tb, *backtest.load_markets(self.conn, self.venue, tb["market_id"].unique()))
         return self.cache[key]
 
+    def forecasts(self, start: dt.date, end: dt.date) -> Forecasts | None:
+        """The window's NWS forecasts, from LEAD before it, or None unless every day of it has a reading."""
+        key = ("forecasts", start)
+        if key not in self.cache:
+            covered = inputs.days(self.conn, "nws_high")
+            self.cache[key] = Forecasts(inputs.readings(self.conn, "nws_high", _midnight(start) - LEAD, _midnight(end))) \
+                if all(d in covered for d in span(start, end)) else None
+        return self.cache[key]
+
     def ref(self, start: dt.date, end: dt.date, ref_venue: str, source: str) -> tuple:
         key = ("ref", ref_venue, source)
         if key not in self.cache:
@@ -585,6 +693,9 @@ def strategy(family: str, params: dict, loader: Loader, start: dt.date, end: dt.
         if not all(d in done for d in span(start - dt.timedelta(days=days), start)):
             return None
         return trained(params, loader.train(start, days), start)
+    if family == "weather":
+        f = loader.forecasts(start, end)
+        return None if f is None else Weather(params, f, inputs.load())
     return Gap(params, *loader.ref(start, end, params["ref_venue"], params["source"]))
 
 

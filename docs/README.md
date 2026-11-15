@@ -20,7 +20,7 @@ The repo README is the reference for layout, the analysis and the site. These pa
 
 ## Markets
 
-- [markets.md](markets.md): the venue reference behind `lab/markets/` (Kalshi, Polymarket, PredictIt, Manifold, The Odds API), the recorder, links, backtest, paper league and demo orders.
+- [markets.md](markets.md): the venue reference behind `lab/markets/` (Kalshi, Polymarket, PredictIt, Manifold, The Odds API), the recorder, links, backtest, paper league, the inputs registry and demo orders.
 
 ## Strategy coverage
 
