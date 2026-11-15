@@ -295,3 +295,56 @@ def test_tt_totals_needs_its_meetings_and_a_fresh_book(conn):
     out = paper.run_pass(conn, "odds_api", c, NOW + dt.timedelta(hours=1))
     assert not out["fresh"] and out["book"] == 0
     assert paper.report(conn, "odds_api", c["paper"], NOW) == ["odds_api: no paper fills yet"]
+
+
+def decisions(conn):
+    return conn.execute("SELECT account, instrument, action, rule, inputs, checks, sizing, fill_source, fill_id "
+                        "FROM decisions ORDER BY id").fetchall()
+
+
+def funnel(conn, at=NOW):
+    return dict(conn.execute("SELECT reason, n FROM decision_funnel WHERE account = %s AND pass_at = %s",
+                             (ACCOUNT, at)).fetchall())
+
+
+def test_each_fill_has_its_decision_and_every_book_row_is_counted_in_the_funnel(conn):
+    seed(conn)
+    paper.run_pass(conn, "kalshi", cfg(), NOW)
+    [d] = [r for r in decisions(conn) if r[2] == "enter"]
+    [(oid,)] = conn.execute("SELECT id FROM paper_orders").fetchall()
+    account, instrument, action, rule, inputs, checks, sizing, source, fill_id = d
+    assert (account, instrument, action, source, fill_id) == (ACCOUNT, "A", "enter", "paper", oid)
+    assert conn.execute("SELECT count(*) FROM fills WHERE source = 'paper' AND fill_id = %s", (fill_id,)).fetchone()[0] == 1
+    assert rule == "longshot: buy no when the yes mid is 0.01-0.10, within 24 h of close"
+    assert all(c["pass"] for c in checks) and {c["name"] for c in checks} == set(paper.Longshot.CHECKS)
+    assert {i["name"]: (i["value"], i["source"]) for i in inputs}["ask"] == (0.07, "kalshi recorder")
+    assert all(i["as_of"] for i in inputs)
+    assert sizing["contracts"] == 10 and sizing["price"] == pytest.approx(0.95) and sizing["cash"] == 1000
+    assert sizing["depth"] == 100 and sizing["fee"] == pytest.approx(0.04)
+    # A ordered; B is 48 h out and C is out of the band: each a near-miss, one check failed of a full trace
+    assert funnel(conn) == {"ordered": 1, "hours to close": 1, "mid in band": 1}
+    assert sum(funnel(conn).values()) == 3
+    near = [(r[1], [c["name"] for c in r[5] if not c["pass"]]) for r in decisions(conn) if r[2] == "near_miss"]
+    assert near == [("B", ["hours to close"]), ("C", ["mid in band"])]
+
+    paper.run_pass(conn, "kalshi", cfg(near_misses=1), NOW + dt.timedelta(minutes=5))
+    later = funnel(conn, NOW + dt.timedelta(minutes=5))
+    assert later == {"new market": 1, "hours to close": 1, "mid in band": 1}  # A is held now
+    near = [r[1] for r in decisions(conn) if r[2] == "near_miss"]
+    assert near == ["B", "C", "B"]  # capped at 1 this pass, the oldest quote first
+    assert len(decisions(conn)) == 4
+
+
+def test_a_stale_book_writes_no_decision_and_one_stale_book_row(conn):
+    seed(conn, sweep_age=dt.timedelta(minutes=20))
+    paper.run_pass(conn, "kalshi", cfg(), NOW)
+    assert decisions(conn) == [] and funnel(conn) == {"stale_book": 1}
+
+
+def test_near_misses_and_funnel_rows_past_trace_days_are_cut(conn):
+    seed(conn)
+    paper.run_pass(conn, "kalshi", cfg(near_misses=5), NOW)
+    assert {r[2] for r in decisions(conn)} == {"enter", "near_miss"}
+    paper.run_pass(conn, "kalshi", cfg(near_misses=0, trace_days=1), NOW + dt.timedelta(days=2))
+    assert [r[2] for r in decisions(conn)] == ["enter"]  # the fill's decision stays with its fill
+    assert funnel(conn) == {}

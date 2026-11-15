@@ -176,3 +176,30 @@ def test_calibration_metrics(conn):
     assert m['trader_calibration_power{edge="0.02",gate="stack",oos_months="60"}'] == 0.75
     assert m['trader_calibration_power{edge="0.01",gate="bias",oos_months="12"}'] == 1
     assert 'trader_run_last_ok_timestamp_seconds{kind="calibration"}' in m
+
+
+def test_decision_metrics(conn):
+    """Decisions per action, the newest pass's funnel, and a fill after the first traced entry with no decision."""
+    from lab import db
+    from web.exporter import TraderCollector
+
+    now = dt.datetime.now(dt.timezone.utc)
+    conn.execute("INSERT INTO paper_accounts (account, family, venue, variant, params, capital, started_at) "
+                 "VALUES ('paper-a', 'longshot', 'kalshi', 'v', '{}', 1000, %s)", (now,))
+    for mid, at in (("OLD", now - dt.timedelta(hours=2)), ("A", now), ("B", now)):
+        conn.execute("INSERT INTO paper_orders (account, market_id, side, stake, sent_at, quoted_at, contracts, price, "
+                     "fee) VALUES ('paper-a', %s, 'no', 10, %s, %s, 10, 0.95, 0.04)", (mid, at, at))
+    conn.execute("INSERT INTO decisions (league, account, venue, instrument, decided_at, action, rule, fill_source, "
+                 "fill_id) VALUES ('event_contracts', 'paper-a', 'kalshi', 'A', %s, 'enter', 'r', 'paper', 2), "
+                 "('event_contracts', 'paper-a', 'kalshi', 'C', %s, 'near_miss', 'r', NULL, NULL)", (now, now))
+    conn.execute("INSERT INTO decision_funnel (league, account, venue, pass_at, reason, n) VALUES "
+                 "('event_contracts', 'paper-a', 'kalshi', %s, 'spread', 9), "
+                 "('event_contracts', 'paper-a', 'kalshi', %s, 'spread', 4), "
+                 "('event_contracts', 'paper-a', 'kalshi', %s, 'ordered', 2)", (now - dt.timedelta(minutes=5), now, now))
+    m = scrape(TraderCollector(db.connect))
+    assert m['trader_decisions_total{account="paper-a",action="enter",league="event_contracts"}'] == 1
+    assert m['trader_decisions_total{account="paper-a",action="near_miss",league="event_contracts"}'] == 1
+    assert m['trader_decision_funnel{account="paper-a",check="spread",league="event_contracts"}'] == 4
+    assert m['trader_decision_funnel{account="paper-a",check="ordered",league="event_contracts"}'] == 2
+    # B has no decision; OLD was sent before the first traced entry, so it is not counted
+    assert m['trader_fills_untraced{league="event_contracts"}'] == 1
