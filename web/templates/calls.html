@@ -41,7 +41,7 @@
   <thead><tr><th>Recorded</th><th>Who</th><th>Signal source</th><th>Call</th><th>Entry close</th><th>Benchmark</th>{% for h in [1, 5, 20] %}<th class="n">{{ h }}d net</th><th class="n">{{ h }}d excess</th>{% endfor %}<th>Thesis</th></tr></thead>
   <tbody>
   {% for c in calls %}
-  <tr><td>{{ c.created_at | local }}</td><td>{{ c.who }} <span class="muted">{{ c.author }}</span></td>
+  <tr><td><a href="/trades/call/{{ c.id }}">{{ c.created_at | local }}</a></td><td>{{ c.who }} <span class="muted">{{ c.author }}</span></td>
       <td>{{ c.signal_source }}</td><td>{{ c.direction }} {{ c.ticker }} <span class="muted">{{ c.instrument }}</span></td><td>{{ c.entry_session }}</td><td>{{ c.benchmark }}</td>
       {% for h in [1, 5, 20] %}{% set s = c.scores.get(h | string) %}
       {% if h not in c.horizons %}<td class="n muted" colspan="2">not asked</td>

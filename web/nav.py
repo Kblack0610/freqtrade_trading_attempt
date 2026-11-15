@@ -6,7 +6,7 @@ One question per tab. base.html loops over `groups(path)`; the shell markup is w
 # (group, [(title, path, extra prefixes the tab also owns)])
 TABS = (
     ("Now", (
-        ("Overview", "/", ("/bots",)),
+        ("Overview", "/", ("/bots", "/trades")),
         ("Live", "/live", ()),
         ("Book", "/book", ()),
         ("Accounts", "/accounts", ()),
