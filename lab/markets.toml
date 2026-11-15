@@ -160,15 +160,18 @@ timeout_s = 30
 series = { basketball_nba = "KXNBAGAME", americanfootball_nfl = "KXNFLGAME", icehockey_nhl = "KXNHLGAME", baseball_mlb = "KXMLBGAME" }
 
 [links.llm]
-# Proposals only, through the LiteLLM gateway with a scoped key (LITELLM_API_KEY). A local model: free, and the
-# market titles never leave the house.
+# Proposals only, through the LiteLLM gateway with a scoped key (LITELLM_API_KEY) that may call this one route.
+# The route is llama-server on the workstation's RTX 4060 Ti: free, and the market titles never leave the house.
+# It has no fallback edge, so with the workstation off each ask logs an error and nothing is proposed that run.
 base_url = "https://llm.kblab.me"
-model = "reasoning (Qwen3.6-35B-A3B-4bit)"
+model = "local (qwen3.5-9b)"
 timeout_s = 120
 # Each [a, b]: open markets of a that are not yet linked or asked about, each asked against b's candidates.
 pairs = [["odds_api", "kalshi"], ["polymarket_us", "kalshi"]]
 # Markets asked about per run, across all pairs, soonest closing first, and only those closing within horizon_d.
 max_asks = 50
+# Failed asks do not count in max_asks, so the pass stops after this many in a row (route down, workstation off).
+max_failures = 3
 horizon_d = 14
 # A candidate closes within window_h of the market and shares a title word; the best `candidates` by shared words go.
 window_h = 96

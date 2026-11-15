@@ -189,6 +189,7 @@ def run_llm(conn, cfg: dict, llm: Llm, now: dt.datetime) -> tuple[int, int]:
     lcfg = cfg["llm"]
     stop, window = set(lcfg.get("stopwords", ())), dt.timedelta(hours=lcfg.get("window_h", 96))
     max_asks, asks, proposed = lcfg.get("max_asks", 50), 0, 0
+    max_failures, failures = lcfg.get("max_failures", 3), 0
     for va, vb in lcfg["pairs"]:
         todo = _unasked(conn, va, vb, now, now + dt.timedelta(days=lcfg.get("horizon_d", 14)))
         if not todo or asks >= max_asks:
@@ -216,7 +217,12 @@ def run_llm(conn, cfg: dict, llm: Llm, now: dt.datetime) -> tuple[int, int]:
                 found = parse(llm.ask(prompt(a, cands)), a, cands)
             except (requests.RequestException, KeyError, IndexError, ValueError) as e:
                 print(f"links: llm: {va} {m['market_id']}: {type(e).__name__}: {e}", flush=True)
+                failures += 1
+                if failures >= max_failures:  # a failed ask is not counted in max_asks, so a down route would be asked about every market
+                    print(f"links: llm: {failures} asks failed in a row, giving up until the next run", flush=True)
+                    return asks, proposed
                 continue
+            failures = 0
             with conn.transaction():
                 cur = conn.cursor()
                 cur.executemany(INSERT, [(va, m["market_id"], oa, vb, c["id"], ob, f"llm:{llm.model}", conf,
