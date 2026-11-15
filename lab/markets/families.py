@@ -264,6 +264,15 @@ class Gap(Family):
         return self.order(row, None if fair is None else side_for(fair, *q, self.params["edge"]))
 
 
+def line_resolution(line_id: str, r: Resolution) -> Resolution:
+    """How a line market `<market>|<line>` (line_book) resolves, given its game's resolution: yes when the total went
+    over, no under, void on a push or a void game."""
+    line = line_id.rsplit("|", 1)[1]
+    paid = None if r.result in ("void", "split") else pays(f"Over {line}", r.result)
+    return Resolution(line_id, "void" if paid is None else "yes" if paid else "no",
+                      None if paid is None else float(paid), r.settled_at, r.volume)
+
+
 def line_book(quotes: pd.DataFrame, markets: dict, resolutions: dict, depth: float) -> tuple:
     """A sportsbook's totals markets (lab/markets/odds.py: outcomes <book>:Over 216.5, resolved `Total 220`) as one
     binary market per line, `<market>|<line>`, yes being the over. Its ask is the best book's over and its bid one
@@ -293,9 +302,7 @@ def line_book(quotes: pd.DataFrame, markets: dict, resolutions: dict, depth: flo
                     lm[lid] = Market(lid, mid, m.series_id, m.title, f"Over {line}", "total_line", m.open_time,
                                      m.close_time)
                     if r is not None:
-                        paid = None if r.result in ("void", "split") else pays(f"Over {line}", r.result)
-                        lr[lid] = Resolution(lid, "void" if paid is None else "yes" if paid else "no",
-                                             None if paid is None else float(paid), r.settled_at, r.volume)
+                        lr[lid] = line_resolution(lid, r)
                 rows.append((lid, ts, 1.0 - best[f"Under {line}"], best[f"Over {line}"], depth, depth))
                 f = RefBook.fairs(latest[line], words).get(f"Over {line}")
                 if f is not None:
@@ -336,6 +343,14 @@ class Meetings:
         if f is not None and f[0] >= at.value:
             raise Lookahead(f"the final score of {market_id} is read at {at}, before it settled")
         return None if f is None else f[1]
+
+
+def meetings_of(conn, venue: str) -> Meetings:
+    """Every resolved totals market of the venue as Meetings."""
+    ids = [r[0] for r in conn.execute(
+        "SELECT market_id FROM resolutions JOIN markets USING (venue, market_id) WHERE venue = %s "
+        "AND market_type = 'totals'", (venue,))]
+    return Meetings(*backtest.load_markets(conn, venue, ids))
 
 
 def features(totals: np.ndarray, line: float) -> dict | None:
@@ -473,10 +488,7 @@ class Loader:
     def meetings(self) -> Meetings:
         """Every resolved totals market of the venue; Meetings shows a strategy only those settled before its row."""
         if self._meetings is None:
-            ids = [r[0] for r in self.conn.execute(
-                "SELECT market_id FROM resolutions JOIN markets USING (venue, market_id) WHERE venue = %s "
-                "AND market_type = 'totals'", (self.venue,))]
-            self._meetings = Meetings(*backtest.load_markets(self.conn, self.venue, ids))
+            self._meetings = meetings_of(self.conn, self.venue)
         return self._meetings
 
     def bars(self, start: dt.date, end: dt.date) -> pd.DataFrame:

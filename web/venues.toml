@@ -22,6 +22,12 @@ checks = [{source = "drill", match = "kalshi_demo", max_age_h = 96},
 human = "Nothing: the demo keys are deployed, so an error here is ours to fix"
 
 [[venue]]
+name = "The Odds API"
+money = "the paper league on the sportsbook totals lines; no bet is ever placed"
+checks = [{source = "paper", match = "odds_api", max_age_h = 7}]
+human = "Nothing: the read key is deployed (trader-odds-api), so an error here is ours to fix"
+
+[[venue]]
 name = "Kraken"
 money = "real, read only"
 checks = [{source = "broker", match = "kraken", max_age_h = 3}]
