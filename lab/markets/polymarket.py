@@ -153,11 +153,11 @@ class Polymarket:
             yield [global_quote(m, ts) for m in markets]
 
     def settled(self, cursor: str | None) -> Iterator[tuple[list[Settled], str | None]]:
-        # volume_num_min is asked of Gamma: an unfiltered closed walk 500s after 2s on a busy day. It is part of the
-        # query the cursor hashes, so a changed floor needs `--restart`.
+        # By id, not closedTime: Gamma 500s a closedTime page once the walk is deep enough, floor or not
+        # (docs/markets.md). Order and floor are part of the query the cursor hashes, so changing either needs
+        # `--restart`.
         floor = {"volume_num_min": self.settled_min_volume} if self.settled_min_volume > 0 else {}
-        for markets, _, nxt in self._walk({"closed": "true", "order": "closedTime", "ascending": "false", **floor},
-                                          cursor):
+        for markets, _, nxt in self._walk({"closed": "true", "order": "id", "ascending": "false", **floor}, cursor):
             yield [Settled(global_quote(m, r.settled_at), r) for m in markets
                    if (r := global_resolution(m)) is not None], nxt
 

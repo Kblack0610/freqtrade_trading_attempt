@@ -64,7 +64,7 @@ def test_polymarket_global_asks_gamma_for_markets_over_open_min_volume_on_every_
 def test_polymarket_global_settled_asks_gamma_for_markets_over_settled_min_volume():
     s = Session((200, "polymarket_closed.json"))
     list(Polymarket(cfg(page_limit=100, settled_min_volume=1000), s, sleep=nosleep).settled(None))
-    assert s.calls[0][1] == {"closed": "true", "order": "closedTime", "ascending": "false", "volume_num_min": 1000.0,
+    assert s.calls[0][1] == {"closed": "true", "order": "id", "ascending": "false", "volume_num_min": 1000.0,
                              "limit": 100}
 
 
@@ -89,6 +89,14 @@ def test_polymarket_global_resolutions_take_the_first_outcome_and_parse_short_of
     assert s.calls[0][1] == {"closed": "true", "order": "closedTime", "ascending": "false", "limit": 100}
     assert [(r.result, r.value) for r in rs] == [("yes", 1.0), ("no", 0.0), ("no", 0.0)]  # the 4th closed before since
     assert rs[0].settled_at == dt.datetime(2026, 11, 6, 6, 46, 21, tzinfo=UTC)
+
+
+def test_polymarket_global_settled_walks_closed_markets_by_id_from_the_saved_cursor():
+    s = Session((200, "polymarket_closed.json"))
+    [(page, nxt)] = list(Polymarket(cfg(page_limit=100), s, sleep=nosleep).settled("saved"))
+    assert s.calls[0][1] == {"closed": "true", "order": "id", "ascending": "false", "limit": 100,
+                             "after_cursor": "saved"}
+    assert [x.resolution.result for x in page] == ["yes", "no", "no", "yes"] and nxt is None
 
 
 def test_predictit_makes_each_contract_a_market_under_its_market_as_event():
