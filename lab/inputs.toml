@@ -1,0 +1,129 @@
+# The inputs registry (lab/inputs.py): every input a strategy reads, by the name the decision record writes it under.
+# A family declares the inputs it reads (lab/markets/families.py Family.INPUTS) and a crypto strategy lists them in
+# lab/families.toml [strategies] `inputs`; both must name an entry here (lab/taxonomy.py). Adding a data source is one
+# entry here, one reader writing input_readings (migration 056) and one family that reads it.
+#
+# Each entry: title; signal_source, one of lab/families.toml [signal_sources]; origin, where the value comes from
+# ({venue} is the venue it was read on), as decisions.inputs[].source shows it; cadence, how often it changes.
+# An entry with a reader of ours also names it (`reader`) and `fresh_min`, past which its newest reading is stale: the
+# recorder lane card and trader_input_age_seconds read that, and a family reading the input refuses an older one.
+
+[inputs.ohlcv]
+title = "Candles"
+signal_source = "price"
+origin = "the exchange's OHLCV, via Freqtrade"
+cadence = "each candle"
+
+[inputs.funding]
+title = "Funding rates and open interest"
+signal_source = "price"
+origin = "the exchange's futures API (lab/futures.py)"
+cadence = "each funding period"
+
+[inputs.bid]
+title = "Best bid of the yes side"
+signal_source = "price"
+origin = "{venue} recorder"
+cadence = "each sweep"
+
+[inputs.ask]
+title = "Best ask of the yes side"
+signal_source = "price"
+origin = "{venue} recorder"
+cadence = "each sweep"
+
+[inputs.yes_depth]
+title = "Contracts offered at the yes ask"
+signal_source = "price"
+origin = "{venue} recorder"
+cadence = "each sweep"
+
+[inputs.no_depth]
+title = "Contracts offered at the no ask"
+signal_source = "price"
+origin = "{venue} recorder"
+cadence = "each sweep"
+
+[inputs.close_time]
+title = "When the market closes"
+signal_source = "structural"
+origin = "{venue} markets"
+cadence = "set at listing"
+
+[inputs.head_to_head]
+title = "The pair's past final totals against the line"
+signal_source = "structural"
+origin = "{venue} results"
+cadence = "each settled game"
+
+[inputs.no_vig_fair]
+title = "The no-vig fair price of the over"
+signal_source = "cross-venue"
+origin = "{venue} line book"
+cadence = "each sweep"
+
+[inputs.nws_high]
+title = "NWS forecast high temperature"
+signal_source = "forecast"
+origin = "api.weather.gov gridpoint forecast"
+cadence = "hourly"
+reader = "lab/nws.py"
+# Read hourly (home-config trader-inputs-nws); three missed reads is stale.
+fresh_min = 180
+
+[inputs.nws_high.api]
+# lab/markets/api.py's client. api.weather.gov publishes no number: "The rate limit is not public information, but
+# allows a generous amount for typical use" (read 2026-11-15, https://www.weather.gov/documentation/services-web-api).
+# A read is two requests a station (points, then its forecast), 14 an hour for 7 stations; one a second is far under.
+base_url = "https://api.weather.gov"
+budget_rps = 1
+page_gap_s = 0.5
+retries = 4
+timeout_s = 30
+# The API refuses a request without a User-Agent and asks it to name the application.
+user_agent = "trader-lab (github.com/Kblack0610/freqtrade_trading_attempt)"
+
+# The stations Kalshi's daily high series settle on: each market's rules name the NWS climate report (CLI) of one
+# station, "the maximum temperature recorded at New York City (CLINYC)" (read 2026-11-15 from each series' open
+# markets). The coordinates are the station's; the reader asks NWS for the forecast grid cell that holds them.
+[inputs.nws_high.stations.KNYC]
+series = "KXHIGHNY"
+cli = "CLINYC"
+lat = 40.7790
+lon = -73.9692
+
+[inputs.nws_high.stations.KMDW]
+series = "KXHIGHCHI"
+cli = "CLIMDW"
+lat = 41.7842
+lon = -87.7553
+
+[inputs.nws_high.stations.KMIA]
+series = "KXHIGHMIA"
+cli = "CLIMIA"
+lat = 25.7906
+lon = -80.3164
+
+[inputs.nws_high.stations.KAUS]
+series = "KXHIGHAUS"
+cli = "CLIAUS"
+lat = 30.1831
+lon = -97.6799
+
+[inputs.nws_high.stations.KDEN]
+series = "KXHIGHDEN"
+cli = "CLIDEN"
+lat = 39.8466
+lon = -104.6562
+
+[inputs.nws_high.stations.KLAX]
+series = "KXHIGHLAX"
+cli = "CLILAX"
+lat = 33.9382
+lon = -118.3866
+
+[inputs.nws_high.stations.KPHL]
+series = "KXHIGHPHIL"
+cli = "CLIPHL"
+lat = 39.8733
+lon = -75.2268

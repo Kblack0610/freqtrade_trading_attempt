@@ -296,7 +296,7 @@ On razer-laptop, walk-forward (01:00 UTC) adds folds it has not stored and analy
 
 ## Calls
 
-Signal categories live in `lab/families.toml`: `[signal_sources]` names the allowed origins, `[family_categories]` classifies every crypto method family and `[market_categories]` classifies the event-contract families. `inputs` remains a data dependency. Crypto horizons are strategy exits (measured holding periods stay in the diversity archive); event contracts hold to resolution, and calls carry their own session horizons. `/avenues` shows the [avenues register](docs/avenues.md). `/coverage` and `/markets/book` filter results by signal source; `/calls` keeps source, instrument and horizon separate when scoring groups.
+Signal categories live in `lab/families.toml`: `[signal_sources]` names the allowed origins, `[family_categories]` classifies every crypto method family and `[market_categories]` classifies the event-contract families. `inputs` remains a data dependency, each one an entry of the inputs registry `lab/inputs.toml` (docs/markets.md, Inputs). Crypto horizons are strategy exits (measured holding periods stay in the diversity archive); event contracts hold to resolution, and calls carry their own session horizons. `/avenues` shows the [avenues register](docs/avenues.md). `/coverage` and `/markets/book` filter results by signal source; `/calls` keeps source, instrument and horizon separate when scoring groups.
 
 A call is any trade idea a person, an agent or a rule makes outside the strategies: `python -m lab.calls add --who human --author <name> --ticker NVDA --direction short --benchmark SMH --signal-source event --thesis "..."` records it in `calls`. It enters at the next regular close still to print (`--entry` picks a later one; one that has printed is refused) and is scored at 1, 5 and 20 sessions (`--horizons`). Rows are append-only (migration 048 refuses UPDATE and DELETE): a changed mind is a new call.
 
@@ -383,7 +383,8 @@ The first run fetches full history (5m since 2019 on binanceus is the long pole)
 - `050`: required signal source on calls; classifies the Phase 1 event seed and refuses unclassified legacy calls.
 - `052`: permits the betting signals (`bet-ready`, `bet-drift`) in the research loop state.
 - `055`: `decisions` (why each paper order was made: rule, checks, inputs, sizing, its `fills` row; and capped near-misses) and `decision_funnel` (book rows per pass and account by the first check failed), written by `lab/markets/paper.py`.
-- `056`: `decisions` keyed by fill source, account, fill id and decided_at, so league bots (whose trade ids repeat across bots) join it: `lab/ingest.py` writes one `crypto` decision per traced bot trade.
+- `056`: `input_readings`, what our own input readers read (`lab/inputs.py`; the first is `lab/nws.py`), one row per input, key and read time.
+- `057`: `decisions` keyed by fill source, account, fill id and decided_at, so league bots (whose trade ids repeat across bots) join it: `lab/ingest.py` writes one `crypto` decision per traced bot trade.
 - `049`: the event-contract walk-forward. `market_backtests` keeps one row per test window (key gains `start_at`, `score` goes, each trade's event and the window's daily returns come in), `market_category_results` follows it, and `market_readiness` holds the markets readiness gate, one row per variant (`lab/markets/families.py`).
 
  A schema change is a new numbered file; never edit an applied one.
@@ -464,6 +465,7 @@ The event-contract paper league's accounts (`paper-<family>-<variant>`) get watc
 | `trader_candle_age_seconds`, `trader_coverage_age_seconds`, `trader_coverage_series` | `exchange` | Newest stored candle, newest backfill write, series stored |
 | `trader_futures_age_seconds` | `kind`, `exchange` | Newest funding (`funding`) or open interest (`open_interest`) row |
 | `trader_suggestions` | `kind` | Open suggestions |
+| `trader_input_age_seconds`, `trader_input_fresh_seconds` | `input` | Since the newest reading of each input with a reader (`lab/inputs.toml`), and its `fresh_min`; an input never read has no age |
 | `trader_markets_sweep_age_seconds`, `trader_markets_sweep_ok` | `venue` | Since the newest successful recorder sweep ended, and 1 when the newest sweep succeeded. A venue reports while it has a sweep in the last 7 days |
 | `trader_markets_sweeps_1h`, `trader_markets_sweeps_failed_1h` | `venue` | Recorder sweeps started in the last hour, and those that failed (an adapter or venue error each) |
 | `trader_markets_sweep_seen`, `trader_markets_sweep_changes`, `trader_markets_sweep_duration_seconds` | `venue` | The newest successful sweep's open outcomes, changed quotes written, and run time |

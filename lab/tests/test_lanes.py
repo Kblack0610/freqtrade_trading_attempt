@@ -9,7 +9,7 @@ NOW = dt.datetime(2026, 11, 13, 12, tzinfo=dt.timezone.utc)
 
 def empty(**over) -> dict:
     read = {"stale_h": 2, "bots": [], "paper": [], "paper_max_age_h": {}, "shadow_counts": [], "shadow_newest": None, "calls": [],
-            "calls_cfg": {"slack_days": 4}, "venues": [], "recorder": [], "recorder_ages": (15, {}), "coverage": [],
+            "calls_cfg": {"slack_days": 4}, "venues": [], "recorder": [], "recorder_ages": (15, {}), "inputs": {"nws_high": NOW}, "coverage": [],
             "runs": [], "confidence": {"ready": 0, "n": 0}, "readiness": {"ready": 0, "n": 0}, "suggestions": [],
             "bankroll": None, "watch": [], "guard_lifted": False}
     return read | over
@@ -99,3 +99,12 @@ def test_a_venue_is_stale_by_its_own_sweep_cadence():
     assert by_id(lanes.cards(empty(recorder=[venue]), NOW))["recorder"]["level"] == "amber"
     six_hourly = empty(recorder=[venue], recorder_ages=(15, {"odds_api": 390}))
     assert by_id(lanes.cards(six_hourly, NOW))["recorder"]["level"] == "green"
+
+
+def test_a_stale_or_unread_input_turns_the_recorder_card_amber():
+    venue = {"venue": "kalshi", "started_at": NOW, "ok": True, "error": None, "failed_1d": 0, "last_ok": NOW}
+    assert by_id(lanes.cards(empty(recorder=[venue]), NOW))["recorder"]["level"] == "green"
+    for newest in ({}, {"nws_high": NOW - dt.timedelta(hours=4)}):
+        card = by_id(lanes.cards(empty(recorder=[venue], inputs=newest), NOW))["recorder"]
+        assert card["level"] == "amber" and card["first"][0]["text"] == "nws_high"
+        assert {"label": "inputs fresh", "value": "0 of 1", "level": "amber"} in card["parts"]
