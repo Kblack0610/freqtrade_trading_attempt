@@ -34,7 +34,7 @@ import pandas as pd
 from psycopg.types.json import Jsonb
 from scipy.stats import norm
 
-from lab import metrics, robustness, suggest
+from lab import call_rules, metrics, robustness, suggest
 from lab.db import connect
 from lab.markets import venues as market_venues
 from lab.suggest import gate
@@ -86,8 +86,10 @@ def venue_fee(exchange: str) -> float | None:
 
 def trial_count(conn) -> int:
     """The crypto lab's tries. lab/markets/backtest.py registers event-contract variants in the same register under
-    their venue and counts only those; they are another lane's tries and do not raise this lane's bar."""
-    return conn.execute("SELECT count(*) FROM trials WHERE NOT (exchange = ANY(%s))", (market_venues(),)).fetchone()[0]
+    their venue, and lab/call_rules.py its rules under 'calls', and each counts only its own; they are other lanes'
+    tries and do not raise this lane's bar."""
+    return conn.execute("SELECT count(*) FROM trials WHERE NOT (exchange = ANY(%s))",
+                        ([*market_venues(), call_rules.EXCHANGE],)).fetchone()[0]
 
 
 def register(conn) -> int:

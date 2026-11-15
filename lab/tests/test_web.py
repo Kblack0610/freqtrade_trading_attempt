@@ -314,7 +314,8 @@ def test_suggestions_show_each_kind_with_its_gates(conn, signed_in):
 
 
 def test_calls_show_each_call_its_scores_and_the_record(conn, signed_in):
-    assert "No calls yet" in signed_in[1].get("/calls").text
+    first = signed_in[1].get("/calls").text
+    assert "No calls yet" in first and "No rule call scored yet" in first
     cid = conn.execute("INSERT INTO calls (who, author, thesis, ticker, direction, instrument, entry_session, horizons, "
                        "benchmark, signal_source) VALUES ('human', 'kenneth', 'board ousted the CEO', 'NVDA', 'short', 'equity', "
                        "'2026-11-13', '{1,5}', 'SMH', 'event') RETURNING id").fetchone()[0]
@@ -323,6 +324,17 @@ def test_calls_show_each_call_its_scores_and_the_record(conn, signed_in):
                  (cid,))
     body = signed_in[1].get("/calls").text
     for needle in ("short NVDA", "board ousted the CEO", "9.96%", "10.50%", "pending", "not asked", "Mean net", "event", "Signal source"):
+        assert needle in body, needle
+    rule = conn.execute("INSERT INTO calls (who, author, thesis, ticker, direction, instrument, entry_session, horizons, "
+                        "benchmark, signal_source) VALUES ('rule', 'rule:filing-shock', '8-K shock', 'AMD', 'long', 'equity', "
+                        "'2026-11-13', '{1}', 'SMH', 'event') RETURNING id").fetchone()[0]
+    conn.execute("INSERT INTO call_rule_events (rule, variant, feed_source, feed_id, ticker, ingested_at, call_id) "
+                 "VALUES ('filing-shock', 'abcdef0123', 'edgar', 'x', 'AMD', now(), %s)", (rule,))
+    conn.execute("INSERT INTO call_scores (call_id, horizon, exit_session, entry_close, exit_close, bench_entry, "
+                 "bench_exit, ret, pnl, excess) VALUES (%s, 1, '2026-11-16', 100, 103, 200, 201, 0.03, 0.0296, 0.025)",
+                 (rule,))
+    body = signed_in[1].get("/calls").text
+    for needle in ("Event rules", "filing-shock", "abcdef01", "no edge yet"):
         assert needle in body, needle
 
 
