@@ -80,7 +80,7 @@
   <thead><tr><th>Sent</th><th>Account</th><th>Market</th><th>Side</th><th class="n">Contracts</th><th class="n">Price</th><th class="n">Fee</th><th>Settled</th><th class="n">Profit</th></tr></thead>
   <tbody>
   {% for o in fills %}
-  <tr><td>{{ o.sent_at | local }}</td><td>{{ o.account }}</td><td>{{ o.title or o.market_id }}{% if o.subtitle %} <span class="muted">{{ o.subtitle }}</span>{% endif %}</td><td>{{ o.side }}</td>
+  <tr><td><a href="/trades/paper/{{ o.id }}">{{ o.sent_at | local }}</a></td><td>{{ o.account }}</td><td>{{ o.title or o.market_id }}{% if o.subtitle %} <span class="muted">{{ o.subtitle }}</span>{% endif %}</td><td>{{ o.side }}</td>
     <td class="n">{{ o.contracts }}</td><td class="n">{{ o.price | num(2) }}</td><td class="n">{{ o.fee | num(2) }}</td>
     <td>{{ o.settled_at | local if o.settled_at else "open" }}</td><td class="n {{ o.profit | tone }}">{{ o.profit | num(2) }}</td></tr>
   {% endfor %}
@@ -96,7 +96,7 @@
   <thead><tr><th>Placed</th><th>Venue</th><th>Ticker</th><th class="n">Price</th><th class="n">Count</th><th>Status</th><th>Canceled</th><th>Error</th></tr></thead>
   <tbody>
   {% for d in demo %}
-  <tr><td>{{ d.placed_at | local }}</td><td>{{ d.venue }}</td><td>{{ d.ticker }}</td><td class="n">{{ d.price | num(2) }}</td><td class="n">{{ d.count }}</td>
+  <tr><td>{% if d.status in ("executed", "filled") %}<a href="/trades/drill/{{ d.id }}">{{ d.placed_at | local }}</a>{% else %}{{ d.placed_at | local }}{% endif %}</td><td>{{ d.venue }}</td><td>{{ d.ticker }}</td><td class="n">{{ d.price | num(2) }}</td><td class="n">{{ d.count }}</td>
     <td>{{ d.status or "-" }}</td><td>{{ d.canceled_at | local }}</td><td>{% if d.error %}<code class="down">{{ d.error }}</code>{% endif %}</td></tr>
   {% endfor %}
   </tbody>

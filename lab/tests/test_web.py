@@ -94,7 +94,7 @@ def test_healthz_needs_no_sign_in(site):
     assert site[1].get("/healthz").text == "ok"
 
 
-@pytest.mark.parametrize("path", ["/", "/live", "/live/rows", "/bots/x", "/strategies", "/strategies/x", "/suggestions", "/confidence", "/book", "/coverage", "/guide", "/data", "/runs", "/runs/1", "/markets", "/links", "/markets/book", "/accounts"])
+@pytest.mark.parametrize("path", ["/", "/live", "/live/rows", "/bots/x", "/strategies", "/strategies/x", "/suggestions", "/confidence", "/book", "/coverage", "/guide", "/data", "/runs", "/runs/1", "/markets", "/links", "/markets/book", "/accounts", "/trades/paper/1"])
 def test_signed_out_goes_to_login(site, path):
     r = site[1].get(path)
     assert r.status_code == 303 and r.headers["location"] == "/login"
@@ -884,3 +884,94 @@ def test_signal_filter_applies_to_market_results_and_paper_accounts(conn, signed
     assert "event-contract" in structural and "resolution" in structural
     assert "paper-longshot-abcdef01" not in price and "1.23%" not in price
     assert "No markets backtest has run yet" in price
+
+
+def paper_fill(c, traced: bool) -> int:
+    c.execute("INSERT INTO venues (venue, title, kind) VALUES ('kalshi', 'Kalshi', 'exchange') ON CONFLICT DO NOTHING")
+    c.execute("INSERT INTO paper_accounts (account, family, venue, variant, params, capital, started_at) VALUES "
+              "('paper-longshot-aaaa1111', 'longshot', 'kalshi', 'aaaa1111', '{}', 1000, now()) ON CONFLICT DO NOTHING")
+    c.execute("INSERT INTO markets (venue, market_id, title, market_type, status, close_time, first_seen, updated_at) "
+              "VALUES ('kalshi', 'MIA-70', 'Miami above 69.99?', 'binary', 'open', %s, now(), now()), "
+              "('kalshi', 'MIA-68', 'Miami above 67.99?', 'binary', 'open', %s, now(), now()) ON CONFLICT DO NOTHING",
+              (NOW + dt.timedelta(hours=3), NOW + dt.timedelta(hours=3)))
+    market = "MIA-70" if traced else "MIA-68"
+    oid = c.execute("INSERT INTO paper_orders (account, market_id, side, stake, sent_at, quoted_at, bid, ask, contracts, "
+                    "price, fee) VALUES ('paper-longshot-aaaa1111', %s, 'yes', 10, %s, %s, 0.96, 0.98, 10, 0.97, 0.03) "
+                    "RETURNING id", (market, NOW, NOW)).fetchone()[0]
+    if traced:
+        checks = [{"name": "spread", "value": 0.02, "threshold": 0.05, "pass": True},
+                  {"name": "mid in band", "value": 0.97, "threshold": [0.9, 0.99], "pass": True}]
+        inputs = [{"name": "ask depth", "value": 212, "source": "kalshi recorder", "as_of": NOW.isoformat()}]
+        sizing = {"side": "yes", "stake": 10, "limit": None, "share": 0.5, "taken": 0, "depth": 212, "cash": 412.3,
+                  "contracts": 10, "price": 0.97, "fee": 0.03, "fees": {"rate": 0.07}}
+        rule = "longshot: buy yes when the yes mid is 0.90-0.99, within 24 h of close"
+        for action, instrument, ch, fill in (("enter", "MIA-70", checks, oid),
+                                             ("near_miss", "MIA-68", [dict(checks[0], value=0.07, **{"pass": False})], None)):
+            c.execute("INSERT INTO decisions (league, account, venue, instrument, decided_at, action, rule, inputs, "
+                      "checks, sizing, fill_source, fill_id) VALUES ('event_contracts', 'paper-longshot-aaaa1111', "
+                      "'kalshi', %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                      (instrument, NOW, action, rule, Jsonb(inputs), Jsonb(ch), Jsonb(sizing) if fill else None,
+                       fill and "paper", fill))
+        c.execute("INSERT INTO decision_funnel VALUES ('event_contracts', 'paper-longshot-aaaa1111', 'kalshi', %s, "
+                  "'spread', 1840), ('event_contracts', 'paper-longshot-aaaa1111', 'kalshi', %s, 'ordered', 1)", (NOW, NOW))
+    return oid
+
+
+def test_a_paper_fill_opens_its_decision(conn, signed_in):
+    oid = paper_fill(conn, traced=True)
+    _, client = signed_in
+    assert f'href="/trades/paper/{oid}"' in client.get("/markets/book").text
+    body = client.get(f"/trades/paper/{oid}").text
+    for needle in ("Miami above 69.99?", "yes 10 @ 0.97", "longshot: buy yes when the yes mid is 0.90-0.99",
+                   "mid in band", "0.9 / 0.99", "ask depth", "kalshi recorder", "depth cap 0.5 x 212", "cash 412.30",
+                   "fee 0.03", "rate 0.07", "spread 1,840", "1 near-miss: spread (1)", "Miami above 67.99?",
+                   "profit if yes", "0.27", "-9.73"):
+        assert needle in body, needle
+    assert "Recorded before decisions were traced" not in body
+
+
+def test_a_fill_from_before_the_record_says_so(conn, signed_in):
+    oid = paper_fill(conn, traced=False)
+    body = signed_in[1].get(f"/trades/paper/{oid}").text
+    assert "Recorded before decisions were traced" in body and "Miami above 67.99?" in body
+
+
+def test_a_crypto_trade_shows_its_markouts_and_reconcile(conn, signed_in):
+    seed(conn)
+    opened = conn.execute("SELECT open_date FROM bot_trades WHERE bot = 'kraken-s001'").fetchone()[0]
+    conn.execute("INSERT INTO markouts (bot, trade_id, open_date, horizon_min, pair, exchange, side, fill_slip, ret, "
+                 "btc_ret, beta, net, null_net, null_draws) VALUES ('kraken-s001', 1, %s, 60, 'BTC/USD', 'kraken', 1, "
+                 "0.0004, 0.015, 0.01, 1.0, 0.0031, -0.0012, 200)", (opened,))
+    conn.execute("INSERT INTO reconcile (bot, n, pair, kind, live_open, bt_open, delay_s, price_gap, fee_gap, profit_gap) "
+                 "VALUES ('kraken-s001', 1, 'BTC/USD', 'matched', %s, %s, 42, 0.0002, 0, -0.0011)", (opened, opened))
+    _, client = signed_in
+    assert 'href="/trades/freqtrade/1?bot=kraken-s001"' in client.get("/bots/kraken-s001").text
+    body = client.get("/trades/freqtrade/1?bot=kraken-s001").text
+    for needle in ("BTC/USD", "60 min", "0.31%", "200 draws", "matched", "42 s", "-0.11%",
+                   "Recorded before decisions were traced"):
+        assert needle in body, needle
+    assert client.get("/trades/freqtrade/1").status_code == 404  # a trade id is per bot
+    assert client.get("/trades/freqtrade/1?bot=other").status_code == 404
+
+
+def test_a_drill_and_a_call_open_their_page(conn, signed_in):
+    did = conn.execute("INSERT INTO demo_orders (venue, ticker, client_id, price, count, placed_at, status) VALUES "
+                       "('alpaca', 'SPY', 'c1', 1.0, 1, now(), 'filled') RETURNING id").fetchone()[0]
+    cid = conn.execute("INSERT INTO calls (who, author, thesis, ticker, direction, instrument, entry_session, horizons, "
+                       "benchmark, signal_source) VALUES ('human', 'kenneth', 'board ousted the CEO', 'NVDA', 'short', "
+                       "'equity', '2026-11-13', '{1}', 'SMH', 'event') RETURNING id").fetchone()[0]
+    conn.execute("INSERT INTO call_scores (call_id, horizon, exit_session, entry_close, exit_close, bench_entry, "
+                 "bench_exit, ret, pnl, excess) VALUES (%s, 1, '2026-11-16', 100, 90, 200, 201, -0.1, 0.0996, 0.105)",
+                 (cid,))
+    _, client = signed_in
+    assert f'href="/trades/drill/{did}"' in client.get("/markets/book").text
+    assert f'href="/trades/call/{cid}"' in client.get("/calls").text
+    drill = client.get(f"/trades/drill/{did}").text
+    assert "SPY" in drill and "order path" in drill
+    call = client.get(f"/trades/call/{cid}").text
+    assert "board ousted the CEO" in call and "9.96%" in call and "10.50%" in call
+
+
+@pytest.mark.parametrize("path", ["/trades/paper/999", "/trades/call/999", "/trades/drill/999", "/trades/nope/1"])
+def test_an_unknown_trade_is_404_not_an_empty_page(conn, signed_in, path):
+    assert signed_in[1].get(path).status_code == 404

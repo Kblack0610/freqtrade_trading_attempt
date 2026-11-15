@@ -322,6 +322,17 @@ def gv(v) -> str:
     return str(v)
 
 
+def tv(v) -> str:
+    """A traced check or input value: numbers to four significant digits, a list joined, a dict as its pairs."""
+    if isinstance(v, bool):
+        return "yes" if v else "no"
+    if isinstance(v, (list, tuple)):
+        return " / ".join(tv(x) for x in v)
+    if isinstance(v, dict):
+        return ", ".join(f"{k} {tv(x)}" for k, x in v.items())
+    return gv(v)
+
+
 def skip_groups(skipped: list[str]) -> list[tuple[str, list[str]]]:
     """Skip lines ("<strategy> on <where>: <why>") grouped by where and why, so a venue still backfilling is one line."""
     groups: dict[str, list[str]] = {}
@@ -331,7 +342,7 @@ def skip_groups(skipped: list[str]) -> list[tuple[str, list[str]]]:
     return [(why, sorted(names)) for why, names in groups.items()]
 
 
-templates.env.filters.update(local=local, ago=ago, num=num, pct=pct, tone=tone, gv=gv, skip_groups=skip_groups)
+templates.env.filters.update(local=local, ago=ago, num=num, pct=pct, tone=tone, gv=gv, tv=tv, skip_groups=skip_groups)
 templates.env.globals.update(nav_groups=nav.groups, stale=stale, tz=str(TZ), min_trades=MIN_TRADES)
 
 
@@ -560,6 +571,75 @@ def bot(request: Request, name: str):
     chart = charts.line([(r["ts"].astimezone(TZ), r["profit_all_pct"]) for r in series], label=f"{name} profit over time")
     return page(request, "bot.html", bot=found[0], trades=trades, chart=chart,
                 drift=(rows("SELECT * FROM drift WHERE bot = %s", (name,)) or [None])[0])
+
+
+# One fill or trade of any league with everything recorded about it (plan recorder-links-vivid-stream P2): the
+# `fills` view row is the key; a freqtrade trade id is per bot, so its URL carries ?bot=.
+TRADE_SOURCES = ("paper", "freqtrade", "drill", "call")
+FILL = "SELECT * FROM fills WHERE source = %s AND fill_id = %s AND (%s = '' OR account = %s) ORDER BY open_date DESC LIMIT 1"
+DECISION = "SELECT * FROM decisions WHERE fill_source = %s AND fill_id = %s"
+NEAR_MISSES = """SELECT d.instrument, d.checks, m.title FROM decisions d
+LEFT JOIN markets m ON m.venue = d.venue AND m.market_id = d.instrument
+WHERE d.league = %s AND d.account = %s AND d.decided_at = %s AND d.action = 'near_miss' ORDER BY d.id LIMIT 20"""
+FUNNEL = "SELECT reason, n FROM decision_funnel WHERE league = %s AND account = %s AND pass_at = %s ORDER BY n DESC, reason"
+PAPER_ORDER = """
+SELECT o.*, a.params, a.family, a.venue, m.title, m.subtitle, m.close_time, r.result, r.value AS paid,
+       r.settled_at AS resolved_at
+FROM paper_orders o JOIN paper_accounts a USING (account)
+LEFT JOIN markets m ON m.venue = a.venue AND m.market_id = o.market_id
+LEFT JOIN resolutions r ON r.venue = a.venue AND r.market_id = o.market_id
+WHERE o.id = %s"""
+BOT_TRADE = """SELECT t.bot, t.trade_id, t.open_date, t.pair, t.is_open, t.close_date, t.open_rate, t.close_rate,
+       t.amount, t.stake_amount, t.profit_ratio, t.profit_abs, t.exit_reason, t.enter_tag
+FROM bot_trades t WHERE t.bot = %s AND t.trade_id = %s AND t.open_date = %s"""
+MARKOUTS = "SELECT * FROM markouts WHERE bot = %s AND trade_id = %s AND open_date = %s ORDER BY horizon_min"
+RECONCILE = "SELECT * FROM reconcile WHERE bot = %s AND pair = %s AND live_open = %s ORDER BY n"
+
+
+def near_miss_reasons(near: list[dict]) -> list[tuple[str, int]]:
+    """The same pass's near-misses counted by the one check each failed."""
+    counts: dict[str, int] = {}
+    for d in near:
+        d["failed"] = next((c for c in d["checks"] if not c["pass"]), None)
+        name = d["failed"]["name"] if d["failed"] else "-"
+        counts[name] = counts.get(name, 0) + 1
+    return sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+
+
+@app.get("/trades/{source}/{fill_id}", response_class=HTMLResponse)
+def trade(request: Request, source: str, fill_id: int, bot: str = ""):
+    """Why a fill happened and how it went: the decision recorded with it (rule, checks, inputs, sizing), the same
+    pass's near-misses and funnel, and per source the order, market and resolution, markouts and reconcile, or scores."""
+    user_of(request)
+    if source not in TRADE_SOURCES:
+        raise HTTPException(404, f"No trade source {source}")
+    if source == "freqtrade" and not bot:
+        raise HTTPException(404, "A crypto trade id is per bot: add ?bot=<name>")
+    found = rows(FILL, (source, fill_id, bot, bot))
+    if not found:
+        raise HTTPException(404, f"No {source} fill {fill_id}")
+    fill = found[0]
+    decision = (rows(DECISION, (source, fill_id)) or [None])[0]
+    near, funnel = [], []
+    if decision:
+        key = (decision["league"], decision["account"], decision["decided_at"])
+        near, funnel = rows(NEAR_MISSES, key), rows(FUNNEL, key)
+    ctx: dict = {"fill": fill, "decision": decision, "near": near, "near_reasons": near_miss_reasons(near),
+                 "funnel": funnel, "source": source}
+    if source == "paper":
+        o = rows(PAPER_ORDER, (fill_id,))[0]
+        cost = o["contracts"] * o["price"] + o["fee"]
+        ctx |= {"order": o, "cost": cost, "if_win": o["contracts"] - cost, "if_lose": -cost}
+    elif source == "freqtrade":
+        key = (fill["account"], fill_id, fill["open_date"])
+        ctx |= {"bot_trade": rows(BOT_TRADE, key)[0], "markouts": rows(MARKOUTS, key),
+                "reconcile": rows(RECONCILE, (fill["account"], fill["instrument"], fill["open_date"]))}
+    elif source == "drill":
+        ctx["drill"] = rows("SELECT * FROM demo_orders WHERE id = %s", (fill_id,))[0]
+    else:
+        ctx |= {"call": rows("SELECT * FROM calls WHERE id = %s", (fill_id,))[0],
+                "scores": rows("SELECT * FROM call_scores WHERE call_id = %s ORDER BY horizon", (fill_id,))}
+    return page(request, "trade.html", **ctx)
 
 
 @app.get("/data", response_class=HTMLResponse)

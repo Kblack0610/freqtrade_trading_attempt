@@ -416,6 +416,8 @@ docker run --rm -p 127.0.0.1:18765:8000 --entrypoint uvicorn -e DATABASE_URL=...
 
 Sign-in cannot complete against a fake Forgejo; mint a cookie with `auth.make_session(auth.Config(), "kblack0610")` under the same `SESSION_KEY` and send it as `trader_session`.
 
+`/trades/{source}/{id}` opens one row of the `fills` view (source `paper`, `freqtrade`, `drill` or `call`; a freqtrade id is per bot, so it takes `?bot=<name>`). It shows the fill's `decisions` row (rule, each check against its threshold, each input with its source and time, sizing and fees), that pass's funnel and near-misses for the account, and per source the order, market and resolution, the trade's markouts and reconcile rows, the drill order, or the call's scores. A fill with no decision row says it was recorded before decisions were traced. The newest paper fills and demo orders on `/markets/book`, a bot's trades, `/live` positions and `/calls` link there; shadow accounts replay returns with no fills, so they have no detail page.
+
 `/coverage` joins `lab/families.toml` to the results already stored: whole-history backtests (`strategy_windows`), walk-forward test months, the trial register and the confidence gates, as a family by venue matrix with one row per strategy below it. A strategy class under `user_data/strategies` with no line in the toml shows in an untagged row, and a name only the results still hold (a deleted strategy, the three dropped hyperopts) in a gone row.
 
 ### Watcher
