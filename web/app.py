@@ -577,7 +577,9 @@ def bot(request: Request, name: str):
 # `fills` view row is the key; a freqtrade trade id is per bot, so its URL carries ?bot=.
 TRADE_SOURCES = ("paper", "freqtrade", "drill", "call")
 FILL = "SELECT * FROM fills WHERE source = %s AND fill_id = %s AND (%s = '' OR account = %s) ORDER BY open_date DESC LIMIT 1"
-DECISION = "SELECT * FROM decisions WHERE fill_source = %s AND fill_id = %s"
+# A crypto decision is the bot trade's (lab/ingest.py, migration 056): same bot and open_date.
+DECISION = """SELECT * FROM decisions WHERE fill_source = %s AND fill_id = %s AND account = %s
+AND (fill_source <> 'freqtrade' OR decided_at = %s)"""
 NEAR_MISSES = """SELECT d.instrument, d.checks, m.title FROM decisions d
 LEFT JOIN markets m ON m.venue = d.venue AND m.market_id = d.instrument
 WHERE d.league = %s AND d.account = %s AND d.decided_at = %s AND d.action = 'near_miss' ORDER BY d.id LIMIT 20"""
@@ -619,7 +621,7 @@ def trade(request: Request, source: str, fill_id: int, bot: str = ""):
     if not found:
         raise HTTPException(404, f"No {source} fill {fill_id}")
     fill = found[0]
-    decision = (rows(DECISION, (source, fill_id)) or [None])[0]
+    decision = (rows(DECISION, (source, fill_id, fill["account"], fill["open_date"])) or [None])[0]
     near, funnel = [], []
     if decision:
         key = (decision["league"], decision["account"], decision["decided_at"])

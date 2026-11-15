@@ -28,7 +28,7 @@
   <thead><tr><th>Check</th><th class="n">Value</th><th class="n">Threshold</th><th>Pass</th></tr></thead>
   <tbody>
   {% for c in decision.checks %}<tr><td>{{ c.name }}</td><td class="n">{{ c.value | tv }}</td><td class="n">{{ c.threshold | tv }}</td><td class="{{ 'up' if c.pass else 'down' }}">{{ "yes" if c.pass else "no" }}</td></tr>
-  {% else %}<tr><td colspan="4" class="muted">The family ran no checks.</td></tr>{% endfor %}
+  {% else %}<tr><td colspan="4" class="muted">{{ "The entry signal is the strategy's code; the candle it read is under Inputs." if source == "freqtrade" else "The family ran no checks." }}</td></tr>{% endfor %}
   </tbody>
 </table>
 </div>
@@ -43,7 +43,13 @@
 </table>
 </div>
 {% set z = decision.sizing %}
-{% if z %}
+{% if z and source == "freqtrade" %}
+<h3>Sizing and fees</h3>
+<ul class="plain">
+  <li>stake {{ z.stake | num(2) }} at {{ z.price | tv }} = {{ z.amount | tv }}</li>
+  <li>fee {{ z.fee | tv }}{% if z.fee_rate is not none %} <span class="muted">({{ (100 * z.fee_rate) | num(2) }}%)</span>{% endif %}</li>
+</ul>
+{% elif z %}
 <h3>Sizing and fees</h3>
 <ul class="plain">
   <li>stake {{ z.stake | num(2) }}{% if z.price %} / {{ z.price | num(2) }} = {{ (z.stake / z.price) | num(1) }} contracts asked{% endif %}{% if z.limit is not none %}, limit {{ z.limit | num(2) }}{% endif %}</li>
@@ -52,6 +58,7 @@
   <li>fee {{ z.fee | num(2) }}{% if z.fees %} <span class="muted">{{ z.fees | tv }}</span>{% endif %}</li>
 </ul>
 {% endif %}
+{% if source != "freqtrade" %}
 <h3>Same pass</h3>
 {% if funnel %}<p>Where each book row stopped for this account: {% for f in funnel %}{{ f.reason }} {{ "{:,}".format(f.n) }}{{ ", " if not loop.last }}{% endfor %}.</p>{% endif %}
 {% if near %}
@@ -67,6 +74,7 @@
 </div>
 </details>
 {% else %}<p class="muted">No near-miss kept from this pass.</p>{% endif %}
+{% endif %}
 {% else %}
 <p class="muted">Recorded before decisions were traced: this fill has no decision row, so its checks, inputs and sizing were not saved.</p>
 {% endif %}
