@@ -24,13 +24,14 @@ def test_a_change_is_an_event_once_and_a_steady_set_is_none(conn):
     conn.execute("INSERT INTO suggestions (kind, strategy, exchange, summary, action, gates) VALUES "
                  "('promote', 'Good', 'kraken', 's', 'a', '[]'), ('watch', 'Meh', 'kraken', 's', 'a', '[]')")
     first = loop.run(conn)
-    assert first == {"research_passing": 2, "research_enters": 3, "research_leaves": 0}
-    assert loop.run(conn) == {"research_passing": 2, "research_enters": 0, "research_leaves": 0}
+    quiet = {"bet_ready": 0, "bet_drifted": 0}
+    assert first == {"research_passing": 2, "research_enters": 3, "research_leaves": 0, **quiet}
+    assert loop.run(conn) == {"research_passing": 2, "research_enters": 0, "research_leaves": 0, **quiet}
 
     conn.execute("UPDATE climate_scorecard SET lo = -0.01 WHERE name = 'S' AND cell = 'up/low'")
     conn.execute("UPDATE climate_scorecard SET lo = 0.02 WHERE name = 'T'")
     conn.execute("DELETE FROM suggestions WHERE kind = 'promote'")
-    assert loop.run(conn) == {"research_passing": 2, "research_enters": 1, "research_leaves": 2}
+    assert loop.run(conn) == {"research_passing": 2, "research_enters": 1, "research_leaves": 2, **quiet}
 
     events = loop.pending(conn)
     assert [(e["signal"], e["change"], e["name"]) for e in events] == [
@@ -66,7 +67,8 @@ def test_monthly_retune_reports_new_fits_and_lost_qualification(conn):
     assert loop.pending(conn)[0]["action"] == action
     newer = action.replace('2026-04-01', '2026-05-01')
     conn.execute("UPDATE suggestions SET action = %s WHERE kind = 'retune'", (newer,))
-    assert loop.run(conn) == {"research_passing": 0, "research_enters": 1, "research_leaves": 1}
+    assert loop.run(conn) == {"research_passing": 0, "research_enters": 1, "research_leaves": 1, "bet_ready": 0,
+                              "bet_drifted": 0}
     events = loop.pending(conn)
     assert [e["action"] for e in events] == [action, newer, action]
     assert events[0]["variant"] != events[1]["variant"]
@@ -137,3 +139,68 @@ def test_a_promotion_files_a_board_row_and_opens_no_roster_pr(monkeypatch):
     assert "shadow account" in rows[0][0] and rows[0][1][0] == "https://trader.kblab.me/accounts"
     assert research_sync.AVENUES in rows[0][1][-1]
     assert not hasattr(research_sync, "roster_pr") and not hasattr(research_sync, "call")
+
+
+def ready(conn, variant, ok, lo=0.012):
+    conn.execute("INSERT INTO market_readiness (family, venue, variant, params, windows, trades, expectancy, expectancy_lo, "
+                 "expectancy_hi, dsr, pbo, trials, ready, passed, gates) VALUES ('longshot', 'kalshi', %s, '{\"edge\": 0.06}', "
+                 "4, 120, 0.02, %s, 0.03, 0.97, 0.1, 9, %s, 7, '[]')", (variant, lo, ok))
+
+
+def paper(conn, account, drifted, retired=False):
+    conn.execute("INSERT INTO paper_accounts (account, family, venue, variant, params, capital, started_at, retired_at, "
+                 "paper_trades, paper_expectancy, backtest_trades, backtest_expectancy, gap_lo, gap_hi, drifted) "
+                 "VALUES (%s, 'longshot', 'kalshi', %s, '{}', 1000, now(), %s, 40, -0.03, 120, 0.02, -0.08, -0.01, %s)",
+                 (account, account[-8:] * 2, "2026-11-14" if retired else None, drifted))
+
+
+def test_betting_gate_and_paper_drift_are_events_against_the_markets_trial_count(conn):
+    crypto = confidence.trial_count(conn)
+    conn.execute("INSERT INTO trials (strategy, exchange, variant) VALUES ('longshot', 'kalshi', 'a'), "
+                 "('longshot', 'kalshi', 'b'), ('longshot', 'kalshi', 'c')")
+    ready(conn, "aaaa1111aaaa1111", True)
+    ready(conn, "bbbb2222bbbb2222", False, lo=-0.01)
+    paper(conn, "paper-longshot-aaaa1111", True)
+    paper(conn, "paper-longshot-cccc3333", True, retired=True)  # retired: its variant already left the gate
+    paper(conn, "paper-longshot-dddd4444", False)
+    out = loop.run(conn)
+    assert out["bet_ready"] == 1 and out["bet_drifted"] == 1 and out["research_passing"] == 0
+    events = loop.pending(conn)
+    assert [(e["signal"], e["change"], e["variant"], e["cell"]) for e in events] == [
+        ("bet-drift", "enters", "aaaa1111aaaa1111", "paper-longshot-aaaa1111"),
+        ("bet-ready", "enters", "aaaa1111aaaa1111", "")]
+    assert all(e["trials"] == 3 for e in events) and confidence.trial_count(conn) == crypto != 3
+    assert events[1]["lo"] == 0.012 and '"edge": 0.06' in events[1]["action"]
+    assert events[0]["action"].startswith("paper -0.0300 per trade over 40 settled, backtest 0.0200 over 120")
+    assert loop.run(conn)["research_enters"] == 0
+
+    conn.execute("UPDATE market_readiness SET ready = NOT ready")
+    conn.execute("UPDATE paper_accounts SET drifted = false")
+    assert loop.run(conn) == {"research_passing": 0, "research_enters": 1, "research_leaves": 2, "bet_ready": 1,
+                              "bet_drifted": 0}
+    assert [(e["signal"], e["change"], e["variant"][:4], e["trials"]) for e in loop.pending(conn)[2:]] == [
+        ("bet-ready", "enters", "bbbb", 3), ("bet-drift", "leaves", "aaaa", 3), ("bet-ready", "leaves", "aaaa", 3)]
+
+
+def test_sync_files_one_row_per_betting_signal_and_acks_it(monkeypatch):
+    def ev(i, signal, change, cell="", action=""):
+        return dict(id=i, at="2026-11-14T12:45:00+00:00", signal=signal, change=change, kind="family", name="longshot",
+                    exchange="kalshi", variant="aaaa1111aaaa1111", cell=cell, lo=0.012, annual=None, trials=60, action=action)
+    events = [ev(1, "bet-ready", "enters"), ev(2, "bet-ready", "leaves"),
+              ev(3, "bet-drift", "enters", "paper-longshot-aaaa1111", "paper -0.03 per trade")]
+    calls, rows = [], []
+    monkeypatch.setenv("DRY_RUN", "0")
+    monkeypatch.setattr(research_sync, "kubectl_research",
+                        lambda *a: calls.append(a) or (research_sync.json.dumps(events) if a == ("pending",) else "acked"))
+    monkeypatch.setattr(research_sync, "board", lambda *a: rows.append(a))
+    assert research_sync.main() == 0
+    assert calls == [("pending",), ("ack", "1", "2", "3")]
+    (gate, gate_details), (drift, drift_details) = rows
+    assert "betting gate 2026-11-14: 1 enter and 1 leave" in gate and gate.endswith("#size/s")
+    assert gate_details[0] == "enters: longshot/aaaa1111 on kalshi, low end +1.20% per trade"
+    assert "paper drift 2026-11-14: 1 paper accounts drifted" in drift
+    assert drift_details[0] == ("enters: longshot/aaaa1111 on kalshi (paper-longshot-aaaa1111), gap low end +1.20%: "
+                                "paper -0.03 per trade")
+    assert all("markets trial register at 60" in d[-1] and research_sync.AVENUES in d[-1] for d in (gate_details, drift_details))
+    many = research_sync.bet_row("bet-ready", [ev(i, "bet-ready", "enters") for i in range(50)])[1]
+    assert len(many) == research_sync.MOST_DETAILS + 3 and many[-3].startswith("and 10 more")

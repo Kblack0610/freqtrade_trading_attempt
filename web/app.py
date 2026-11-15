@@ -204,6 +204,7 @@ ORDER BY l.proposed_at DESC, l.id DESC LIMIT 200
 """
 LINK_ASKS = "SELECT model, venue_b, count(*) AS asked, sum(proposed) AS proposed, max(asked_at) AS last FROM market_link_asks GROUP BY model, venue_b ORDER BY model, venue_b"
 MARKET_BACKTESTS = "SELECT * FROM market_backtests ORDER BY start_at DESC, expectancy_lo DESC NULLS LAST, family, venue, variant"
+MARKET_READINESS = "SELECT * FROM market_readiness ORDER BY ready DESC, passed DESC, expectancy_lo DESC NULLS LAST, family, venue, variant"
 MARKET_CATEGORIES = "SELECT * FROM market_category_results ORDER BY category, lo DESC NULLS LAST, family, venue, variant"
 PAPER_ACCOUNTS = """
 SELECT a.*, w.state, w.breached_at, w.stopped_at,
@@ -890,7 +891,7 @@ def markets_book(request: Request, signal_source: str = ""):
     accounts = selected(rows(PAPER_ACCOUNTS))
     for a in accounts:
         a["ret"] = None if a["equity"] is None else a["equity"] / a["capital"] - 1
-    return page(request, "markets_book.html", backtests=selected(rows(MARKET_BACKTESTS)), categories=selected(rows(MARKET_CATEGORIES)), accounts=accounts,
+    return page(request, "markets_book.html", backtests=selected(rows(MARKET_BACKTESTS)), readiness=selected(rows(MARKET_READINESS)), categories=selected(rows(MARKET_CATEGORIES)), accounts=accounts,
                 signal_source=signal_source, signal_sources=tax["signal_sources"], family_categories=tax["market_categories"],
                 fills=[r for r in rows(PAPER_FILLS) if not signal_source or r["account"] in {a["account"] for a in accounts}],
                 demo=rows(DEMO_ORDERS), hard_stop=hard_stop)
