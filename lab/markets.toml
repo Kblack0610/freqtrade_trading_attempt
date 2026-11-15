@@ -187,6 +187,9 @@ latency_s = 2
 depth_share = 0.5
 # Bars carry no sizes: each side's depth is this share of the contracts the period traded.
 bar_volume_share = 0.1
+# Sportsbooks quote no size either: each side of a line (families.line_book) shows this many contracts. Books limit
+# a winning account long before it, so a fill here is no claim a stake would be taken.
+sportsbook_depth = 1000
 
 # Fees per venue (lab/markets/fees.py; facts in docs/markets.md, Fees). A venue with no table costs nothing.
 [backtest.fees.kalshi]
@@ -263,6 +266,20 @@ stake = 10
 max_spread = 0.05
 ref_venue = "odds_api"
 source = ["rule:kalshi_game"]
+edge = [0.03, 0.06]
+
+[families.tt_totals]
+# Head-to-head totals on a sportsbook venue's line book (families.line_book), run with --venue odds_api. Within
+# `hours` of the start, once per game: the pair's over-rate at the line, over the `min_h2h` or more meetings that
+# settled before the row, shrunk by `prior` games toward the no-vig fair; buy the over or the under when that beats
+# the best book's price by `edge` and the last five meetings (`last5` of them on that side) and the mean total agree.
+# A -110/-110 line is a 0.048 spread. hours stays inside families.LEAD (2 days) of quotes before each window.
+stake = 10
+max_spread = 0.08
+hours = 24
+prior = 10
+last5 = 0.6
+min_h2h = [5, 10]
 edge = [0.03, 0.06]
 
 [families.llm]

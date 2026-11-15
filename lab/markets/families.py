@@ -35,6 +35,14 @@ than `max_spread`.
   book is fair. Rule links are confirmed when they are made, so a rule link later rejected by its resolution is
   still traded: that is what the rule would have done. LLM links confirm only by resolving, which is too late to
   trade, so gap takes no LLM source. Each source is its own variant, so results are reported per source.
+- tt_totals (head-to-head totals): runs on a sportsbook venue (kind sportsbook), whose book is line_book over
+  its recorded totals quotes and whose windows are whole months it recorded (recorded_dates). Within `hours` of a
+  game's start, once per game: features() of the pair's earlier finals against the line (meetings that did not
+  push, their over-rate, the last five's, the mean total less the line), from Meetings, which shows only games
+  settled before the row and raises Lookahead on a read of any other score. The over-rate shrunk by `prior`
+  games toward the no-vig fair (RefBook.fairs) is the probability; buy the over or under when it beats the best
+  book by `edge` and the last five and the mean agree. Its venue needs a totals adapter writing odds.py's shape;
+  table tennis has none yet (docs/markets.md, Table tennis data).
 - llm (forecaster): forward only. Its `cutoff` is the model's training cutoff, and backtest.replay refuses any
   book that starts before it; it has no command here and is scored by the paper league.
 """
@@ -51,6 +59,7 @@ from collections import defaultdict
 
 import numpy as np
 import pandas as pd
+from pyarrow import fs as pafs
 
 from psycopg.types.json import Jsonb
 
@@ -60,13 +69,16 @@ from lab.grid import variants
 from lab.markets import backtest
 from lab.markets.backtest import Lookahead, Market, Order
 from lab.markets.history import _midnight
-from lab.markets.links import outcome_word
+from lab.markets.links import LINE, outcome_word, pays
 from lab.markets.recorder import load_config
+from lab.markets.venue import Resolution
 from lab.suggest import gate as check
 from lab.util import s3_from_env
 
 UTC = dt.timezone.utc
+LEAD = dt.timedelta(days=2)  # a line book reads quotes from this long before its window, for games early in it
 COMMANDS = ("longshot", "calibration", "gap")
+LINES = ("tt_totals",)  # a sportsbook venue's families, on its line book (line_book)
 
 
 def categories() -> dict:
@@ -252,6 +264,118 @@ class Gap(Family):
         return self.order(row, None if fair is None else side_for(fair, *q, self.params["edge"]))
 
 
+def line_book(quotes: pd.DataFrame, markets: dict, resolutions: dict, depth: float) -> tuple:
+    """A sportsbook's totals markets (lab/markets/odds.py: outcomes <book>:Over 216.5, resolved `Total 220`) as one
+    binary market per line, `<market>|<line>`, yes being the over. Its ask is the best book's over and its bid one
+    minus the best book's under, so a no buys the under at that book's price with its margin in; a row needs both
+    sides. Its event is the game, so the interval resamples a game's lines together. The line resolves yes, no, or
+    void on a push (links.pays). Returns the book, its markets and resolutions, and the no-vig fair of the over at
+    each row, (line market, ts ns) -> fair, from RefBook.fairs. Sportsbooks quote no size: each side shows `depth`."""
+    rows, lm, lr, fair = [], {}, {}, {}
+    q = quotes.assign(ts=pd.to_datetime(quotes["ts"], utc=True)).sort_values(["market_id", "ts"], kind="stable")
+    for mid, g in q[q["market_id"].isin(set(markets))].groupby("market_id", sort=False):
+        m, r, latest = markets[mid], resolutions.get(mid), defaultdict(dict)
+        for ts, at in g.groupby("ts", sort=True):
+            touched = set()
+            for o in at.itertuples(index=False):
+                hit = LINE.fullmatch(outcome_word(o.outcome))
+                if hit and hit[1] in ("Over", "Under"):
+                    latest[hit[2]][o.outcome] = (o.bid, o.ask)
+                    touched.add(hit[2])
+            for line in touched:
+                words = {f"Over {line}", f"Under {line}"}
+                best = {w: min((a for o, (_, a) in latest[line].items() if outcome_word(o) == w
+                                and a is not None and math.isfinite(a) and a > 0), default=None) for w in words}
+                if None in best.values():
+                    continue
+                lid = f"{mid}|{line}"
+                if lid not in lm:
+                    lm[lid] = Market(lid, mid, m.series_id, m.title, f"Over {line}", "total_line", m.open_time,
+                                     m.close_time)
+                    if r is not None:
+                        paid = None if r.result in ("void", "split") else pays(f"Over {line}", r.result)
+                        lr[lid] = Resolution(lid, "void" if paid is None else "yes" if paid else "no",
+                                             None if paid is None else float(paid), r.settled_at, r.volume)
+                rows.append((lid, ts, 1.0 - best[f"Under {line}"], best[f"Over {line}"], depth, depth))
+                f = RefBook.fairs(latest[line], words).get(f"Over {line}")
+                if f is not None:
+                    fair[(lid, ts.value)] = f
+    book = backtest._book(pd.DataFrame(rows, columns=backtest.BOOK)) if rows else backtest._empty()
+    return book, lm, lr, fair
+
+
+def pair(m: Market) -> tuple:
+    """The two sides of a game, whichever is home: its sport and the names either side of " at " in its title."""
+    return m.series_id, frozenset(m.title.rsplit(" at ", 1))
+
+
+class Meetings:
+    """The final totals of past games, by pair, as they stood at any time: a game counts only once it settled
+    before the time asked about, and reading a score that had not settled by then raises Lookahead. Built from a
+    sportsbook's resolved totals markets (`Total 220`)."""
+
+    def __init__(self, markets: dict, resolutions: dict):
+        self.by, self.final = defaultdict(list), {}
+        for mid, r in resolutions.items():
+            m, hit = markets.get(mid), LINE.fullmatch(r.result or "")
+            if m is None or " at " not in m.title or not hit or hit[1] != "Total":
+                continue
+            at = pd.Timestamp(r.settled_at).value
+            self.final[mid] = (at, float(hit[2]))
+            self.by[pair(m)].append((at, float(hit[2])))
+        self.by = {k: (np.array([a for a, _ in v], dtype=np.int64), np.array([t for _, t in v]))
+                   for k, v in ((k, sorted(v)) for k, v in self.by.items())}
+
+    def before(self, m: Market, at: pd.Timestamp) -> np.ndarray:
+        """The pair's final totals settled before `at`, oldest first."""
+        s = self.by.get(pair(m))
+        return s[1][:int(np.searchsorted(s[0], at.value, side="left"))] if s else np.array([])
+
+    def score(self, market_id: str, at: pd.Timestamp) -> float | None:
+        f = self.final.get(market_id)
+        if f is not None and f[0] >= at.value:
+            raise Lookahead(f"the final score of {market_id} is read at {at}, before it settled")
+        return None if f is None else f[1]
+
+
+def features(totals: np.ndarray, line: float) -> dict | None:
+    """What tt_totals reads of a pair's past totals against a line: the meetings that did not push (h2h), the share
+    of them over the line, that share over the last five, and the mean total less the line. None with no meeting."""
+    decided = totals[totals != line]
+    if not len(decided):
+        return None
+    last = decided[-5:]
+    return {"h2h": len(decided), "over_rate": float(np.mean(decided > line)), "last5_rate": float(np.mean(last > line)),
+            "mean_gap": float(np.mean(totals) - line)}
+
+
+class TTTotals(Family):
+    """Head-to-head totals: once per game, within `hours` of its start, on a line whose pair has met `min_h2h`
+    times: the over-rate shrunk by `prior` games toward the no-vig fair is the probability, and it buys the over
+    (yes) or the under (no) when that beats the price by `edge` and the last five and the mean total agree."""
+    name = "tt_totals"
+
+    def __init__(self, params: dict, meetings: Meetings, fairs: dict):
+        super().__init__(params)
+        self.meetings, self.fairs = meetings, fairs
+
+    def on_book(self, row, m):
+        if m.event_id in self.seen or not (q := self.entry(row, m)):
+            return []
+        p, line = self.params, float(m.subtitle.split()[-1])
+        f, fair = features(self.meetings.before(m, row.ts), line), self.fairs.get((row.market_id, row.ts.value))
+        if f is None or f["h2h"] < p["min_h2h"] or fair is None:
+            return []
+        prob = (f["over_rate"] * f["h2h"] + p["prior"] * fair) / (f["h2h"] + p["prior"])
+        side = side_for(prob, *q, p["edge"])
+        agree = {"yes": f["last5_rate"] >= p["last5"] and f["mean_gap"] > 0,
+                 "no": 1 - f["last5_rate"] >= p["last5"] and f["mean_gap"] < 0}
+        if side is None or not agree[side]:
+            return []
+        self.seen.add(m.event_id)
+        return self.order(row, side)
+
+
 FORECAST = ("You forecast the probability that a prediction market resolves yes, from its question alone. "
             'Reply with one JSON object and nothing else: {"p": <probability from 0 to 1>}.')
 
@@ -300,6 +424,14 @@ def months(done: set, today: dt.date) -> list[tuple[dt.date, dt.date]]:
     return out[::-1]
 
 
+def recorded_dates(fs, cfg: dict, venue: str) -> set:
+    """The days the recorder wrote quotes for the venue: a sportsbook's history is its own recording."""
+    sel = pafs.FileSelector(f"{cfg['recorder']['bucket']}/{cfg['recorder']['prefix']}/venue={venue}",
+                            allow_not_found=True)
+    return {dt.date.fromisoformat(i.base_name.removeprefix("date=")) for i in fs.get_file_info(sel)
+            if i.type == pafs.FileType.Directory and i.base_name.startswith("date=")}
+
+
 def done_dates(conn, venue: str) -> set:
     return {dt.date.fromisoformat(u) for (u,) in conn.execute(
         "SELECT unit FROM market_backfill WHERE venue = %s AND job = 'bars' AND done", (venue,))}
@@ -319,6 +451,33 @@ class Loader:
 
     def __init__(self, conn, fs, venue: str, cfg: dict):
         self.conn, self.fs, self.venue, self.cfg, self.cache = conn, fs, venue, cfg, {}
+        self.sportsbook = cfg["venues"][venue].get("kind") == "sportsbook"
+        self.known, self.fairs, self._meetings = None, {}, None
+
+    def book(self, start: dt.date, end: dt.date) -> pd.DataFrame:
+        """The window's book: a sportsbook's line book (line_book) of the totals markets that start in it, from the
+        recorder's quotes up to LEAD before; any other venue's bars."""
+        if not self.sportsbook:
+            return self.bars(start, end)
+        c = self.cfg
+        ids = [r[0] for r in self.conn.execute(
+            "SELECT market_id FROM markets WHERE venue = %s AND market_type = 'totals' AND close_time >= %s "
+            "AND close_time < %s", (self.venue, _midnight(start), _midnight(end)))]
+        q = backtest.read_quotes(self.fs, f"{c['recorder']['bucket']}/{c['recorder']['prefix']}", self.venue,
+                                 start - LEAD, end)
+        markets, res = backtest.load_markets(self.conn, self.venue, ids)
+        book, lm, lr, self.fairs = line_book(q, markets, res, c["backtest"]["sportsbook_depth"])
+        self.known = (lm, lr)
+        return book
+
+    def meetings(self) -> Meetings:
+        """Every resolved totals market of the venue; Meetings shows a strategy only those settled before its row."""
+        if self._meetings is None:
+            ids = [r[0] for r in self.conn.execute(
+                "SELECT market_id FROM resolutions JOIN markets USING (venue, market_id) WHERE venue = %s "
+                "AND market_type = 'totals'", (self.venue,))]
+            self._meetings = Meetings(*backtest.load_markets(self.conn, self.venue, ids))
+        return self._meetings
 
     def bars(self, start: dt.date, end: dt.date) -> pd.DataFrame:
         c = self.cfg
@@ -326,7 +485,7 @@ class Loader:
                                   start, end, c["backtest"]["bar_volume_share"])
 
     def window(self) -> None:
-        self.cache = {}
+        self.cache, self.known, self.fairs = {}, None, {}
 
     def train(self, start: dt.date, days: int) -> tuple:
         key = ("train", days, start)
@@ -352,6 +511,8 @@ def strategy(family: str, params: dict, loader: Loader, start: dt.date, end: dt.
     """The variant ready for one window, or None when its inputs are not all backfilled."""
     if family == "longshot":
         return Longshot(params)
+    if family == "tt_totals":
+        return TTTotals(params, loader.meetings(), loader.fairs)
     if family == "calibration":
         days = params["train_days"]
         if not all(d in done for d in span(start - dt.timedelta(days=days), start)):
@@ -384,14 +545,14 @@ def walk(conn, loader: Loader, names, windows, done: set, cfg: dict, rerun: bool
             print(f"families: budget spent, {start} and later wait for the next run", flush=True)
             break
         loader.window()
-        book = loader.bars(start, end)
+        book = loader.book(start, end)
         print(f"families: {loader.venue} {start} to {end}: {len(book)} rows, {book['market_id'].nunique()} markets",
               flush=True)
         for family, params in todo:
             s = strategy(family, params, loader, start, end, done)
             if s is None:
                 continue
-            out = backtest.run(conn, s, loader.venue, book, _midnight(start), _midnight(end), cfg)
+            out = backtest.run(conn, s, loader.venue, book, _midnight(start), _midnight(end), cfg, known=loader.known)
             ran += 1
             print(f"families: {family} {backtest.variant_of(params)[:8]} {start}: {out}", flush=True)
         del book
@@ -492,22 +653,28 @@ def gate(conn, loader: Loader, names, test, lockbox, done: set, cfg: dict, ccfg:
 def main(argv: list[str] | None = None, fs=None, today: dt.date | None = None) -> int:
     ap = argparse.ArgumentParser(prog="markets.families")
     ap.add_argument("--venue", default="kalshi")
-    ap.add_argument("--family", nargs="*", choices=COMMANDS, default=list(COMMANDS))
+    ap.add_argument("--family", nargs="*", choices=COMMANDS + LINES, help="default: every family the venue's kind runs")
     ap.add_argument("--rerun", action="store_true", help="run every window again, stored or not")
     a = ap.parse_args(argv)
     cfg, ccfg = load_config(), suggest.load_config()["confidence"]
     fam = cfg["families"]
     if set(categories()) != {name for name, grid in fam.items() if isinstance(grid, dict)}:
         raise ValueError("every market family needs a category")
+    sportsbook = cfg["venues"][a.venue].get("kind") == "sportsbook"
+    fits = LINES if sportsbook else COMMANDS
+    a.family = a.family or list(fits)
+    if set(a.family) - set(fits):
+        ap.error(f"{a.venue} runs {', '.join(fits)}: a sportsbook runs line families, an exchange the others")
     today = today or dt.datetime.now(UTC).date()
     stop = time.monotonic() + fam["budget_min"] * 60
+    fs = fs or s3_from_env()
     with connect(autocommit=True) as conn:
-        done = done_dates(conn, a.venue)
+        done = recorded_dates(fs, cfg, a.venue) if sportsbook else done_dates(conn, a.venue)
         windows = months(done, today)
         cut = max(len(windows) - fam["lockbox_months"], 0)
         test, lockbox = windows[:cut], windows[cut:]
         print(f"families: {a.venue}: {len(test)} test windows, lockbox {[str(s) for s, _ in lockbox]}", flush=True)
-        loader = Loader(conn, fs or s3_from_env(), a.venue, cfg)
+        loader = Loader(conn, fs, a.venue, cfg)
         ran = walk(conn, loader, a.family, test, done, cfg, a.rerun, stop=stop)
         passed = gate(conn, loader, a.family, test, lockbox, done, cfg, ccfg)
     print(json.dumps({"venue": a.venue, "windows": len(test), "lockbox": len(lockbox), "ran": ran, "ready": passed}),

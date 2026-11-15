@@ -283,15 +283,16 @@ def by_category(trades: pd.DataFrame, markets: dict, categories: dict, seed: int
 
 
 def run(conn, strategy: Strategy, venue: str, book: pd.DataFrame, start: dt.datetime, end: dt.datetime,
-        cfg: dict | None = None, ccfg: dict | None = None) -> dict:
-    """Register the trial, replay, settle, evaluate and store. start and end bound the window's days."""
+        cfg: dict | None = None, ccfg: dict | None = None, known: tuple[dict, dict] | None = None) -> dict:
+    """Register the trial, replay, settle, evaluate and store. start and end bound the window's days. `known` is
+    the book's markets and resolutions when they are not rows of the markets table (families.line_book)."""
     cfg = cfg or load_config()
     ccfg = ccfg or suggest.load_config()["confidence"]
     bcfg, variant = cfg["backtest"], variant_of(strategy.params)
     conn.execute("INSERT INTO trials (strategy, exchange, variant) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
                  (strategy.name, venue, f"{variant}:{pd.Timestamp(start).date()}"))
     trials = trial_count(conn, cfg)
-    markets, res = load_markets(conn, venue, book["market_id"].unique().tolist())
+    markets, res = known or load_markets(conn, venue, book["market_id"].unique().tolist())
     fee_cfg = bcfg.get("fees", {}).get(venue)
     fills, sent = replay(book, markets, res, strategy, bcfg, fee_cfg)
     trades = settle(fills, res, fee_cfg)

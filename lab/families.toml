@@ -252,3 +252,4 @@ longshot = { signal_source = "structural", instrument = "event-contract", horizo
 calibration = { signal_source = "structural", instrument = "event-contract", horizon = "resolution" }
 gap = { signal_source = "cross-venue", instrument = "event-contract", horizon = "resolution" }
 llm = { signal_source = "event", instrument = "event-contract", horizon = "resolution" }
+tt_totals = { signal_source = "structural", instrument = "sportsbook-line", horizon = "resolution" }
