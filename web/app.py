@@ -29,6 +29,7 @@ from starlette.concurrency import run_in_threadpool
 
 from lab import book as book_lab
 from lab import guard as guard_lab
+from lab import call_rules
 from lab import calls as calls_lab
 from lab import db, diversity, metrics, suggest, universe, taxonomy
 from web import auth, charts, exporter, lanes, nav
@@ -906,8 +907,10 @@ FROM calls c LEFT JOIN call_scores s ON s.call_id = c.id GROUP BY c.id ORDER BY 
 @app.get("/calls", response_class=HTMLResponse)
 def calls(request: Request):
     """Every trade idea recorded before its outcome, each horizon's score once its exit close has printed, and the
-    record per who, signal source, instrument and horizon."""
-    return page(request, "calls.html", calls=rows(CALLS), groups=calls_lab.groups(rows(calls_lab.SCORED)))
+    record per who, signal source, instrument and horizon, and each event rule's record against every rule trial."""
+    trials = rows("SELECT count(*) AS n FROM trials WHERE exchange = %s", (call_rules.EXCHANGE,))[0]["n"]
+    return page(request, "calls.html", calls=rows(CALLS), groups=calls_lab.groups(rows(calls_lab.SCORED)),
+                rules=call_rules.records(rows(call_rules.RULE_SCORES), trials), rule_trials=trials)
 
 
 @app.get("/accounts", response_class=HTMLResponse)

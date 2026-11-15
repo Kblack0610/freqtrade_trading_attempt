@@ -18,6 +18,22 @@
 </table>
 </div>
 {% else %}<p class="muted">Nothing scored yet: a call's first score lands the night after its first horizon's close.</p>{% endif %}
+<h2>Event rules</h2>
+<p class="muted">Calls a rule in <code>lab/call_rules.toml</code> made from feed-ingest events. Each rule and each edit of one is a trial; the deflated Sharpe counts all {{ rule_trials }} of them. A rule shows an edge only with enough scored calls and a deflated Sharpe over the bar, and an edge is still a paper call, never a bot.</p>
+{% if rules %}
+<div class="scroll">
+<table>
+  <thead><tr><th>Rule</th><th class="n">Horizon</th><th class="n">Scored</th><th class="n">Mean net</th><th class="n">Deflated Sharpe</th><th>Verdict</th></tr></thead>
+  <tbody>
+  {% for r in rules %}
+  <tr><td>{{ r.rule }} <span class="muted">{{ r.variant[:8] }}</span></td><td class="n">{{ r.horizon }}d</td><td class="n">{{ r.n }}</td>
+      <td class="n {{ r.mean | tone }}">{{ r.mean | pct(2) }}</td><td class="n">{% if r.dsr is none %}<span class="muted">n/a</span>{% else %}{{ "%.2f" | format(r.dsr) }}{% endif %}</td>
+      <td>{% if r.edge %}edge{% else %}<span class="muted">no edge yet</span>{% endif %}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}<p class="muted">No rule call scored yet.</p>{% endif %}
 <h2>Every call</h2>
 {% if calls %}
 <div class="scroll">
