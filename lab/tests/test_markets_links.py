@@ -15,19 +15,19 @@ CFG = load_config()["links"]
 
 
 def market(conn, venue, mid, title, subtitle=None, event=None, series=None, close=None, status="active",
-           outcomes=("yes",)):
+           outcomes=("yes",), kind="binary"):
     conn.execute("INSERT INTO venues (venue, title, kind) VALUES (%s, %s, 'exchange') ON CONFLICT DO NOTHING",
                  (venue, venue))
     conn.execute("INSERT INTO markets (venue, market_id, event_id, series_id, title, subtitle, market_type, status, "
-                 "close_time, first_seen, updated_at) VALUES (%s, %s, %s, %s, %s, %s, 'binary', %s, %s, %s, %s)",
-                 (venue, mid, event, series, title, subtitle, status, close, NOW, NOW))
+                 "close_time, first_seen, updated_at) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                 (venue, mid, event, series, title, subtitle, kind, status, close, NOW, NOW))
     for o in outcomes:
         conn.execute("INSERT INTO outcomes (venue, market_id, outcome, quoted_at) VALUES (%s, %s, %s, %s)",
                      (venue, mid, o, NOW))
 
 
 def game(conn, gid, away, home, commence, sport="basketball_nba"):
-    market(conn, "odds_api", gid, f"{away} at {home}", "NBA", series=sport, close=commence,
+    market(conn, "odds_api", gid, f"{away} at {home}", "NBA", series=sport, close=commence, kind="h2h",
            outcomes=[f"{b}:{t}" for b in ("draftkings", "fanduel") for t in (away, home)])
 
 
@@ -71,6 +71,19 @@ def test_pays():
     assert links.pays("yes", "yes") and links.pays("yes", "no") is False
     assert links.pays("San Antonio Spurs", "San Antonio Spurs") and links.pays("Phoenix Suns", "Draw") is False
     assert links.pays("yes", "void") is None and links.pays("Phoenix Suns", "split") is None
+    assert links.pays("Philadelphia 76ers", "Philadelphia 76ers")  # a number in a name is not a line
+
+
+@pytest.mark.parametrize("outcome, result, want", [
+    ("Over 216.5", "Total 217", True), ("Over 216.5", "Total 216", False), ("Under 216.5", "Total 216", True),
+    ("Over 216", "Total 216", None),  # a push
+    ("Phoenix Suns +4.5", "Phoenix Suns -4", True), ("Phoenix Suns +4.5", "Phoenix Suns -5", False),
+    ("San Antonio Spurs -4.5", "Phoenix Suns -5", True), ("San Antonio Spurs -4.5", "Phoenix Suns -4", False),
+    ("San Antonio Spurs -4", "Phoenix Suns -4", None),
+    ("Phoenix Suns", "Total 216", False), ("Over 216.5", "Phoenix Suns", False),
+])
+def test_a_line_settles_against_the_score(outcome, result, want):
+    assert links.pays(outcome, result) is want
 
 
 def test_rule_links_each_team_to_its_kalshi_market_on_the_eastern_date(conn):
@@ -104,6 +117,14 @@ def test_rule_ignores_a_tie_market_and_other_series(conn):
     kalshi_event(conn, "KXNHLGAME-26NOV12NYILA", ("NYI", "New York I"), ("LA", "Los Angeles"), ("TIE", "Tie"))
     game(conn, "soc", "Arsenal", "Chelsea", commence, sport="soccer_epl")  # no series configured
     assert links.run_rules(conn, CFG) == 2
+
+
+def test_rule_links_only_the_moneyline(conn):
+    commence = dt.datetime(2026, 11, 10, 1, tzinfo=UTC)
+    market(conn, "odds_api", "g1:totals", "San Antonio Spurs at Phoenix Suns", "NBA", series="basketball_nba",
+           close=commence, kind="totals", outcomes=["fanduel:Over 216.5", "fanduel:Under 216.5"])
+    kalshi_event(conn, "KXNBAGAME-26NOV09SASPHX", ("SAS", "San Antonio"), ("PHX", "Phoenix"))
+    assert links.run_rules(conn, CFG) == 0
 
 
 class FakeLlm:
