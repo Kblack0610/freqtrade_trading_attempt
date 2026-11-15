@@ -397,9 +397,16 @@ def test_a_variant_that_reads_the_final_score_is_refused():
         backtest.replay(book, {"G|70.5": line_market()}, {}, Peek(TT, mt, {}), CFG["backtest"], None)
 
 
+@pytest.fixture
+def odds_trials(conn):
+    """The trials register outlives the truncate, and the betting lane's count spans venues: leave none behind."""
+    yield conn
+    conn.execute("DELETE FROM trials WHERE exchange = 'odds_api'")
+
+
 def tt_walkforward(conn, fs, over_rate):
     """A game of Ann and Bea every day of August to October, its 70.5 line quoted at 0.526 a side by two books at
-    06:00 and settled at 14:00, `over_rate` of them over (75), the rest under (66)."""
+    06:00, the over at 0.588 and the under at 0.476 by 10:00, and settled at 14:00, `over_rate` of them over (75), the rest under (66)."""
     root = f"{CFG['recorder']['bucket']}/{CFG['recorder']['prefix']}/venue=odds_api"
     conn.execute("DELETE FROM trials WHERE exchange = 'odds_api'")
     conn.execute("INSERT INTO venues (venue, title, kind) VALUES ('odds_api', 'odds_api', 'sportsbook') "
@@ -417,19 +424,22 @@ def tt_walkforward(conn, fs, over_rate):
                      (mid, f"Total {total}", close + pd.Timedelta(hours=2)))
         rows = [{**r, "ts": close - pd.Timedelta(hours=6)} for r in
                 totals_quotes(mid, 0, 1 / 1.9, 1 / 1.9, ("b1", "b2"))]
+        rows += [{**r, "ts": close - pd.Timedelta(hours=2)} for r in  # the over shortens toward the start
+                 totals_quotes(mid, 0, 1 / 1.7, 1 / 2.1, ("b1", "b2"))]
         fs.create_dir(f"{root}/date={d}", recursive=True)
         pq.write_table(pa.Table.from_pandas(pd.DataFrame(rows), preserve_index=False),
                        f"{root}/date={d}/060000Z.parquet", filesystem=fs)
 
 
-def test_tt_totals_walks_forward_on_a_sportsbook_and_counts_every_variant_as_a_trial(conn, tmp_path):
+def test_tt_totals_walks_forward_on_a_sportsbook_and_counts_every_variant_as_a_trial(odds_trials, tmp_path):
+    conn = odds_trials
     fs = pafs.SubTreeFileSystem(str(tmp_path), pafs.LocalFileSystem())
     tt_walkforward(conn, fs, 0.9)
     with pytest.raises(SystemExit):  # an exchange family on a sportsbook
         families.main(["--venue", "odds_api", "--family", "longshot"], fs=fs, today=TODAY)
     assert families.main(["--venue", "odds_api"], fs=fs, today=TODAY) == 0
     n = len(grid.variants(CFG["families"]["tt_totals"]))
-    test = conn.execute("SELECT variant, start_at, trades, expectancy_lo FROM market_backtests "
+    test = conn.execute("SELECT variant, start_at, trades, expectancy_lo, (metrics->>'clv')::float FROM market_backtests "
                         "WHERE family = 'tt_totals' AND start_at < '2026-10-01'").fetchall()
     assert len(test) == 2 * n  # August and September; October is the lockbox
     trials = conn.execute("SELECT count(*) FROM trials WHERE exchange = 'odds_api' AND strategy = 'tt_totals'")
@@ -437,10 +447,13 @@ def test_tt_totals_walks_forward_on_a_sportsbook_and_counts_every_variant_as_a_t
                                                 ).fetchone()[0]
     september = [r for r in test if day(r[1]) == dt.date(2026, 9, 1)]
     assert all(r[2] == 30 and r[3] > 0 for r in september)  # one bet a game, overs paying 0.9 x 1.9
+    # bought at 0.526, closing mid (0.588 + 1 - 0.476) / 2
+    assert all(r[4] == pytest.approx((0.588 + 0.524) / 2 - 1 / 1.9, abs=2e-3) for r in september)
     assert conn.execute("SELECT count(*) FROM market_readiness WHERE family = 'tt_totals'").fetchone()[0] == n
 
 
-def test_a_lookahead_variant_is_refused_in_the_walk_forward(conn, tmp_path, monkeypatch):
+def test_a_lookahead_variant_is_refused_in_the_walk_forward(odds_trials, tmp_path, monkeypatch):
+    conn = odds_trials
     fs = pafs.SubTreeFileSystem(str(tmp_path), pafs.LocalFileSystem())
     tt_walkforward(conn, fs, 0.5)
     monkeypatch.setattr(families, "TTTotals", Peek)
