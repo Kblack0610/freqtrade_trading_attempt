@@ -5,6 +5,7 @@ import datetime as dt
 import json
 
 import pytest
+import requests
 
 from lab.markets import links
 from lab.markets.recorder import load_config
@@ -202,6 +203,22 @@ def test_main_without_a_key_runs_rules_and_the_check(conn, monkeypatch, capsys):
     assert links.main([], now=NOW) == 0
     out = capsys.readouterr().out
     assert "LITELLM_API_KEY not set" in out and "resolutions:" in out
+
+
+def test_a_down_route_ends_the_pass_after_max_failures_asks_in_a_row(conn):
+    close = NOW + dt.timedelta(days=1)
+    for i in range(5):
+        market(conn, "polymarket_us", f"pm-phx{i}", f"Phoenix game {i}", None, close=close + dt.timedelta(hours=i))
+    market(conn, "kalshi", "KX-PHX", "Phoenix wins", "Phoenix", close=close)
+    cfg = {**CFG, "llm": {**CFG["llm"], "pairs": [["polymarket_us", "kalshi"]], "max_failures": 2}}
+
+    def down(prompt):
+        raise requests.ConnectionError("route down")
+
+    llm = FakeLlm(down)
+    assert links.run_llm(conn, cfg, llm, NOW) == (0, 0)
+    assert len(llm.prompts) == 2
+    assert conn.execute("SELECT count(*) FROM market_link_asks").fetchone() == (0,)
 
 
 def test_a_market_with_no_candidates_does_not_use_up_the_ask_budget(conn):

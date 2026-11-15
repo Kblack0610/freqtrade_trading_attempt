@@ -170,6 +170,8 @@ timeout_s = 120
 pairs = [["odds_api", "kalshi"], ["polymarket_us", "kalshi"]]
 # Markets asked about per run, across all pairs, soonest closing first, and only those closing within horizon_d.
 max_asks = 50
+# Failed asks do not count in max_asks, so the pass stops after this many in a row (route down, workstation off).
+max_failures = 3
 horizon_d = 14
 # A candidate closes within window_h of the market and shares a title word; the best `candidates` by shared words go.
 window_h = 96
