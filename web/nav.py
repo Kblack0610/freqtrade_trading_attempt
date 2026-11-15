@@ -19,6 +19,7 @@ TABS = (
         ("Confidence", "/confidence", ()),
         ("Calls", "/calls", ()),
         ("Coverage", "/coverage", ()),
+        ("Avenues", "/avenues", ()),
     )),
     ("Pipeline", (
         ("Markets", "/markets", ("/links",)),

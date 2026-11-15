@@ -95,11 +95,11 @@ def test_the_data_client_reads_every_page_and_refuses_anything_but_a_get_to_its_
 def call(conn, **kw):
     row = {"who": "human", "author": "kenneth", "thesis": "t", "ticker": "NVDA", "direction": "short",
            "instrument": "equity", "entry_session": D(2026, 11, 13), "horizons": [1, 5, 20], "benchmark": "SMH",
-           "source": None, **kw}
+           "source": None, "signal_source": "event", **kw}
     return conn.execute(
         "INSERT INTO calls (who, author, thesis, ticker, direction, instrument, entry_session, horizons, benchmark, "
-        "source) VALUES (%(who)s, %(author)s, %(thesis)s, %(ticker)s, %(direction)s, %(instrument)s, "
-        "%(entry_session)s, %(horizons)s, %(benchmark)s, %(source)s) RETURNING id", row).fetchone()[0]
+        "source, signal_source) VALUES (%(who)s, %(author)s, %(thesis)s, %(ticker)s, %(direction)s, %(instrument)s, "
+        "%(entry_session)s, %(horizons)s, %(benchmark)s, %(source)s, %(signal_source)s) RETURNING id", row).fetchone()[0]
 
 
 def test_the_ledger_refuses_update_and_delete(conn):
@@ -123,7 +123,7 @@ def test_the_nightly_step_scores_what_printed_once_and_joins_the_fills_view(conn
     # the call is open in fills until its longest horizon (20) is scored, and calls stay out of strategy confidence
     assert conn.execute("SELECT source, account, venue, is_open FROM fills WHERE source = 'call'").fetchall() == \
         [("call", "human", "call", True)]
-    g = calls.groups([{"who": "human", "instrument": "equity", "horizon": 1, "pnl": got[1]}], CFG)
+    g = calls.groups([{"who": "human", "signal_source": "event", "instrument": "equity", "horizon": 1, "pnl": got[1]}], CFG)
     assert g[0]["n"] == 1 and g[0]["hit"] == 1 and g[0]["lo"] <= got[1] <= g[0]["hi"]
 
 
@@ -140,7 +140,7 @@ def test_an_overdue_call_with_no_prices_fails_the_step(conn, monkeypatch):
 
 def test_add_refuses_an_entry_whose_close_has_printed(conn):
     a = argparse.Namespace(who="agent", author="agent-5", thesis="t", ticker="nvda", direction="short",
-                           instrument="equity", benchmark="smh", horizons="5,1", entry=D(2026, 11, 13), source=None)
+                           instrument="equity", benchmark="smh", horizons="5,1", entry=D(2026, 11, 13), source=None, signal_source="event")
     with pytest.raises(SystemExit, match="has printed"):
         calls.add(conn, a, at(D(2026, 11, 13), 17))
     cid = calls.add(conn, argparse.Namespace(**{**vars(a), "entry": None}), at(D(2026, 11, 13), 17))
