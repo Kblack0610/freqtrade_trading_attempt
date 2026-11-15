@@ -31,7 +31,7 @@ human = "Nothing: the read key is deployed (trader-odds-api), so an error here i
 name = "Kraken"
 money = "real, read only"
 checks = [{source = "broker", match = "kraken", max_age_h = 3}]
-human = "A Query Funds key (docs/platforms.md, Read-only key checklist) in SOPS trader-brokers as KRAKEN_API_KEY and KRAKEN_API_SECRET"
+human = "Nothing: the person's full-permission key is deployed (home-config #937, ask aPbc4G); the client permits only balance reads, so an error here is ours to fix"
 
 [[venue]]
 name = "Fidelity (SnapTrade)"
