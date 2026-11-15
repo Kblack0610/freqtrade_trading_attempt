@@ -152,8 +152,7 @@ class Polymarket:
             yield [global_quote(m, ts) for m in markets]
 
     def settled(self, cursor: str | None) -> Iterator[tuple[list[Settled], str | None]]:
-        # By id, not closedTime: a closedTime page slows with depth and Gamma 500s it past about 2.2 s, while an id
-        # page stays near 0.5 s however deep (docs/markets.md, measured 2026-11-15)
+        # By id, not closedTime: Gamma 500s a closedTime page once the walk is deep enough (docs/markets.md)
         for markets, _, nxt in self._walk({"closed": "true", "order": "id", "ascending": "false"}, cursor):
             yield [Settled(global_quote(m, r.settled_at), r) for m in markets
                    if (r := global_resolution(m)) is not None], nxt
