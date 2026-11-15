@@ -1,24 +1,55 @@
 {% extends "base.html" %}
-{% block title %}Guide{% endblock %}
+{% block title %}Guide<h2 id="glossary">Glossary</h2>
+<p class="muted">One set of words for the whole site, from <code>web/glossary.toml</code>. Labels changed; database ids, roster names and the Freqtrade <code>dry_run</code> flag did not.</p>
+<dl>
+{% for t in glossary.term %}<dt><strong>{{ t.name }}</strong>{% if t.replaces %} <span class="muted">replaces {{ t.replaces }}</span>{% endif %}</dt><dd>{{ t.means }}</dd>
+{% endfor %}</dl>
+<h3>Scorecard columns</h3>
+<dl>
+{% for c in glossary.column %}<dt><strong>{{ c.name }}</strong></dt><dd>{{ c.means }}</dd>
+{% endfor %}</dl>
+<h3 id="retired">Moved and removed</h3>
+<div class="scroll"><table>
+<thead><tr><th>Old place</th><th>New home</th><th>Why</th></tr></thead>
+<tbody>{% for r in glossary.retired %}<tr><td>{{ r.old }}</td><td>{{ r.new }}</td><td>{{ r.why }}</td></tr>
+{% endfor %}</tbody>
+</table></div>
+{% endblock %}
 {% block body %}
 <h1>How to read this site</h1>
-<p class="muted">Read the pages in this order. Each one narrows what the one before it showed. Nothing here trades: the league is paper only.</p>
+<p class="muted">Read the pages in this order. Each one narrows what the one before it showed. Nothing here trades: every league is paper only.</p>
 <ol>
-  <li><a href="/">Overview</a>: one card per lane (the crypto dry-run league, the event-contract paper league, shadow accounts, calls, venues, the recorder, price data, research gates, money and the guard), the ones that need a look first. Each lane keeps its own paper profit, never a total across lanes; a few weeks of live prices is too short to judge a strategy on.</li>
-  <li><a href="/cohorts">Cohorts</a>: the bots grouped by the cohort each roster row names (league, and later aggressive, mixture, markets paper), with each cohort's profit, best and worst bot, and the setup overlay every bot runs under.</li>
+  <li><a href="/">Overview</a>: one card per lane (the crypto league, the event-contract league, replay accounts, calls, venues, the recorder, price data, research gates, money and the guard), the ones that need a look first. Each lane keeps its own paper profit, never a total across lanes; a few weeks of live prices is too short to judge a strategy on.</li>
+  <li><a href="/cohorts">Cohorts</a>: the crypto league's bots grouped by the cohort each roster row names (league, aggressive, mixture and so on), with each cohort's profit, best and worst bot, and the setup overlay every bot runs under.</li>
+  <li><a href="/leagues">Leagues</a>: how the paper accounts are doing. One scorecard with the same columns for the crypto league, the event-contract league and, later, the stock league, and each league's newest fills; every fill opens the decision behind it.</li>
   <li><a href="/live">Live</a>: each bot's open positions with their last price and unrealized profit, and how old the snapshot and its candles are. It refreshes itself.</li>
   <li><a href="/data">Data</a>: which exchanges, pairs and timeframes have candles, and from when. A strategy is only tested where its data is complete.</li>
   <li><a href="/strategies">Strategies</a>: every strategy backtested on all stored history, ranked by the low end of its Sharpe interval, so it has to look good even on an unlucky draw. Grey rows have under 20 trades. A backtest is in sample: the strategy may have been written or tuned on these same years, so treat this page as a shortlist, not proof.</li>
   <li><a href="/walkforward">Walk-forward</a>: each month is tuned on the months before it, then traded on that month, which tuning never saw. This is the first page whose numbers are out of sample.</li>
-  <li><a href="/suggestions">Suggestions</a>: promote, demote, retire, fix and retune, for the dry-run league only.</li>
+  <li><a href="/suggestions">Suggestions</a>: promote, demote, retire, fix and retune, for the crypto league only.</li>
   <li><a href="/confidence">Confidence</a>: whether a strategy has earned a small real-money test. The score is the chance its true net return per trade is above zero. It needs {{ need }} strategies with at least {{ member_trades }} out-of-sample trades each before it scores anyone; until then the page shows how far off that is. Ready means every gate passes, including {{ oos }} out-of-sample trades, and a score of at least {{ ready }}.</li>
   <li><a href="/calls">Calls</a>: every trade idea a person, an agent or a rule wrote down before its entry close, scored after 1, 5 and 20 sessions against its benchmark, net of borrow and costs. A hunch is judged here by its record, not by how it felt.</li>
   <li><a href="/book">Book</a>: for scored strategies only, a range of returns over one and five years beside holding BTC and beside cash, after a guessed tax, and what each stage of a real-money test would cost.</li>
   <li><a href="/coverage">Coverage</a>: which method families (trend, mean-reversion, momentum and the rest) have been backtested, walk-forward tested and counted as trials on each venue. A family nobody has tried is a gap, not a failure.</li>
-  <li><a href="/markets">Markets</a>: event contracts, a separate track from the crypto league. The recorder's health per venue and the history backfill, then <a href="/links">Links</a> (the same event matched across venues) and <a href="/markets/book">the markets book</a> (every backtested family variant, and the paper league trading them on live books).</li>
+  <li><a href="/markets">Markets</a>: event contracts, a separate track from the crypto league. The recorder's health per venue and the history backfill, then <a href="/links">Links</a> (the same event matched across venues) and <a href="/markets/book">the markets book</a> (every backtested family variant and the readiness gate; the league that trades them is on Leagues).</li>
   <li><a href="/accounts">Accounts</a>: every account we hold or paper-trade, read only: broker balances, watch-only wallets, and the watcher's kill-switch state per bot. The real-money guard is shown at the top.</li>
   <li><a href="/runs">Runs</a>: when each analysis ran and what failed.</li>
 </ol>
 <h2>What no page can tell you</h2>
 <p>No test proves a strategy will keep working. The most this lab can show is that one made money on months it was never tuned on, on more than one venue, after fees and slippage, and that it still did on the locked-away months from <code>[lockbox] start</code>. Every strategy, venue and parameter set ever tried is counted in the trial register, and the more there are, the higher the bar each one must clear, because some of a large number of tries will look good by chance.</p>
+<h2 id="glossary">Glossary</h2>
+<p class="muted">One set of words for the whole site, from <code>web/glossary.toml</code>. Labels changed; database ids, roster names and the Freqtrade <code>dry_run</code> flag did not.</p>
+<dl>
+{% for t in glossary.term %}<dt><strong>{{ t.name }}</strong>{% if t.replaces %} <span class="muted">replaces {{ t.replaces }}</span>{% endif %}</dt><dd>{{ t.means }}</dd>
+{% endfor %}</dl>
+<h3>Scorecard columns</h3>
+<dl>
+{% for c in glossary.column %}<dt><strong>{{ c.name }}</strong></dt><dd>{{ c.means }}</dd>
+{% endfor %}</dl>
+<h3 id="retired">Moved and removed</h3>
+<div class="scroll"><table>
+<thead><tr><th>Old place</th><th>New home</th><th>Why</th></tr></thead>
+<tbody>{% for r in glossary.retired %}<tr><td>{{ r.old }}</td><td>{{ r.new }}</td><td>{{ r.why }}</td></tr>
+{% endfor %}</tbody>
+</table></div>
 {% endblock %}

@@ -143,9 +143,9 @@ Reference: [Suggestions](../README.md#suggestions), [Confidence](../README.md#co
 
 `lab/loop.py`, the last step of the analysis, compares tonight's climate scorecard cells whose low end is above zero, promote suggestions, retune fits, ready betting variants and drifted paper accounts with last night's and writes what changed as `research_events`. At 10:00 UTC `ci/research_sync.py` on the fleet machine files one board row a night for the climate changes, one for each betting set's changes, and a row for each promotion. `lab/shadow.py`, just before the loop, opens shadow paper accounts (database rows, no pod) for walk-forward-qualified, uncorrelated strategies, marks them forward from their promotion day and retires them by rule (the anytime-valid confidence sequence on the mean daily return, read every night: [Shadow judge](anytime-gates.md#shadow-judge)), toward 50 winners; `/accounts` ranks them. `python -m lab.shadow funnel` prints the funnel from the first ok night (series, each entry gate, eligible, admitted, retired early, winning) and which step holds the most candidates; the nightly `analysis` row carries tonight's gate counts as `shadow_funnel`. A pod is still a person's pick (`ci/cohort_roster.py`). Reference: [Nightly research loop](../README.md#nightly-research-loop).
 
-## Step 7: the paper league
+## Step 7: the crypto league
 
-Each row of home-config `apps/freqtrade/roster.tsv` is one paper bot: a strategy on an exchange with an optional overlay, grouped into cohorts (`strategies`, `aggressive`, `mixture`, `markets`). The league is where the time-based gates fill up.
+Each row of home-config `apps/freqtrade/roster.tsv` is one paper bot: a strategy on an exchange with an optional overlay, grouped into cohorts (`strategies`, `aggressive`, `mixture`, `winners`); the event-contract league is a separate league, not a cohort. Both are scored on `/leagues`. The league is where the time-based gates fill up.
 
 - `freqtrade-ingest` copies every bot's trades into Postgres every 5 minutes.
 - Drift compares each bot's trades with a backtest of the same days. A low match rate means the backtest does not model what the bot does; a steady negative gap means fills or fees the backtest leaves out.

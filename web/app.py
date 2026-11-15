@@ -33,7 +33,9 @@ from lab import inputs as inputs_lab
 from lab import call_rules
 from lab import calls as calls_lab
 from lab import db, diversity, metrics, suggest, universe, taxonomy
-from web import auth, charts, exporter, lanes, nav
+from lab import leagues as league_rows
+from lab.markets import paper as paper_lab
+from web import auth, charts, exporter, glossary, lanes, nav
 from web import venues as venue_roster
 
 HERE = Path(__file__).resolve().parent
@@ -47,7 +49,6 @@ CACHE_MAX = 512  # entries; the oldest goes first
 TF_ORDER = ["1m", "5m", "15m", "30m", "1h", "4h", "1d"]
 FAMILIES = HERE.parent / "lab" / "families.toml"
 MARKETS = HERE.parent / "lab" / "markets.toml"
-PAPER_COHORT = "markets"  # the paper league's row among the cohorts (lab/markets/paper.py)
 STRATEGY_DIR = HERE.parent / "user_data" / "strategies"
 # Direct IStrategy subclasses, read from source so the toml check needs neither freqtrade nor a database.
 STRATEGY_CLASS = re.compile(r"^class (\w+)\(IStrategy\)", re.M)
@@ -64,7 +65,7 @@ COVER = {
 
 BOTS = """
 SELECT b.name, b.exchange, b.strategy, b.cohort, b.overlay, o.params AS overlay_params, s.ts, s.dry_run,
-       s.closed_trades, s.open_trades, s.profit_all_pct, s.profit_all_abs, s.winrate_pct, s.max_drawdown_pct,
+       s.closed_trades, s.open_trades, s.profit_closed_abs, s.profit_all_pct, s.profit_all_abs, s.winrate_pct, s.max_drawdown_pct,
        s.balance_total, s.raw->'balance'->>'stake' AS balance_currency, s.error, d.matched, d.live_entries, d.bt_entries
 FROM bots b
 LEFT JOIN LATERAL (SELECT * FROM bot_snapshots WHERE bot = b.name ORDER BY ts DESC LIMIT 1) s ON true
@@ -213,12 +214,6 @@ SELECT a.*, w.state, w.breached_at, w.stopped_at,
        (SELECT count(*) FROM paper_orders o WHERE o.account = a.account AND o.contracts > 0 AND o.settled_at IS NOT NULL) AS settled
 FROM paper_accounts a LEFT JOIN watch w ON w.bot = a.account
 ORDER BY a.equity DESC NULLS LAST, a.account
-"""
-PAPER_FILLS = """
-SELECT o.*, m.title, m.subtitle FROM paper_orders o
-JOIN paper_accounts a ON a.account = o.account
-LEFT JOIN markets m ON m.venue = a.venue AND m.market_id = o.market_id
-WHERE o.contracts > 0 ORDER BY o.sent_at DESC, o.id DESC LIMIT 50
 """
 DEMO_ORDERS = "SELECT * FROM demo_orders ORDER BY placed_at DESC, id DESC LIMIT 20"
 BROKERS = "SELECT DISTINCT ON (broker) * FROM broker_balances ORDER BY broker, read_at DESC"
@@ -460,36 +455,13 @@ def cohorts(bots: list[dict]) -> list[dict]:
     return sorted(out.values(), key=lambda c: (c["cohort"] != "league", c["cohort"]))
 
 
-def paper_cohort(accounts: list[dict]) -> dict | None:
-    """The markets paper league (lab/markets/paper.py) as a cohort row: its accounts, the marked ones, and their
-    summed profit and equity, settled and open fills, and mean return, the way cohorts() sums bots."""
-    if not accounts:
-        return None
-    marked = sorted(({**a, "name": a["account"], "href": "/markets/book",
-                      "profit_all_pct": (a["equity"] / a["capital"] - 1) * 100}
-                     for a in accounts if a["marked_at"] and a["equity"] is not None),
-                    key=lambda a: a["profit_all_pct"])
-    return {"cohort": PAPER_COHORT, "bots": len(accounts), "reporting": len(marked),
-            "profit_abs": sum(a["equity"] - a["capital"] for a in marked), "balance": sum(a["equity"] for a in marked),
-            "open_trades": sum(a["open_positions"] or 0 for a in marked),
-            "closed_trades": sum(a["settled"] for a in marked),
-            "mean_pct": sum(a["profit_all_pct"] for a in marked) / len(marked) if marked else None,
-            "worst": marked[0] if marked else None, "best": marked[-1] if marked else None}
-
-
-def all_cohorts(bots: list[dict], accounts: list[dict]) -> list[dict]:
-    """The bot cohorts, then the markets paper league."""
-    paper = paper_cohort(accounts)
-    return cohorts(bots) + ([paper] if paper else [])
-
-
 @app.get("/", response_class=HTMLResponse)
 def overview(request: Request):
     user_of(request)
     bots = rows(BOTS)
     snaps = [b for b in bots if b["ts"]]
     paper = rows(PAPER_ACCOUNTS)
-    return page(request, "overview.html", cohorts=all_cohorts(bots, paper), lanes=lanes.cards(lane_reads(bots, paper)),
+    return page(request, "overview.html", cohorts=cohorts(bots), lanes=lanes.cards(lane_reads(bots, paper)),
                 live_bots=[b["name"] for b in snaps if b["dry_run"] is False],
                 top=[r for r in rows(LEADERBOARD, ("365d",)) if not r["biased"] and r["trades"] >= MIN_TRADES][:5])
 
@@ -544,9 +516,42 @@ def live_view() -> dict:
 def cohorts_page(request: Request):
     user_of(request)
     bots = rows(BOTS)
+    return page(request, "cohorts.html", cohorts=cohorts(bots), bots=bots)
+
+
+# Each paper account's settled profits, oldest first: the curve its max drawdown is read from.
+PAPER_PROFITS = """
+SELECT account, array_agg(profit ORDER BY settled_at, id) AS profits FROM paper_orders
+WHERE contracts > 0 AND settled_at IS NOT NULL GROUP BY account
+"""
+NEWEST_FILLS = """
+SELECT f.*, m.title FROM fills f
+LEFT JOIN markets m ON f.source = 'paper' AND m.venue = f.venue AND m.market_id = f.instrument
+WHERE f.source = %s ORDER BY f.open_date DESC, f.fill_id DESC LIMIT 20
+"""
+
+
+@app.get("/leagues", response_class=HTMLResponse)
+def leagues(request: Request):
+    """How the paper accounts are doing: one scorecard, the same columns for every league, and its newest fills."""
+    user_of(request)
+    methods = suggest.load_config(FAMILIES)
+    watching = {w["bot"]: w for w in rows(KILL_SWITCH)}
+    profits = {r["account"]: r["profits"] for r in rows(PAPER_PROFITS)}
+    crypto = league_rows.crypto_rows(
+        rows(BOTS), watching, lambda s: f"{s}: {strategy_method(s, methods)['description']}")
     accounts = rows(PAPER_ACCOUNTS)
-    return page(request, "cohorts.html", cohorts=all_cohorts(bots, accounts), bots=bots, accounts=accounts,
-                paper=PAPER_COHORT)
+    events = league_rows.event_rows(accounts, profits, paper_lab.rule_of)
+    return page(request, "leagues.html", glossary=glossary.load(),
+                tabs=[{"id": "crypto", "title": "Crypto", "rows": crypto, "fills": rows(NEWEST_FILLS, ("freqtrade",)),
+                       "about": "Freqtrade spot bots on live prices (lab/league.py), grouped into cohorts."},
+                      {"id": "event-contracts", "title": "Event contracts", "rows": events,
+                       "fills": rows(NEWEST_FILLS, ("paper",)),
+                       "forward": [a for a in accounts if a["drifted"] is not None],
+                       "about": "One account per family variant, filled against the recorded books (lab/markets/paper.py)."},
+                      {"id": "stocks", "title": "Stocks", "rows": [], "fills": [],
+                       "about": "No stock league yet: it is the next phase of the plan."}],
+                hard_stop=suggest.load_config()["book"]["hard_stop"])
 
 
 @app.get("/live", response_class=HTMLResponse)
@@ -797,7 +802,7 @@ def guide(request: Request):
     user_of(request)
     c = suggest.load_config()["confidence"]
     return page(request, "guide.html", need=c["min_population"], member_trades=c["min_member_trades"],
-                ready=c["ready_score"], oos=c["min_oos_trades"])
+                ready=c["ready_score"], oos=c["min_oos_trades"], glossary=glossary.load())
 
 
 @app.get("/confidence", response_class=HTMLResponse)
@@ -970,14 +975,9 @@ def markets_book(request: Request, signal_source: str = ""):
     def selected(found):
         return [r for r in found if not signal_source
                 or tax["market_categories"].get(r["family"], {}).get("signal_source") == signal_source]
-    hard_stop = suggest.load_config()["book"]["hard_stop"]
-    accounts = selected(rows(PAPER_ACCOUNTS))
-    for a in accounts:
-        a["ret"] = None if a["equity"] is None else a["equity"] / a["capital"] - 1
-    return page(request, "markets_book.html", backtests=selected(rows(MARKET_BACKTESTS)), readiness=selected(rows(MARKET_READINESS)), categories=selected(rows(MARKET_CATEGORIES)), accounts=accounts,
-                signal_source=signal_source, signal_sources=tax["signal_sources"], family_categories=tax["market_categories"],
-                fills=[r for r in rows(PAPER_FILLS) if not signal_source or r["account"] in {a["account"] for a in accounts}],
-                demo=rows(DEMO_ORDERS), hard_stop=hard_stop)
+    return page(request, "markets_book.html", backtests=selected(rows(MARKET_BACKTESTS)), readiness=selected(rows(MARKET_READINESS)),
+                categories=selected(rows(MARKET_CATEGORIES)), signal_source=signal_source, signal_sources=tax["signal_sources"],
+                family_categories=tax["market_categories"], demo=rows(DEMO_ORDERS))
 
 
 # Every call newest first with its scores by horizon (lab/calls.py), and the scored rows groups() summarizes.

@@ -1,10 +1,10 @@
 {% extends "base.html" %}
-{% block title %}Markets book{% endblock %}
+{% block title %}Backtests{% endblock %}
 {% block body %}
-<h1>Markets book</h1>
+<h1>Backtests</h1>
 {% include "_markets_nav.html" %}
 {% include "_signal_filter.html" %}
-<p class="muted">The event-contract strategy families: every backtested variant, then the paper league that trades them against the recorder's live books. Paper money only: nothing here can reach a venue's order API.</p>
+<p class="muted">The event-contract strategy families: every backtested variant and the gate that lets one into the event-contract league, then the demo orders. Paper money only: nothing here can reach a venue's order API.</p>
 
 <h2>Backtests</h2>
 <p class="muted">One row per family, venue, variant and walk-forward window (a settled month), newest first. Each window is a trial in the register before its result is read, so the deflated Sharpe counts every window tried. The interval resamples whole events of the net return per trade, after fees.</p>
@@ -27,7 +27,7 @@
 {% else %}<p class="muted">No markets backtest has run yet.</p>{% endif %}
 
 <h3>Readiness gate</h3>
-<p class="muted">Each variant's windows before the lockbox, pooled and held to the <code>lab/suggest.toml</code> [confidence] gates with the betting lane's own trial count; the lockbox months are read only for a variant that passes every other gate. The paper league trades exactly the ready variants. A variant entering or leaving this set, or a paper account drifting from its backtest, is filed on the agent board by the nightly research loop.</p>
+<p class="muted">Each variant's windows before the lockbox, pooled and held to the <code>lab/suggest.toml</code> [confidence] gates with the betting lane's own trial count; the lockbox months are read only for a variant that passes every other gate. The event-contract league trades exactly the ready variants. A variant entering or leaving this set, or a paper account drifting from its backtest, is filed on the agent board by the nightly research loop.</p>
 <p>{{ readiness | selectattr("ready") | list | length }} of {{ readiness | length }} variants are ready for paper.</p>
 {% for r in readiness %}
 <details class="card">
@@ -52,42 +52,8 @@
 </div>
 {% else %}<p class="muted">No split yet: it fills when a backtest next runs.</p>{% endif %}
 
-<h2>Paper league</h2>
-<p class="muted">Each account is one family variant with its own paper capital. Equity is capital, plus realized profit, plus each open position at its exit price. The watcher holds each account to the daily loss limit and runs the kill drill on it; the drawdown alert fires {{ hard_stop | pct(0) }} of capital below an account's peak, the book's hard stop.</p>
-{% if accounts %}
-<div class="scroll">
-<table>
-  <thead><tr><th>Account</th><th>Family</th><th>Signal source</th><th>Instrument</th><th>Horizon</th><th>Venue</th><th class="n">Capital</th><th class="n">Equity</th><th class="n">Return</th><th class="n">Realized</th><th class="n">Open</th><th class="n">Fills</th><th class="n">Settled</th><th class="n" title="Settled paper return per trade minus the backtest's, 90% interval">Paper vs backtest</th><th>Watch</th><th>Marked</th></tr></thead>
-  <tbody>
-  {% for a in accounts %}
-  <tr><td><span title="{{ a.params | tojson }}">{{ a.account }}</span></td><td>{{ a.family }}</td>{% set category = family_categories.get(a.family, {}) %}<td>{{ category.signal_source or "-" }}</td><td>{{ category.instrument or "-" }}</td><td>{{ category.horizon or "-" }}</td><td>{{ a.venue }}</td>
-    <td class="n">{{ a.capital | num(0) }}</td><td class="n">{{ a.equity | num(2) }}</td><td class="n {{ a.ret | tone }}">{{ a.ret | pct(2) }}</td>
-    <td class="n {{ a.realized | tone }}">{{ a.realized | num(2) }}</td><td class="n">{{ a.open_positions if a.open_positions is not none else "-" }}</td>
-    <td class="n">{{ a.fills }}</td><td class="n">{{ a.settled }}</td>
-    <td class="n">{% if a.drifted is none %}<span class="muted">-</span>{% else %}<span class="{{ 'down' if a.drifted else '' }}">{{ a.gap_lo | pct(2) }} to {{ a.gap_hi | pct(2) }}{% if a.drifted %} drifted{% endif %}</span>{% endif %}</td>
-    <td>{% if a.retired_at %}<span class="muted">retired</span>{% elif a.stopped_at %}<span class="down">stopped</span>{% elif a.breached_at %}<span class="down">day limit hit</span>{% else %}{{ a.state or "-" }}{% endif %}</td>
-    <td class="{{ 'down' if stale(a.marked_at, 3600) }}">{{ a.marked_at | ago }}</td></tr>
-  {% endfor %}
-  </tbody>
-</table>
-</div>
-{% else %}<p class="muted">The paper league has not run yet.</p>{% endif %}
-
-{% if fills %}
-<h3>Newest paper fills</h3>
-<div class="scroll">
-<table>
-  <thead><tr><th>Sent</th><th>Account</th><th>Market</th><th>Side</th><th class="n">Contracts</th><th class="n">Price</th><th class="n">Fee</th><th>Settled</th><th class="n">Profit</th></tr></thead>
-  <tbody>
-  {% for o in fills %}
-  <tr><td><a href="/trades/paper/{{ o.id }}">{{ o.sent_at | local }}</a></td><td>{{ o.account }}</td><td>{{ o.title or o.market_id }}{% if o.subtitle %} <span class="muted">{{ o.subtitle }}</span>{% endif %}</td><td>{{ o.side }}</td>
-    <td class="n">{{ o.contracts }}</td><td class="n">{{ o.price | num(2) }}</td><td class="n">{{ o.fee | num(2) }}</td>
-    <td>{{ o.settled_at | local if o.settled_at else "open" }}</td><td class="n {{ o.profit | tone }}">{{ o.profit | num(2) }}</td></tr>
-  {% endfor %}
-  </tbody>
-</table>
-</div>
-{% endif %}
+<h2 id="paper">Paper league</h2>
+<p class="muted">The paper league moved to <a href="/leagues#event-contracts">Leagues</a>, beside the other leagues, with the same scorecard.</p>
 
 <h2>Demo orders</h2>
 <p class="muted">Each order path on mock funds, the Kalshi demo exchange, Manifold play money and the Alpaca paper API: the drill rests one order far from the market and cancels it.</p>

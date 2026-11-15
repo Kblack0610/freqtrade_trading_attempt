@@ -8,6 +8,7 @@ TABS = (
     ("Now", (
         ("Overview", "/", ("/bots", "/trades")),
         ("Live", "/live", ()),
+        ("Leagues", "/leagues", ()),
         ("Book", "/book", ()),
         ("Accounts", "/accounts", ()),
         ("Suggestions", "/suggestions", ()),
