@@ -203,3 +203,24 @@ def test_decision_metrics(conn):
     assert m['trader_decision_funnel{account="paper-a",check="ordered",league="event_contracts"}'] == 2
     # B has no decision; OLD was sent before the first traced entry, so it is not counted
     assert m['trader_fills_untraced{league="event_contracts"}'] == 1
+
+
+def test_crypto_untraced_counts_filled_bot_trades_since_the_first_crypto_decision(conn):
+    """A bot trade with an entry fill and no decision is untraced; one still waiting on its entry order, or opened
+    before the first crypto decision, is not."""
+    from psycopg.types.json import Jsonb
+
+    from lab import db
+    from web.exporter import TraderCollector
+
+    now = dt.datetime.now(dt.timezone.utc)
+    conn.execute("INSERT INTO bots (name, exchange, strategy) VALUES ('k-a', 'kraken', 'S'), ('k-b', 'kraken', 'S')")
+    for bot, tid, at, entries in (("k-a", 1, now, 1), ("k-b", 1, now, 1), ("k-b", 2, now, 1), ("k-b", 3, now, 0),
+                                  ("k-b", 4, now - dt.timedelta(days=1), 1)):
+        conn.execute("INSERT INTO bot_trades (bot, trade_id, open_date, pair, is_open, raw) VALUES "
+                     "(%s, %s, %s, 'BTC/USD', true, %s)", (bot, tid, at, Jsonb({"nr_of_successful_entries": entries})))
+    conn.execute("INSERT INTO decisions (league, account, venue, instrument, decided_at, action, rule, fill_source, "
+                 "fill_id) VALUES ('crypto', 'k-a', 'kraken', 'BTC/USD', %s, 'enter', 'S: entry signal', 'freqtrade', 1)",
+                 (now,))
+    m = scrape(TraderCollector(db.connect))
+    assert m['trader_fills_untraced{league="crypto"}'] == 2  # k-b's 1 and 2: k-a's 1 is no proof for k-b's

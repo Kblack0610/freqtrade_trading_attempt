@@ -49,7 +49,7 @@ MARKETS = HERE.parent / "lab" / "markets.toml"
 PAPER_COHORT = "markets"  # the paper league's row among the cohorts (lab/markets/paper.py)
 STRATEGY_DIR = HERE.parent / "user_data" / "strategies"
 # Direct IStrategy subclasses, read from source so the toml check needs neither freqtrade nor a database.
-STRATEGY_CLASS = re.compile(r"^class (\w+)\(IStrategy\)", re.M)
+STRATEGY_CLASS = re.compile(r"^class (\w+)\((?:\w+, )*IStrategy\)", re.M)  # mixins first, e.g. (EntryInputs, IStrategy)
 UNTAGGED = "untagged"  # on disk, no line in lab/families.toml
 GONE = "gone"  # in the results only: a deleted strategy, or the trial register's "(dropped)" hyperopts
 # What /coverage joins to lab/families.toml, each one row per strategy x exchange.

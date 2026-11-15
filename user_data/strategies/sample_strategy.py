@@ -14,10 +14,11 @@ from freqtrade.strategy import (BooleanParameter, CategoricalParameter, DecimalP
 # Add your lib to import here
 import talib.abstract as ta
 import freqtrade.vendor.qtpylib.indicators as qtpylib
+from lab.entry_inputs import EntryInputs
 
 
 # This class is a sample. Feel free to customize it.
-class SampleStrategy(IStrategy):
+class SampleStrategy(EntryInputs, IStrategy):
     """
     This is a sample strategy to inspire you.
     More information in https://www.freqtrade.io/en/latest/strategy-customization/

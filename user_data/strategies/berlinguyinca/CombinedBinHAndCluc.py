@@ -5,6 +5,7 @@ import numpy as np
 import talib.abstract as ta
 from freqtrade.strategy import IStrategy
 from pandas import DataFrame
+from lab.entry_inputs import EntryInputs
 
 
 def bollinger_bands(stock_price, window_size, num_of_std):
@@ -14,7 +15,7 @@ def bollinger_bands(stock_price, window_size, num_of_std):
     return np.nan_to_num(rolling_mean), np.nan_to_num(lower_band)
 
 
-class CombinedBinHAndCluc(IStrategy):
+class CombinedBinHAndCluc(EntryInputs, IStrategy):
     # Based on a backtesting:
     # - the best perfomance is reached with "max_open_trades" = 2 (in average for any market),
     #   so it is better to increase "stake_amount" value rather then "max_open_trades" to get more profit

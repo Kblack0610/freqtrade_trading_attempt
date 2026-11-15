@@ -48,7 +48,7 @@ Results go to the `trader` database in the cluster's shared Postgres, which the 
 | `lab/calls.py`, `lab/calls.toml` | Every trade idea before its outcome: `add` records a call (who, thesis, ticker, direction, entry close, horizons, benchmark), and the last analysis step scores it at each horizon from Alpaca daily closes (see Calls) |
 | `lab/guard.py` | The live guard every real-money entry point runs, whatever the engine: `GUARD_LIFTED`, stage caps, venue list, ready, the bankroll kill switch. See `docs/live.md` |
 | `lab/live.py` | Live Freqtrade bot entry point: always refuses, nothing deploys it. Its config checks sit on `lab/guard.py`. See `docs/live.md` and the operator rules in `docs/operating-rules.md` |
-| `lab/ingest.py` | Job run every 5 minutes: every bot's trades (closed and open) and a snapshot (profit, balance, dry-run flag, each open pair's newest candle time) into Postgres |
+| `lab/ingest.py` | Job run every 5 minutes: every bot's trades (closed and open) and a snapshot (profit, balance, dry-run flag, each open pair's newest candle time) into Postgres, plus a `crypto` decision per trade from the entry candle the bot recorded (`lab/entry_inputs.py`) |
 | `lab/watcher.py` | Daily loss watch: each bot's marked-to-market equity every 60 s into `watch`, and the kill drill. See Watcher |
 | `lab/migrate.py`, `lab/migrations/` | Schema: numbered SQL files applied once each, in order, under an advisory lock; runs as the init container of every job |
 | `lab/db.py` | The one Postgres connection: `DATABASE_URL` |
@@ -306,7 +306,7 @@ Event rules (`lab/call_rules.py`, `lab/call_rules.toml`) make calls from news. E
 
 ## Adding a strategy
 
-Drop the `.py` in `user_data/strategies/` (any subfolder). It must import on the pinned image: Python 3.14, NumPy 2 (`np.nan`, not `np.NaN`), no `ta` package. Check with `freqtrade list-strategies --recursive-strategy-search --userdir user_data -c user_data/config.base.json -c user_data/exchanges/binanceus.json`. The next nightly analysis backtests its whole history and checks it for bias. Give its class a line in `lab/families.toml`, or `/coverage` lists it as untagged and the tests fail.
+Drop the `.py` in `user_data/strategies/` (any subfolder). It must import on the pinned image: Python 3.14, NumPy 2 (`np.nan`, not `np.NaN`), no `ta` package. Check with `freqtrade list-strategies --recursive-strategy-search --userdir user_data -c user_data/config.base.json -c user_data/exchanges/binanceus.json`. The next nightly analysis backtests its whole history and checks it for bias. Give its class a line in `lab/families.toml`, or `/coverage` lists it as untagged and the tests fail. Before it gets a roster row, list `EntryInputs` (`lab/entry_inputs.py`) before `IStrategy` in its bases: on each trade's first entry fill it keeps the signal candle's columns as custom data, which ingest turns into the trade's decision; a league bot without it shows in `trader_fills_untraced{league="crypto"}`.
 
 ## Generated families
 
@@ -383,6 +383,7 @@ The first run fetches full history (5m since 2019 on binanceus is the long pole)
 - `050`: required signal source on calls; classifies the Phase 1 event seed and refuses unclassified legacy calls.
 - `052`: permits the betting signals (`bet-ready`, `bet-drift`) in the research loop state.
 - `055`: `decisions` (why each paper order was made: rule, checks, inputs, sizing, its `fills` row; and capped near-misses) and `decision_funnel` (book rows per pass and account by the first check failed), written by `lab/markets/paper.py`.
+- `056`: `decisions` keyed by fill source, account, fill id and decided_at, so league bots (whose trade ids repeat across bots) join it: `lab/ingest.py` writes one `crypto` decision per traced bot trade.
 - `049`: the event-contract walk-forward. `market_backtests` keeps one row per test window (key gains `start_at`, `score` goes, each trade's event and the window's daily returns come in), `market_category_results` follows it, and `market_readiness` holds the markets readiness gate, one row per variant (`lab/markets/families.py`).
 
  A schema change is a new numbered file; never edit an applied one.

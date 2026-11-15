@@ -22,6 +22,7 @@ class FakeBots:
     def __init__(self, *bots: dict):
         self.bots = list(bots)
         self.candle_paths: list[str] = []
+        self.custom_paths: list[str] = []
 
     def __call__(self, i: int, path: str):
         b = self.bots[i]
@@ -41,6 +42,14 @@ class FakeBots:
         if path.startswith("pair_candles?"):
             self.candle_paths.append(path)
             return {"data_stop_ts": 1793794800000}
+        if "custom-data" in path:  # b["custom"]: trade_id -> its entry_inputs, as lab/entry_inputs.py writes it
+            self.custom_paths.append(path)
+            if b.get("custom_down"):
+                raise ConnectionError("custom data refused")
+            tid = path.split("/")[1]
+            ids = [t["trade_id"] for t in b["open"]] if tid == "open" else [int(tid)]
+            return [{"trade_id": i, "custom_data": [{"key": "entry_inputs", "type": "dict", "value": b["custom"][i]}]}
+                    for i in ids if i in b.get("custom", {})]
         if path.startswith("trades?"):
             q = dict(kv.split("=") for kv in path.split("?")[1].split("&"))
             off, lim = int(q["offset"]), int(q["limit"])
@@ -170,3 +179,57 @@ def test_main_prunes_after_ingesting(conn, monkeypatch, tmp_path):
     snapshots(conn, [old, old + dt.timedelta(minutes=5)])
     assert ingest.main(FakeBots({"closed": [], "open": []})) == 0
     assert kept(conn)[0] == old + dt.timedelta(minutes=5) and len(kept(conn)) == 2
+
+
+def candle(rsi: float) -> dict:
+    return {"candle": "2026-11-04T12:15:00+00:00", "timeframe": "5m", "values": {"close": 77990.0, "rsi": rsi}}
+
+
+def decisions(conn) -> list[tuple]:
+    return conn.execute("SELECT account, fill_id, decided_at, rule, inputs, sizing FROM decisions "
+                        "WHERE league = 'crypto' ORDER BY account, fill_id").fetchall()
+
+
+def test_each_traced_trade_gets_one_decision_with_its_entry_candle(conn):
+    open_t = dict(trade(4, True), enter_tag="dip", fee_open=0.0026, fee_open_cost=0.86)
+    bots = FakeBots({"closed": [trade(1, False), trade(2, False)], "open": [open_t, trade(5, True)],
+                     "custom": {1: candle(28.0), 4: candle(31.5)}})
+    snap = ingest.ingest_bot(conn, bots, 0, Row("k-s", "kraken", "BinHV45"), T0)
+    assert snap["decision_rows"] == 2
+    got = decisions(conn)
+    assert [(a, f) for a, f, *_ in got] == [("k-s", 1), ("k-s", 4)]
+    _, _, at, rule, inputs, sizing = got[1]
+    assert at == ingest.trade_row(open_t)["open_date"] and rule == "BinHV45: entry signal dip"
+    assert inputs[1] == {"name": "rsi", "value": 31.5, "source": "kraken 5m candle", "as_of": "2026-11-04T12:15:00+00:00"}
+    assert sizing == {"stake": 330.0, "amount": 0.004, "price": 78000.0, "fee_rate": 0.0026, "fee": 0.86}
+
+    bots.custom_paths.clear()
+    ingest.ingest_bot(conn, bots, 0, Row("k-s", "kraken", "BinHV45"), T0 + dt.timedelta(minutes=5))
+    assert len(decisions(conn)) == 2  # a rerun adds none
+    # trade 5 (open, untraced) is asked for in the one open call; traced 1 is not asked again, untraced 2 is
+    assert bots.custom_paths == ["trades/open/custom-data?key=entry_inputs&limit=500", "trades/2/custom-data?key=entry_inputs"]
+
+
+def test_a_closed_trade_is_read_one_by_one_only_while_recent(conn):
+    bots = FakeBots({"closed": [trade(1, False)], "open": [], "custom": {1: candle(28.0)}})
+    later = ingest.trade_row(trade(1, False))["close_date"] + dt.timedelta(hours=ingest.TRACE_CLOSED_HOURS, minutes=1)
+    ingest.ingest_bot(conn, bots, 0, Row("k-s", "kraken", "S"), later)
+    assert bots.custom_paths == [] and decisions(conn) == []
+
+
+def test_two_bots_with_the_same_trade_id_each_keep_their_decision(conn):
+    bot = {"closed": [], "open": [trade(1, True)], "custom": {1: candle(30.0)}}
+    bots = FakeBots(bot, dict(bot))
+    ingest.ingest_bot(conn, bots, 0, Row("k-a", "kraken", "S"), T0)
+    ingest.ingest_bot(conn, bots, 1, Row("k-b", "kraken", "S"), T0)
+    assert [(a, f) for a, f, *_ in decisions(conn)] == [("k-a", 1), ("k-b", 1)]
+
+
+def test_a_failed_custom_data_read_keeps_the_trades_and_traces_them_later(conn):
+    bots = FakeBots({"closed": [], "open": [trade(1, True)], "custom": {1: candle(30.0)}, "custom_down": True})
+    snap = ingest.ingest_bot(conn, bots, 0, Row("k-s", "kraken", "S"), T0)
+    assert snap["error"] is None and snap["raw"].obj["trace_error"].startswith("ConnectionError")
+    assert count(conn, "SELECT count(*) FROM bot_trades") == 1 and decisions(conn) == []
+    bots.bots[0]["custom_down"] = False
+    ingest.ingest_bot(conn, bots, 0, Row("k-s", "kraken", "S"), T0 + dt.timedelta(minutes=5))
+    assert len(decisions(conn)) == 1

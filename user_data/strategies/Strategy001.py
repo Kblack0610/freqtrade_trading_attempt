@@ -8,9 +8,10 @@ from pandas import DataFrame
 
 import talib.abstract as ta
 import freqtrade.vendor.qtpylib.indicators as qtpylib
+from lab.entry_inputs import EntryInputs
 
 
-class Strategy001(IStrategy):
+class Strategy001(EntryInputs, IStrategy):
     """
     Strategy 001
     author@: Gerald Lonlas
