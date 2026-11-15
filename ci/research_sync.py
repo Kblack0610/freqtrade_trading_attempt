@@ -22,6 +22,7 @@ import os
 import subprocess
 import sys
 
+AVENUES = "https://trader.kblab.me/avenues"
 MOST_DETAILS = 40  # a board row past this many detail lines points at /book instead
 
 
@@ -39,7 +40,8 @@ def climate_row(events: list[dict]) -> tuple[str, list[str]]:
     details = [label(e) for e in events[:MOST_DETAILS]]
     if len(events) > MOST_DETAILS:
         details.append(f"and {len(events) - MOST_DETAILS} more: https://trader.kblab.me/book")
-    details.append(f"trial register at {events[-1]['trials']}: the interval is per cell, not corrected for the search")
+    details.append(f"trial register at {events[-1]['trials']}: the interval is per cell, not corrected for the search; "
+                   f"avenues: {AVENUES}")
     return text, details
 
 
@@ -89,6 +91,7 @@ def main() -> int:
             text = (f"check(trader): {e['name']} on {e['exchange']} no longer clears the promote gates; retire "
                     "its bot if a person rostered one #size/s")
             details = ["https://trader.kblab.me/suggestions"]
+        details.append(f"avenues: {AVENUES}")
         print(text, *details, sep="\n  ")
         if not dry:
             board(text, details)
@@ -97,6 +100,7 @@ def main() -> int:
         state = "review monthly retune" if e["change"] == "enters" else "monthly retune fit superseded or no longer qualifies"
         text = f"check(trader): {state} for {e['name']} on {e['exchange']} (fit {e['variant'][:12]}) #size/s"
         details = [e["action"], "Research only: review the fit before applying parameters; bots keep their current settings."]
+        details.append(f"avenues: {AVENUES}")
         print(text, *details, sep="\n  ")
         if not dry:
             board(text, details)

@@ -54,7 +54,7 @@ import pandas as pd
 
 from psycopg.types.json import Jsonb
 
-from lab import confidence, metrics, suggest
+from lab import confidence, metrics, suggest, taxonomy
 from lab.db import connect
 from lab.grid import variants
 from lab.markets import backtest
@@ -67,6 +67,10 @@ from lab.util import s3_from_env
 
 UTC = dt.timezone.utc
 COMMANDS = ("longshot", "calibration", "gap")
+
+
+def categories() -> dict:
+    return taxonomy.load()["market_categories"]
 
 
 def quote(row) -> tuple[float, float] | None:
@@ -493,6 +497,8 @@ def main(argv: list[str] | None = None, fs=None, today: dt.date | None = None) -
     a = ap.parse_args(argv)
     cfg, ccfg = load_config(), suggest.load_config()["confidence"]
     fam = cfg["families"]
+    if set(categories()) != {name for name, grid in fam.items() if isinstance(grid, dict)}:
+        raise ValueError("every market family needs a category")
     today = today or dt.datetime.now(UTC).date()
     stop = time.monotonic() + fam["budget_min"] * 60
     with connect(autocommit=True) as conn:

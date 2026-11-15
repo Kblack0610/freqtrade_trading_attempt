@@ -316,13 +316,13 @@ def test_suggestions_show_each_kind_with_its_gates(conn, signed_in):
 def test_calls_show_each_call_its_scores_and_the_record(conn, signed_in):
     assert "No calls yet" in signed_in[1].get("/calls").text
     cid = conn.execute("INSERT INTO calls (who, author, thesis, ticker, direction, instrument, entry_session, horizons, "
-                       "benchmark) VALUES ('human', 'kenneth', 'board ousted the CEO', 'NVDA', 'short', 'equity', "
-                       "'2026-11-13', '{1,5}', 'SMH') RETURNING id").fetchone()[0]
+                       "benchmark, signal_source) VALUES ('human', 'kenneth', 'board ousted the CEO', 'NVDA', 'short', 'equity', "
+                       "'2026-11-13', '{1,5}', 'SMH', 'event') RETURNING id").fetchone()[0]
     conn.execute("INSERT INTO call_scores (call_id, horizon, exit_session, entry_close, exit_close, bench_entry, "
                  "bench_exit, ret, pnl, excess) VALUES (%s, 1, '2026-11-16', 100, 90, 200, 201, -0.1, 0.0996, 0.105)",
                  (cid,))
     body = signed_in[1].get("/calls").text
-    for needle in ("short NVDA", "board ousted the CEO", "9.96%", "10.50%", "pending", "not asked", "Mean net"):
+    for needle in ("short NVDA", "board ousted the CEO", "9.96%", "10.50%", "pending", "not asked", "Mean net", "event", "Signal source"):
         assert needle in body, needle
 
 
@@ -830,3 +830,38 @@ def test_every_table_sits_in_a_scroll_box():
         bare += [f"{p.name}:{s.count(chr(10), 0, m.start()) + 1}" for m in re.finditer(r"<table\b", s)
                  if not re.search(r'<div class="scroll">\s*$', s[:m.start()])]
     assert bare == []
+
+
+def test_signal_filter_keeps_coverage_categories_separate(conn, signed_in):
+    client = signed_in[1]
+    price = client.get("/coverage?signal_source=price").text
+    structural = client.get("/coverage?signal_source=structural").text
+    assert ">Strategy001</a>" in price and ">HourBasedStrategy</a>" not in price
+    assert ">HourBasedStrategy</a>" in structural and ">Strategy001</a>" not in structural
+    assert "Signal source" in structural and "strategy-exit" in structural
+    assert "<h2>Residual clusters</h2>" not in structural
+    assert "Clear the signal source filter" in structural
+    for path in ("/coverage", "/markets/book"):
+        assert client.get(path + "?signal_source=unknown").status_code == 404
+
+
+def test_avenues_page_uses_the_canonical_register(conn, signed_in):
+    from pathlib import Path
+
+    body = signed_in[1].get("/avenues").text
+    text = (Path(__file__).parents[2] / "docs/avenues.md").read_text()
+    names = [line.split("|")[1].strip() for line in text.splitlines() if line.startswith("| ")][1:]
+    assert names and all(name in body for name in names)
+    assert 'href="https://github.com/Kblack0610/freqtrade_trading_attempt/blob/master/docs/strategy-coverage.md#strategy-families"' in body
+    assert "[Strategy coverage](" not in body
+
+
+def test_signal_filter_applies_to_market_results_and_paper_accounts(conn, signed_in):
+    seed_markets(conn)
+    client = signed_in[1]
+    structural = client.get("/markets/book?signal_source=structural").text
+    price = client.get("/markets/book?signal_source=price").text
+    assert "1.23%" in structural and "paper-longshot-abcdef01" in structural
+    assert "event-contract" in structural and "resolution" in structural
+    assert "paper-longshot-abcdef01" not in price and "1.23%" not in price
+    assert "No markets backtest has run yet" in price

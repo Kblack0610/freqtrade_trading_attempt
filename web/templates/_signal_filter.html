@@ -1,0 +1,8 @@
+<form method="get">
+  <label for="signal-source">Signal source</label>
+  <select name="signal_source" id="signal-source">
+    <option value="">All sources</option>
+    {% for source, description in signal_sources.items() %}<option value="{{ source }}" title="{{ description }}"{% if signal_source == source %} selected{% endif %}>{{ source }}</option>{% endfor %}
+  </select>
+  <button type="submit">Filter</button>
+</form>
