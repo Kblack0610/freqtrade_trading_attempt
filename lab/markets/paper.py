@@ -93,6 +93,14 @@ def strategy_of(family: str, params: dict, meetings, fairs: dict, forecasts: For
     return Weather(params, forecasts, REGISTRY) if family == "weather" else Longshot(params)
 
 
+def rule_of(family: str, params: dict) -> str:
+    """An account's rule in words, from its family's `rule()`; the family name when the params do not fit it."""
+    try:
+        return strategy_of(family, params, None, {}).rule()
+    except (KeyError, TypeError):
+        return family
+
+
 def _f(x) -> float:
     return math.nan if x is None else float(x)
 

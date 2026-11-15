@@ -38,7 +38,7 @@
 <script src="/static/account-setups.js" defer></script>
 </section>
 
-<h2>Dry-run bots</h2>
+<h2>Crypto league bots</h2>
 <p class="muted">Current strategy assignments and the newest observed balances. Research setups above never change these assignments.</p>
 {% if bots %}
 <div class="scroll"><table><thead><tr><th>Bot</th><th>Strategy</th><th>Venue</th><th>Mode</th><th>Last observation</th><th class="n">Equity</th><th>Currency</th><th>Status</th></tr></thead><tbody>
@@ -46,27 +46,28 @@
 <tr><td><a href="/bots/{{ b.name | urlencode }}">{{ b.name }}</a></td><td><a href="/strategies/{{ b.strategy | urlencode }}?exchange={{ b.exchange | urlencode }}">{{ b.strategy }}</a></td><td>{{ b.exchange }}</td><td>{{ "dry run" if b.dry_run else ("not dry run" if b.dry_run is false else "not observed") }}</td><td>{{ b.ts | local }}</td><td class="n">{{ b.balance_total | num(2) }}</td><td>{{ b.balance_currency or "Unknown reported units" }}</td><td>{% if b.error %}<span class="down">{{ b.error }}</span>{% elif not b.ts %}Not observed{% elif b.ts < stale_before %}<span class="down">Stale observation</span>{% else %}Observed{% endif %}</td></tr>
 {% endfor %}
 </tbody></table></div>
-{% else %}<p class="muted">No dry-run bots have been ingested yet.</p>{% endif %}
+{% else %}<p class="muted">No crypto league bots have been ingested yet.</p>{% endif %}
 
-<h2 id="shadow">Shadow paper accounts</h2>
-<p class="muted">Database rows with paper capital and no pod (<code>lab/shadow.py</code>). A strategy and venue that clears the walk-forward and backtest entry gates opens one, and each night adds the backtest's days after its promotion, replayed on candles, not filled on a book. It wins when it is up with the interval's low end above zero after its cohort's minimum days; it retires past the drawdown limit, below zero, or at the day limit (<code>lab/suggest.toml [shadow]</code>). Short: median trade under a day; long: a day or more.</p>
+<h2 id="shadow">Replay accounts</h2>
+<p class="muted">Not a league: database rows with paper capital, no pod and no fills (<code>lab/shadow.py</code>). A strategy and venue that clears the walk-forward and backtest entry gates opens one, and each night adds the backtest's days after its promotion, replayed on candles, not filled on a book. It wins when it is up with the interval's low end above zero after its cohort's minimum days; it retires past the drawdown limit, below zero, or at the day limit (<code>lab/suggest.toml [shadow]</code>). Short: median trade under a day; long: a day or more.</p>
 <p>Active short {{ shadow.active.short }}, active long {{ shadow.active.long }}, winning {{ shadow.winning }}, retired {{ shadow.retired }}.</p>
 {% if shadow.rows %}
-<div class="scroll"><table><thead><tr><th>Account</th><th>Cohort</th><th>State</th><th class="n">Days</th><th class="n">Return</th><th class="n">Drawdown</th><th>Promoted</th><th>Retired</th></tr></thead><tbody>
+<div class="scroll"><table><thead><tr><th>Account</th><th>Hold</th><th>State</th><th class="n">Days</th><th class="n">Return</th><th class="n">Drawdown</th><th>Promoted</th><th>Retired</th></tr></thead><tbody>
 {% for a in shadow.rows %}
 <tr><td><a href="/strategies/{{ a.strategy | urlencode }}?exchange={{ a.exchange | urlencode }}">{{ a.account }}</a></td><td>{{ a.cohort }}</td><td>{% if a.state == "winning" %}<span class="up">Winning</span>{% elif a.state == "retired" %}Retired{% else %}Trial{% endif %}</td><td class="n">{{ a.days or 0 }}</td><td class="n">{{ "%+.1f%%" | format((a.equity / a.capital - 1) * 100) }}</td><td class="n">{{ "%.1f%%" | format((1 - a.equity / a.peak) * 100) }}</td><td>{{ a.promoted_on }}</td><td>{% if a.retired_on %}{{ a.retired_on }}: {{ a.retired_why }}{% else %}-{% endif %}</td></tr>
 {% endfor %}
 </tbody></table></div>
-{% else %}<p class="muted">No shadow account yet: the nightly analysis opens them once a strategy clears the entry gates on /confidence.</p>{% endif %}
+{% else %}<p class="muted">No replay account yet: the nightly analysis opens them once a strategy clears the entry gates on /confidence.</p>{% endif %}
 
-<h2>Prediction-market paper accounts</h2>
+<h2>Event-contract league accounts</h2>
+<p class="muted">The scorecard and fills are on <a href="/leagues#event-contracts">Leagues</a>.</p>
 {% if paper_accounts %}
 <div class="scroll"><table><thead><tr><th>Account</th><th>Strategy family</th><th>Venue</th><th>Mode</th><th>Last observation</th><th class="n">Equity (USD)</th><th>Status</th></tr></thead><tbody>
 {% for a in paper_accounts %}
-<tr><td><a href="/markets/book">{{ a.account }}</a></td><td>{{ a.family }}</td><td>{{ a.venue }}</td><td>paper</td><td>{{ a.marked_at | local }}</td><td class="n">{{ a.equity | num(2) }}</td><td>{% if a.stopped_at %}<span class="down">Stopped</span>{% elif a.breached_at %}<span class="down">Loss limit hit</span>{% elif not a.marked_at %}Not observed{% elif a.marked_at < stale_before %}<span class="down">Stale observation</span>{% else %}{{ a.state or "Observed" }}{% endif %}</td></tr>
+<tr><td><a href="/leagues#event-contracts">{{ a.account }}</a></td><td>{{ a.family }}</td><td>{{ a.venue }}</td><td>paper</td><td>{{ a.marked_at | local }}</td><td class="n">{{ a.equity | num(2) }}</td><td>{% if a.stopped_at %}<span class="down">Stopped</span>{% elif a.breached_at %}<span class="down">Loss limit hit</span>{% elif not a.marked_at %}Not observed{% elif a.marked_at < stale_before %}<span class="down">Stale observation</span>{% else %}{{ a.state or "Observed" }}{% endif %}</td></tr>
 {% endfor %}
 </tbody></table></div>
-{% else %}<p class="muted">No prediction-market paper accounts have been recorded yet.</p>{% endif %}
+{% else %}<p class="muted">No event-contract league accounts have been recorded yet.</p>{% endif %}
 
 <h2>Broker accounts</h2>
 <p class="muted">The newest read of each broker account: Alpaca paper money, and read-only reads of real accounts (Robinhood Crypto, Fidelity through SnapTrade). Nothing here can place a real order.</p>
@@ -99,10 +100,10 @@
 {% else %}<p class="muted">No wallet read yet.</p>{% endif %}
 
 <h2>Kill switch</h2>
-<p class="muted">The watcher's state for each dry-run bot and paper account (<code>lab/watcher.py</code>): a bot that hits its daily loss limit, or is drilled, stops entries for the rest of the UTC day. Stopped and breached rows come first.</p>
+<p class="muted">The watcher's state for each crypto league bot and event-contract account (<code>lab/watcher.py</code>): a bot that hits its daily loss limit, or is drilled, stops entries for the rest of the UTC day. Stopped and breached rows come first.</p>
 {% if watch %}
 <div class="scroll"><table>
-  <thead><tr><th>Bot</th><th>Dry run</th><th>State</th><th class="n">Equity</th><th class="n">Day open</th><th>Day limit hit</th><th>Stopped</th><th>Last read</th><th>Error</th></tr></thead>
+  <thead><tr><th>Bot</th><th>Paper</th><th>State</th><th class="n">Equity</th><th class="n">Day open</th><th>Day limit hit</th><th>Stopped</th><th>Last read</th><th>Error</th></tr></thead>
   <tbody>
   {% for w in watch %}
   <tr><td>{{ w.bot }}</td><td>{% if w.dry_run is false %}<span class="down">no</span>{% elif w.dry_run %}yes{% else %}-{% endif %}</td><td>{{ w.state or "-" }}</td>

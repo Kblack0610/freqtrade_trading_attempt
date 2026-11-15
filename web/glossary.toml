@@ -1,0 +1,98 @@
+# One vocabulary for the site, as data (web/glossary.py). The guide renders it at /guide#glossary; templates and docs
+# link there instead of restating a term. Labels change here and in templates; database ids, roster names and the
+# Freqtrade `dry_run` flag do not (roster.tsv is append-only: pod N is row N).
+
+[[term]]
+name = "Paper"
+means = "Any trading with no real money. The Freqtrade setting `dry_run` keeps its name; the site says paper."
+replaces = "dry run, in UI text"
+
+[[term]]
+name = "League"
+means = "Paper accounts trading one asset class against live prices with simulated fills. There is a crypto league, an event-contract league and, once built, a stock league."
+replaces = "Crypto dry-run league, Event-contract paper league"
+
+[[term]]
+name = "Account"
+means = "One strategy variant with its own paper capital, shown with its rule in words, for example: longshot: buy yes when the yes mid is 0.90-0.99, within 24 h of close."
+replaces = "a bare id such as paper-longshot-97664530"
+
+[[term]]
+name = "Replay account"
+means = "A backtest's daily returns replayed forward on paper capital, with no fills and no order book (lab/shadow.py)."
+replaces = "Shadow account"
+
+[[term]]
+name = "Cohort"
+means = "A group of crypto league bots, named by the roster row each reports in. Nothing else is a cohort."
+replaces = "the markets cohort row, and the shadow short and long groups"
+
+[[term]]
+name = "Lane"
+means = "One card on the overview. Each league is a lane, as are calls, venues, the recorder, prices, research and money."
+replaces = ""
+
+[[term]]
+name = "Decision"
+means = "One recorded choice by an account: an entry, an exit or a near-miss, with the rule, every check against its threshold, every input with its source, and the sizing. Every fill opens a page showing its decision."
+replaces = ""
+
+# Each league's scorecard has these columns and no others (lab/leagues.py COLUMNS).
+[[column]]
+name = "Account"
+means = "The account or bot."
+[[column]]
+name = "Rule"
+means = "What it trades, in words."
+[[column]]
+name = "Capital"
+means = "Paper capital it started with."
+[[column]]
+name = "Equity"
+means = "Capital, plus realized profit, plus each open position marked at its exit price."
+[[column]]
+name = "Return"
+means = "Equity over capital, less one."
+[[column]]
+name = "Realized"
+means = "Profit on closed trades, net of fees."
+[[column]]
+name = "Open"
+means = "Positions open now."
+[[column]]
+name = "Fills"
+means = "Every fill, open or closed."
+[[column]]
+name = "Closed"
+means = "Fills that have closed or settled."
+[[column]]
+name = "Max drawdown"
+means = "Largest fall from a peak. Crypto: Freqtrade's own figure. Event contracts: the settled-profit curve over capital."
+[[column]]
+name = "Watch"
+means = "The kill-switch state (lab/watcher.py): running, day limit hit, stopped or retired."
+[[column]]
+name = "Marked"
+means = "When the account was last marked."
+
+# What moved, for dashboards.md rule 13. The old name keeps working as an anchor or a redirect.
+[[retired]]
+old = "/markets/book#paper"
+new = "/leagues#event-contracts"
+why = "The paper league is one of the leagues, so its scorecard sits with the others; the book keeps backtests."
+[[retired]]
+old = "/cohorts#markets"
+new = "/leagues#event-contracts"
+why = "The paper league is not a cohort of bots; it was a made-up row beside them."
+[[retired]]
+old = "Cohorts tab, markets row"
+new = "Leagues tab"
+why = "A cohort groups crypto league bots only."
+[[retired]]
+old = "/accounts#shadow, Shadow paper accounts"
+new = "/accounts#shadow, Replay accounts"
+why = "They have no fills, so they are not a league; the anchor stays."
+[[retired]]
+old = "Dry-run bots (accounts table)"
+new = "Crypto league bots"
+why = "One word, paper, for trading with no real money."

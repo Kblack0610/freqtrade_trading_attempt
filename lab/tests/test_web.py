@@ -94,7 +94,7 @@ def test_healthz_needs_no_sign_in(site):
     assert site[1].get("/healthz").text == "ok"
 
 
-@pytest.mark.parametrize("path", ["/", "/live", "/live/rows", "/bots/x", "/strategies", "/strategies/x", "/suggestions", "/confidence", "/book", "/coverage", "/guide", "/data", "/runs", "/runs/1", "/markets", "/links", "/markets/book", "/accounts", "/trades/paper/1"])
+@pytest.mark.parametrize("path", ["/", "/live", "/live/rows", "/bots/x", "/strategies", "/strategies/x", "/suggestions", "/confidence", "/book", "/coverage", "/guide", "/data", "/runs", "/runs/1", "/markets", "/links", "/markets/book", "/accounts", "/leagues", "/trades/paper/1"])
 def test_signed_out_goes_to_login(site, path):
     r = site[1].get(path)
     assert r.status_code == 303 and r.headers["location"] == "/login"
@@ -195,7 +195,7 @@ def test_every_page_renders_with_data(conn, signed_in):
     seed(conn)
     _, client = signed_in
     pages = {"/": ["kraken-s001", "2.50%", "binanceus", "Best strategies", "/strategies/Strategy001?exchange=binanceus",
-                   "Crypto dry-run league", "of 1 bots reporting", "Research gates", "Money and guard", "Dry run"],
+                   "Crypto league", "of 1 bots reporting", "Research gates", "Money and guard", "Dry run"],
              "/bots/kraken-s001": ["Strategy001 on kraken", "<svg", "BTC/USD", "1.20%", "Dry run against backtest", "1.85%",
                                    "3 of 4 dry-run entries matched the backtest; the gap is -0.65%"],
              "/strategies": ["Strategy001", "0.40", "62%", "-5% / ", "3.2%", "1.20%", "lookahead bias", "Broken", "failed to import",
@@ -260,7 +260,7 @@ def test_each_cohort_gets_a_row_and_profit_stays_inside_its_lane(conn, signed_in
     _, client = signed_in
     top = client.get("/").text
     assert "Total profit" not in top and "League profit" not in top
-    crypto = top[top.index("Crypto dry-run league"):].split("</article>")[0]
+    crypto = top[top.index("Crypto league"):].split("</article>")[0]
     assert "55.00 USD" in crypto and "of 4 bots reporting" in crypto
     assert top.index('href="/cohorts#league"') < top.index('href="/cohorts#aggressive"')
     assert "2 of 3" in top and "1.50%" in top and "30.00" in top
@@ -270,33 +270,37 @@ def test_each_cohort_gets_a_row_and_profit_stays_inside_its_lane(conn, signed_in
     assert ">Backtest match</th>" in page and "<td class=\"n\">3 of 4</td>" in page and "<td class=\"n\">66%</td>" in page  # moved off /
 
 
-def test_the_markets_paper_league_is_a_cohort_beside_the_bots(conn, signed_in):
+def test_the_event_contract_league_is_not_a_cohort_and_scores_beside_the_crypto_league(conn, signed_in):
     seed(conn)
     conn.execute("INSERT INTO paper_accounts (account, family, venue, variant, params, capital, started_at, equity, "
                  "realized, open_positions, marked_at) VALUES "
-                 "('paper-longshot-aaaa1111', 'longshot', 'kalshi', 'aaaa1111', '{\"edge\": 0.06}', 1000, now(), 1020, 20, 2, now()), "
-                 "('paper-longshot-bbbb2222', 'longshot', 'kalshi', 'bbbb2222', '{}', 1000, now(), 990, -10, 0, now()), "
+                 "('paper-longshot-aaaa1111', 'longshot', 'kalshi', 'aaaa1111', "
+                 "'{\"buy\": \"yes\", \"lo\": 0.9, \"hi\": 0.99, \"hours\": 24}', 1000, now(), 1020, 20, 2, now()), "
                  "('paper-longshot-cccc3333', 'longshot', 'kalshi', 'cccc3333', '{}', 1000, now(), NULL, 0, 0, NULL)")
-    conn.execute("INSERT INTO paper_orders (account, market_id, side, stake, sent_at, quoted_at, contracts, price, fee, "
-                 "settled_at, payout, profit) VALUES ('paper-longshot-aaaa1111', 'M1', 'no', 10, now(), now(), 10, 0.9, 0, "
-                 "now(), 1, 1)")
+    for i, profit in enumerate((10, -30, 5)):  # settled profits in order: the curve falls 3% from its first peak
+        conn.execute("INSERT INTO paper_orders (account, market_id, side, stake, sent_at, quoted_at, contracts, price, fee, "
+                     "settled_at, payout, profit) VALUES ('paper-longshot-aaaa1111', %s, 'no', 10, now(), now(), 10, 0.9, 0, "
+                     "now() + make_interval(mins => %s), 1, %s)", (f"M{i}", i, profit))
     _, client = signed_in
     top = client.get("/").text
-    assert top.index('href="/cohorts#league"') < top.index('href="/cohorts#markets"')
-    row = top[top.index('href="/cohorts#markets"'):].split("</tr>")[0]
-    assert "2 of 3" in row and "10.00" in row and "0.50%" in row and "2,010" in row
-    assert '<a href="/markets/book">paper-longshot-aaaa1111</a> 2.00%' in row
-    assert "35.00 USD" not in top  # no total across lanes: the league's 25.00 and the paper league's 10.00 stay apart
-    betting = top[top.index("Event-contract paper league"):].split("</article>")[0]
-    assert "10.00 USD" in betting and "of 3 accounts marked" in betting
-    page = client.get("/cohorts").text
-    section = page[page.index('<h2 id="markets">'):]
-    assert "paper-longshot-bbbb2222" in section and "-1.00%" in section and "edge 0.06" in section
+    assert 'href="/cohorts#markets"' not in top and 'href="/cohorts#league"' in top
+    assert "35.00 USD" not in top  # no total across lanes
+    cohorts = client.get("/cohorts").text
+    assert '<h2 id="markets">' not in cohorts and "paper-longshot" not in cohorts
+    page = client.get("/leagues").text
+    crypto = page[page.index('<h2 id="crypto">'):page.index('<h2 id="event-contracts">')]
+    events = page[page.index('<h2 id="event-contracts">'):page.index('<h2 id="stocks">')]
+    assert "kraken-s001" in crypto and "Strategy001" in crypto
+    assert "longshot: buy yes when the yes mid is 0.90-0.99, within 24 h of close" in events
+    assert "2.00%" in events and "3.0%" in events and "paper-longshot-cccc3333" in events
+    head = lambda t: re.findall(r"<th[^>]*>([^<]+)</th>", t[t.index("<thead>"):t.index("</thead>")])  # noqa: E731
+    assert head(crypto) == head(events) and "Max drawdown" in head(events)  # one scorecard, the same columns
+    assert 'id="stocks"' in page and "No stock league yet" in page
 
 
 def test_pages_render_on_an_empty_database(conn, signed_in):
     assert signed_in[1].get("/").text.count('<span class="tag">no data</span>') == 8  # every lane but the guard
-    for path in ("/", "/cohorts", "/data", "/runs", "/strategies", "/suggestions", "/walkforward", "/coverage", "/markets", "/links", "/markets/book", "/accounts", "/calls"):
+    for path in ("/", "/cohorts", "/data", "/runs", "/strategies", "/suggestions", "/walkforward", "/coverage", "/markets", "/links", "/markets/book", "/accounts", "/calls", "/leagues"):
         assert signed_in[1].get(path).status_code == 200, path
 
 
@@ -617,9 +621,10 @@ def test_markets_pages_render_with_data(conn, signed_in):
                           "The Odds API", "1 of 2", "2026-01-02 to 2026-01-03", "4,321", "never swept"],
              "/links": ["rule:kalshi_game", "San Antonio at Phoenix", "Spurs at Suns", "by rule", "claude-haiku"],
              "/links?status=rejected": ["No rejected links."],
-             "/markets/book": ["longshot", "abcdef01", "1.23%", "-0.40% to 3.10%", "61%", "0.42", "By contract category", "2.11%", "0.43% to 3.77%", "paper-longshot-abcdef01",
+             "/markets/book": ["longshot", "abcdef01", "1.23%", "-0.40% to 3.10%", "61%", "0.42", "By contract category", "2.11%", "0.43% to 3.77%", 
                                "Readiness gate", "0 of 1 variants are ready", "not ready: expectancy interval low", "1 of 2 gates, 3 windows",
-                               "-8.10% to -1.20% drifted", "987.50", "-1.25%", "stopped", "San Antonio at Phoenix", "0.91", "KXDEMO-1", "canceled", "15%"]}
+                               "KXDEMO-1", "canceled"],
+             "/leagues": ["paper-longshot-abcdef01", "987.50", "-1.25%", "stopped", "-8.10% to -1.20% drifted", "San Antonio at Phoenix", "10.08", "15%"]}
     for path, needles in pages.items():
         r = client.get(path)
         assert r.status_code == 200, path
@@ -822,7 +827,7 @@ def test_account_evidence_distinguishes_recursive_instability(conn, signed_in):
 
 def test_accounts_ranks_shadow_accounts_and_says_how_many_each_cohort_holds(conn, signed_in):
     client = signed_in[1]
-    assert "No shadow account yet" in client.get("/accounts").text
+    assert "No replay account yet" in client.get("/accounts").text
     conn.execute("INSERT INTO shadow_accounts (account, strategy, exchange, cohort, capital, promoted_on, entry, state, "
                  "retired_on, retired_why) VALUES "
                  "('shadow-A-binanceus', 'A', 'binanceus', 'short', 1000, '2026-10-01', '{}', 'trial', NULL, NULL), "
@@ -834,7 +839,7 @@ def test_accounts_ranks_shadow_accounts_and_says_how_many_each_cohort_holds(conn
                  "('shadow-W-kraken', '2026-08-02', 0.30, 1300)")
     body = client.get("/accounts").text
     assert "Active short 1, active long 1, winning 1, retired 1." in body
-    table = body.split('id="shadow"')[1].split("Prediction-market paper accounts")[0]
+    table = body.split('id="shadow"')[1].split("Event-contract league accounts")[0]
     assert table.index("shadow-W-kraken") < table.index("shadow-A-binanceus") < table.index("shadow-R-binanceus")
     assert "+30.0%" in table and "+4.5%" in table and "5.0%" in table and "drawdown 25.0% past 20%" in table
 
@@ -875,14 +880,14 @@ def test_avenues_page_uses_the_canonical_register(conn, signed_in):
     assert "[Strategy coverage](" not in body
 
 
-def test_signal_filter_applies_to_market_results_and_paper_accounts(conn, signed_in):
+def test_signal_filter_applies_to_market_results(conn, signed_in):
     seed_markets(conn)
     client = signed_in[1]
     structural = client.get("/markets/book?signal_source=structural").text
     price = client.get("/markets/book?signal_source=price").text
-    assert "1.23%" in structural and "paper-longshot-abcdef01" in structural
+    assert "1.23%" in structural
     assert "event-contract" in structural and "resolution" in structural
-    assert "paper-longshot-abcdef01" not in price and "1.23%" not in price
+    assert "1.23%" not in price
     assert "No markets backtest has run yet" in price
 
 
@@ -920,7 +925,7 @@ def paper_fill(c, traced: bool) -> int:
 def test_a_paper_fill_opens_its_decision(conn, signed_in):
     oid = paper_fill(conn, traced=True)
     _, client = signed_in
-    assert f'href="/trades/paper/{oid}"' in client.get("/markets/book").text
+    assert f'href="/trades/paper/{oid}"' in client.get("/leagues").text
     body = client.get(f"/trades/paper/{oid}").text
     for needle in ("Miami above 69.99?", "yes 10 @ 0.97", "longshot: buy yes when the yes mid is 0.90-0.99",
                    "mid in band", "0.9 / 0.99", "ask depth", "kalshi recorder", "depth cap 0.5 x 212", "cash 412.30",

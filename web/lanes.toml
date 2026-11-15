@@ -5,19 +5,19 @@
 
 [[lane]]
 id = "crypto"
-title = "Crypto dry-run league"
-href = "/cohorts"
-what = "Freqtrade spot bots on live prices, dry run only (lab/league.py)"
+title = "Crypto league"
+href = "/leagues#crypto"
+what = "Freqtrade spot bots on live prices, paper only (lab/league.py)"
 
 [[lane]]
 id = "betting"
-title = "Event-contract paper league"
-href = "/markets/book"
+title = "Event-contract league"
+href = "/leagues#event-contracts"
 what = "One paper account per family variant, filled against the recorded books (lab/markets/paper.py)"
 
 [[lane]]
 id = "shadow"
-title = "Shadow accounts"
+title = "Replay accounts"
 href = "/accounts#shadow"
 what = "Paper capital on walk-forward passes, marked nightly from backtests (lab/shadow.py)"
 
