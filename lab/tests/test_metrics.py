@@ -323,3 +323,48 @@ def test_events_that_move_together_widen_the_interval():
     lo_c, hi_c = metrics.cluster_mean_ci(x, np.repeat(np.arange(40), 10), 2)
     lo_r, hi_r = metrics.cluster_mean_ci(x, np.arange(400), 2)
     assert hi_c - lo_c > 2 * (hi_r - lo_r)
+
+
+def event_trades(price: float, wins: int, losses: int) -> pd.DataFrame:
+    """Event fills at `price` per contract paying 1: a win nets 1/price - 1, a loss -1."""
+    p = [1 / price - 1] * wins + [-1.0] * losses
+    days = pd.date_range("2026-01-01", periods=len(p), freq="D", tz="UTC")
+    return pd.DataFrame([{"open_date": d, "close_date": d + pd.Timedelta(hours=6), "open_rate": price,
+                          "close_rate": 1.0 if x > 0 else 0.0, "min_rate": np.nan, "profit_abs": x, "profit_ratio": x}
+                         for d, x in zip(days, p)])
+
+
+def event_window(t: pd.DataFrame) -> dict:
+    daily = metrics.daily_returns(t, t["open_date"].min(), t["close_date"].max() + pd.Timedelta(days=1), 1000.0)
+    return metrics.window_metrics(daily, t, 5, event=True)
+
+
+def test_wins_losses_and_breakeven_on_fixed_event_trades():
+    # 3 wins and 1 loss at price 0.50 (decimal odds 2.0): W-L 3-1, win rate 75% against a 50% breakeven
+    m = event_window(event_trades(0.50, 3, 1))
+    assert (m["wins"], m["losses"]) == (3, 1)
+    assert m["winrate"] == 0.75 and m["breakeven_winrate"] == pytest.approx(0.50)
+    assert m["expectancy"] == pytest.approx((3 * 1.0 - 1.0) / 4)
+
+
+def test_breakeven_is_one_over_the_average_decimal_odds_across_prices():
+    # prices 0.5 and 0.25 are odds 2 and 4, average 3, breakeven 1/3
+    t = pd.concat([event_trades(0.50, 1, 0), event_trades(0.25, 0, 1)], ignore_index=True)
+    assert event_window(t)["breakeven_winrate"] == pytest.approx(1 / 3)
+
+
+def test_a_70_percent_win_rate_at_decimal_1_33_loses_money():
+    m = event_window(event_trades(0.75, 7, 3))
+    assert m["winrate"] == 0.70 and (m["wins"], m["losses"]) == (7, 3)
+    assert m["breakeven_winrate"] == pytest.approx(0.75)
+    assert m["expectancy"] == pytest.approx(0.7 * (1 / 0.75 - 1) - 0.3) and m["expectancy"] < 0
+
+
+def test_crypto_breakeven_is_a_half_for_an_equal_win_and_loss_net_of_fees():
+    days = pd.date_range("2026-01-01", periods=4, freq="D", tz="UTC")
+    t = trades(*[(d, d + pd.Timedelta(hours=6), p) for d, p in zip(days, (10.0, -10.0, 10.0, -10.0))])
+    daily = metrics.daily_returns(t, days[0], days[-1] + pd.Timedelta(days=1), 1000.0)
+    m = metrics.window_metrics(daily, t, 5)
+    assert (m["wins"], m["losses"]) == (2, 2) and m["breakeven_winrate"] == pytest.approx(0.5)
+    t["profit_ratio"] = [0.10, -0.05, 0.10, -0.05]  # a 2:1 payoff breaks even at a third
+    assert metrics.breakeven_winrate(t, False) == pytest.approx(1 / 3)

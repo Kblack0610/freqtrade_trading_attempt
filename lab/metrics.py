@@ -204,11 +204,14 @@ def hold_excess(daily: pd.DataFrame, close: pd.Series, capital: float, seed: int
     return float(x.mean() * YEAR), float(lo * YEAR), float(hi * YEAR)
 
 
-def window_metrics(daily: pd.DataFrame, trades: pd.DataFrame, seed: int) -> dict:
+def window_metrics(daily: pd.DataFrame, trades: pd.DataFrame, seed: int, event: bool = False) -> dict:
     """Everything the Strategies page shows for one strategy x exchange x window.
 
     daily: day, ret (one row per day). trades: open_date, close_date, open_rate, close_rate, profit_ratio,
     profit_abs. The research config trades spot, long only, so a trade's edge before fees is close over open.
+    event: the trades are event-contract fills, open_rate the price of one contract that pays 1, so the breakeven win
+    rate is 1 over the average decimal odds (1 / price); otherwise it is the win rate at which the average net win
+    and loss cancel, 0.5 when they are equal.
     """
     r = daily["ret"].to_numpy(dtype=float)
     n = len(r)
@@ -220,6 +223,7 @@ def window_metrics(daily: pd.DataFrame, trades: pd.DataFrame, seed: int) -> dict
     losses = -trades.loc[trades["profit_abs"] < 0, "profit_abs"].sum() if len(trades) else 0.0
     won = trades.loc[trades["profit_abs"] > 0, "profit_ratio"] if len(trades) else pd.Series(dtype=float)
     lost = trades.loc[trades["profit_abs"] < 0, "profit_ratio"] if len(trades) else pd.Series(dtype=float)
+    n_won, n_lost = int((trades["profit_abs"] > 0).sum()), int((trades["profit_abs"] < 0).sum())
     exp_lo, exp_hi = mean_ci(trades["profit_ratio"].to_numpy(), seed_of(seed, "expectancy"))
     priced = trades[(trades["open_rate"] > 0) & trades["close_rate"].notna()] if len(trades) else trades
     gross = (priced["close_rate"] / priced["open_rate"] - 1.0).to_numpy(dtype=float) if len(priced) else np.array([])
@@ -232,6 +236,7 @@ def window_metrics(daily: pd.DataFrame, trades: pd.DataFrame, seed: int) -> dict
     skew = float(pd.Series(r).skew()) if n > 2 else 0.0
     kurt = float(pd.Series(r).kurt()) + 3.0 if n > 3 else 3.0
     sd = r.std(ddof=1) if n > 1 else 0.0
+    breakeven = breakeven_winrate(trades, event)
     return {
         "days": n,
         "start_day": daily["day"].iloc[0] if n else None,
@@ -254,6 +259,9 @@ def window_metrics(daily: pd.DataFrame, trades: pd.DataFrame, seed: int) -> dict
         "gross_expectancy_hi": gross_hi,
         "fee_per_trade": float((gross - priced["profit_ratio"].to_numpy(dtype=float)).mean()) if len(gross) else None,
         "winrate": float((trades["profit_abs"] > 0).mean()) if len(trades) else None,
+        "wins": n_won,
+        "losses": n_lost,
+        "breakeven_winrate": breakeven,
         "avg_win": float(won.mean()) if len(won) else None,
         "avg_loss": float(-lost.mean()) if len(lost) else None,
         "exposure": exposure(trades, start, end) if n else 0.0,
@@ -267,6 +275,20 @@ def window_metrics(daily: pd.DataFrame, trades: pd.DataFrame, seed: int) -> dict
         "_skew": skew,
         "_kurt": kurt,
     }
+
+
+def breakeven_winrate(trades: pd.DataFrame, event: bool) -> float | None:
+    """The win rate at which these trades earn nothing (window_metrics): 1 over the average decimal odds for event
+    fills, else average net loss over average net win plus loss, so 0.5 for a symmetric payoff."""
+    if not len(trades):
+        return None
+    if event:
+        price = trades["open_rate"].to_numpy(dtype=float)
+        price = price[price > 0]
+        return float(1.0 / np.mean(1.0 / price)) if len(price) else None
+    ratio = trades["profit_ratio"].to_numpy(dtype=float)
+    win, loss = ratio[ratio > 0], -ratio[ratio < 0]
+    return float(loss.mean() / (win.mean() + loss.mean())) if len(win) and len(loss) else None
 
 
 def deflated_sharpe(sr: float, n: int, skew: float, kurt: float, trials: int) -> float | None:
