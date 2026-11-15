@@ -17,7 +17,7 @@
 {% if card.window %}
 <dl class="card">
   <dt>Return a year, {{ card.window }}</dt><dd class="{{ card.cagr | tone }}">{{ card.cagr | pct }} <span class="muted">Sharpe 90% interval {{ card.sharpe_lo | num(2) }} to {{ card.sharpe_hi | num(2) }}; per trade {{ card.expectancy | pct(2) }} ({{ card.expectancy_lo | pct(2) }} to {{ card.expectancy_hi | pct(2) }})</span></dd>
-  <dt>Win rate</dt><dd>{{ card.winrate | pct(0) }} <span class="muted">of {{ card.trades }} trades</span></dd>
+  <dt>Win rate</dt><dd>{{ card.winrate | pct(0) }} <span class="muted">of {{ card.trades }} trades{% if card.breakeven_winrate is not none %}; {{ card.wins }}-{{ card.losses }}, breakeven {{ card.breakeven_winrate | pct(0) }}{% endif %}</span></dd>
   <dt>Payoff ratio</dt><dd>{% if card.payoff is not none %}{{ card.payoff | num(2) }} <span class="muted">average win over average loss</span>{% elif card.haircut is none %}<span class="muted">not measured yet: the next nightly analysis fills it</span>{% else %}<span class="muted">no losing trades</span>{% endif %}</dd>
   <dt>Wins cut to {{ card.haircut_share | pct(0) }}</dt><dd>{% if card.haircut is none %}<span class="muted">not measured yet</span>{% else %}<span class="{{ card.haircut | tone }}">{{ card.haircut | pct(2) }}</span> <span class="muted">a trade, if every win were {{ card.haircut_share | pct(0) }} of its backtest size</span>{% endif %}</dd>
   <dt>Trades a month</dt><dd>{{ card.per_month | num(1) }}</dd>
@@ -59,7 +59,7 @@
 {% if windows %}
 <div class="scroll">
 <table>
-  <thead><tr><th>Window</th><th>From</th><th class="n">Days</th><th class="n">Trades</th><th class="n">Return</th><th class="n">CAGR</th><th class="n">Sharpe (90% CI)</th><th class="n">Deflated Sharpe</th><th class="n">Sortino</th><th class="n">Calmar</th><th class="n" title="Realized on trade close, so open losses do not count">Max drawdown</th><th class="n" title="Deepest any trade went against its entry before it closed">Worst open</th><th class="n">Profit factor</th><th class="n">Per trade (90% CI)</th><th class="n" title="Mean price move per trade before fees. A venue whose round-trip fee is below the low end keeps the edge.">Before fees (90% CI)</th><th class="n" title="Mean round-trip fee a trade paid">Fee per trade</th><th class="n">Win rate</th><th class="n" title="Share of the window with any position open">Exposure</th><th class="n" title="Mean share of the wallet in positions">Capital used</th><th class="n" title="Annual return over holding BTC with the same share of capital. A low end above zero is skill, not the market.">Over hold (90% CI)</th><th class="n">Months up</th><th class="n" title="Trades still needed before the low end of the per-trade interval can clear zero, if the mean and spread hold">Trades needed</th></tr></thead>
+  <thead><tr><th>Window</th><th>From</th><th class="n">Days</th><th class="n">Trades</th><th class="n">Return</th><th class="n">CAGR</th><th class="n">Sharpe (90% CI)</th><th class="n">Deflated Sharpe</th><th class="n">Sortino</th><th class="n">Calmar</th><th class="n" title="Realized on trade close, so open losses do not count">Max drawdown</th><th class="n" title="Deepest any trade went against its entry before it closed">Worst open</th><th class="n">Profit factor</th><th class="n">Per trade (90% CI)</th><th class="n" title="Mean price move per trade before fees. A venue whose round-trip fee is below the low end keeps the edge.">Before fees (90% CI)</th><th class="n" title="Mean round-trip fee a trade paid">Fee per trade</th><th class="n" title="Wins-losses, win rate vs the breakeven win rate">W-L, win% vs breakeven%</th><th class="n" title="Share of the window with any position open">Exposure</th><th class="n" title="Mean share of the wallet in positions">Capital used</th><th class="n" title="Annual return over holding BTC with the same share of capital. A low end above zero is skill, not the market.">Over hold (90% CI)</th><th class="n">Months up</th><th class="n" title="Trades still needed before the low end of the per-trade interval can clear zero, if the mean and spread hold">Trades needed</th></tr></thead>
   <tbody>
   {% for w in windows %}
   <tr class="{{ 'muted' if w.trades < min_trades }}">
@@ -71,7 +71,7 @@
     <td class="n">{{ w.expectancy | pct(2) }} <span class="muted">({{ w.expectancy_lo | pct(2) }}, {{ w.expectancy_hi | pct(2) }})</span></td>
     <td class="n">{{ w.gross_expectancy | pct(2) }} <span class="muted">({{ w.gross_expectancy_lo | pct(2) }}, {{ w.gross_expectancy_hi | pct(2) }})</span></td>
     <td class="n">{{ w.fee_per_trade | pct(2) }}</td>
-    <td class="n">{{ w.winrate | pct(0) }}</td><td class="n">{{ w.exposure | pct(0) }}</td><td class="n">{{ w.capital_exposure | pct(0) }}</td>
+    <td class="n">{{ w.wins }}-{{ w.losses }}, {{ w.winrate | pct(0) }} <span class="muted">vs {{ w.breakeven_winrate | pct(0) }}</span></td><td class="n">{{ w.exposure | pct(0) }}</td><td class="n">{{ w.capital_exposure | pct(0) }}</td>
     <td class="n {{ w.hold_excess | tone }}">{{ w.hold_excess | pct }} <span class="muted">({{ w.hold_excess_lo | pct }}, {{ w.hold_excess_hi | pct }})</span></td>
     <td class="n">{{ w.months_profitable | pct(0) }}</td>
     <td class="n">{% if w.trades_needed is none %}-{% elif w.trades_needed == 0 %}enough{% else %}{{ w.trades_needed }}{% endif %}</td>

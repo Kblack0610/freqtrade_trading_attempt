@@ -240,6 +240,31 @@ def settle(fills: pd.DataFrame, resolutions: dict, fee_cfg: dict | None) -> pd.D
     return t.sort_values(["close_date", "open_date"], kind="stable").reset_index(drop=True)
 
 
+def clv(fills: pd.DataFrame, book: pd.DataFrame, markets: dict, resolutions: dict) -> float | None:
+    """Closing line value: the mean over fills of the closing fair price of the side bought minus the fill price.
+    The closing fair price is the bid-ask midpoint of the market's last recorded row at or before its close (its
+    settlement when it has no close time); a fill with no such row, or on a book that never moved after it, is
+    skipped. Positive means the market moved our way before it closed."""
+    if not len(fills):
+        return None
+    book = _book(book)
+    last = {}
+    for mid, g in book.groupby("market_id", sort=False):
+        m, res = markets.get(mid), resolutions.get(mid)
+        end = (m.close_time if m and m.close_time else None) or (res.settled_at if res else None)
+        g = g if end is None else g[g["ts"] <= pd.Timestamp(end)]
+        if len(g):
+            row = g.iloc[-1]
+            last[mid] = (row["ts"], (row["bid"] + row["ask"]) / 2.0)
+    out = []
+    for f in fills.itertuples(index=False):
+        got = last.get(f.market_id)
+        if got is None or got[0] < f.open_date or not np.isfinite(got[1]):
+            continue
+        out.append((got[1] if f.side == "yes" else 1.0 - got[1]) - f.price)
+    return float(np.mean(out)) if out else None
+
+
 def trial_count(conn, cfg: dict) -> int:
     """Trials on every markets venue: the betting lane's own multiple-testing count."""
     return conn.execute("SELECT count(*) FROM trials WHERE exchange = ANY(%s)", (list(cfg["venues"]),)).fetchone()[0]
@@ -251,7 +276,7 @@ def evaluate(trades: pd.DataFrame, start: dt.datetime, end: dt.datetime, wallet:
     (resampled by `events` when given), the deflated Sharpe at `trials`, and the daily returns."""
     until = max(pd.Timestamp(end), trades["close_date"].max() + pd.Timedelta(days=1)) if len(trades) else end
     daily = metrics.daily_returns(trades, start, until, wallet)
-    w = metrics.window_metrics(daily, trades, seed)
+    w = metrics.window_metrics(daily, trades, seed, event=True)
     ev = confidence.interval(trades["profit_ratio"], seed, ccfg, events)
     dsr = metrics.deflated_sharpe(w["_sr_daily"], w["days"], w["_skew"], w["_kurt"], trials)
     m = {k: v.isoformat() if isinstance(v, dt.date) else finite(v)
@@ -300,6 +325,7 @@ def run(conn, strategy: Strategy, venue: str, book: pd.DataFrame, start: dt.date
     e = evaluate(trades, start, end, bcfg["wallet"], metrics.seed_of(strategy.name, venue, variant, "confidence"),
                  ccfg, trials, events)
     ev = e["interval"]
+    e["metrics"]["clv"] = finite(clv(fills, book, markets, res))
     conn.execute(
         """INSERT INTO market_backtests (family, venue, variant, params, start_at, end_at, orders, fills, trades,
                open_fills, metrics, returns, events, daily, expectancy, expectancy_lo, expectancy_hi, dsr, trials,

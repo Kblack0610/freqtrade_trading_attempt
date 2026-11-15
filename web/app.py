@@ -645,6 +645,7 @@ def card(window: list[dict], conf: list[dict], climates: list[dict], folds: list
         "window": w and w["win"], "cagr": w and w["cagr"], "sharpe_lo": w and w["sharpe_lo"], "sharpe_hi": w and w["sharpe_hi"],
         "expectancy": w and w["expectancy"], "expectancy_lo": w and w["expectancy_lo"],
         "expectancy_hi": w and w["expectancy_hi"], "winrate": rate, "trades": w and w["trades"],
+        "wins": w and w.get("wins"), "losses": w and w.get("losses"), "breakeven_winrate": w and w.get("breakeven_winrate"),
         "payoff": win / loss if win is not None and loss else None, "haircut_share": haircut,
         "haircut": rate * haircut * (win or 0.0) - (1 - rate) * (loss or 0.0)
         if rate is not None and (win is not None or loss is not None) else None,

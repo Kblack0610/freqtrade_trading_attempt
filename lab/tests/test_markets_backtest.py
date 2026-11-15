@@ -299,3 +299,26 @@ def test_results_split_by_the_category_of_each_trade(conn):
     assert set(out) == {"sports", "economics"} and out["sports"][1] == out["economics"][1] == 40
     assert out["sports"][2] > 0 > out["economics"][2] and out["sports"][3] > 0 > out["economics"][4]
     assert backtest.by_category(trades.iloc[:0], markets, CFG["categories"], 1, {}) == []
+
+
+def test_clv_is_the_closing_midpoint_of_the_side_bought_minus_the_fill():
+    # yes fills at the 0.50 ask and the market closes at a 0.60 midpoint: +0.10; no fills at 1 - 0.48 = 0.52 against a 0.40 fair: -0.12
+    b = book(("a", 0, 0.48, 0.50, 1e6, 1e6), ("a", 3600, 0.58, 0.62, 1e6, 1e6),
+             ("b", 0, 0.48, 0.50, 1e6, 1e6), ("b", 3600, 0.58, 0.62, 1e6, 1e6))
+    markets = {m: market(m) for m in "ab"}
+    res = {m: resolved(m) for m in "ab"}
+    yes, _, _ = go(b[b["market_id"] == "a"], Once("yes"), markets, res)
+    no, _, _ = go(b[b["market_id"] == "b"], Once("no"), markets, res)
+    assert backtest.clv(yes, b, markets, res) == pytest.approx(0.10)
+    assert backtest.clv(no, b, markets, res) == pytest.approx(-0.12)
+    assert backtest.clv(pd.concat([yes, no]), b, markets, res) == pytest.approx(-0.01)
+
+
+def test_clv_ignores_a_book_row_after_the_close_and_a_book_that_never_moved():
+    b = book(("a", 0, 0.48, 0.50, 1e6, 1e6), ("a", 3600, 0.58, 0.62, 1e6, 1e6), ("a", 90000, 0.0, 1.0, 1e6, 1e6),
+             ("c", 0, 0.48, 0.50, 1e6, 1e6))
+    markets = {m: market(m) for m in "ac"}
+    res = {m: resolved(m) for m in "ac"}
+    fills, _, _ = go(b, Once("yes"), markets, res)
+    assert backtest.clv(fills[fills["market_id"] == "a"], b, markets, res) == pytest.approx(0.10)
+    assert backtest.clv(fills[fills["market_id"] == "c"], b, markets, res) is None
