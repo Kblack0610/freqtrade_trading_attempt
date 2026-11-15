@@ -34,7 +34,8 @@ reported under "unrunnable". A pass:
 An account whose `watch` row is stopped (lab/watcher.py --drill) takes no entries; its fills still settle and mark.
 Paper only: nothing here can reach a venue's order API, and nothing places a bet at a sportsbook (lab/live.py
 holds the guard). Families that need a fit or a key are not in the league yet: calibration (a bars fit), gap (odds_api is not deployed) and llm (no LiteLLM key; forward scoring is its only
-scoring, so it joins once the key is in SOPS).
+scoring, so it joins once the key is in SOPS). weather joins once a variant passes the gate, trading on the NWS
+forecasts lab/nws.py read within the input's fresh_min.
 """
 
 import argparse
@@ -46,18 +47,20 @@ from collections import Counter, namedtuple
 import pandas as pd
 from psycopg.types.json import Jsonb
 
-from lab import metrics
+from lab import inputs, metrics
 from lab.db import connect
 from lab.grid import variants
 from lab.markets import backtest, fees
 from lab.markets.backtest import Market
-from lab.markets.families import Longshot, TTTotals, line_book, line_resolution, meetings_of
+from lab.markets.families import Forecasts, Longshot, TTTotals, Weather, line_book, line_resolution, meetings_of
 from lab.markets.recorder import load_config
 from lab.util import finite
 
 UTC = dt.timezone.utc
-FAMILIES = ("longshot", "tt_totals")
+FAMILIES = ("longshot", "tt_totals", "weather")
 LEAGUE = "event_contracts"  # decisions.league
+REGISTRY = inputs.load()
+FRESH = dt.timedelta(minutes=REGISTRY["nws_high"]["fresh_min"])  # any older reading is one weather refuses
 Row = namedtuple("Row", backtest.BOOK)
 
 
@@ -82,9 +85,12 @@ def accounts(conn, venue: str, cfg: dict) -> tuple[list[tuple[str, str, dict]], 
     return [(a, f, p) for a, (f, p) in sorted(league.items())], unrunnable
 
 
-def strategy_of(family: str, params: dict, meetings, fairs: dict):
-    """A fresh strategy for one pass; tt_totals reads the venue's meetings and the line book's no-vig fairs."""
-    return TTTotals(params, meetings, fairs) if family == "tt_totals" else Longshot(params)
+def strategy_of(family: str, params: dict, meetings, fairs: dict, forecasts: Forecasts | None = None):
+    """A fresh strategy for one pass; tt_totals reads the venue's meetings and the line book's no-vig fairs, weather
+    the NWS forecasts read within the input's fresh_min."""
+    if family == "tt_totals":
+        return TTTotals(params, meetings, fairs)
+    return Weather(params, forecasts, REGISTRY) if family == "weather" else Longshot(params)
 
 
 def _f(x) -> float:
@@ -204,15 +210,15 @@ def _json(v):
 
 def traced(strategy, row: Row, m: Market, venue: str) -> tuple[list, list, list]:
     """The strategy's orders on one book row, the checks it ran and the inputs it read: the row's quote and the
-    market's close from the recorder, then whatever the family read, each as of the row."""
+    market's close from the recorder, then whatever the family read, each with its source from lab/inputs.toml and
+    as of the row unless the family says it is older."""
     strategy.checks, strategy.inputs = [], []
     orders = list(strategy.on_book(row, m) or ())
-    src = f"{venue} recorder"
-    inputs = [{"name": "bid", "value": row.bid, "source": src}, {"name": "ask", "value": row.ask, "source": src},
-              {"name": "yes depth", "value": row.depth_yes, "source": src},
-              {"name": "no depth", "value": row.depth_no, "source": src},
-              {"name": "close time", "value": m.close_time, "source": f"{venue} markets"}] + strategy.inputs
-    return orders, strategy.checks, [dict(i, as_of=row.ts) for i in inputs]
+    book = {"bid": row.bid, "ask": row.ask, "yes_depth": row.depth_yes, "no_depth": row.depth_no,
+            "close_time": m.close_time}
+    read = [{"name": k, "value": v} for k, v in book.items()] + strategy.inputs
+    return orders, strategy.checks, [{"as_of": row.ts, **i, "source": inputs.source(REGISTRY, i["name"], venue)}
+                                     for i in read]
 
 
 def decide(conn, account: str, venue: str, instrument: str, now: dt.datetime, action: str, rule: str, inputs: list,
@@ -344,13 +350,15 @@ def run_pass(conn, venue: str, cfg: dict, now: dt.datetime) -> dict:
         book, fairs = ((line_books(conn, venue, now, pcfg["horizon_h"], bcfg["sportsbook_depth"]) if sportsbook
                         else (books(conn, venue, now, pcfg["horizon_h"]), {})) if fresh else ([], {}))
         meetings = meetings_of(conn, venue) if any(f == "tt_totals" for _, f, _ in league) else None
+        forecasts = (Forecasts(inputs.readings(conn, "nws_high", now - FRESH, now + dt.timedelta(seconds=1)))
+                     if any(f == "weather" for _, f, _ in league) else None)
         stopped = {b for (b,) in conn.execute("SELECT bot FROM watch WHERE stopped_at IS NOT NULL")}
         capital = dict(conn.execute("SELECT account, capital FROM paper_accounts WHERE venue = %s", (venue,)).fetchall())
         out = {"settled": settled, "book": len(book), "fresh": fresh, "stopped": sorted(stopped & capital.keys()),
                "retired": sorted(retired), "unrunnable": unrunnable, "accounts": {}}
         trading = [(a, f, p) for a, f, p in league if a not in stopped]
         for a, f, p in trading:
-            out["accounts"][a] = trade(conn, a, strategy_of(f, p, meetings, fairs), book, capital[a],
+            out["accounts"][a] = trade(conn, a, strategy_of(f, p, meetings, fairs, forecasts), book, capital[a],
                                        bcfg["depth_share"], fee_cfg, now, pcfg["max_open"], venue, pcfg["near_misses"])
         if not fresh:
             funnel(conn, venue, now, {(a, "stale_book"): 1 for a, _, _ in trading})

@@ -228,6 +228,7 @@ structural = "Calendar, contract mechanics or historical resolution base rates."
 cross-venue = "A price discrepancy between venues."
 event = "A filing, news item or other discrete catalyst."
 sentiment = "Expressed opinion or attention."
+forecast = "An outside forecast of the quantity a market settles on, such as the NWS forecast high."
 
 [family_categories]
 trend = { signal_source = "price", instrument = "crypto", horizon = "strategy-exit" }
@@ -253,3 +254,4 @@ calibration = { signal_source = "structural", instrument = "event-contract", hor
 gap = { signal_source = "cross-venue", instrument = "event-contract", horizon = "resolution" }
 llm = { signal_source = "event", instrument = "event-contract", horizon = "resolution" }
 tt_totals = { signal_source = "structural", instrument = "sportsbook-line", horizon = "resolution" }
+weather = { signal_source = "forecast", instrument = "event-contract", horizon = "resolution" }

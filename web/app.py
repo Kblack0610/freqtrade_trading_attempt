@@ -29,6 +29,7 @@ from starlette.concurrency import run_in_threadpool
 
 from lab import book as book_lab
 from lab import guard as guard_lab
+from lab import inputs as inputs_lab
 from lab import call_rules
 from lab import calls as calls_lab
 from lab import db, diversity, metrics, suggest, universe, taxonomy
@@ -502,6 +503,7 @@ def lane_reads(bots: list[dict], paper: list[dict]) -> dict:
             "shadow_newest": rows("SELECT max(day) AS day FROM shadow_marks")[0]["day"],
             "calls": rows(CALLS), "calls_cfg": calls_lab.load_config(), "venues": venue_roster.rows(rows),
             "recorder": rows(MARKET_VENUES), "recorder_ages": sweep_ages(),
+            "inputs": {r["input"]: r["newest"] for r in rows(inputs_lab.NEWEST)},
             "coverage": rows(COVERAGE_BY_EXCHANGE), "runs": rows(RUNS + " LIMIT 50"),
             "confidence": rows(ready.format("confidence"))[0], "readiness": rows(ready.format("market_readiness"))[0],
             "suggestions": rows("SELECT kind, count(*) AS n FROM suggestions GROUP BY kind ORDER BY kind"),

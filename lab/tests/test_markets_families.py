@@ -7,7 +7,7 @@ import pyarrow.parquet as pq
 import pytest
 from pyarrow import fs as pafs
 
-from lab import grid
+from lab import grid, inputs
 from lab.markets import backtest, families
 from lab.markets.backtest import Lookahead, Market
 from lab.markets.families import Calibration, Forecaster, Gap, Longshot, RefBook, day
@@ -501,4 +501,75 @@ def test_a_traced_family_makes_the_same_orders_as_an_untraced_one_and_names_each
     assert s.on_book(tt_row(10), line_market()) == []
     assert [c["name"] for c in s.checks if not c["pass"]] == ["form agrees"]
     assert {c["name"] for c in s.checks} == set(families.TTTotals.CHECKS)
-    assert [i["name"] for i in s.inputs] == ["head to head", "no-vig fair"]
+    assert [i["name"] for i in s.inputs] == ["head_to_head", "no_vig_fair"]
+
+
+# weather: a Kalshi daily high against the NWS forecast high (lab/inputs.toml nws_high)
+
+WX = {**BASE, "hours": 24, "sd": 2.0, "edge": 0.05}
+
+
+def wx_market(mid, subtitle, series="KXHIGHNY", event="KXHIGHNY-26NOV02"):
+    return Market(mid, event, series, mid, subtitle, "binary", at(-240), at(30))
+
+
+def wx(*readings):
+    """A Weather variant over KNYC readings of (hour, {date: high})."""
+    rows = [("KNYC", at(h), {"highs": highs, "grid": "OKX/33,37"}) for h, highs in readings]
+    return families.Weather(WX, families.Forecasts(rows), inputs.load())
+
+
+def test_temperature_markets_read_their_range_and_day_and_a_normal_high_gives_each_range_a_chance():
+    assert families.degrees("57° or above") == (57, None)
+    assert families.degrees("48° or below") == (None, 48)
+    assert families.degrees("55° to 56°") == (55, 56)
+    assert families.degrees("Above 57") is None and families.degrees(None) is None
+    assert families.day_of("KXHIGHNY-26NOV15") == dt.date(2026, 11, 15) and families.day_of("EV") is None
+    # a forecast of 58 with sd 2: 57 or above is above 56.5, P = Phi(0.75)
+    assert families.chance(57, None, 58, 2) == pytest.approx(0.7734, abs=1e-4)
+    parts = [families.chance(None, 54, 58, 2), families.chance(55, 56, 58, 2), families.chance(57, None, 58, 2)]
+    assert sum(parts) == pytest.approx(1)
+
+
+def test_weather_buys_the_side_the_forecast_favours_and_never_reads_a_forecast_made_after_the_row():
+    day = {"2026-11-02": 58}
+    s = wx((9, day))
+    assert sides(s.on_book(row("A", 10, 0.58, 0.60), wx_market("A", "57° or above"))) == [("A", "yes")]  # 0.77 vs 0.60
+    assert sides(s.on_book(row("B", 10, 0.20, 0.22), wx_market("B", "48° or below"))) == [("B", "no")]  # ~0 vs 0.20
+    assert s.on_book(row("C", 10, 0.74, 0.76), wx_market("C", "57° or above")) == []  # no edge at 0.76
+    assert s.on_book(row("D", 10, 0.58, 0.60), wx_market("D", "57° or above", series="S")) == []  # no station
+    assert s.on_book(row("E", 10, 0.58, 0.60), wx_market("E", "57° or above", event="KXHIGHNY-26NOV05")) == []  # no day
+    assert wx((11, day)).on_book(row("A", 10, 0.58, 0.60), wx_market("A", "57° or above")) == []  # read after the row
+    assert wx((5, day)).on_book(row("A", 10, 0.58, 0.60), wx_market("A", "57° or above")) == []  # 5 h old: stale
+
+
+def test_a_traced_weather_variant_makes_the_same_orders_and_names_its_forecast_input():
+    book = [(row("A", 10, 0.58, 0.60), wx_market("A", "57° or above")),
+            (row("B", 0, 0.20, 0.22), wx_market("B", "48° or below")),  # 30 h out
+            (row("C", 10, 0.74, 0.76), wx_market("C", "57° or above")),
+            (row("D", 10, 0.58, 0.60), wx_market("D", "57° or above", series="S")),
+            (row("E", 10, 0.58, 0.60), wx_market("E", "57° or above", event="KXHIGHNY-26NOV05"))]
+    for reads in (((9, {"2026-11-02": 58}),), ((5, {"2026-11-02": 58}),), ()):
+        assert run(wx(*reads), book, True) == run(wx(*reads), book, False)
+    s = wx((-1, {"2026-11-02": 58}))
+    s.checks, s.inputs = [], []
+    s.on_book(row("B", 0, 0.20, 0.22), wx_market("B", "48° or below"))  # the window fails, the rest still run
+    assert [c["name"] for c in s.checks if not c["pass"]] == ["hours to close"]
+    assert {c["name"] for c in s.checks} == set(families.Weather.CHECKS)
+    assert s.inputs == [{"name": "nws_high", "value": {"station": "KNYC", "day": "2026-11-02", "high": 58,
+                                                       "grid": "OKX/33,37"}, "as_of": at(-1)}]
+    with pytest.raises(ValueError, match="INPUTS"):
+        s.read("ohlcv", 1)
+
+
+def test_a_weather_window_runs_only_when_every_day_of_it_has_a_forecast(conn, tmp_path):
+    fs = pafs.SubTreeFileSystem(str(tmp_path), pafs.LocalFileSystem())
+    loader = families.Loader(conn, fs, "kalshi", CFG)
+    start, end = dt.date(2026, 10, 1), dt.date(2026, 11, 1)
+    for d in families.span(start, end - dt.timedelta(days=1)):
+        inputs.write(conn, "nws_high", "KNYC", dt.datetime.combine(d, dt.time(12), UTC), {"highs": {}})
+    assert families.strategy("weather", WX, loader, start, end, set()) is None  # Oct 31 has no reading
+    inputs.write(conn, "nws_high", "KNYC", dt.datetime(2026, 10, 31, 12, tzinfo=UTC), {"highs": {"2026-11-01": 50}})
+    s = families.strategy("weather", WX, families.Loader(conn, fs, "kalshi", CFG), start, end, set())
+    assert isinstance(s, families.Weather)
+    assert s.forecasts.at("KNYC", pd.Timestamp("2026-11-01", tz="UTC"))[0]["highs"] == {"2026-11-01": 50}

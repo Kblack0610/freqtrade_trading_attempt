@@ -269,6 +269,7 @@ MONEY_MAP = {
     ("lab/markets/predictit.py", "PredictIt"): Client("none", why="PredictIt public market data, GET only, no key"),
     ("lab/markets/manifold.py", "Manifold"): Client("none", why="Manifold public market data, GET only, no key"),
     ("lab/markets/odds.py", "OddsApi"): Client("none", why="sportsbook odds, GET only; its key is a data plan's, no account"),
+    ("lab/nws.py", "client"): Client("none", why="NWS forecasts from api.weather.gov, GET only, no key"),
     ("lab/wallet.py", "Esplora"): Client("none", why="the Trezor watch: public addresses on a block explorer, GET only"),
     ("lab/markets/links.py", "Llm"): Client("none", why="our LiteLLM gateway: market text in, no account"),
     ("lab/markets/research/kalshi_calibration.py", "<module>"): Client("none", why="Kalshi public market data"),

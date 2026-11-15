@@ -11,6 +11,7 @@ from prometheus_client import CollectorRegistry, start_http_server
 from prometheus_client.core import GaugeMetricFamily
 from psycopg.rows import dict_row
 
+from lab import inputs
 from lab.db import connect
 
 RUN_KINDS = ("analysis", "walkforward", "reproduce", "calibration")
@@ -128,6 +129,7 @@ class TraderCollector:
                 marks = cur.execute(MARKOUTS).fetchall()
                 rec = cur.execute(RECONCILE).fetchall()
                 calibration = cur.execute(CALIBRATION).fetchall()
+                newest = {r["input"]: r["newest"] for r in cur.execute(inputs.NEWEST).fetchall()}
         except Exception:  # noqa: BLE001 - any failure is reported as the db being unreadable
             up.add_metric([], 0)
             yield up
@@ -154,6 +156,7 @@ class TraderCollector:
         yield from broker_metrics(now, brokers)
         yield from markout_metrics(marks, rec)
         yield from calibration_metrics(calibration)
+        yield from input_metrics(now, newest)
 
 
 def family(name: str, doc: str, labels: list[str], items) -> GaugeMetricFamily:
@@ -247,6 +250,16 @@ def market_metrics(now, sweeps, last_sweep, links):
                  ["venue"], (([s["venue"]], s["took"]) for s in last_sweep))
     yield family("trader_markets_links", "Cross-venue links by how they were made (rule, llm) and their status",
                  ["source", "status"], (([r["source"], r["status"]], r["n"]) for r in links))
+
+
+def input_metrics(now, newest):
+    """Each input with a reader (lab/inputs.toml): the age of its newest reading, and its limit, so a rule can compare
+    the two; an input never read has no age, which absent() catches."""
+    fed = inputs.freshness(newest, now)
+    yield family("trader_input_age_seconds", "Seconds since the input's newest reading (input_readings)", ["input"],
+                 (([i["input"]], age(now, i["newest"])) for i in fed))
+    yield family("trader_input_fresh_seconds", "The input's fresh_min in lab/inputs.toml, in seconds", ["input"],
+                 (([i["input"]], i["fresh_min"] * 60) for i in fed))
 
 
 def decision_metrics(decisions, funnel, untraced):
