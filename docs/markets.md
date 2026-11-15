@@ -47,6 +47,8 @@ A date is marked done with its market count. When a later walk or the recorder a
 
 Measured 2026-11-06, 3 minutes per venue against the live APIs: Kalshi walked 341k settled markets (5 days of the live side; 71k over 100 contracts), Polymarket global 40k (1 day; 8k over $1,000), Polymarket US 46k (under a day), and Manifold finished all 111k resolved binary markets, back to 2021-12. At those rates the two months of Kalshi's live side take about 40 minutes, and Polymarket global's 3 years about 55 hours of budget. Bars cost one request a market: a Kalshi date has about 14k markets over 100 contracts, about an hour at 0.15 s a market, so a date is split over runs (above).
 
+Live 2026-11-15, the first 21 hours on #171 (tr-250, deployed 2026-11-14 23:12 UTC): every bars and trades run moved its cursor, and every bars Job completed (before #171 they were Failed). A bars run gets about 17 minutes a venue. In that time Kalshi fetches about 3,200 markets, Polymarket US about 3,800 and Polymarket global about 1,350. Trades finished four Kalshi dates in six runs. Kalshi bars is the slow job: at about 25k markets a day against 17k to 36k a date and 1,077 dates left, it finishes about one date a day, as fast as new dates settle, so it does not catch up while older dates are that size.
+
 What the venues serve:
 
 - Kalshi: `/historical/cutoff` was 2026-09-06 for both markets and trades. The archive reaches back to 2021-06, and markets settled in the few hours around the cutoff appear on both sides. Archive candles use bare field names (`yes_bid.close`), live ones the `_dollars` and `_fp` names; the adapter reads both. One request returns at most 5,000 candles, so a long market is read in windows.
