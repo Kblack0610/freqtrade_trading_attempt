@@ -168,3 +168,34 @@ def test_hyperopt_with_the_same_random_state_tunes_the_same_parameters(golden, m
     first = params(7)
     assert params(7) == first
     assert params(8) != first
+
+
+def hyperopt_space(path) -> dict:
+    """Each IStrategy class of a strategy file: its hyperopt parameters' ranges and defaults, loaded afresh."""
+    import importlib.util
+
+    from freqtrade.strategy import IStrategy
+    from freqtrade.strategy.parameters import BaseParameter
+
+    spec = importlib.util.spec_from_file_location(f"space_{path.stem}", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return {name: {k: (repr(getattr(p, "opt_range", None)), repr(p.value)) for k, p in vars(cls).items()
+                   if isinstance(p, BaseParameter)}
+            for name, cls in vars(module).items() if isinstance(cls, type) and issubclass(cls, IStrategy)}
+
+
+def test_a_strategy_draws_the_same_parameter_space_in_every_process():
+    """The seed covers hyperopt, not a strategy that draws its own space at import: DevilStra drew its spell pot from
+    the global random state, so each run tuned a different space and its cached fold could not reproduce."""
+    import random
+
+    from test_families import ACTIVE
+
+    drawn = [p for p in sorted(ACTIVE.rglob("*.py")) if "random" in p.read_text(encoding="utf-8")]
+    assert any(p.stem == "DevilStra" for p in drawn)
+    for path in drawn:
+        random.seed(1)
+        first = hyperopt_space(path)
+        random.seed(2)
+        assert hyperopt_space(path) == first, path.name

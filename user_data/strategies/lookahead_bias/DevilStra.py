@@ -32,6 +32,10 @@ PAIR_LIST_LENGHT = 269
 TREND_CHECK_CANDLES = 4
 # Set the pain range of devil(2~9999)
 PAIN_RANGE = 1000
+# The spell pot comes from one fixed seed, not the process's global random state. Upstream drew it unseeded, so each
+# process tuned and backtested a different parameter space and default, and no cached result could reproduce
+# (lab/reproduce.py, 2026-11-15).
+SPELL_RNG = random.Random(0)
 # Add "GodStraNew" Generated Results As spells inside SPELLS.
 # Set them unic phonemes like 'Zi' 'Gu' or 'Lu'!
 # * Use below replacement on GodStraNew results to
@@ -565,7 +569,7 @@ class DevilStra(IStrategy):
     spell_pot = [
         ",".join(
             tuple(
-                random.choices(
+                SPELL_RNG.choices(
                     list(SPELLS.keys()),
                     # TODO: k will be change to len(pairlist)
                     k=PAIR_LIST_LENGHT
