@@ -61,6 +61,13 @@ def test_polymarket_global_asks_gamma_for_markets_over_open_min_volume_on_every_
     assert [c[1]["volume_num_min"] for c in s.calls] == [1000.0, 1000.0]
 
 
+def test_polymarket_global_settled_asks_gamma_for_markets_over_settled_min_volume():
+    s = Session((200, "polymarket_closed.json"))
+    list(Polymarket(cfg(page_limit=100, settled_min_volume=1000), s, sleep=nosleep).settled(None))
+    assert s.calls[0][1] == {"closed": "true", "order": "closedTime", "ascending": "false", "volume_num_min": 1000.0,
+                             "limit": 100}
+
+
 def test_polymarket_global_follows_the_keyset_cursor():
     s, slept = Session((200, "polymarket_open_page1.json"), (200, "polymarket_open_page2.json")), []
     pages = list(Polymarket(cfg(page_limit=2), s, sleep=slept.append).open_markets())

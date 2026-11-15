@@ -208,7 +208,7 @@ def main(argv: list[str] | None = None, fs=None, adapters: dict | None = None) -
             now = time.monotonic()  # an equal share of what is left, so a venue that finishes early hands its time on
             share = now + max(0.0, end - now) / (len(names) - i)
             try:
-                v = adapters[name]({**cfg["venues"][name], **{k: hcfg[k] for k in ("page_gap_s",) if k in hcfg}})
+                v = adapters[name]({**cfg["venues"][name], **{k: hcfg[k] for k in ("page_gap_s", "settled_min_volume") if k in hcfg}})
                 if not hasattr(v, a.job):
                     raise ValueError(f"{name} serves no {a.job} history")
                 stats = (walk_settled(v, cfg["venues"][name], conn, share, a.restart,
