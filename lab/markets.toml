@@ -272,11 +272,16 @@ hours = 168
 edge = 0.06
 
 [paper]
-# python -m lab.markets.paper (lab/markets/paper.py): each variant of each family here is one paper account. Only families
-# that need no fit and no key run here (lab/markets/paper.py docstring); the recorder's books are Kalshi only.
+# python -m lab.markets.paper (lab/markets/paper.py): each variant the readiness gate passed (market_readiness, ready) is
+# one paper account, if its family needs no fit and no key (lab/markets/paper.py docstring); the rest are retired.
+# The recorder's books are Kalshi only.
 venues = ["kalshi"]
-families = ["longshot"]
 capital = 1000
+# Open positions an account may hold. At [families.longshot] stake 10 this keeps at most half of capital in open
+# fills; before the cap (2026-11-13) the eight longshot accounts held 77 to 206 each and most were out of cash.
+max_open = 50
+# The forward check (paper.forward) reads an account's paper against its backtest once this many fills settled.
+drift_min_trades = 30
 # Only markets closing within this many hours are shown to the league: the longest `hours` any family trades.
 horizon_h = 168
 # No entries when the venue's last good sweep is older than this: three missed 5-min sweeps.

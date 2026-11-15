@@ -3,7 +3,12 @@
 
   python -m lab.markets.paper [--venue kalshi]     # one pass; the CronJob runs it after each recorder sweep
 
-Each variant of each family in `[paper] families` (lab/markets.toml) is one account with `[paper] capital`. A pass:
+The league follows the readiness gate: every market_readiness row (lab/markets/families.py gate()) on the venue that
+is ready, of a family that can run here (FAMILIES), is one account with `[paper] capital`, trading the params the gate
+judged. An account whose variant is no longer ready is retired (retired_at): it takes no entries, its open fills still
+settle and mark, and it comes back if the variant passes again. A ready variant of a family that cannot run here is
+reported under "unrunnable". A pass:
+0. Opens an account for each ready variant and retires the rest.
 1. Settles every open fill whose market has a resolution, with backtest.payout and fees.settlement.
 2. Shows each account the venue's latest recorded book: the recorder's `outcomes` row of every open yes outcome
    closing within `horizon_h`, as the row backtest.replay would show it. It does so only when the venue's last good
@@ -11,9 +16,12 @@ Each variant of each family in `[paper] families` (lab/markets.toml) is one acco
 3. Fills each order with backtest.take against that row (crossing the spread, at most `[backtest] depth_share` of
    the side's size) and fees.entry, so a paper fill and a backtest fill of the same book cost the same. Every order
    is stored, filled or not, so an account enters a market once, as in a backtest. An order the account's cash
-   cannot pay for is dropped unstored and asked again next pass.
+   cannot pay for, or one past `[paper] max_open` open positions, is dropped unstored and asked again next pass.
 4. Marks each account: capital, plus realized profit, plus each open position at its exit price (a yes at the bid,
    a no at one minus the ask) less its cost.
+5. Checks each account forward (forward): its settled per-trade returns against its variant's out-of-sample
+   market_backtests returns, the difference of means bootstrapped (metrics.diff_ci) once `[paper] drift_min_trades`
+   have settled; `drifted` when that interval excludes zero.
 
 An account whose `watch` row is stopped (lab/watcher.py --drill) takes no entries; its fills still settle and mark.
 Paper only: nothing here can reach a venue's order API. Families that need a fit or a key are not in the league
@@ -30,6 +38,7 @@ from collections import namedtuple
 import pandas as pd
 from psycopg.types.json import Jsonb
 
+from lab import metrics
 from lab.db import connect
 from lab.grid import variants
 from lab.markets import backtest, fees
@@ -42,18 +51,22 @@ FAMILIES = {"longshot": Longshot}
 Row = namedtuple("Row", backtest.BOOK)
 
 
-def account_of(family: str, params: dict) -> str:
-    return f"paper-{family}-{backtest.variant_of(params)[:8]}"
+def account_of(family: str, variant: str) -> str:
+    return f"paper-{family}-{variant[:8]}"
 
 
-def accounts(cfg: dict) -> list[tuple[str, object]]:
-    """(account, a fresh strategy) for every variant of every league family."""
-    out = []
-    for fam in cfg["paper"]["families"]:
-        if fam not in FAMILIES:
-            raise ValueError(f"family {fam!r} cannot run in the paper league (module docstring)")
-        out += [(account_of(fam, p), FAMILIES[fam](p)) for p in variants(cfg["families"][fam])]
-    return out
+def accounts(conn, venue: str) -> tuple[list[tuple[str, object]], list[str]]:
+    """(account, a fresh strategy) for every ready variant on the venue of a family that can run here, and the
+    family/variant of every ready one that cannot."""
+    league, unrunnable = [], []
+    for fam, variant, params in conn.execute(
+            "SELECT family, variant, params FROM market_readiness WHERE venue = %s AND ready ORDER BY family, variant",
+            (venue,)).fetchall():
+        if fam in FAMILIES:
+            league.append((account_of(fam, variant), FAMILIES[fam](params)))
+        else:
+            unrunnable.append(f"{fam}/{variant[:8]}")
+    return league, unrunnable
 
 
 def _f(x) -> float:
@@ -126,10 +139,16 @@ def cash(conn, account: str, capital: float) -> float:
     return capital + realized - held
 
 
+def held(conn, account: str) -> int:
+    """Open positions: fills not yet settled."""
+    return conn.execute("SELECT count(*) FROM paper_orders WHERE account = %s AND settled_at IS NULL AND contracts > 0",
+                        (account,)).fetchone()[0]
+
+
 def trade(conn, account: str, strategy, book: list[tuple[Row, Market]], capital: float, share: float,
-          fee_cfg: dict | None, now: dt.datetime) -> dict:
+          fee_cfg: dict | None, now: dt.datetime, max_open: int) -> dict:
     strategy.seen = {m for (m,) in conn.execute("SELECT market_id FROM paper_orders WHERE account = %s", (account,))}
-    left, sent, filled, broke = cash(conn, account, capital), 0, 0, 0
+    left, sent, filled, broke, capped, open_ = cash(conn, account, capital), 0, 0, 0, 0, held(conn, account)
     taken: dict = {}
     for row, m in book:
         for o in strategy.on_book(row, m) or ():
@@ -137,6 +156,10 @@ def trade(conn, account: str, strategy, book: list[tuple[Row, Market]], capital:
                                 share)
             n, price = got or (0, None)
             fee = fees.entry(fee_cfg, n, price) if n else 0.0
+            if n and open_ >= max_open:
+                strategy.seen.discard(o.market_id)
+                capped += 1
+                continue
             if n and n * price + fee > left:
                 strategy.seen.discard(o.market_id)
                 broke += 1
@@ -150,21 +173,51 @@ def trade(conn, account: str, strategy, book: list[tuple[Row, Market]], capital:
             sent += 1
             if n:
                 filled += 1
+                open_ += 1
                 left -= n * price + fee
                 taken[(o.market_id, o.side)] = taken.get((o.market_id, o.side), 0) + n
-    return {"orders": sent, "fills": filled, "no_cash": broke}
+    return {"orders": sent, "fills": filled, "no_cash": broke, "capped": capped}
+
+
+def forward(conn, venue: str, min_trades: int, now: dt.datetime) -> int:
+    """Each account's settled per-trade returns (profit over cost with fees, backtest's profit_ratio) against its
+    variant's market_backtests returns on the venue. Writes the check on paper_accounts; returns how many drifted."""
+    drifted = 0
+    for account, family, variant in conn.execute(
+            "SELECT account, family, variant FROM paper_accounts WHERE venue = %s ORDER BY account", (venue,)).fetchall():
+        paid = [float(r) for (r,) in conn.execute(
+            "SELECT profit / nullif(contracts * price + fee, 0) FROM paper_orders "
+            "WHERE account = %s AND settled_at IS NOT NULL AND contracts > 0", (account,)).fetchall() if r is not None]
+        bt = [x for (rs,) in conn.execute(
+            "SELECT returns FROM market_backtests WHERE family = %s AND venue = %s AND variant = %s",
+            (family, venue, variant)).fetchall() for x in rs]
+        lo, hi = (metrics.diff_ci(paid, bt, metrics.seed_of(account, "forward"))
+                  if len(paid) >= min_trades and bt else (None, None))
+        drift = None if lo is None else bool(lo > 0 or hi < 0)
+        drifted += bool(drift)
+        conn.execute(
+            "UPDATE paper_accounts SET paper_trades = %s, paper_expectancy = %s, backtest_trades = %s, "
+            "backtest_expectancy = %s, gap_lo = %s, gap_hi = %s, drifted = %s, checked_at = %s WHERE account = %s",
+            (len(paid), float(sum(paid) / len(paid)) if paid else None, len(bt),
+             float(sum(bt) / len(bt)) if bt else None, lo, hi, drift, now, account))
+    return drifted
 
 
 def run_pass(conn, venue: str, cfg: dict, now: dt.datetime) -> dict:
     pcfg, bcfg = cfg["paper"], cfg["backtest"]
     fee_cfg = bcfg.get("fees", {}).get(venue)
-    league = accounts(cfg)
     with conn.transaction():
+        league, unrunnable = accounts(conn, venue)
+        names = [a for a, _ in league]
         conn.cursor().executemany(
             "INSERT INTO paper_accounts (account, family, venue, variant, params, capital, started_at) "
             "VALUES (%s, %s, %s, %s, %s, %s, %s) ON CONFLICT (account) DO NOTHING",
             [(a, s.name, venue, backtest.variant_of(s.params), Jsonb(s.params), pcfg["capital"], now)
              for a, s in league])
+        retired = [a for (a,) in conn.execute(
+            "UPDATE paper_accounts SET retired_at = %s WHERE venue = %s AND retired_at IS NULL "
+            "AND NOT account = ANY(%s) RETURNING account", (now, venue, names)).fetchall()]
+        conn.execute("UPDATE paper_accounts SET retired_at = NULL WHERE account = ANY(%s)", (names,))
         settled = settle(conn, venue, fee_cfg)
         age = book_age(conn, venue, now)
         fresh = age is not None and age <= dt.timedelta(minutes=pcfg["max_book_age_min"])
@@ -172,11 +225,13 @@ def run_pass(conn, venue: str, cfg: dict, now: dt.datetime) -> dict:
         stopped = {b for (b,) in conn.execute("SELECT bot FROM watch WHERE stopped_at IS NOT NULL")}
         capital = dict(conn.execute("SELECT account, capital FROM paper_accounts WHERE venue = %s", (venue,)).fetchall())
         out = {"settled": settled, "book": len(book), "fresh": fresh, "stopped": sorted(stopped & capital.keys()),
-               "accounts": {}}
+               "retired": sorted(retired), "unrunnable": unrunnable, "accounts": {}}
         for a, s in league:
             if a not in stopped:
-                out["accounts"][a] = trade(conn, a, s, book, capital[a], bcfg["depth_share"], fee_cfg, now)
+                out["accounts"][a] = trade(conn, a, s, book, capital[a], bcfg["depth_share"], fee_cfg, now,
+                                           pcfg["max_open"])
         mark(conn, venue, now)
+        out["drifted"] = forward(conn, venue, pcfg["drift_min_trades"], now)
     return out
 
 

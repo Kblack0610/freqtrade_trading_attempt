@@ -129,9 +129,10 @@ def test_paper_money_adds_up_through_fills_fees_and_settlement(conn, v):
     book = seed_ledger(conn, v.name)
 
     # pass 1: four fills; X would cost more than the cash those four left, so it is refused and not stored
-    out = paper.trade(conn, ACCOUNT, Script({m: b[3] for m, b in BOOKS.items()}), book, CAPITAL, 0.5, fee_cfg, NOW)
+    out = paper.trade(conn, ACCOUNT, Script({m: b[3] for m, b in BOOKS.items()}), book, CAPITAL, 0.5, fee_cfg, NOW,
+                      load_config()["paper"]["max_open"])
     paper.mark(conn, v.name, NOW)
-    assert out == {"orders": 4, "fills": 4, "no_cash": 1}
+    assert out == {"orders": 4, "fills": 4, "no_cash": 1, "capped": 0}
     f = fills(conn)
     assert {m: (r[0], r[1], r[2]) for m, r in f.items()} == {
         "Y": ("yes", 25, pytest.approx(0.40)), "N": ("no", 20, pytest.approx(0.30)),
