@@ -35,7 +35,7 @@ from lab import calls as calls_lab
 from lab import db, diversity, metrics, suggest, universe, taxonomy
 from lab import leagues as league_rows
 from lab import stocks as stocks_lab
-from lab.markets import paper as paper_lab
+from lab.markets import paper as paper_lab, sweep_ages as market_sweep_ages
 from web import auth, charts, exporter, glossary, lanes, nav
 from web import venues as venue_roster
 
@@ -967,11 +967,7 @@ def run(request: Request, run_id: int):
 
 
 def sweep_ages() -> tuple[int, dict[str, int]]:
-    """Minutes past which a venue's last good sweep is stale: [paper] max_book_age_min, or the venue's own
-    stale_after_min in lab/markets.toml when it sweeps less often."""
-    cfg = suggest.load_config(MARKETS)
-    default = cfg["paper"]["max_book_age_min"]
-    return default, {v: c.get("stale_after_min", default) for v, c in cfg["venues"].items()}
+    return market_sweep_ages(MARKETS)
 
 
 @app.get("/markets", response_class=HTMLResponse)

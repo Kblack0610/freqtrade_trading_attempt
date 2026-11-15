@@ -13,6 +13,7 @@ from psycopg.rows import dict_row
 
 from lab import inputs
 from lab.db import connect
+from lab.markets import sweep_ages
 
 RUN_KINDS = ("analysis", "walkforward", "reproduce", "calibration")
 
@@ -244,6 +245,9 @@ def suggestion_metrics(suggestions):
 
 
 def market_metrics(now, sweeps, last_sweep, links):
+    default, limits = sweep_ages()
+    yield family("trader_markets_sweep_stale_seconds", "Seconds past which the venue's recorder sweep is stale",
+                 ["venue"], (([s["venue"]], limits.get(s["venue"], default) * 60) for s in sweeps))
     yield family("trader_markets_sweep_age_seconds", "Seconds since the venue's newest successful recorder sweep ended",
                  ["venue"], (([s["venue"]], age(now, s["last_ok"])) for s in sweeps))
     yield family("trader_markets_sweep_ok", "1 when the venue's newest recorder sweep succeeded", ["venue"],

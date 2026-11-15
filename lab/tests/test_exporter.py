@@ -230,3 +230,27 @@ def test_crypto_untraced_counts_filled_bot_trades_since_the_first_crypto_decisio
                  (now,))
     m = scrape(TraderCollector(db.connect))
     assert m['trader_fills_untraced{league="crypto"}'] == 2  # k-b's 1 and 2: k-a's 1 is no proof for k-b's
+
+
+@pytest.mark.parametrize("venue,minutes", [("kalshi", 15), ("polymarket", 45), ("odds_api", 390)])
+def test_recorder_freshness_uses_venue_config(venue, minutes):
+    from web.exporter import market_metrics
+
+    sweeps = [{"venue": venue, "last_ok": None}]
+    metric = next(market_metrics(None, sweeps, [], []))
+    assert metric.name == "trader_markets_sweep_stale_seconds"
+    assert metric.samples[0].labels == {"venue": venue}
+    assert metric.samples[0].value == minutes * 60
+
+
+def test_recorder_freshness_changes_with_config_and_only_reports_active_venues(tmp_path, monkeypatch):
+    from lab import markets
+    from web.exporter import market_metrics
+
+    cfg = tmp_path / "markets.toml"
+    cfg.write_text('[paper]\nmax_book_age_min = 23\n[venues.odds_api]\nstale_after_min = 401\n[venues.retired]\n')
+    monkeypatch.setattr(markets, "CONFIG", cfg)
+    sweeps = [{"venue": v, "last_ok": None} for v in ("odds_api", "kalshi")]
+    metric = next(market_metrics(None, sweeps, [], []))
+    assert [(s.labels["venue"], s.value) for s in metric.samples] == [("odds_api", 401 * 60), ("kalshi", 23 * 60)]
+    assert not next(market_metrics(None, [], [], [])).samples
