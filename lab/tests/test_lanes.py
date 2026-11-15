@@ -8,7 +8,7 @@ NOW = dt.datetime(2026, 11, 13, 12, tzinfo=dt.timezone.utc)
 
 
 def empty(**over) -> dict:
-    read = {"stale_h": 2, "bots": [], "paper": [], "paper_max_age_h": {}, "shadow_counts": [], "shadow_newest": None, "calls": [],
+    read = {"stale_h": 2, "bots": [], "paper": [], "paper_max_age_h": {}, "stocks": [], "shadow_counts": [], "shadow_newest": None, "calls": [],
             "calls_cfg": {"slack_days": 4}, "venues": [], "recorder": [], "recorder_ages": (15, {}), "inputs": {"nws_high": NOW}, "coverage": [],
             "runs": [], "confidence": {"ready": 0, "n": 0}, "readiness": {"ready": 0, "n": 0}, "suggestions": [],
             "bankroll": None, "watch": [], "guard_lifted": False}

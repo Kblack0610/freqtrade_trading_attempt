@@ -295,11 +295,12 @@ def test_the_event_contract_league_is_not_a_cohort_and_scores_beside_the_crypto_
     assert "2.00%" in events and "3.0%" in events and "paper-longshot-cccc3333" in events
     head = lambda t: re.findall(r"<th[^>]*>([^<]+)</th>", t[t.index("<thead>"):t.index("</thead>")])  # noqa: E731
     assert head(crypto) == head(events) and "Max drawdown" in head(events)  # one scorecard, the same columns
-    assert 'id="stocks"' in page and "No stock league yet" in page
+    stocks = page[page.index('<h2 id="stocks">'):]
+    assert "No accounts in this league yet" in stocks  # no stock pass has run
 
 
 def test_pages_render_on_an_empty_database(conn, signed_in):
-    assert signed_in[1].get("/").text.count('<span class="tag">no data</span>') == 8  # every lane but the guard
+    assert signed_in[1].get("/").text.count('<span class="tag">no data</span>') == 9  # every lane but the guard
     for path in ("/", "/cohorts", "/data", "/runs", "/strategies", "/suggestions", "/walkforward", "/coverage", "/markets", "/links", "/markets/book", "/accounts", "/calls", "/leagues"):
         assert signed_in[1].get(path).status_code == 200, path
 
@@ -977,6 +978,26 @@ def test_a_drill_and_a_call_open_their_page(conn, signed_in):
     assert "board ousted the CEO" in call and "9.96%" in call and "10.50%" in call
 
 
-@pytest.mark.parametrize("path", ["/trades/paper/999", "/trades/call/999", "/trades/drill/999", "/trades/nope/1"])
+def test_a_stock_fill_shows_its_rule_its_checks_and_its_exit(conn, signed_in):
+    from lab import stocks
+    from lab.tests import test_stocks as ts
+    ts.run(conn)
+    fell = {**ts.CLOSES, "SPY": ts.CLOSES["SPY"][:-1] + [100]}
+    ts.run(conn, ts.Data(fell, at=ts.LATER), now=ts.LATER)
+    pid = conn.execute("SELECT id FROM stock_positions WHERE account = %s", (ts.TREND,)).fetchone()[0]
+    _, client = signed_in
+    page = client.get("/leagues").text
+    tab = page[page.index('<h2 id="stocks">'):]
+    assert ts.TREND in tab and f'href="/trades/stock/{pid}"' in tab
+    assert stocks.rule_of("trend", {"sma": 3}) in tab and "No accounts in this league yet" not in tab
+    body = client.get(f"/trades/stock/{pid}").text
+    for needle in ("SPY", "Stocks", "close above average", "quote fresh", "alpaca latest quote", "Sizing and costs",
+                   "2 bp of the notional", "sold at the bid 99.99", "close below average", "Exit checks"):
+        assert needle in body, needle
+    assert "Recorded before decisions were traced" not in body
+
+
+@pytest.mark.parametrize("path", ["/trades/paper/999", "/trades/call/999", "/trades/drill/999", "/trades/stock/999",
+                                  "/trades/nope/1"])
 def test_an_unknown_trade_is_404_not_an_empty_page(conn, signed_in, path):
     assert signed_in[1].get(path).status_code == 404

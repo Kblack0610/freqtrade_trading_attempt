@@ -203,3 +203,9 @@ def test_decision_metrics(conn):
     assert m['trader_decision_funnel{account="paper-a",check="ordered",league="event_contracts"}'] == 2
     # B has no decision; OLD was sent before the first traced entry, so it is not counted
     assert m['trader_fills_untraced{league="event_contracts"}'] == 1
+    assert m['trader_fills_untraced{league="stocks"}'] == 0
+    conn.execute("INSERT INTO stock_accounts (account, family, variant, params, capital, started_at) VALUES "
+                 "('stock-a', 'trend', 'v', '{}', 1000, now())")
+    conn.execute("INSERT INTO stock_positions (account, ticker, shares, entered_at, quoted_at, entry_price, entry_cost) "
+                 "VALUES ('stock-a', 'SPY', 1, now(), now(), 600, 0.12)")
+    assert scrape(TraderCollector(db.connect))['trader_fills_untraced{league="stocks"}'] == 1

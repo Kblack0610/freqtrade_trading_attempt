@@ -217,7 +217,7 @@ The agent never types the PIN, the passphrase or the seed, never opens the recov
 
 ## API brokers
 
-None of these has a strategy in the repo yet. Freqtrade trades crypto only. A broker would carry equity or ETF strategies, or crypto at Alpaca or Robinhood, once written and walked forward.
+None of these places an order for a strategy. Freqtrade trades crypto only. The stock league (`lab/stocks.py`) paper-trades ETFs on Alpaca quotes with simulated fills; a broker would carry those strategies once they are walked forward.
 
 Only Alpaca and the Tastytrade sandbox can be practised on without money: IBKR paper needs a funded account and Schwab has no paper API. Alpaca is the one connected. No broker here needs a mac-mini re-auth today: Alpaca keys and Tastytrade refresh tokens do not expire, and the IBKR and Schwab logins stay the person's until their terms are read.
 

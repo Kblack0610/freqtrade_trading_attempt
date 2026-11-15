@@ -18,9 +18,10 @@ way a live breach will:
   python lab/watcher.py --drill-end <bot>   clear the breach and start entries again
   python lab/watcher.py --bankroll-clear    clear a bankroll breach; a human starts each money bot again
 
-The event-contract paper league's accounts (lab/markets/paper.py) are watched the same way, one row each, read from
-paper_accounts: equity is the last paper pass's mark, and seen_at that pass's time, so a dead paper job ages its rows
-like a dead bot. A drilled account is stopped by its watch row, which the next paper pass obeys; no API is called.
+The event-contract and stock leagues' accounts (lab/markets/paper.py, lab/stocks.py) are watched the same way, one
+row each, read from paper_accounts and stock_accounts: equity is the last pass's mark, and seen_at that pass's time,
+so a dead pass job ages its rows like a dead bot. A drilled account is stopped by its watch row, which the next pass
+obeys; no API is called.
 """
 
 import argparse
@@ -134,7 +135,9 @@ def tick(conn, bots: list[str], day_loss: float, fetch: Fetch, now: dt.datetime,
     conn.execute(BANK, bank)
     stopped = bank["breached_at"] is not None
     for name, capital, equity, marked_at in conn.execute(
-            "SELECT account, capital, equity, marked_at FROM paper_accounts WHERE marked_at IS NOT NULL").fetchall():
+            "SELECT account, capital, equity, marked_at FROM paper_accounts WHERE marked_at IS NOT NULL "
+            "UNION ALL SELECT account, capital, equity, marked_at FROM stock_accounts WHERE marked_at IS NOT NULL"
+    ).fetchall():
         p = prev.get(name)
         row = step(p, {"dry_run": True, "state": None, "capital": capital, "equity": equity}, now, day_loss)
         if p is not None and p["drill_at"] is not None:

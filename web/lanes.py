@@ -91,6 +91,22 @@ def betting(read: dict, now: dt.datetime, cfg: dict) -> dict:
                 "each account's newest mark; stale past its venue's paper age in web/venues.toml", parts, first)
 
 
+def stocks(read: dict, now: dt.datetime, cfg: dict) -> dict:
+    accounts = read["stocks"]
+    if not accounts:
+        return empty("no stock accounts", "stock_accounts: no rows")
+    late = [a for a in accounts if old(a["marked_at"], now, read["stale_h"])]
+    marked = [a for a in accounts if a["marked_at"] and a["equity"] is not None]
+    parts = [part("fills", sum(a["fills"] for a in accounts)), part("closed", sum(a["settled"] for a in accounts)),
+             part("open positions", sum(a["open_positions"] or 0 for a in marked)),
+             part("paper P&L", usd(sum(a["equity"] - a["capital"] for a in marked)))]
+    parts += [part("stale", len(late), "amber")] if late else []
+    first = [row(a["account"], "never marked" if not a["marked_at"] else "last marked", "amber", "/leagues#stocks",
+                 a["marked_at"]) for a in late]
+    return card(len(accounts) - len(late), f"of {len(accounts)} accounts marked", "amber" if late else "green",
+                f"each account's newest mark; stale past {read['stale_h']:g} h", parts, first)
+
+
 def shadow(read: dict, now: dt.datetime, cfg: dict) -> dict:
     by_state: dict[str, int] = {}
     for r in read["shadow_counts"]:
@@ -229,7 +245,8 @@ def money(read: dict, now: dt.datetime, cfg: dict) -> dict:
 
 
 READERS: dict[str, Callable[[dict, dt.datetime, dict], dict]] = {
-    "crypto": crypto, "betting": betting, "shadow": shadow, "calls": calls, "venues": venues, "recorder": recorder,
+    "crypto": crypto, "betting": betting, "stocks": stocks, "shadow": shadow, "calls": calls, "venues": venues,
+    "recorder": recorder,
     "prices": prices, "research": research, "money": money,
 }
 

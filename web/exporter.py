@@ -67,7 +67,7 @@ MARKOUTS = ("SELECT bot, horizon_min, count(net) AS n, avg(net) AS net, avg(null
 RECONCILE = ("SELECT bot, kind, count(*) AS n, avg(delay_s) AS delay_s, avg(price_gap) AS price, avg(fee_gap) AS fee, "
              "avg(profit_gap) AS profit FROM reconcile GROUP BY 1, 2")
 PAPER = "SELECT account, capital, equity, open_positions, marked_at FROM paper_accounts WHERE marked_at IS NOT NULL"
-# The decision record (lab/markets/paper.py trade, migration 055): decisions per action, each account's newest pass
+# The decision record (lab/decisions.py, migration 055): decisions per action, each account's newest pass
 # through the funnel, and the fills since a league's first traced entry that have no decision.
 DECISIONS = "SELECT league, account, action, count(*) AS n FROM decisions GROUP BY 1, 2, 3"
 FUNNEL = """
@@ -79,6 +79,9 @@ SELECT 'event_contracts' AS league, count(*) AS n FROM paper_orders o
 WHERE o.contracts > 0
   AND o.sent_at >= (SELECT min(decided_at) FROM decisions WHERE league = 'event_contracts' AND action = 'enter')
   AND NOT EXISTS (SELECT 1 FROM decisions d WHERE d.fill_source = 'paper' AND d.fill_id = o.id)
+UNION ALL
+SELECT 'stocks', count(*) FROM stock_positions p
+WHERE NOT EXISTS (SELECT 1 FROM decisions d WHERE d.fill_source = 'stock' AND d.fill_id = p.id)
 """
 # lab/shadow.py: accounts per cohort and state, and the newest day marked (a day's mark lands after it ends).
 SHADOW = "SELECT cohort, state, count(*) AS n FROM shadow_accounts GROUP BY 1, 2"

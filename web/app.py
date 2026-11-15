@@ -34,6 +34,7 @@ from lab import call_rules
 from lab import calls as calls_lab
 from lab import db, diversity, metrics, suggest, universe, taxonomy
 from lab import leagues as league_rows
+from lab import stocks as stocks_lab
 from lab.markets import paper as paper_lab
 from web import auth, charts, exporter, glossary, lanes, nav
 from web import venues as venue_roster
@@ -214,6 +215,18 @@ SELECT a.*, w.state, w.breached_at, w.stopped_at,
        (SELECT count(*) FROM paper_orders o WHERE o.account = a.account AND o.contracts > 0 AND o.settled_at IS NOT NULL) AS settled
 FROM paper_accounts a LEFT JOIN watch w ON w.bot = a.account
 ORDER BY a.equity DESC NULLS LAST, a.account
+"""
+# The stock league's accounts (lab/stocks.py), in PAPER_ACCOUNTS' columns: settled counts closed positions.
+STOCK_ACCOUNTS = """
+SELECT a.*, w.state, w.breached_at, w.stopped_at,
+       (SELECT count(*) FROM stock_positions p WHERE p.account = a.account) AS fills,
+       (SELECT count(*) FROM stock_positions p WHERE p.account = a.account AND p.exited_at IS NOT NULL) AS settled
+FROM stock_accounts a LEFT JOIN watch w ON w.bot = a.account
+ORDER BY a.equity DESC NULLS LAST, a.account
+"""
+STOCK_PROFITS = """
+SELECT account, array_agg(profit ORDER BY exited_at, id) AS profits FROM stock_positions
+WHERE exited_at IS NOT NULL GROUP BY account
 """
 DEMO_ORDERS = "SELECT * FROM demo_orders ORDER BY placed_at DESC, id DESC LIMIT 20"
 BROKERS = "SELECT DISTINCT ON (broker) * FROM broker_balances ORDER BY broker, read_at DESC"
@@ -471,6 +484,7 @@ def lane_reads(bots: list[dict], paper: list[dict]) -> dict:
     ready = "SELECT count(*) FILTER (WHERE ready) AS ready, count(*) AS n FROM {}"
     paper_age = {c["match"]: c["max_age_h"] for v in venue_roster.load() for c in v["checks"] if c["source"] == "paper"}
     return {"stale_h": STALE.total_seconds() / 3600, "bots": bots, "paper": paper, "paper_max_age_h": paper_age,
+            "stocks": rows(STOCK_ACCOUNTS),
             "shadow_counts": rows(SHADOW_COUNTS),
             "shadow_newest": rows("SELECT max(day) AS day FROM shadow_marks")[0]["day"],
             "calls": rows(CALLS), "calls_cfg": calls_lab.load_config(), "venues": venue_roster.rows(rows),
@@ -542,6 +556,8 @@ def leagues(request: Request):
         rows(BOTS), watching, lambda s: f"{s}: {strategy_method(s, methods)['description']}")
     accounts = rows(PAPER_ACCOUNTS)
     events = league_rows.event_rows(accounts, profits, paper_lab.rule_of)
+    stocks = league_rows.event_rows(rows(STOCK_ACCOUNTS), {r["account"]: r["profits"] for r in rows(STOCK_PROFITS)},
+                                    stocks_lab.rule_of)
     return page(request, "leagues.html", glossary=glossary.load(),
                 tabs=[{"id": "crypto", "title": "Crypto", "rows": crypto, "fills": rows(NEWEST_FILLS, ("freqtrade",)),
                        "about": "Freqtrade spot bots on live prices (lab/league.py), grouped into cohorts."},
@@ -549,8 +565,9 @@ def leagues(request: Request):
                        "fills": rows(NEWEST_FILLS, ("paper",)),
                        "forward": [a for a in accounts if a["drifted"] is not None],
                        "about": "One account per family variant, filled against the recorded books (lab/markets/paper.py)."},
-                      {"id": "stocks", "title": "Stocks", "rows": [], "fills": [],
-                       "about": "No stock league yet: it is the next phase of the plan."}],
+                      {"id": "stocks", "title": "Stocks", "rows": stocks, "fills": rows(NEWEST_FILLS, ("stock",)),
+                       "about": "One account per family variant on a small ETF universe, filled at Alpaca's latest "
+                                "quote with no order sent (lab/stocks.py)."}],
                 hard_stop=suggest.load_config()["book"]["hard_stop"])
 
 
@@ -582,7 +599,7 @@ def bot(request: Request, name: str):
 
 # One fill or trade of any league with everything recorded about it (plan recorder-links-vivid-stream P2): the
 # `fills` view row is the key; a freqtrade trade id is per bot, so its URL carries ?bot=.
-TRADE_SOURCES = ("paper", "freqtrade", "drill", "call")
+TRADE_SOURCES = ("paper", "freqtrade", "drill", "call", "stock")
 FILL = "SELECT * FROM fills WHERE source = %s AND fill_id = %s AND (%s = '' OR account = %s) ORDER BY open_date DESC LIMIT 1"
 DECISION = "SELECT * FROM decisions WHERE fill_source = %s AND fill_id = %s"
 NEAR_MISSES = """SELECT d.instrument, d.checks, m.title FROM decisions d
@@ -599,6 +616,10 @@ WHERE o.id = %s"""
 BOT_TRADE = """SELECT t.bot, t.trade_id, t.open_date, t.pair, t.is_open, t.close_date, t.open_rate, t.close_rate,
        t.amount, t.stake_amount, t.profit_ratio, t.profit_abs, t.exit_reason, t.enter_tag
 FROM bot_trades t WHERE t.bot = %s AND t.trade_id = %s AND t.open_date = %s"""
+STOCK_POSITION = "SELECT p.*, a.family, a.params FROM stock_positions p JOIN stock_accounts a USING (account) WHERE p.id = %s"
+# An exit's decision is keyed by its account, ticker and time: the entry's decision holds the fill key.
+STOCK_EXIT = ("SELECT * FROM decisions WHERE league = 'stocks' AND action = 'exit' AND account = %s AND instrument = %s "
+              "AND decided_at = %s")
 MARKOUTS = "SELECT * FROM markouts WHERE bot = %s AND trade_id = %s AND open_date = %s ORDER BY horizon_min"
 RECONCILE = "SELECT * FROM reconcile WHERE bot = %s AND pair = %s AND live_open = %s ORDER BY n"
 
@@ -643,6 +664,9 @@ def trade(request: Request, source: str, fill_id: int, bot: str = ""):
                 "reconcile": rows(RECONCILE, (fill["account"], fill["instrument"], fill["open_date"]))}
     elif source == "drill":
         ctx["drill"] = rows("SELECT * FROM demo_orders WHERE id = %s", (fill_id,))[0]
+    elif source == "stock":
+        p = rows(STOCK_POSITION, (fill_id,))[0]
+        ctx |= {"position": p, "exit": (rows(STOCK_EXIT, (p["account"], p["ticker"], p["exited_at"])) or [None])[0]}
     else:
         ctx |= {"call": rows("SELECT * FROM calls WHERE id = %s", (fill_id,))[0],
                 "scores": rows("SELECT * FROM call_scores WHERE call_id = %s ORDER BY horizon", (fill_id,))}

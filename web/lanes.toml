@@ -16,6 +16,12 @@ href = "/leagues#event-contracts"
 what = "One paper account per family variant, filled against the recorded books (lab/markets/paper.py)"
 
 [[lane]]
+id = "stocks"
+title = "Stock league"
+href = "/leagues#stocks"
+what = "One paper account per family variant on an ETF universe, filled at Alpaca quotes (lab/stocks.py)"
+
+[[lane]]
 id = "shadow"
 title = "Replay accounts"
 href = "/accounts#shadow"
