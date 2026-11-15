@@ -84,6 +84,14 @@ def test_polymarket_global_resolutions_take_the_first_outcome_and_parse_short_of
     assert rs[0].settled_at == dt.datetime(2026, 11, 6, 6, 46, 21, tzinfo=UTC)
 
 
+def test_polymarket_global_settled_walks_closed_markets_by_id_from_the_saved_cursor():
+    s = Session((200, "polymarket_closed.json"))
+    [(page, nxt)] = list(Polymarket(cfg(page_limit=100), s, sleep=nosleep).settled("saved"))
+    assert s.calls[0][1] == {"closed": "true", "order": "id", "ascending": "false", "limit": 100,
+                             "after_cursor": "saved"}
+    assert [x.resolution.result for x in page] == ["yes", "no", "no", "yes"] and nxt is None
+
+
 def test_predictit_makes_each_contract_a_market_under_its_market_as_event():
     s = Session((200, "predictit_all.json"))
     [page] = list(PredictIt(cfg(), s, sleep=nosleep).open_markets())
