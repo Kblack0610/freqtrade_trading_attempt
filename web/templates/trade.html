@@ -1,11 +1,12 @@
 {% extends "base.html" %}
 {% block title %}{{ source }} fill {{ fill.fill_id }}{% endblock %}
 {% block body %}
-{% set league = {"paper": "Event contracts", "freqtrade": "Crypto", "drill": "Order drill", "call": "Calls"}[source] %}
+{% set league = {"paper": "Event contracts", "freqtrade": "Crypto", "drill": "Order drill", "call": "Calls", "stock": "Stocks"}[source] %}
 <h1>Fill {{ fill.fill_id }} - {% if source == "freqtrade" %}<a href="/bots/{{ fill.account }}">{{ fill.account }}</a>{% else %}{{ fill.account }}{% endif %} <span class="tag">{{ league }}</span></h1>
 {% if order %}<p>{{ order.title or order.market_id }}{% if order.subtitle %} <span class="muted">{{ order.subtitle }}</span>{% endif %} <strong>{{ order.side }} {{ order.contracts }} @ {{ order.price | num(2) }}</strong></p>
 {% elif bot_trade %}<p>{{ bot_trade.pair }} <strong>{{ bot_trade.amount | num(6) }} @ {{ bot_trade.open_rate | num(4) }}</strong>, stake {{ bot_trade.stake_amount | num(2) }} on {{ fill.venue }}{% if fill.strategy %} <span class="muted">{{ fill.strategy }}</span>{% endif %}</p>
 {% elif drill %}<p>{{ drill.ticker }} <strong>{{ drill.count }} @ {{ drill.price | num(2) }}</strong> on {{ drill.venue }}, status {{ drill.status or "-" }}</p>
+{% elif position %}<p>{{ position.ticker }} <strong>{{ position.shares | num(4) }} @ {{ position.entry_price | num(2) }}</strong> <span class="muted">{{ position.family }}</span></p>
 {% elif call %}<p>{{ call.direction }} {{ call.ticker }} <span class="muted">{{ call.instrument }}</span> vs {{ call.benchmark }}: {{ call.thesis }}{% if call.source %} <span class="muted">({{ call.source }})</span>{% endif %}</p>{% endif %}
 
 <div class="scroll">
@@ -43,7 +44,14 @@
 </table>
 </div>
 {% set z = decision.sizing %}
-{% if z and source == "freqtrade" %}
+{% if z and position %}
+<h3>Sizing and costs</h3>
+<ul class="plain">
+  <li>stake {{ z.stake | num(2) }} / ask {{ z.price | num(2) }} = {{ z.shares | num(4) }} shares</li>
+  <li>cash {{ z.cash | num(2) }} before; {{ z.open }} of {{ z.max_open }} positions open</li>
+  <li>cost {{ z.cost | num(2) }} <span class="muted">{{ z.cost_bps }} bp of the notional (lab/calls.toml cost_bps)</span></li>
+</ul>
+{% elif z and source == "freqtrade" %}
 <h3>Sizing and fees</h3>
 <ul class="plain">
   <li>stake {{ z.stake | num(2) }} at {{ z.price | tv }} = {{ z.amount | tv }}</li>
@@ -60,7 +68,7 @@
 {% endif %}
 {% if source != "freqtrade" %}
 <h3>Same pass</h3>
-{% if funnel %}<p>Where each book row stopped for this account: {% for f in funnel %}{{ f.reason }} {{ "{:,}".format(f.n) }}{{ ", " if not loop.last }}{% endfor %}.</p>{% endif %}
+{% if funnel %}<p>Where each {{ "ticker" if position else "book row" }} stopped for this account: {% for f in funnel %}{{ f.reason }} {{ "{:,}".format(f.n) }}{{ ", " if not loop.last }}{% endfor %}.</p>{% endif %}
 {% if near %}
 <p>{{ near | length }} near-miss{{ "es" if near | length != 1 }}: {% for name, n in near_reasons %}{{ name }} ({{ n }}){{ ", " if not loop.last }}{% endfor %}</p>
 <details><summary>Show near-misses</summary>
@@ -113,6 +121,23 @@
 </table>
 </div>
 {% else %}<p class="muted">Not reconciled yet: the bot's drift row has not matched this trade against its backtest.</p>{% endif %}
+{% elif position %}
+<ul class="plain">
+  <li>bought {{ position.shares | num(4) }} at the ask {{ position.entry_price | num(2) }}, quoted {{ position.quoted_at | local("%H:%M:%S") }}, cost {{ position.entry_cost | num(2) }}</li>
+  {% if position.exited_at %}<li>sold at the bid {{ position.exit_price | num(2) }} on {{ position.exited_at | local }} ({{ position.exit_reason }}), cost {{ position.exit_cost | num(2) }}, profit <span class="{{ position.profit | tone }}">{{ position.profit | num(2) }}</span></li>
+  {% else %}<li>open: it sells at the bid once an exit check passes</li>{% endif %}
+</ul>
+{% if exit %}
+<h3>Exit checks</h3>
+<div class="scroll">
+<table>
+  <thead><tr><th>Check</th><th class="n">Value</th><th class="n">Threshold</th><th>Pass</th></tr></thead>
+  <tbody>
+  {% for c in exit.checks %}<tr><td>{{ c.name }}</td><td class="n">{{ c.value | tv }}</td><td class="n">{{ c.threshold | tv }}</td><td class="{{ 'up' if c.pass else 'down' }}">{{ "yes" if c.pass else "no" }}</td></tr>{% endfor %}
+  </tbody>
+</table>
+</div>
+{% endif %}
 {% elif drill %}
 <p class="muted">A drill rests one order far from the market and cancels it; it tests the order path, not a strategy.{% if drill.error %} <code class="down">{{ drill.error }}</code>{% endif %}</p>
 {% elif call %}

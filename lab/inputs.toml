@@ -127,3 +127,21 @@ series = "KXHIGHPHIL"
 cli = "CLIPHL"
 lat = 39.8733
 lon = -75.2268
+
+[inputs.daily_close]
+title = "A stock's split- and dividend-adjusted daily close"
+signal_source = "price"
+origin = "alpaca daily bars"
+cadence = "each session"
+
+[inputs.stock_bid]
+title = "A stock's latest best bid"
+signal_source = "price"
+origin = "alpaca latest quote"
+cadence = "each pass"
+
+[inputs.stock_ask]
+title = "A stock's latest best ask"
+signal_source = "price"
+origin = "alpaca latest quote"
+cadence = "each pass"

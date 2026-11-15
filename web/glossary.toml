@@ -9,7 +9,7 @@ replaces = "dry run, in UI text"
 
 [[term]]
 name = "League"
-means = "Paper accounts trading one asset class against live prices with simulated fills. There is a crypto league, an event-contract league and, once built, a stock league."
+means = "Paper accounts trading one asset class against live prices with simulated fills. There is a crypto league, an event-contract league and a stock league."
 replaces = "Crypto dry-run league, Event-contract paper league"
 
 [[term]]

@@ -1,0 +1,29 @@
+# The stock league (lab/stocks.py): paper accounts on a small ETF universe, one per family variant below, filled at
+# Alpaca's latest quote with nothing sent to any order API. Prices come from lab/broker.toml [alpaca_data]; costs from
+# lab/calls.toml cost_bps, paid on each side's notional. A grid is lab/grid.py's: a list is an axis.
+
+# Broad index, bond, gold and sector ETFs: deep books, so the quote is the price, and every check reads plainly.
+universe = ["SPY", "QQQ", "IWM", "DIA", "TLT", "GLD", "XLE", "XLF", "XLK", "XLV"]
+
+capital = 10000.0      # each account's paper capital, USD
+stake = 1000.0         # USD per entry; shares are fractional, stake over the ask
+max_open = 8           # open positions an account holds at most
+history_days = 400     # calendar days of daily bars read, enough for a 200-session average
+quote_feed = "iex"     # the Basic plan's only real-time quote feed (lab/broker.py AlpacaData.quotes)
+max_quote_age_min = 15 # a quote older than this is not a price: no entry or exit on it
+max_spread_bps = 20    # the spread over the mid an entry or exit accepts
+session = { open = "09:30", close = "16:00", tz = "America/New_York" }  # a pass outside it is funnel `market_closed`
+near_misses = 2        # near-miss decisions kept per account per pass (one check failed)
+trace_days = 30        # near-miss decisions and funnel rows older than this are cut
+
+# Trend: hold while the last close is above its n-session simple average; sell when it closes below.
+[families.trend]
+sma = [50, 200]
+
+# Reversion: buy after the last `lookback` sessions fell at least `drop`; sell once the close is back above its
+# `exit_sma`-session average or after `max_days` sessions held.
+[families.reversion]
+lookback = 5
+drop = [0.03, 0.05]
+exit_sma = 5
+max_days = 10

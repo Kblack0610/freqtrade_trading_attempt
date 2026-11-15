@@ -44,6 +44,7 @@ import tomllib
 from pathlib import Path
 from urllib.parse import urlencode, urlparse
 
+import pandas as pd
 import requests
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
@@ -144,11 +145,13 @@ class AlpacaData:
             raise RuntimeError(f"alpaca data GET {path}: HTTP {r.status_code}: {str(r.text)[:300]}")
         return r.json()
 
-    def closes(self, symbols: list[str], start: dt.date) -> dict[str, list[tuple[dt.date, float]]]:
-        """Each symbol's split- and dividend-adjusted daily closes from start, oldest first, as (session date, close)."""
+    def closes(self, symbols: list[str], start: dt.date,
+               end: dt.datetime | None = None) -> dict[str, list[tuple[dt.date, float]]]:
+        """Each symbol's split- and dividend-adjusted daily closes from start, oldest first, as (session date, close).
+        A read during the session passes `end` at least 15 minutes ago, the newest SIP data the Basic plan serves."""
         out: dict[str, list[tuple[dt.date, float]]] = {s: [] for s in symbols}
         params = {"symbols": ",".join(symbols), "timeframe": "1Day", "start": start.isoformat(), "adjustment": "all",
-                  "feed": self.feed, "limit": 10000}
+                  "feed": self.feed, "limit": 10000} | ({} if end is None else {"end": end.isoformat()})
         while True:
             page = self.call("GET", "/v2/stocks/bars", params)
             for sym, bars in (page.get("bars") or {}).items():
@@ -156,6 +159,15 @@ class AlpacaData:
             if not page.get("next_page_token"):
                 return {s: sorted(v) for s, v in out.items()}
             params = {**params, "page_token": page["next_page_token"]}
+
+    def quotes(self, symbols: list[str], feed: str) -> dict[str, dict]:
+        """Each symbol's latest quote as {bid, ask, bid_size, ask_size, at}. The Basic plan serves real-time quotes
+        from IEX only, so the stock league reads feed "iex" (lab/stocks.toml)."""
+        page = self.call("GET", "/v2/stocks/quotes/latest", {"symbols": ",".join(symbols), "feed": feed})
+        return {s: {"bid": float(q["bp"]), "ask": float(q["ap"]), "bid_size": float(q["bs"]),
+                    "ask_size": float(q["as"]),
+                    "at": pd.Timestamp(q["t"]).tz_convert("UTC").floor("us").to_pydatetime()}
+                for s, q in (page.get("quotes") or {}).items()}
 
 
 class RobinhoodCrypto:

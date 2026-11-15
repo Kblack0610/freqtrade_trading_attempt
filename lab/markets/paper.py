@@ -49,12 +49,12 @@ from psycopg.types.json import Jsonb
 
 from lab import inputs, metrics
 from lab.db import connect
+from lab.decisions import decide, funnel, prune
 from lab.grid import variants
 from lab.markets import backtest, fees
 from lab.markets.backtest import Market
 from lab.markets.families import Forecasts, Longshot, TTTotals, Weather, line_book, line_resolution, meetings_of
 from lab.markets.recorder import load_config
-from lab.util import finite
 
 UTC = dt.timezone.utc
 FAMILIES = ("longshot", "tt_totals", "weather")
@@ -205,17 +205,6 @@ def held(conn, account: str) -> int:
                         (account,)).fetchone()[0]
 
 
-def _json(v):
-    """A trace value jsonb can hold: finite numbers, timestamps as ISO strings."""
-    if isinstance(v, (dt.datetime, pd.Timestamp)):
-        return v.isoformat()
-    if isinstance(v, dict):
-        return {k: _json(x) for k, x in v.items()}
-    if isinstance(v, (list, tuple)):
-        return [_json(x) for x in v]
-    return finite(v)
-
-
 def traced(strategy, row: Row, m: Market, venue: str) -> tuple[list, list, list]:
     """The strategy's orders on one book row, the checks it ran and the inputs it read: the row's quote and the
     market's close from the recorder, then whatever the family read, each with its source from lab/inputs.toml and
@@ -227,22 +216,6 @@ def traced(strategy, row: Row, m: Market, venue: str) -> tuple[list, list, list]
     read = [{"name": k, "value": v} for k, v in book.items()] + strategy.inputs
     return orders, strategy.checks, [{"as_of": row.ts, **i, "source": inputs.source(REGISTRY, i["name"], venue)}
                                      for i in read]
-
-
-def decide(conn, account: str, venue: str, instrument: str, now: dt.datetime, action: str, rule: str, inputs: list,
-           checks: list, sizing: dict | None = None, fill_id: int | None = None) -> None:
-    conn.execute(
-        "INSERT INTO decisions (league, account, venue, instrument, decided_at, action, rule, inputs, checks, sizing, "
-        "fill_source, fill_id) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
-        (LEAGUE, account, venue, instrument, now, action, rule, Jsonb(_json(inputs)), Jsonb(_json(checks)),
-         None if sizing is None else Jsonb(_json(sizing)), None if fill_id is None else "paper", fill_id))
-
-
-def funnel(conn, venue: str, now: dt.datetime, counts: dict) -> None:
-    """One decision_funnel row per (account, reason) of this pass."""
-    conn.cursor().executemany(
-        "INSERT INTO decision_funnel (league, account, venue, pass_at, reason, n) VALUES (%s, %s, %s, %s, %s, %s)",
-        [(LEAGUE, a, venue, now, reason, n) for (a, reason), n in sorted(counts.items())])
 
 
 def trade(conn, account: str, strategy, book: list[tuple[Row, Market]], capital: float, share: float,
@@ -261,7 +234,7 @@ def trade(conn, account: str, strategy, book: list[tuple[Row, Market]], capital:
             failed = [c["name"] for c in checks if not c["pass"]]
             counts[(account, failed[0] if failed else "no order")] += 1
             if len(failed) == 1 and near < near_misses and set(strategy.CHECKS) <= {c["name"] for c in checks}:
-                decide(conn, account, venue, row.market_id, now, "near_miss", rule, inputs, checks)
+                decide(conn, LEAGUE, account, venue, row.market_id, now, "near_miss", rule, inputs, checks)
                 near += 1
             continue
         for o in orders:
@@ -288,17 +261,17 @@ def trade(conn, account: str, strategy, book: list[tuple[Row, Market]], capital:
                  fee)).fetchone()
             counts[(account, "ordered" if stored else "already entered")] += 1
             if stored:
-                decide(conn, account, venue, o.market_id, now, "enter", rule, inputs, checks,
+                decide(conn, LEAGUE, account, venue, o.market_id, now, "enter", rule, inputs, checks,
                        {"side": o.side, "stake": o.stake, "limit": o.limit, "share": share, "taken": before,
                         "depth": row.depth_yes if o.side == "yes" else row.depth_no, "cash": left, "contracts": n,
-                        "price": price, "fee": fee, "fees": fee_cfg}, stored[0])
+                        "price": price, "fee": fee, "fees": fee_cfg}, ("paper", stored[0]))
             sent += 1
             if n:
                 filled += 1
                 open_ += 1
                 left -= n * price + fee
                 taken[(o.market_id, o.side)] = before + n
-    funnel(conn, venue, now, counts)
+    funnel(conn, LEAGUE, venue, now, counts)
     return {"orders": sent, "fills": filled, "no_cash": broke, "capped": capped}
 
 
@@ -369,12 +342,9 @@ def run_pass(conn, venue: str, cfg: dict, now: dt.datetime) -> dict:
             out["accounts"][a] = trade(conn, a, strategy_of(f, p, meetings, fairs, forecasts), book, capital[a],
                                        bcfg["depth_share"], fee_cfg, now, pcfg["max_open"], venue, pcfg["near_misses"])
         if not fresh:
-            funnel(conn, venue, now, {(a, "stale_book"): 1 for a, _, _ in trading})
+            funnel(conn, LEAGUE, venue, now, {(a, "stale_book"): 1 for a, _, _ in trading})
         keep = now - dt.timedelta(days=pcfg["trace_days"])
-        conn.execute("DELETE FROM decisions WHERE league = %s AND venue = %s AND action = 'near_miss' "
-                     "AND decided_at < %s", (LEAGUE, venue, keep))
-        conn.execute("DELETE FROM decision_funnel WHERE league = %s AND venue = %s AND pass_at < %s",
-                     (LEAGUE, venue, keep))
+        prune(conn, LEAGUE, venue, keep)
         closing_line(conn, venue, book, now)
         mark(conn, venue, now)
         out["drifted"] = forward(conn, venue, pcfg["drift_min_trades"], now)
