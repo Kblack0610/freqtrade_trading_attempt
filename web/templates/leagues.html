@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}Leagues{% endblock %}
+{% block body %}
+<h1>Leagues</h1>
+<p class="muted">How are the paper accounts doing? Each league is paper accounts trading one asset class against live prices with simulated fills; every league shows the same columns (<a href="/guide#glossary">what each means</a>). Paper money only: nothing here can reach a real order API. Each lane keeps its own profit, never a total across leagues. The watcher holds each account to the daily loss limit; the drawdown alert fires {{ hard_stop | pct(0) }} of capital below an account's peak.</p>
+<p>{% for t in tabs %}<a href="#{{ t.id }}">{{ t.title }}</a>{% if not loop.last %} - {% endif %}{% endfor %}</p>
+{% for t in tabs %}
+<h2 id="{{ t.id }}">{{ t.title }}</h2>
+<p class="muted">{{ t.about }}</p>
+{% if t.rows %}
+<div class="scroll">
+<table>
+  <thead><tr><th>Account</th><th>Rule</th><th class="n">Capital</th><th class="n">Equity</th><th class="n">Return</th><th class="n">Realized</th><th class="n">Open</th><th class="n">Fills</th><th class="n">Closed</th><th class="n">Max drawdown</th><th>Watch</th><th>Marked</th></tr></thead>
+  <tbody>
+  {% for a in t.rows %}
+  <tr><td>{% if a.href %}<a href="{{ a.href }}">{{ a.account }}</a>{% else %}{{ a.account }}{% endif %}</td><td>{{ a.rule }}</td>
+    <td class="n">{{ a.capital | num(0) }}</td><td class="n">{{ a.equity | num(2) }}</td><td class="n {{ a.ret | tone }}">{{ a.ret | pct(2) }}</td>
+    <td class="n {{ a.realized | tone }}">{{ a.realized | num(2) }}</td><td class="n">{{ a.open if a.open is not none else "-" }}</td>
+    <td class="n">{{ a.fills if a.fills is not none else "-" }}</td><td class="n">{{ a.closed if a.closed is not none else "-" }}</td><td class="n">{{ a.max_drawdown | pct(1) }}</td>
+    <td>{% if a.watch in ("stopped", "day limit hit") %}<span class="down">{{ a.watch }}</span>{% elif a.watch == "retired" %}<span class="muted">retired</span>{% else %}{{ a.watch }}{% endif %}</td>
+    <td class="{{ 'down' if stale(a.marked_at, 3600) }}">{{ a.marked_at | ago }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% if t.forward %}
+<h3>Paper against backtest</h3>
+<p class="muted">Settled paper return per trade minus the backtest's, with its 90% interval; red when the interval excludes zero (a drifted account is filed on the agent board).</p>
+<div class="scroll">
+<table>
+  <thead><tr><th>Account</th><th class="n">Paper trades</th><th class="n">Gap per trade</th><th>Checked</th></tr></thead>
+  <tbody>
+  {% for a in t.forward %}
+  <tr><td>{{ a.account }}</td><td class="n">{{ a.paper_trades if a.paper_trades is not none else "-" }}</td><td class="n {{ 'down' if a.drifted }}">{{ a.gap_lo | pct(2) }} to {{ a.gap_hi | pct(2) }}{% if a.drifted %} drifted{% endif %}</td><td>{{ a.checked_at | ago }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endif %}
+{% if t.fills %}
+<h3>Newest fills</h3>
+<div class="scroll">
+<table>
+  <thead><tr><th>Opened</th><th>Account</th><th>Instrument</th><th class="n">Stake</th><th>Closed</th><th class="n">Profit</th></tr></thead>
+  <tbody>
+  {% for f in t.fills %}
+  <tr><td><a href="/trades/{{ f.source }}/{{ f.fill_id }}{% if f.source == 'freqtrade' %}?bot={{ f.account | urlencode }}{% endif %}">{{ f.open_date | local }}</a></td><td>{{ f.account }}</td><td>{{ f.title or f.instrument }}</td>
+    <td class="n">{{ f.stake | num(2) }}</td><td>{{ f.close_date | local if f.close_date else "open" }}</td><td class="n {{ f.profit_abs | tone }}">{{ f.profit_abs | num(2) }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endif %}
+{% elif t.id == "stocks" %}<p class="muted">No stock league yet.</p>
+{% else %}<p class="muted">No accounts in this league yet.</p>{% endif %}
+{% endfor %}
+{% endblock %}

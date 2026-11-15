@@ -2,6 +2,7 @@
 
 The repo README is the reference for layout, the analysis and the site. These pages go deeper on one subject each.
 
+- Glossary: one vocabulary for the site (paper, league, account, replay account, cohort, lane, decision), in `web/glossary.toml` and rendered on `/guide#glossary`.
 - [Overview](overview.md): features and implementation status.
 - [Architecture](architecture.md): components, data flow and storage boundaries.
 - [Standards](standards.md): contributor checks and their scope.

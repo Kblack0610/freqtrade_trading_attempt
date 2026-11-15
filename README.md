@@ -1,6 +1,6 @@
 # freqtrade_trading_attempt
 
-Strategy code and tooling for a Freqtrade dry-run league: a set of paper-trading bots, each running one strategy on one exchange, plus a nightly analysis that backtests every strategy over all the price history there is and ranks them with confidence intervals, bias checks and return estimates. No real money, ever.
+Strategy code and tooling for a Freqtrade paper-trading league: a set of bots, each running one strategy on one exchange, plus a nightly analysis that backtests every strategy over all the price history there is and ranks them with confidence intervals, bias checks and return estimates. No real money, ever.
 
 The league runs on home-k3s. Its deploy (roster, StatefulSet, CronJobs, secrets) lives in home-config at `apps/freqtrade/`. Every pod runs one image, `ghcr.io/kblack0610/trader`: the `freqtradeorg/freqtrade:2026.10` release, pinned by digest in the `Dockerfile`, plus psycopg plus this repo at `/repo`. GitHub Actions builds it on each push to master (tags `sha-<7>` and `latest`), and home-config pins it by digest, so a change here goes live only when home-config bumps the digest.
 
@@ -79,7 +79,7 @@ The `strategies` cohort runs every strategy in dry run: `python -m lab.cohorts p
 
 The `winners` cohort is the candidate league: the shadow paper accounts (`lab/shadow.py`, see Shadow accounts) that the nightly rule judged winning. `python -m lab.cohorts pick winners` prints one row per winning account, best forward return first, up to `max_bots` (8), on the account's own venue under its own overlay (a non-base overlay is in the bot name). An overlay no longer in `lab/variants.toml` is left out. A shadow mark is a backtest replayed on candles, so a pod is what adds live fills and fees. `ci/cohort_roster.py winners` opens the home-config PR like the others; a person merges it.
 
-The `markets` cohort is the event-contract paper league (`lab/markets/paper.py`): one paper account per variant of each family in `lab/markets.toml` [paper], with no roster rows. The overview and `/cohorts` show it as one more cohort row (accounts marked of accounts, profit as equity less capital, settled and open fills), and the overview's Event-contract paper league card counts it on its own, never added to the crypto bots' profit. It fills only while a CronJob runs `python -m lab.markets.paper` after each recorder sweep (home-config, board row tr-74).
+The event-contract league (`lab/markets/paper.py`) is not a cohort: it is one paper account per variant of each family in `lab/markets.toml` [paper], with no roster rows, and it is scored on `/leagues` with the crypto league's bots in the same columns (`lab/leagues.py`). The overview's Event-contract league card counts it on its own, never added to the crypto bots' profit. It fills only while `python -m lab.markets.paper` runs after each recorder sweep (the CronJob is in home-config `apps/freqtrade/`).
 
 ## Run locally
 
@@ -279,6 +279,8 @@ On razer-laptop, walk-forward (01:00 UTC) adds folds it has not stored and analy
 
 ### Shadow accounts
 
+The site calls them replay accounts (`/accounts#shadow`): they have no fills, so they are not a league. The names are in [the glossary](web/glossary.toml), rendered on `/guide#glossary`.
+
 `lab/shadow.py` runs in each analysis after horizon and before the research loop. A series, a strategy x venue as it stands or under one setup overlay, opens a shadow paper account, a `shadow_accounts` row with paper capital and no pod, when its 365-day backtest expectancy interval and its walk-forward out-of-sample mean profit per trade are both above zero on at least 30 trades each, it never had an account, and its BTC-residual daily returns correlate at |rho| 0.5 or under with every active account of its cohort; best Sharpe low end first, until the cohort is full. Short holds the median trade under a day, long a day or more, 60 accounts each. An overlay series is keyed by its overlay id (`shadow_accounts.overlay`, account `shadow-<strategy>-<venue>-<overlay>`), is gated on its own 365-day window and its base's walk-forward edge (walk-forward scores only the strategy as it stands), and meets the same diversity bar, so the `lab/variants.toml` grid is what the loop spawns from. Each night appends `shadow_marks`, one per day after the promotion day from `strategy_daily` (`overlay_daily` for an overlay series) through the last day its backtest covers: days replayed on candles that nobody had seen at promotion, never rewritten. The rule: retire past the cohort's drawdown (20% short, 30% long), when the block-bootstrap interval of the mean daily return is below zero after the minimum days (30 short, 90 long), or at the day limit (60, 180) without winning; winning when up with the interval's low end above zero. A retired series never reopens (an overlay of it still can), and its slot is refilled the same night. All of it is `lab/suggest.toml [shadow]`; `/accounts` ranks the accounts, `trader_shadow_accounts{cohort,state}` counts them, and home-config's `TraderShadowMarksStale` warns when the newest mark passes 50 hours while an account is open. Paper only: nothing here trades or edits the roster; the winners reach a pod only through the `winners` cohort (Cohorts) and a person's merge.
 
 ## Confidence
@@ -415,6 +417,8 @@ docker run --rm -p 127.0.0.1:18765:8000 --entrypoint uvicorn -e DATABASE_URL=...
 ```
 
 Sign-in cannot complete against a fake Forgejo; mint a cookie with `auth.make_session(auth.Config(), "kblack0610")` under the same `SESSION_KEY` and send it as `trader_session`.
+
+`/leagues` is the one scorecard: `lab/leagues.py` maps the crypto bots and the event-contract accounts into the same columns (account, rule in words, capital, equity, return, realized, open, fills, closed, max drawdown, watch, marked), with each league's newest fills; the stock tab waits for the stock league. The vocabulary (paper, league, account, replay account, cohort, lane, decision) is `web/glossary.toml`, rendered on `/guide#glossary` with the Moved and removed table.
 
 `/trades/{source}/{id}` opens one row of the `fills` view (source `paper`, `freqtrade`, `drill` or `call`; a freqtrade id is per bot, so it takes `?bot=<name>`). It shows the fill's `decisions` row (rule, each check against its threshold, each input with its source and time, sizing and fees), that pass's funnel and near-misses for the account, and per source the order, market and resolution, the trade's markouts and reconcile rows, the drill order, or the call's scores. A fill with no decision row says it was recorded before decisions were traced. The newest paper fills and demo orders on `/markets/book`, a bot's trades, `/live` positions and `/calls` link there; shadow accounts replay returns with no fills, so they have no detail page.
 

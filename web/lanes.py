@@ -84,7 +84,7 @@ def betting(read: dict, now: dt.datetime, cfg: dict) -> dict:
              part("open positions", sum(a["open_positions"] or 0 for a in marked)),
              part("paper P&L", usd(sum(a["equity"] - a["capital"] for a in marked)))]
     parts += [part("stale", len(late), "amber")] if late else []
-    first = [row(a["account"], "never marked" if not a["marked_at"] else "last marked", "amber", "/markets/book",
+    first = [row(a["account"], "never marked" if not a["marked_at"] else "last marked", "amber", "/leagues#event-contracts",
                  a["marked_at"]) for a in late]
     return card(len(accounts) - len(late), f"of {len(accounts)} accounts marked", "amber" if late else "green",
                 "each account's newest mark; stale past its venue's paper age in web/venues.toml", parts, first)
