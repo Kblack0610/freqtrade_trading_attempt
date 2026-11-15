@@ -26,6 +26,16 @@
 </div>
 {% else %}<p class="muted">No markets backtest has run yet.</p>{% endif %}
 
+<h3>Readiness gate</h3>
+<p class="muted">Each variant's windows before the lockbox, pooled and held to the <code>lab/suggest.toml</code> [confidence] gates with the betting lane's own trial count; the lockbox months are read only for a variant that passes every other gate. The paper league trades exactly the ready variants. A variant entering or leaving this set, or a paper account drifting from its backtest, is filed on the agent board by the nightly research loop.</p>
+<p>{{ readiness | selectattr("ready") | list | length }} of {{ readiness | length }} variants are ready for paper.</p>
+{% for r in readiness %}
+<details class="card">
+  <summary><strong>{{ r.family }}</strong> <span title="{{ r.params | tojson }}">{{ r.variant[:8] }}</span> on {{ r.venue }}: {% if r.ready %}<span class="up">ready</span>{% else %}<span class="down">not ready: {{ (r.gates | rejectattr("pass") | first).gate }}</span>{% endif %} <span class="muted">{{ r.passed }} of {{ r.gates | length }} gates, {{ r.windows }} windows, {{ "{:,}".format(r.trades) }} trades, per trade {{ r.expectancy | pct(2) }} ({{ r.expectancy_lo | pct(2) }} to {{ r.expectancy_hi | pct(2) }}), {{ r.trials }} trials, judged {{ r.computed_at | ago }}</span></summary>
+  {% set gates = r.gates %}{% include "_gates.html" %}
+</details>
+{% else %}<p class="muted">No variant has been judged yet: the gate needs whole backfilled months.</p>{% endfor %}
+
 <h3>By contract category</h3>
 <p class="muted">The same backtests split by the category of each trade's series (<code>lab/markets.toml</code> [categories]; series that match none are "other"), since the longshot bias differs by category. Net return per trade with its block-bootstrap interval; a thin category has no interval.</p>
 {% if categories %}
@@ -47,14 +57,15 @@
 {% if accounts %}
 <div class="scroll">
 <table>
-  <thead><tr><th>Account</th><th>Family</th><th>Signal source</th><th>Instrument</th><th>Horizon</th><th>Venue</th><th class="n">Capital</th><th class="n">Equity</th><th class="n">Return</th><th class="n">Realized</th><th class="n">Open</th><th class="n">Fills</th><th class="n">Settled</th><th>Watch</th><th>Marked</th></tr></thead>
+  <thead><tr><th>Account</th><th>Family</th><th>Signal source</th><th>Instrument</th><th>Horizon</th><th>Venue</th><th class="n">Capital</th><th class="n">Equity</th><th class="n">Return</th><th class="n">Realized</th><th class="n">Open</th><th class="n">Fills</th><th class="n">Settled</th><th class="n" title="Settled paper return per trade minus the backtest's, 90% interval">Paper vs backtest</th><th>Watch</th><th>Marked</th></tr></thead>
   <tbody>
   {% for a in accounts %}
   <tr><td><span title="{{ a.params | tojson }}">{{ a.account }}</span></td><td>{{ a.family }}</td>{% set category = family_categories.get(a.family, {}) %}<td>{{ category.signal_source or "-" }}</td><td>{{ category.instrument or "-" }}</td><td>{{ category.horizon or "-" }}</td><td>{{ a.venue }}</td>
     <td class="n">{{ a.capital | num(0) }}</td><td class="n">{{ a.equity | num(2) }}</td><td class="n {{ a.ret | tone }}">{{ a.ret | pct(2) }}</td>
     <td class="n {{ a.realized | tone }}">{{ a.realized | num(2) }}</td><td class="n">{{ a.open_positions if a.open_positions is not none else "-" }}</td>
     <td class="n">{{ a.fills }}</td><td class="n">{{ a.settled }}</td>
-    <td>{% if a.stopped_at %}<span class="down">stopped</span>{% elif a.breached_at %}<span class="down">day limit hit</span>{% else %}{{ a.state or "-" }}{% endif %}</td>
+    <td class="n">{% if a.drifted is none %}<span class="muted">-</span>{% else %}<span class="{{ 'down' if a.drifted else '' }}">{{ a.gap_lo | pct(2) }} to {{ a.gap_hi | pct(2) }}{% if a.drifted %} drifted{% endif %}</span>{% endif %}</td>
+    <td>{% if a.retired_at %}<span class="muted">retired</span>{% elif a.stopped_at %}<span class="down">stopped</span>{% elif a.breached_at %}<span class="down">day limit hit</span>{% else %}{{ a.state or "-" }}{% endif %}</td>
     <td class="{{ 'down' if stale(a.marked_at, 3600) }}">{{ a.marked_at | ago }}</td></tr>
   {% endfor %}
   </tbody>
