@@ -52,7 +52,10 @@ bars_min_volume = 0
 bars_since_days = 45
 
 [history.polymarket]
-# volumeNum is dollars traded.
+# volumeNum is dollars traded. The settled walk asks Gamma for markets over this floor (volume_num_min): the
+# unfiltered closed walk 500s on a busy day. Changing it changes the query the saved cursor hashes: run the job
+# with --restart once.
+settled_min_volume = 1000
 bars_period_min = 60
 bars_min_volume = 1000
 bars_since_days = 1095
