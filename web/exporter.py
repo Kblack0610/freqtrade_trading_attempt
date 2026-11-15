@@ -68,7 +68,8 @@ RECONCILE = ("SELECT bot, kind, count(*) AS n, avg(delay_s) AS delay_s, avg(pric
              "avg(profit_gap) AS profit FROM reconcile GROUP BY 1, 2")
 PAPER = "SELECT account, capital, equity, open_positions, marked_at FROM paper_accounts WHERE marked_at IS NOT NULL"
 # The decision record (lab/markets/paper.py trade, migration 055): decisions per action, each account's newest pass
-# through the funnel, and the fills since a league's first traced entry that have no decision.
+# through the funnel, and the fills since a league's first traced entry that have no decision (a bot trade counts
+# once an entry order filled; lab/ingest.py writes crypto decisions).
 DECISIONS = "SELECT league, account, action, count(*) AS n FROM decisions GROUP BY 1, 2, 3"
 FUNNEL = """
 SELECT f.league, f.account, f.reason, f.n FROM decision_funnel f
@@ -79,6 +80,12 @@ SELECT 'event_contracts' AS league, count(*) AS n FROM paper_orders o
 WHERE o.contracts > 0
   AND o.sent_at >= (SELECT min(decided_at) FROM decisions WHERE league = 'event_contracts' AND action = 'enter')
   AND NOT EXISTS (SELECT 1 FROM decisions d WHERE d.fill_source = 'paper' AND d.fill_id = o.id)
+UNION ALL
+SELECT 'crypto', count(*) FROM bot_trades t
+WHERE (t.raw->>'nr_of_successful_entries')::int > 0
+  AND t.open_date >= (SELECT min(decided_at) FROM decisions WHERE league = 'crypto')
+  AND NOT EXISTS (SELECT 1 FROM decisions d WHERE d.fill_source = 'freqtrade' AND d.account = t.bot
+                  AND d.fill_id = t.trade_id AND d.decided_at = t.open_date)
 """
 # lab/shadow.py: accounts per cohort and state, and the newest day marked (a day's mark lands after it ends).
 SHADOW = "SELECT cohort, state, count(*) AS n FROM shadow_accounts GROUP BY 1, 2"

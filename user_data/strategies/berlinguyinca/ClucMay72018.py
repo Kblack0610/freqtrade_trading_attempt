@@ -15,9 +15,10 @@ from pandas import DataFrame, DatetimeIndex, merge
 import talib.abstract as ta
 import freqtrade.vendor.qtpylib.indicators as qtpylib
 import numpy  # noqa
+from lab.entry_inputs import EntryInputs
 
 
-class ClucMay72018(IStrategy):
+class ClucMay72018(EntryInputs, IStrategy):
     """
 
     author@: Gert Wohlgemuth

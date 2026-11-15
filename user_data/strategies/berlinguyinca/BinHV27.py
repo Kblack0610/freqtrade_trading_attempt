@@ -14,9 +14,10 @@ from pandas import DataFrame, DatetimeIndex, merge
 import talib.abstract as ta
 import freqtrade.vendor.qtpylib.indicators as qtpylib
 import numpy  # noqa
+from lab.entry_inputs import EntryInputs
 
 
-class BinHV27(IStrategy):
+class BinHV27(EntryInputs, IStrategy):
     """
 
         strategy sponsored by user BinH from slack

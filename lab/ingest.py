@@ -4,6 +4,9 @@
 Per bot: closed trades (/trades, paged) and open trades (/status) are upserted by
 (bot, trade_id, open_date), and one bot_snapshots row is written from /profit, /balance and
 /show_config, with the newest candle time of each open trade's pair (/pair_candles) for /live.
+Each trade the bot recorded its entry candle for (lab/entry_inputs.py, Freqtrade custom data) gets one `crypto`
+decision in the same transaction, read from /trades/open/custom-data, and one by one for a trade that closed
+within TRACE_CLOSED_HOURS with none yet. A failed custom-data read leaves those trades untraced until the next run.
 Re-running adds no duplicates. An open trade the bot no longer reports (an entry that timed out
 unfilled) is deleted. One unreachable bot gets a snapshot with its error and the
 others carry on. Each run then thins old snapshots, see prune_snapshots.
@@ -24,6 +27,7 @@ from typing import Callable
 from psycopg.types.json import Jsonb
 
 from lab.db import connect
+from lab.entry_inputs import KEY as ENTRY_INPUTS
 from lab.league import Row, roster_rows
 from lab.util import utc
 
@@ -34,6 +38,10 @@ PAGE = 500  # the most /trades returns per call
 # bot_snapshots keeps every row this long, then the last of each hour, then the last of each day for good.
 SNAPSHOT_FULL_DAYS = 7
 SNAPSHOT_HOURLY_DAYS = 90
+
+LEAGUE = "crypto"  # decisions.league
+# A trade that opened and closed between two runs is read one by one, if it closed this recently and has no decision.
+TRACE_CLOSED_HOURS = 6
 
 Fetch = Callable[..., object]
 
@@ -107,6 +115,47 @@ def closed_trades(fetch: Fetch, i: int) -> list[dict]:
             return out
 
 
+def traced(conn, bot: str, trades: list[dict]) -> set[tuple]:
+    """(trade_id, open_date) of the trades that already have their decision."""
+    got = conn.execute("SELECT fill_id, decided_at FROM decisions WHERE fill_source = 'freqtrade' AND account = %s "
+                       "AND fill_id = ANY(%s)", (bot, [t["trade_id"] for t in trades])).fetchall()
+    return {(fid, utc(at)) for fid, at in got}
+
+
+def entry_inputs(fetch: Fetch, i: int, trades: list[dict], done: set[tuple], now: dt.datetime) -> dict[int, dict]:
+    """trade_id -> the entry candle the bot recorded, for each trade still without a decision."""
+    def value(entries: object) -> dict[int, dict]:
+        return {e["trade_id"]: d["value"] for e in entries for d in e["custom_data"] if d["key"] == ENTRY_INPUTS}
+
+    todo = [t for t in trades if (t["trade_id"], t["open_date"]) not in done]
+    got = value(fetch(i, f"trades/open/custom-data?key={ENTRY_INPUTS}&limit=500")) if any(
+        t["is_open"] for t in todo) else {}
+    since = now - dt.timedelta(hours=TRACE_CLOSED_HOURS)
+    for t in todo:
+        if not t["is_open"] and t["close_date"] is not None and t["close_date"] >= since:
+            got.update(value(fetch(i, f"trades/{t['trade_id']}/custom-data?key={ENTRY_INPUTS}")))
+    ids = {t["trade_id"] for t in todo}
+    return {tid: v for tid, v in got.items() if tid in ids}
+
+
+def decision_row(row: Row, t: dict, got: dict) -> dict:
+    """A trade's entry as a decision: the strategy's signal, its candle's columns as inputs, the stake as sizing."""
+    raw = t["raw"].obj
+    tag = t["enter_tag"]
+    source = f"{row.exchange} {got['timeframe']} candle"
+    return {
+        "league": LEAGUE, "account": row.name, "venue": row.exchange, "instrument": t["pair"],
+        "decided_at": t["open_date"], "action": "enter",
+        "rule": f"{row.strategy}: entry signal" + (f" {tag}" if tag else ""),
+        "inputs": Jsonb([{"name": k, "value": v, "source": source, "as_of": got["candle"]}
+                         for k, v in got["values"].items()]),
+        "checks": Jsonb([]),
+        "sizing": Jsonb({"stake": t["stake_amount"], "amount": t["amount"], "price": t["open_rate"],
+                         "fee_rate": raw.get("fee_open"), "fee": raw.get("fee_open_cost")}),
+        "fill_source": "freqtrade", "fill_id": t["trade_id"],
+    }
+
+
 SNAPSHOT_COLS = ["bot", "ts", "source", "dry_run", "closed_trades", "open_trades", "profit_closed_pct",
                  "profit_all_pct", "profit_closed_abs", "profit_all_abs", "winrate_pct", "max_drawdown_pct",
                  "profit_factor", "balance_total", "bot_start", "error", "raw"]
@@ -121,6 +170,9 @@ def insert_sql(table: str, cols: list[str], conflict: str) -> str:
 
 UPSERT_TRADE = insert_sql("bot_trades", TRADE_COLS, "(bot, trade_id, open_date) DO UPDATE SET " + ", ".join(
     f"{c} = EXCLUDED.{c}" for c in TRADE_COLS[3:]) + ", updated_at = now()")
+DECISION_COLS = ["league", "account", "venue", "instrument", "decided_at", "action", "rule", "inputs", "checks",
+                 "sizing", "fill_source", "fill_id"]
+INSERT_DECISION = insert_sql("decisions", DECISION_COLS, "ON CONSTRAINT decisions_fill DO NOTHING")
 INSERT_SNAPSHOT = insert_sql("bot_snapshots", SNAPSHOT_COLS, "(bot, ts) DO NOTHING")
 UPSERT_BOT = """INSERT INTO bots (name, exchange, strategy, cohort, overlay, first_seen, last_seen)
                 VALUES (%s, %s, %s, %s, %s, %s, %s)
@@ -154,6 +206,7 @@ def ingest_bot(conn, fetch: Fetch, i: int, row: Row, now: dt.datetime) -> dict:
     name = row.name
     snap: dict = {k: None for k in SNAPSHOT_COLS}
     trades: list[dict] = []
+    decisions: list[dict] = []
     try:
         cfg, prof, bal = fetch(i, "show_config"), fetch(i, "profit"), fetch(i, "balance")
         snap.update(snapshot_row(cfg, prof, bal))
@@ -164,15 +217,22 @@ def ingest_bot(conn, fetch: Fetch, i: int, row: Row, now: dt.datetime) -> dict:
     except Exception as e:  # one dead bot must not hide the others
         snap["error"] = f"{type(e).__name__}: {e}"
         trades = []
+    if trades:
+        try:
+            got = entry_inputs(fetch, i, trades, traced(conn, name, trades), now)
+            decisions = [decision_row(row, t, got[t["trade_id"]]) for t in trades if t["trade_id"] in got]
+        except Exception as e:  # the trades still land; their decisions follow on a later run
+            snap["raw"].obj["trace_error"] = f"{type(e).__name__}: {e}"
     snap.update(bot=name, ts=now, source="ingest")
     with conn.transaction():
         conn.execute(UPSERT_BOT, (*row, now, now))
         conn.cursor().executemany(UPSERT_TRADE, [{**t, "bot": name} for t in trades])
+        conn.cursor().executemany(INSERT_DECISION, decisions)
         if snap["error"] in (None, "NOT DRY RUN"):  # the fetch completed, so the trade list is whole
             conn.execute("DELETE FROM bot_trades WHERE bot = %s AND is_open AND NOT (trade_id = ANY(%s))",
                          (name, [t["trade_id"] for t in trades]))
         conn.execute(INSERT_SNAPSHOT, snap)
-    snap["trade_rows"] = len(trades)
+    snap["trade_rows"], snap["decision_rows"] = len(trades), len(decisions)
     return snap
 
 
@@ -184,7 +244,7 @@ def main(fetch: Fetch = http_fetch) -> int:
             snap = ingest_bot(conn, fetch, i, row, now)
             if snap["error"] == "NOT DRY RUN":
                 unsafe.append(row.name)
-            print(f"ingest: {row.name}: {snap['trade_rows']} trades, error={snap['error']}")
+            print(f"ingest: {row.name}: {snap['trade_rows']} trades, {snap['decision_rows']} traced, error={snap['error']}")
         print(f"ingest: pruned {prune_snapshots(conn, now)} snapshots")
     if unsafe:
         print(f"ingest: NOT DRY RUN: {unsafe}", file=sys.stderr)
