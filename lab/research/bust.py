@@ -123,7 +123,9 @@ def windows(trades: pd.DataFrame, spans: list[tuple]) -> dict:
     inside = [(opened >= a) & (opened <= b) for a, b, _ in spans]
     out = {f"{a} to {b}": (btc, trades[m]) for (a, b, btc), m in zip(spans, inside)}
     out["outside every fall"] = (None, trades[~pd.concat(inside, axis=1).any(axis=1)])
-    return out | {"whole history": (None, trades)}
+    short = trades["is_short"].astype(bool)
+    return out | {"whole history": (None, trades), "whole history, longs": (None, trades[~short]),
+                  "whole history, shorts": (None, trades[short])}
 
 
 def main() -> None:
