@@ -35,7 +35,7 @@ from lab import calls as calls_lab
 from lab import db, diversity, metrics, suggest, universe, taxonomy
 from lab import leagues as league_rows
 from lab import stocks as stocks_lab
-from lab.markets import paper as paper_lab, sweep_ages as market_sweep_ages
+from lab.markets import paper as paper_lab, paper_venues, sweep_ages as market_sweep_ages
 from web import auth, charts, exporter, glossary, lanes, nav
 from web import venues as venue_roster
 
@@ -214,6 +214,7 @@ SELECT a.*, w.state, w.breached_at, w.stopped_at,
        (SELECT count(*) FROM paper_orders o WHERE o.account = a.account AND o.contracts > 0) AS fills,
        (SELECT count(*) FROM paper_orders o WHERE o.account = a.account AND o.contracts > 0 AND o.settled_at IS NOT NULL) AS settled
 FROM paper_accounts a LEFT JOIN watch w ON w.bot = a.account
+WHERE a.venue = ANY(%s)
 ORDER BY a.equity DESC NULLS LAST, a.account
 """
 # The stock league's accounts (lab/stocks.py), in PAPER_ACCOUNTS' columns: settled counts closed positions.
@@ -373,6 +374,11 @@ def user_of(request: Request) -> str:
     return user
 
 
+def paper_accounts() -> list[dict]:
+    """The paper league's accounts: those of a venue in `[paper] venues`. One taken out keeps its rows, off every page."""
+    return rows(PAPER_ACCOUNTS, (paper_venues(),))
+
+
 def rows(sql: str, params: tuple = ()) -> list[dict]:
     """A query's rows, from the cache while no run has finished since and CACHE_TTL has not passed."""
     slot = _request.get()
@@ -473,7 +479,7 @@ def overview(request: Request):
     user_of(request)
     bots = rows(BOTS)
     snaps = [b for b in bots if b["ts"]]
-    paper = rows(PAPER_ACCOUNTS)
+    paper = paper_accounts()
     return page(request, "overview.html", cohorts=cohorts(bots), lanes=lanes.cards(lane_reads(bots, paper)),
                 live_bots=[b["name"] for b in snaps if b["dry_run"] is False],
                 top=[r for r in rows(LEADERBOARD, ("365d",)) if not r["biased"] and r["trades"] >= MIN_TRADES][:5])
@@ -622,7 +628,7 @@ def leagues(request: Request):
     profits = {r["account"]: r["profits"] for r in rows(PAPER_PROFITS)}
     crypto = league_rows.crypto_rows(
         rows(BOTS), watching, lambda s: f"{s}: {strategy_method(s, methods)['description']}")
-    accounts = rows(PAPER_ACCOUNTS)
+    accounts = paper_accounts()
     events = league_rows.event_rows(accounts, profits, paper_lab.rule_of)
     stocks = league_rows.event_rows(rows(STOCK_ACCOUNTS), {r["account"]: r["profits"] for r in rows(STOCK_PROFITS)},
                                     stocks_lab.rule_of)
@@ -1091,7 +1097,7 @@ def calls(request: Request):
 def accounts(request: Request):
     """Every account we hold or paper-trade, read only: the newest read of each, and the watcher's kill-switch state."""
     user = user_of(request)
-    brokers, wallets, bots, paper = rows(BROKERS), rows(WALLETS), rows(BOTS), rows(PAPER_ACCOUNTS)
+    brokers, wallets, bots, paper = rows(BROKERS), rows(WALLETS), rows(BOTS), paper_accounts()
     refs = [{"id": f"broker:{b['broker']}", "label": f"Broker: {b['broker']}"} for b in brokers]
     refs += [{"id": f"wallet:{w['coin']}:{w['account']}", "label": f"Wallet: {w['account']} ({w['coin']})"} for w in wallets]
     refs += [{"id": f"bot:{b['name']}", "label": f"Bot: {b['name']}"} for b in bots]

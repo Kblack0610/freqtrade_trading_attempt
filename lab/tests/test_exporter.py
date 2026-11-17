@@ -170,7 +170,9 @@ def test_market_metrics(conn):
                  "('odds_api', 'g', 'B', 'kalshi', 'K', 'no', 'llm:claude-haiku', 'proposed')")
     conn.execute("INSERT INTO paper_accounts (account, family, venue, variant, params, capital, started_at, equity, open_positions, marked_at) "
                  "VALUES ('paper-a', 'longshot', 'kalshi', 'v', '{}', 1000, %s, 900, 4, %s), "
-                 "('paper-new', 'longshot', 'kalshi', 'w', '{}', 1000, %s, NULL, NULL, NULL)", (now, now - dt.timedelta(minutes=5), now))
+                 "('paper-new', 'longshot', 'kalshi', 'w', '{}', 1000, %s, NULL, NULL, NULL), "
+                 "('paper-gone', 'tt_totals', 'odds_api', 'v', '{}', 1000, %s, 1000, 0, %s)",
+                 (now, now - dt.timedelta(minutes=5), now, now, now - dt.timedelta(days=1)))
     for mid, at in (("K1", now - dt.timedelta(hours=1)), ("K0", now - dt.timedelta(hours=25))):
         conn.execute("INSERT INTO paper_orders (account, market_id, side, stake, sent_at, quoted_at, contracts, price, "
                      "fee) VALUES ('paper-a', %s, 'no', 10, %s, %s, 0, NULL, 0)", (mid, at, at))
@@ -193,6 +195,7 @@ def test_market_metrics(conn):
     assert m['trader_paper_orders_24h{venue="polymarket_us"}'] == 0  # in [paper] venues with no order: the volume watch's red
     assert 'trader_paper_orders_24h{venue="odds_api"}' not in m  # not a paper venue: no series for the watch to read
     assert not any('account="paper-new"' in k for k in m)  # never marked: no equity to alert on yet
+    assert not any('account="paper-gone"' in k for k in m)  # its venue left [paper]: no pass marks it again
     assert not any(k.startswith("trader_shadow_marked_age") for k in m)  # no mark yet: nothing to call stale
     conn.execute("INSERT INTO shadow_accounts (account, strategy, exchange, cohort, capital, promoted_on, entry, state) "
                  "VALUES ('shadow-a', 'A', 'kraken', 'short', 1000, %s, '{}', 'trial'), "

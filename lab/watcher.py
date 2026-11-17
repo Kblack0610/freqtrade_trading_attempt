@@ -135,7 +135,7 @@ def tick(conn, bots: list[str], day_loss: float, fetch: Fetch, now: dt.datetime,
     bank = bank_step(prev_bank, money, lim, now)
     conn.execute(BANK, bank)
     stopped = bank["breached_at"] is not None
-    # Only a [paper] venue has a pass that marks its accounts: one taken out of [paper] would read as blind forever.
+    # Only a [paper] venue has a pass that marks its accounts (as web/exporter.py PAPER): one taken out would read blind.
     for name, capital, equity, marked_at in conn.execute(
             "SELECT account, capital, equity, marked_at FROM paper_accounts WHERE marked_at IS NOT NULL "
             "AND venue = ANY(%s) "

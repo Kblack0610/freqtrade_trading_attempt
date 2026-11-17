@@ -37,8 +37,10 @@ def test_a_venue_is_connected_only_when_every_check_is_fresh_and_clean():
                 {"account": "tastytrade_7055", "at": NOW - H, "error": None}],
         drill=[{"account": "alpaca_paper", "at": NOW - 2 * H, "error": "RuntimeError: order o1 is new after the cancel"},
                {"account": "kalshi_demo", "at": NOW - 20 * H, "error": None}],
-        paper=[{"account": "kalshi", "at": NOW - dt.timedelta(minutes=5), "error": None}]), NOW))
+        paper=[{"account": "kalshi", "at": NOW - dt.timedelta(minutes=5), "error": None}],
+        sweep=[{"account": "odds_api", "at": NOW - 2 * H, "error": None}]), NOW))
     assert rows["Kalshi"]["status"] == "connected"
+    assert rows["The Odds API"]["status"] == "connected"  # read from its recorder: it is not a paper venue
     assert rows["Alpaca"]["status"] == "error" and "after the cancel" in rows["Alpaca"]["checks"][1]["error"]
     assert rows["Kraken"]["status"] == "stale"  # hourly read, 5 h old
     assert rows["Fidelity (SnapTrade)"]["status"] == "error"  # the worst of its accounts

@@ -1,8 +1,8 @@
 """One /accounts row per venue (web/venues.toml): connected, error, stale or missing, and what the person does.
 
-Each source is one query for the newest row per account, so the page costs four small queries however many venues there
-are. A check's status is the worst of its matching accounts; a venue's is the worst of its checks, and a venue with no
-checks is missing until code reads it.
+Each source is one query for the newest row per account, so the page costs one small query per source however many
+venues there are. A check's status is the worst of its matching accounts; a venue's is the worst of its checks, and a
+venue with no checks is missing until code reads it.
 """
 
 import datetime as dt
@@ -15,6 +15,8 @@ SOURCES = {
               "ORDER BY broker, read_at DESC",
     "drill": "SELECT DISTINCT ON (venue) venue AS account, placed_at AS at, error FROM demo_orders ORDER BY venue, placed_at DESC",
     "paper": "SELECT venue AS account, max(marked_at) AS at, NULL AS error FROM paper_accounts GROUP BY venue",
+    "sweep": "SELECT DISTINCT ON (venue) venue AS account, finished_at AS at, error FROM market_sweeps "
+             "ORDER BY venue, started_at DESC",
     "wallet": "SELECT DISTINCT ON (account) account AS account, read_at AS at, error FROM wallet_balances "
               "ORDER BY account, read_at DESC",
 }

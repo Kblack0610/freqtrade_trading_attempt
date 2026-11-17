@@ -6,11 +6,12 @@
 
 A `[paper] forward` family of the venue joins with every variant of its grid, gate or not: paper costs nothing and
 the forward test is the evidence the gate is waiting on, so every family that can run is forward on its venue
-(longshot, weather and observed on kalshi, longshot on polymarket_us and predictit) and the gate decides only promotion. A family not in forward
-follows the readiness gate: every market_readiness row (lab/markets/families.py gate()) on the venue that is ready, of
-a family that can run here (FAMILIES), is one account with `[paper] capital`, trading the params the gate judged. An
-account in neither set is retired (retired_at): it takes no entries, its open fills still settle and mark, and it
-comes back if it joins again. A ready variant of a family that cannot run here is
+(longshot, weather and observed on kalshi, longshot on polymarket_us and predictit) and the gate decides only
+promotion. A family not in forward follows the readiness gate: every market_readiness row (lab/markets/families.py
+gate()) on the venue that is ready, of a family that can run here (FAMILIES), is one account with `[paper] capital`,
+trading the params the gate judged. An account in neither set is retired (retired_at): it takes no entries, its open
+fills still settle and mark, and it comes back if it joins again. A venue taken out of `[paper] venues` gets no pass,
+and its accounts drop off the site, the exporter and the watcher. A ready variant of a family that cannot run here is
 reported under "unrunnable". A pass:
 0. Opens an account for each forward or ready variant and retires the rest.
 1. Settles every open fill whose market has a resolution, with backtest.payout and fees.settlement.
