@@ -10,6 +10,10 @@ The repo README is the reference for layout, the analysis and the site. These pa
 - [Pipeline](pipeline.md): the research pipeline step by step in plain words: price data, nightly analysis, walk-forward, scoring, the paper league, where the time goes and troubleshooting.
 - [Anytime-valid gates](anytime-gates.md): proposed confidence-sequence replacements for the drift and dry run gates, option a chosen, build queued.
 
+## Knowledge
+
+- [knowledge/](knowledge/README.md): trading terms, a ranked reading list, free resources and the evidence on edge in event contracts.
+
 ## Live
 
 - [live.md](live.md): why nothing trades money, what `lab/live.py` would check, how a human lifts the guard, reconciliation and backups.
