@@ -24,7 +24,7 @@ Sources: the table of contents on [Carver's book page](https://www.systematicmon
 | needs scale | Only matters with real contracts, more coins or more capital than Stage 1 ($500, a $50 stake, three open trades: `[[book.stages]]` in `lab/suggest.toml`) |
 | n/a | Futures plumbing with no spot equivalent |
 
-The phases are in the trader plan for this work: P2 built the ports as the forecast family (`user_data/strategies/forecast/family.toml`, signals in `lab/forecasts.py`), P3 the carry study from recorded funding, P4 the long-short research.
+The phases are in the trader plan for this work: P2 built the ports as the forecast family (`user_data/strategies/forecast/family.toml`, signals in `lab/forecasts.py`), P3 the carry study from recorded funding ([carry.md](carry.md)), P4 the long-short research.
 
 ## Part one: basic directional
 
@@ -39,8 +39,8 @@ The phases are in the trader plan for this work: P2 built the ports as the forec
 | 7 | Slow trend following with trend strength | Forecast = EWMAC(64,256) over price volatility, scaled to an average absolute value of 10, capped at 20; position in proportion. | Long when above 0, stake by the forecast at entry. | `CarverTrendStrength64` on the ladder | now | Trend |
 | 8 | Fast trend following, long and short with trend strength | 7 on EWMAC(16,64), with a buffer: trade only when the position leaves a band about 10% around its target. | Long half via the faster speeds; the buffer needs position adjustment; the short half needs shorts. Fees bind harder the faster it trades. | `CarverTrendStrength16` on the ladder, long half, no buffer; short half `CarverLongShort16` research, NO-GO ([short-bust.md](short-bust.md#carver-long-short)) | now | Trend |
 | 9 | Multiple trend following rules | Average several EWMAC(n,4n) speeds, each scaled and capped, times a forecast diversification multiplier, recapped at 20; drop speeds whose costs pass 0.15 Sharpe units. | The book's core trend system, portable. The cost cut maps to each venue's fees. Nearest today: TrendDonchian. | `CarverTrendMix` on the ladder: speeds 8 to 64, the two fastest of the book dropped for cost | now | Trend |
-| 10 | Basic carry | Forecast from annualised carry over volatility, smoothed over 5 to 120 days, scaled and capped. | Crypto carry is the perpetual funding rate. Spot earns no funding, so it needs long spot plus a short perpetual. Recorded in `funding_rates`. | P3 research | research | Funding carry and basis |
-| 11 | Combined carry and trend | Mix the trend and carry forecasts, about 60/40. | Needs 10. A long-only reading: trend entries filtered by funding. | P3 research | research | Funding carry and basis |
+| 10 | Basic carry | Forecast from annualised carry over volatility, smoothed over 5 to 120 days, scaled and capped. | Crypto carry is the perpetual funding rate. Spot earns no funding, so it needs long spot plus a short perpetual. Recorded in `funding_rates`. | Measured in [carry.md](carry.md), no edge | research | Funding carry and basis |
+| 11 | Combined carry and trend | Mix the trend and carry forecasts, about 60/40. | Needs 10. A long-only reading: trend entries filtered by funding. | Measured in [carry.md](carry.md), no edge | research | Funding carry and basis |
 
 ## Part two: advanced trend and carry
 
@@ -49,12 +49,12 @@ The phases are in the trader plan for this work: P2 built the ports as the forec
 | 12 | Adjusted trend | Reshape forecasts where strength stops predicting: the fastest speed through a "double V" that falls to 0 beyond 20; two speeds scaled up and capped at 15. | A small effect per the notes; an option on 9 once 9 has results. | after P2 | port | Trend |
 | 13 | Trend following and carry in different risk regimes | Multiply forecasts by 2 down to 0.5 as volatility rises against its 10-year average (quantile, smoothed). | Portable, with the quantile over all history so far rather than 10 years. | `CarverRegimeMix` on the ladder: the AFTS 9 mix times the multiplier, against the last 1000 candles | now | Volatility-regime scaling |
 | 14 | Spot trend | Trend on the spot price rather than the back-adjusted futures price, which takes carry out of trend. Confirm. | Our prices are spot, so every trend strategy here is already a spot trend. | Every trend strategy | now | Trend |
-| 15 | Accurate carry | A better carry estimate than two nearby contracts give. Confirm. | Funding is observed every 8 hours; the estimate is the smoothed recorded rate. | P3 research | research | Funding carry and basis |
-| 16 | Trend and carry allocation | How to split risk between trend and carry by instrument or asset class. Confirm. | Needs 10 and 11. | P3 research | research | Funding carry and basis |
+| 15 | Accurate carry | A better carry estimate than two nearby contracts give. Confirm. | Funding is observed every 8 hours; the estimate is the smoothed recorded rate. | Measured in [carry.md](carry.md), no edge | research | Funding carry and basis |
+| 16 | Trend and carry allocation | How to split risk between trend and carry by instrument or asset class. Confirm. | Needs 10 and 11. | Measured in [carry.md](carry.md), no edge | research | Funding carry and basis |
 | 17 | Normalised trend | Trend on a price built from cumulative volatility-normalised returns, so instruments can be pooled. Confirm. | Changes little for one coin; it is the base for 18 and 19. | with 18 | port | Trend |
 | 18 | Trend following asset classes | Trend on the average normalised price of the asset class, added to each instrument's trend. Confirm. | Crypto is one class, so this becomes a market-wide trend (BTC or an equal-weight basket) applied to every coin, through Freqtrade informative pairs. | later port | port | Long-term trend filter |
 | 19 | Cross sectional momentum | Each instrument's trend against its class average: long the strongest, short the weakest. Confirm. | The long leg runs on spot. | XSMomentumRotation | now | Momentum |
-| 20 | Cross sectional carry | Carry against the class average. Confirm. | Relative funding across coins. The long leg is measurable offline. | P3 research | research | Funding carry and basis |
+| 20 | Cross sectional carry | Carry against the class average. Confirm. | Relative funding across coins. The long leg is measurable offline. | Measured in [carry.md](carry.md), no edge | research | Funding carry and basis |
 
 ## Part three: advanced directional
 
@@ -93,7 +93,7 @@ The phases are in the trader plan for this work: P2 built the ports as the forec
 ## What would move a strategy up a level
 
 - **A guarded short route** (a verified US perpetual or CME micro route, as the register's route rows track) turns 6, the short half of 8, 10, 11, 20, 28 and 29 from research or blocked into something a paper league can trade.
-- **P3's carry result** decides whether 10, 11, 15, 16 and 20 are worth that route at all.
+- **Carry paying again.** [carry.md](carry.md) found the carry harvest paid in 2024 and not since, and no funding signal for a long-only account; 10, 11, 15, 16 and 20 are worth a short route only when a rerun shows it paying again.
 - **Longer, survivor-free history** (dead coins included) opens 22.
 - **Real contracts, or more coins than three open trades allow,** make 25 matter.
 - **A port's own result.** Each `Carver` class is a counted trial. When its strategy page shows the confidence gates in [pipeline.md](pipeline.md) passing, it goes through promotion like any other strategy. When it fails them, the avenue row records the verdict.
