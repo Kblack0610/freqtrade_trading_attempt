@@ -77,6 +77,10 @@ means = "When the account was last marked."
 
 # What moved, for dashboards.md rule 13. The old name keeps working as an anchor or a redirect.
 [[retired]]
+old = "/leagues, Newest fills (20 rows per league)"
+new = "/today"
+why = "A 20-row blotter without a date could not answer which trades ran today; Today counts every dry run of a day and a league now shows its count with a link."
+[[retired]]
 old = "/markets/book#paper"
 new = "/leagues#event-contracts"
 why = "The paper league is one of the leagues, so its scorecard sits with the others; the book keeps backtests."
