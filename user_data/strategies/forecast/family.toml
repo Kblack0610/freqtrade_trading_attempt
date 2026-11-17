@@ -1,0 +1,103 @@
+# The forecast family: Carver's Advanced Futures Trading Strategies, the ones that run long-only on spot (docs/carver-afts.md).
+# Each strategy is a forecast from lab/forecasts.py: long while it is above 0, flat at or under it, stake cut to a
+# volatility target and, unless `size = "flat"`, scaled by the forecast over its average of 10 (full stake at 10 or more).
+# There is no buffering and no position adjustment: lab/live.py forbids both live. Long-only adaptations of long/short rules.
+# EWMAC scalars are the book's published values; scalars and multipliers marked approximate are to be confirmed against the book.
+# lab/families/generate.py writes the strategy files from this file: edit here, then rerun it.
+kind = "forecast"
+prefix = "Carver"
+timeframe = "1d"
+ladder = ["15m", "1h", "4h", "1d"]  # holding period is a diversity axis (docs/strategy-coverage.md); generate.py scales the exit per rung
+# Covers EWMAC(64, 256): about three slow spans for the average to settle.
+startup_candle_count = 800
+
+[exit]
+# No take-profit: the forecast's own sign closes the trade. The stoploss is for a crash between candles.
+minimal_roi = { "0" = 100 }
+stoploss = -0.3
+
+[sizing]
+vol_target = 0.4      # annual volatility one sleeve aims for
+vol_window = 30       # candles of realized volatility
+bars_per_year = 365
+
+# AFTS 2: always long, sized by volatility alone. A daily hold only; faster rungs would be a churn of stoploss exits.
+[strategies.VolHold]
+call = "hold_forecast"
+rule = "AFTS 2, buy and hold with risk scaling."
+timeframes = ["1d"]
+args = {}
+
+# AFTS 5: long while EWMAC(64, 256) is above 0, sized flat.
+[strategies.Ewmac64]
+call = "ewmac"
+rule = "AFTS 5, slow trend following, long only: EWMAC(64, 256)."
+size = "flat"
+startup_candle_count = 1100
+args = { fast = 64 }
+
+# AFTS 7: the same signal sized by its strength.
+[strategies.TrendStrength64]
+call = "ewmac"
+rule = "AFTS 7, slow trend following with trend strength: EWMAC(64, 256) over price volatility."
+startup_candle_count = 1100
+args = { fast = 64 }
+
+# AFTS 8, long half: EWMAC(16, 64) by strength; the buffer needs position adjustment and the short half needs shorts.
+[strategies.TrendStrength16]
+call = "ewmac"
+rule = "AFTS 8, fast trend following, long half: EWMAC(16, 64) over price volatility."
+startup_candle_count = 300
+args = { fast = 16 }
+
+# AFTS 9: speeds 8 to 64; the two fastest speeds of the book are dropped, their costs pass its limit at crypto fees.
+[strategies.TrendMix]
+call = "ewmac_mix"
+rule = "AFTS 9, multiple trend following rules: EWMAC speeds 8, 16, 32, 64 averaged with a diversification multiplier of 1.13 (approximate)."
+startup_candle_count = 1100
+args = { fasts = [8, 16, 32, 64], fdm = 1.13 }
+
+# AFTS 13: the same mix scaled from 2 down to 0.5 as volatility rises against its recent history.
+[strategies.RegimeMix]
+call = "regime_mix"
+rule = "AFTS 13, trend following with a volatility-regime multiplier: the AFTS 9 mix times 2 down to 0.5 as volatility rises against the last 1000 candles."
+startup_candle_count = 1300
+args = { fasts = [8, 16, 32, 64], fdm = 1.13, history = 1000 }
+
+# AFTS 21: the place in the rolling range, one window.
+[strategies.Range80]
+call = "breakout_forecast"
+rule = "AFTS 21, breakout: the close's place in its 80-candle high-low range."
+startup_candle_count = 300
+args = { window = 80 }
+
+# AFTS 23: a trend speeding up.
+[strategies.Accel16]
+call = "acceleration"
+rule = "AFTS 23, acceleration: the change in EWMAC(16, 64) over 16 candles (scalar approximate)."
+startup_candle_count = 300
+args = { fast = 16, scalar = 6.0 }
+
+# AFTS 24: the long leg only, long after negative skew.
+[strategies.NegSkew]
+call = "skew_forecast"
+rule = "AFTS 24, skew, long leg: negative skew of the last 90 candles' returns (scalar approximate)."
+startup_candle_count = 300
+args = { window = 90, scalar = 10.0 }
+
+# AFTS 26 and 27: fast mean reversion on the fast rungs only, where taker fees decide it (no limit-order fills are assumed).
+[strategies.DipFast]
+call = "dip_forecast"
+rule = "AFTS 26, fast mean reversion, long only: the gap under a 5-day equilibrium over price volatility (scalar approximate)."
+timeframes = ["1h", "15m"]
+per_day = true
+startup_candle_count = 800
+args = { eq_days = 5, vol_days = 1, scalar = 2.0 }
+
+[strategies.DipSafe]
+call = "dip_forecast"
+rule = "AFTS 27, safer fast mean reversion: AFTS 26 standing aside while EWMAC(16, 64) is under 0 (scalar approximate)."
+timeframes = ["1h", "15m"]
+per_day = true
+startup_candle_count = 800
+args = { eq_days = 5, vol_days = 1, scalar = 2.0, trend_fast = 16, floor = 0.0 }

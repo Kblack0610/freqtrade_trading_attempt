@@ -7,7 +7,7 @@ A family is a folder holding a family.toml, under lab/families/ while staged or 
 user_data/strategies/ once switched on. Each strategy gets its own file with a literal
 `class <Name>(`, because freqtrade loads a strategy by name only from a file containing that text:
 classes built in a loop list fine but never load. Each file also carries every number it uses, and
-a chart, signal, trend or range file the hash of the lab modules it calls, so the analysis, which keys its cache on the
+a chart, signal, trend, forecast or range file the hash of the lab modules it calls, so the analysis, which keys its cache on the
 strategy file's hash, reruns a strategy whenever its exit, its parameters or its pattern code change.
 
 A family's `ladder` lists the timeframes each strategy runs on (a strategy's own `timeframes` overrides it). The
@@ -28,6 +28,7 @@ REPO = Path(__file__).resolve().parents[2]
 ROOTS = (REPO / "lab" / "families", REPO / "user_data" / "strategies")
 PATTERNS = REPO / "lab" / "patterns.py"
 CHANNELS = REPO / "lab" / "channels.py"
+FORECASTS = REPO / "lab" / "forecasts.py"
 METRICS = REPO / "lab" / "metrics.py"
 SUGGEST = REPO / "lab" / "suggest.toml"
 MODULES = {"patterns": PATTERNS, "channels": CHANNELS}
@@ -110,6 +111,47 @@ class {name}(IStrategy):
             return proposed_stake
         last = df.iloc[-1]
         return min(max(proposed_stake * float(last["scale"]) * float(last["score"]), min_stake or 0.0), max_stake)
+'''
+
+FORECAST = '''{header}
+{extra}"""{doc}"""
+
+from pandas import DataFrame
+
+from freqtrade.strategy import IStrategy
+from lab import channels, forecasts
+
+
+class {name}(IStrategy):
+    INTERFACE_VERSION = 3
+    timeframe = "{timeframe}"
+    can_short = False
+    startup_candle_count = {startup}
+    minimal_roi = {roi}
+    stoploss = {stoploss}
+
+    def populate_indicators(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
+        dataframe["forecast"] = forecasts.{call}(dataframe["close"], {args})
+        dataframe["scale"] = channels.vol_scale(dataframe["close"], {vol_target}, {vol_window}, {bars_per_year})
+        return dataframe
+
+    def populate_entry_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
+        dataframe.loc[(dataframe["forecast"] > 0) & dataframe["scale"].notna() & (dataframe["volume"] > 0), "enter_long"] = 1
+        return dataframe
+
+    def populate_exit_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
+        dataframe.loc[dataframe["forecast"] <= 0, "exit_long"] = 1
+        return dataframe
+
+    def custom_stake_amount(self, pair: str, current_time, current_rate, proposed_stake, min_stake, max_stake,
+                            leverage, entry_tag, side, **kwargs) -> float:
+        """The proposed stake times the vol scale and, unless the rule sizes flat, the forecast over its average of 10."""
+        df, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
+        if df.empty:
+            return proposed_stake
+        last = df.iloc[-1]
+        weight = {weight}
+        return min(max(proposed_stake * float(last["scale"]) * weight, min_stake or 0.0), max_stake)
 '''
 
 RANGE = '''{header}
@@ -238,6 +280,19 @@ def render(family: Path) -> dict[str, str]:
                 enter_at=spec["enter_at"], exit_at=spec["exit_at"],
                 doc=f"Trend family: long-flat Donchian ensemble over {spec['lookbacks']} candles, entering at a score of "
                     f"{spec['enter_at']}, leaving at {spec['exit_at']}, stake cut to a {cfg['sizing']['vol_target']:.0%} vol target.")
+        elif cfg["kind"] == "forecast":
+            sizing = {**cfg["sizing"], "bars_per_year": round(cfg["sizing"]["bars_per_year"] * minutes(cfg["timeframe"]) / minutes(tf))}
+            args = dict(spec["args"])
+            if spec.get("per_day"):
+                args["bars_per_day"] = round(1440 / minutes(tf), 6)
+            flat = spec.get("size") == "flat"
+            text = FORECAST.format(
+                **{**common, "startup": spec.get("startup_candle_count", cfg["startup_candle_count"])}, **sizing,
+                extra=digests(CHANNELS, FORECASTS), call=spec["call"], args=", ".join(f"{k}={json.dumps(v)}" for k, v in args.items()),
+                weight="1.0" if flat else 'min(max(float(last["forecast"]) / 10.0, 0.0), 1.0)',
+                doc=f"Forecast family: {spec['rule']} Enters long above a forecast of 0, leaves at or under it; "
+                    f"stake cut to a {cfg['sizing']['vol_target']:.0%} vol target"
+                    f"{'.' if flat else ' and sized by the forecast over 10.'}")
         elif cfg["kind"] == "range":
             band = tomllib.loads(SUGGEST.read_text(encoding="utf-8"))["confidence"]["trend_band"]
             text = RANGE.format(
