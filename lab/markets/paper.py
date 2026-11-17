@@ -4,13 +4,15 @@
   python -m lab.markets.paper [--venue kalshi]     # one pass; the CronJob runs it after each recorder sweep
   python -m lab.markets.paper --venue V --report   # the forward test's weekly ROI and CLV (report), for lab-status
 
-The league follows the readiness gate: every market_readiness row (lab/markets/families.py gate()) on the venue that
-is ready, of a family that can run here (FAMILIES), is one account with `[paper] capital`, trading the params the gate
-judged. A `[paper] forward` family of the venue joins with every variant of its grid, gate or not: the paper
-forward test is the evidence it is waiting on (tt_totals, whose backtest needs history no source sells yet). An account whose variant is no longer ready is retired (retired_at): it takes no entries, its open fills still
-settle and mark, and it comes back if the variant passes again. A ready variant of a family that cannot run here is
+A `[paper] forward` family of the venue joins with every variant of its grid, gate or not: paper costs nothing and
+the forward test is the evidence the gate is waiting on, so every family that can run is forward on its venue
+(longshot and weather on kalshi, tt_totals on odds_api) and the gate decides only promotion. A family not in forward
+follows the readiness gate: every market_readiness row (lab/markets/families.py gate()) on the venue that is ready, of
+a family that can run here (FAMILIES), is one account with `[paper] capital`, trading the params the gate judged. An
+account in neither set is retired (retired_at): it takes no entries, its open fills still settle and mark, and it
+comes back if it joins again. A ready variant of a family that cannot run here is
 reported under "unrunnable". A pass:
-0. Opens an account for each ready variant and retires the rest.
+0. Opens an account for each forward or ready variant and retires the rest.
 1. Settles every open fill whose market has a resolution, with backtest.payout and fees.settlement.
 2. Shows each account the venue's latest recorded book: the recorder's `outcomes` row of every open yes outcome
    closing within `horizon_h`, as the row backtest.replay would show it; a sportsbook's (kind sportsbook) is its
@@ -34,8 +36,8 @@ reported under "unrunnable". A pass:
 An account whose `watch` row is stopped (lab/watcher.py --drill) takes no entries; its fills still settle and mark.
 Paper only: nothing here can reach a venue's order API, and nothing places a bet at a sportsbook (lab/live.py
 holds the guard). Families that need a fit or a key are not in the league yet: calibration (a bars fit), gap (odds_api is not deployed) and llm (no LiteLLM key; forward scoring is its only
-scoring, so it joins once the key is in SOPS). weather joins once a variant passes the gate, trading on the NWS
-forecasts lab/nws.py read within the input's fresh_min.
+scoring, so it joins once the key is in SOPS). weather trades on the NWS forecasts lab/nws.py read within the
+input's fresh_min.
 """
 
 import argparse
