@@ -397,3 +397,39 @@ def test_weather_joins_the_league_only_once_a_variant_passes_and_trades_on_the_n
     [nws] = [i for i in d[4] if i["name"] == "nws_high"]
     assert nws["value"]["high"] == 60 and nws["source"] == "api.weather.gov gridpoint forecast"
     assert pd.Timestamp(nws["as_of"]) == pd.Timestamp(read_at)
+
+
+# polymarket_us and predictit: recorded quotes with no sizes
+def seed_unsized(conn, venue, sweep_age=dt.timedelta(minutes=5)):
+    """One longshot, A, closing in 12 h at 0.05/0.07 with no recorded size."""
+    conn.execute("INSERT INTO venues (venue, title, kind) VALUES (%s, %s, 'exchange')", (venue, venue))
+    conn.execute("INSERT INTO markets (venue, market_id, title, market_type, status, close_time, first_seen, "
+                 "updated_at) VALUES (%s, 'A', 'A', 'binary', 'active', %s, %s, %s)",
+                 (venue, NOW + dt.timedelta(hours=12), NOW, NOW))
+    conn.execute("INSERT INTO outcomes (venue, market_id, outcome, bid, ask, quoted_at) VALUES (%s, 'A', 'yes', 0.05, "
+                 "0.07, %s)", (venue, NOW - dt.timedelta(minutes=7)))
+    conn.execute("INSERT INTO market_sweeps (venue, started_at, finished_at, seen, new_markets, changes, resolved, ok) "
+                 "VALUES (%s, %s, %s, 1, 1, 1, 0, true)", (venue, NOW - sweep_age, NOW - sweep_age))
+
+
+@pytest.mark.parametrize("venue", ["polymarket_us", "predictit"])
+def test_a_venue_that_records_no_sizes_trades_paper_at_its_quote_and_a_stale_book_places_nothing(conn, venue):
+    shipped = load_config()
+    assert venue in shipped["paper"]["venues"] and shipped["paper"]["forward"][venue] == ["longshot"]
+    c = cfg(forward={venue: ["longshot"]})
+    seed_unsized(conn, venue, sweep_age=dt.timedelta(minutes=30))
+    assert paper.run_pass(conn, venue, c, NOW)["accounts"][ACCOUNT]["orders"] == 0  # older than max_book_age_min
+    conn.execute("INSERT INTO market_sweeps (venue, started_at, finished_at, seen, new_markets, changes, resolved, ok) "
+                 "VALUES (%s, %s, %s, 1, 0, 0, 0, true)", (venue, NOW, NOW))
+    out = paper.run_pass(conn, venue, c, NOW + dt.timedelta(minutes=1))
+    assert out["accounts"][ACCOUNT]["fills"] == 1
+    assert [(o[1], o[2], o[4]) for o in orders(conn)] == [("A", "no", 0.95)]
+
+
+def test_without_unsized_depth_a_sizeless_quote_cannot_fill(conn):
+    """The negative control: books() leaves an unrecorded size NaN, which backtest.take reads as no room."""
+    seed_unsized(conn, "predictit")
+    row, _ = paper.books(conn, "predictit", NOW, 168)[0]
+    assert row.depth_yes != row.depth_yes
+    row, _ = paper.books(conn, "predictit", NOW, 168, unsized=1000)[0]
+    assert (row.depth_yes, row.depth_no) == (1000, 1000)
