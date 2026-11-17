@@ -183,7 +183,8 @@ def test_market_metrics(conn):
     assert m['trader_markets_sweeps_failed_1h{venue="kalshi"}'] == 2 and m['trader_markets_sweeps_1h{venue="kalshi"}'] == 3
     assert m['trader_markets_sweep_seen{venue="kalshi"}'] == 179000 and m['trader_markets_sweep_changes{venue="kalshi"}'] == 12000
     assert m['trader_markets_sweep_duration_seconds{venue="kalshi"}'] == 180
-    assert not any('venue="predictit"' in k for k in m)  # no sweep in a week: the venue is not recorded any more
+    assert not any(k.startswith("trader_markets_") and 'venue="predictit"' in k for k in m)  # no sweep in a week: not recorded any more
+    assert m['trader_paper_orders_24h{venue="predictit"}'] == 0  # still a [paper] venue, so the volume watch sees its 0
     assert m['trader_markets_links{source="rule",status="confirmed"}'] == 1
     assert m['trader_markets_links{source="llm",status="proposed"}'] == 1
     assert m['trader_paper_equity{account="paper-a"}'] == 900 and m['trader_paper_capital{account="paper-a"}'] == 1000
