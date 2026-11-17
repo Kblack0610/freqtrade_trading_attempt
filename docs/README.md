@@ -29,6 +29,7 @@ The repo README is the reference for layout, the analysis and the site. These pa
 ## Strategy coverage
 
 - [Avenues register](avenues.md): considered research and trading paths, verdicts, evidence and revisit triggers.
+- [carver-afts.md](carver-afts.md): the 30 strategies and four tactics of Carver's *Advanced Futures Trading Strategies*, each mapped to spot crypto, our version, when we can use it and its avenue.
 
 - [strategy-coverage.md](strategy-coverage.md): what a dry-run bot costs, why every strategy runs on binanceus only (the `strategies` cohort), the strategy family catalogue (scanned, staged, blocked), what diversity means (the archive axes, the cohort charter, the strategy card) and the control-set proposal.
 

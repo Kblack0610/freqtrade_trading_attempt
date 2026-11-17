@@ -36,7 +36,7 @@ Easier way in:
 | Van Tharp, *Trade Your Way to Financial Freedom* (2nd ed. 2006) | Useful for R-multiples and expectancy; thin on testing |
 | Larry Harris, *Trading and Exchanges* (2003) | Market microstructure reference: how orders, dealers and exchanges work. Dense and dated, but the one to open for a microstructure question |
 | Ralph Vince, optimal f | Sizing from the past's worst loss; overfits |
-| Robert Carver, *Advanced Futures Trading Strategies* (2023) | 30 plus futures strategies; for after *Systematic Trading* |
+| Robert Carver, *Advanced Futures Trading Strategies* (2023) | 30 plus futures strategies; for after *Systematic Trading*. Each one mapped to the lab: [carver-afts.md](../carver-afts.md) |
 
 ## Evidence
 
