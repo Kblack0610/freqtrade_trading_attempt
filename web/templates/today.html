@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}Today{% endblock %}
+{% block body %}
+<h1>Today <span class="muted">{{ day.isoformat() }} (UTC)</span></h1>
+<p class="muted">Every dry run of the day across crypto, stocks and event contracts. An order is a paper order sent that day, filled or not; a crypto or stock fill is its own order. Day P&amp;L is the paper profit of fills that closed that day. Paper money only. <a href="/today?day={{ prev.isoformat() }}">Previous day</a>{% if next %} - <a href="/today?day={{ next.isoformat() }}">Next day</a>{% endif %} - <a href="/leagues">Scorecards per account</a></p>
+<p><strong>{{ orders | num(0) }}</strong> orders - <strong>{{ fills | num(0) }}</strong> fills - <strong>{{ markets | num(0) }}</strong> markets - <strong>{{ venues }}</strong> venues</p>
+{% if table %}
+<div class="scroll">
+<table>
+  <thead><tr><th>League / venue</th><th>Family</th><th class="n">Orders</th><th class="n">Fills</th><th class="n">Markets</th><th class="n">Day P&amp;L</th></tr></thead>
+  <tbody>
+  {% for r in table %}
+  <tr><td>{{ r.label }}</td><td>{{ r.family }}</td><td class="n">{{ r.orders | num(0) }}</td><td class="n">{{ r.fills | num(0) }}</td><td class="n">{{ r.markets | num(0) }}</td>
+    <td class="n {{ r.pnl | tone }}">{{ r.pnl | num(2) if r.pnl is not none else "-" }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}<p class="muted">No dry run placed or closed a fill on this day.</p>{% endif %}
+{% if idle %}
+<h2>Not trading</h2>
+<p class="muted">Active accounts whose family placed nothing on this day.</p>
+<p>{% for source, venue, family in idle %}{{ family }} on {{ venue }}{% if not loop.last %}, {% endif %}{% endfor %}</p>
+{% endif %}
+{% for title, list in (("Best", best), ("Worst", worst)) %}
+<h2>{{ title }}</h2>
+{% if list %}
+<div class="scroll">
+<table>
+  <thead><tr><th>Closed</th><th>Account</th><th>Instrument</th><th class="n">Stake</th><th class="n">Profit</th><th class="n">Return</th></tr></thead>
+  <tbody>
+  {% for f in list %}
+  <tr><td><a href="/trades/{{ f.source }}/{{ f.fill_id }}{% if f.source == 'freqtrade' %}?bot={{ f.account | urlencode }}{% endif %}">{{ f.close_date | local }}</a></td><td>{{ f.account }}</td><td>{{ f.title or f.instrument }}</td>
+    <td class="n">{{ f.stake | num(2) }}</td><td class="n {{ f.profit_abs | tone }}">{{ f.profit_abs | num(2) }}</td><td class="n {{ f.profit_ratio | tone }}">{{ f.profit_ratio | pct(1) }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}<p class="muted">Nothing settled on this day.</p>{% endif %}
+{% endfor %}
+{% endblock %}

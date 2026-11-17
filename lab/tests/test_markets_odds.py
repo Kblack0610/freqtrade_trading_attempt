@@ -107,3 +107,12 @@ def test_an_http_error_never_carries_the_key():
 def test_a_score_missing_a_side_is_not_a_result():
     e = {"id": "x", "completed": True, "home_team": "A", "away_team": "B", "scores": [{"name": "A", "score": "1"}]}
     assert odds.resolutions_of(e) == []
+
+
+def test_a_run_counts_the_credits_it_spends(capsys):
+    """One sport, h2h and totals, one region is 2 for the odds and 2 for the scores: the 4 a run docs/markets.md sizes."""
+    api = OddsApi(cfg(markets=["h2h", "totals"]), Session((200, "odds_api_odds.json"), (200, "odds_api_scores.json")),
+                  sleep=lambda _: None, key="k")
+    list(api.open_markets())
+    list(api.resolutions(dt.datetime.now(UTC) - dt.timedelta(hours=30)))
+    assert api.credits == 4 and "4 this run" in capsys.readouterr().out
