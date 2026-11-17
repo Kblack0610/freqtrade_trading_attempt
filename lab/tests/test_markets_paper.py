@@ -243,6 +243,19 @@ def test_a_paper_loss_past_the_day_limit_breaches_without_stopping(conn):
     assert breached is not None and stopped is None and seen == NOW + dt.timedelta(minutes=5)
 
 
+def test_the_watcher_skips_an_account_whose_venue_left_paper(conn):
+    """No pass marks an account once its venue leaves [paper] venues (odds_api, ar-2743), so watching it would report
+    it blind forever; a kalshi account is still watched (the control)."""
+    seed(conn)
+    paper.run_pass(conn, "kalshi", cfg(), NOW)
+    conn.execute("INSERT INTO paper_accounts (account, family, venue, variant, params, capital, started_at, equity, "
+                 "marked_at) VALUES ('paper-tt_totals-gone', 'tt_totals', 'odds_api', 'v', '{}', 1000, %s, 1000, %s)",
+                 (NOW, NOW))
+    assert "odds_api" not in load_config()["paper"]["venues"]
+    watcher.tick(conn, [], 0.03, None, NOW, BANK)
+    assert {b for (b,) in conn.execute("SELECT bot FROM watch")} == {ACCOUNT}
+
+
 # tt_totals on a sportsbook: the forward test of a family no backtest can judge yet
 def seed_odds(conn, meetings=6):
     """Ann and Bea met `meetings` times before NOW, every one 75 points (over 70.5 and 72.5); their next game, G,
@@ -274,6 +287,7 @@ def sweep(conn, at):
 def test_tt_totals_trades_the_line_book_without_a_gate_row_settles_its_line_and_reports_roi_and_clv(conn):
     seed_odds(conn)
     c = load_config()
+    c["paper"]["forward"] = {"odds_api": ["tt_totals"]}  # no shipped venue runs tt_totals until one records table tennis
     out = paper.run_pass(conn, "odds_api", c, NOW)
     n = len(paper.variants(c["families"]["tt_totals"]))
     assert out["fresh"] and out["book"] == 2 and len(out["accounts"]) == n == 4  # every variant, no readiness row
@@ -309,6 +323,7 @@ def test_tt_totals_trades_the_line_book_without_a_gate_row_settles_its_line_and_
 def test_tt_totals_needs_its_meetings_and_a_fresh_book(conn):
     seed_odds(conn, meetings=4)
     c = load_config()
+    c["paper"]["forward"] = {"odds_api": ["tt_totals"]}
     gated = copy.deepcopy(c)
     gated["paper"]["forward"] = {}
     assert paper.run_pass(conn, "odds_api", gated, NOW)["accounts"] == {}  # without forward, the gate decides

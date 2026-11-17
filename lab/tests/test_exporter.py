@@ -190,7 +190,8 @@ def test_market_metrics(conn):
     assert m['trader_paper_open_positions{account="paper-a"}'] == 4
     assert 290 < m['trader_paper_marked_age_seconds{account="paper-a"}'] < 320
     assert m['trader_paper_orders_24h{venue="kalshi"}'] == 1  # K1 counts though unfilled; K0 is over a day old
-    assert m['trader_paper_orders_24h{venue="odds_api"}'] == 0  # in [paper] venues with no order: the volume watch's red
+    assert m['trader_paper_orders_24h{venue="polymarket_us"}'] == 0  # in [paper] venues with no order: the volume watch's red
+    assert 'trader_paper_orders_24h{venue="odds_api"}' not in m  # not a paper venue: no series for the watch to read
     assert not any('account="paper-new"' in k for k in m)  # never marked: no equity to alert on yet
     assert not any(k.startswith("trader_shadow_marked_age") for k in m)  # no mark yet: nothing to call stale
     conn.execute("INSERT INTO shadow_accounts (account, strategy, exchange, cohort, capital, promoted_on, entry, state) "

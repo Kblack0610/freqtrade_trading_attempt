@@ -325,15 +325,18 @@ edge = 0.06
 [paper]
 # python -m lab.markets.paper (lab/markets/paper.py): each variant the readiness gate passed (market_readiness, ready) is
 # one paper account, if its family needs no fit and no key (lab/markets/paper.py docstring); the rest are retired.
-# Kalshi's books, odds_api's sportsbook totals lines (lab/markets/paper.py line_books), and the quotes polymarket_us and
-# predictit record every 5 min. Manifold stays data only: its recorder stores a probability and no bid or ask, so
-# there is no price to fill at. Polymarket global stays data only too: a US resident may not trade it.
-venues = ["kalshi", "odds_api", "polymarket_us", "predictit"]
+# Kalshi's books and the quotes polymarket_us and predictit record every 5 min. Manifold stays data only: its recorder
+# stores a probability and no bid or ask, so there is no price to fill at. Polymarket global stays data only too: a US
+# resident may not trade it. odds_api is out until it records a sport a family can trade: it records basketball_nba
+# only, and tt_totals (its one family) needs min_h2h 5 or 10 meetings of a pair, which NBA teams reach only in the
+# playoffs, so its four accounts placed 0 orders and failed "head to head" on every row (ar-2743). A table-tennis
+# source (the OddsPapi adapter, tr-303) brings tt_totals back on its own venue.
+venues = ["kalshi", "polymarket_us", "predictit"]
 # Families that join a venue's league with every variant of their grid, without the readiness gate, as a forward
 # test. Paper costs nothing, so every family that can run here trades on paper from day one and the gate decides only
 # promotion (candidate, live). Gating paper left the league at 0 orders from 2026-11-15: the gate needs six whole test
 # months and had none (plan see-keen-goose). tt_totals has no backtest window until a source sells table tennis history.
-forward = { kalshi = ["longshot", "weather", "observed"], odds_api = ["tt_totals"], polymarket_us = ["longshot"], predictit = ["longshot"] }
+forward = { kalshi = ["longshot", "weather", "observed"], polymarket_us = ["longshot"], predictit = ["longshot"] }
 # Contracts each side of a quote shows on a venue whose recorder stores no sizes (polymarket_us, predictit), so a fill is
 # limited by `stake` and depth_share and not by a size nobody recorded; the same figure as [backtest] sportsbook_depth.
 unsized_depth = { polymarket_us = 1000, predictit = 1000 }
@@ -349,8 +352,8 @@ max_open = 50
 drift_min_trades = 30
 # Only markets closing within this many hours are shown to the league: the longest `hours` any family trades.
 horizon_h = 168
-# No entries when the venue's last good sweep is older than this: three missed 5-min sweeps. odds_api sweeps every
-# 6 h and its pass runs right after the sweep, so the same limit holds there.
+# No entries when the venue's last good sweep is older than this: three missed 5-min sweeps. A venue swept every
+# 6 h (odds_api) whose pass runs right after its sweep is under the same limit.
 max_book_age_min = 15
 # The decision record (lab/markets/paper.py trade, migration 055): each account keeps at most this many near-misses
 # a pass (rows whose full trace failed one check), and near-misses and funnel counts older than trace_days go. At
