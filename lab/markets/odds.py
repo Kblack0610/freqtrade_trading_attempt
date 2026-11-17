@@ -85,9 +85,15 @@ class OddsApi:
         self.sports = list(cfg["sports"])
         self.regions = cfg.get("regions", "us")
         self.markets = tuple(cfg.get("markets", ("h2h",)))
+        self.credits = 0
         self.key = key or os.environ.get("ODDS_API_KEY")
         if not self.key:
             raise RuntimeError("odds_api: ODDS_API_KEY is not set")
+
+    def spend(self, credits: int, sport: str) -> None:
+        """Count the credits a call cost (module docstring) and print the run's total so far, for the monthly limit."""
+        self.credits += credits
+        print(f"odds_api: {sport} cost {credits} credits, {self.credits} this run", flush=True)
 
     def _get(self, path: str, params: dict):
         try:
@@ -99,6 +105,7 @@ class OddsApi:
         for sport in self.sports:
             events = self._get(f"/v4/sports/{sport}/odds", {"regions": self.regions, "markets": ",".join(self.markets),
                                                              "oddsFormat": "decimal", "dateFormat": "iso"})
+            self.spend(len(self.markets) * len(self.regions.split(",")), sport)
             ts = dt.datetime.now(dt.timezone.utc)
             yield [q for e in events for q in quotes(e, ts, self.markets)]
 
@@ -106,5 +113,7 @@ class OddsApi:
         days = (dt.datetime.now(dt.timezone.utc) - since).total_seconds() / 86400
         days_from = min(3, max(1, math.ceil(days)))  # the API takes 1 to 3
         for sport in self.sports:
-            for e in self._get(f"/v4/sports/{sport}/scores", {"daysFrom": days_from, "dateFormat": "iso"}):
+            scores = self._get(f"/v4/sports/{sport}/scores", {"daysFrom": days_from, "dateFormat": "iso"})
+            self.spend(2, sport)
+            for e in scores:
                 yield from resolutions_of(e, self.markets)  # every finished game in the window; storing one is idempotent

@@ -20,7 +20,9 @@ Add a dated line under Notes, or a section below, when a chapter changes how the
 5. **Ed Thorp, *A Man for All Markets* (2017), with his 2006 Kelly paper.** The memoir of the man who beat blackjack and ran one of the first quant funds. The method is in the free paper ([resources.md](resources.md), Sizing): half Kelly or less, because the edge estimate is too high more often than not.
 
 For betting and event contracts:
-- **Joseph Buchdahl, *Squares & Sharps, Suckers & Sharks* (High Stakes, first edition 2016, second edition 2021).** What separates winning bettors: closing line value, market efficiency, and how much luck a record hides. His *Monte Carlo or Bust* (High Stakes, December 2021; one retailer lists 2022) covers simulating variance to judge whether a record shows skill.
+1. **Joseph Buchdahl, *Squares & Sharps, Suckers & Sharks* (High Stakes, 2016, 352 pp; second edition 2021).** The first betting book to buy. The statistics of market efficiency, testing a record against the closing line, and how much luck a record hides: the question the `gap` and `tt_totals` paper tests have to answer. His *Monte Carlo or Bust* (High Stakes, December 2021; one retailer lists 2022) covers simulating variance to judge whether a record shows skill.
+2. **Elihu Feustel, *Beyond the Odds: Efficient Market Theory and Tools of Warfare for the Modern Sports Bettor* (self-published, July 2024, about 164 pp).** Feustel was a Pinnacle oddsmaker in 2004-06 and is a full-time professional bettor. Its unique part is the "Answer Key": pricing alternate lines, halves, teasers and props from the market's main line, with push-rate charts, no-vig odds, the closing line, fractional Kelly and log loss, plus Excel files. That is the job `tt_totals` does on alternate totals lines. The second half is about staying unlimited at US sportsbooks, which does not apply to Kalshi or a paper league. Spreadsheet-level maths. Maurice Berk, a professional exchange bettor, calls it the clearest market-beating model he has seen in print. Buy after Buchdahl.
+3. **Ed Miller and Matthew Davidow, *The Logic of Sports Betting* (self-published, 2019, 237 pp).** The accessible primer on how betting markets set and move lines and why the closing line matters. US-odds centred, with no model building. Optional once Buchdahl is read.
 
 Easier way in:
 - **Robert Carver, *Leveraged Trading* (Harriman House, 2019).** Starts with one instrument and builds up; written for small accounts. Read this first if *Systematic Trading* feels heavy.
@@ -53,6 +55,11 @@ Tier: primary means the publisher's or author's page was read; snippet means a s
 | *AFML* not introductory, "a research manual for teams" | https://www.tandfonline.com/doi/full/10.1080/14697688.2019.1703030 | snippet |
 | *Following the Trend* 2nd ed. Jan 2023 | https://www.wiley.com/en-ca/Following+the+Trend:+Diversified+Managed+Futures+Trading,+2nd+Edition-p-9781119908982 | primary |
 | *Trading Evolved* Python on Zipline | https://www.followingthetrend.com/trading-evolved/ | snippet |
-| Buchdahl's books and dates: Squares & Sharps 2016, 2nd edition 2021; Monte Carlo or Bust 2021-12-02 | Blackwell's and AbeBooks listings via search, plus the author bio on Sports Trading Network | snippet (retailer pages refuse automated fetches) |
+| Buchdahl, *Squares & Sharps*, 2016, 352 pp (second edition 2021 per Blackwell's and AbeBooks listings; *Monte Carlo or Bust* 2021-12-02) | https://openlibrary.org/books/OL27703196M/Squares_and_Sharps_Suckers_and_Sharks | snippet |
+| *Beyond the Odds* contents: Answer Key for derivative lines, push charts, no-vig odds, closing line, Kelly, log loss, account longevity, Excel files | https://books.google.com/books/about/Beyond_The_Odds_Efficient_Market_Theory.html?id=V6oSEQAAQBAJ | primary |
+| Feustel a Pinnacle oddsmaker, former insurance lawyer, professional bettor | https://www.lasvegasadvisor.com/blog/life-is-a-gamble-podcast-elihu-feustel/ | primary |
+| *Beyond the Odds* July 2024, Goodreads 4.41 from 19 ratings | https://www.goodreads.com/en/book/show/216124921-beyond-the-odds | primary |
+| Berk's review: the clearest market-beating model in print; the second half is account management, of little use to an exchange bettor. Miller and Davidow: an excellent primer with no model building | https://algorithmicsportsbetting.substack.com/p/the-books-i-actually-recommend-as | primary |
+| Miller and Davidow, 2019, 237 pp | https://www.goodreads.com/book/show/45485081-the-logic-of-sports-betting | snippet |
 
 Not checked: Reddit r/algotrading consensus (fetch blocked); the *A Man for All Markets* publisher page; whether *Systematic Trading* ships code (pysystemtrade is separate). Carver's next book, *The Art and Science of Trading*, is listed for late 2026.

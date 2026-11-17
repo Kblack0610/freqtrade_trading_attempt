@@ -185,7 +185,7 @@ def test_a_settlement_fee_is_charged_on_a_win_only_and_on_the_profit():
 def test_the_paper_league_runs_only_on_its_paper_venues(monkeypatch):
     monkeypatch.setattr(paper, "connect", lambda **k: pytest.fail("connected for a refused venue"))
     with pytest.raises(SystemExit, match="is not a paper venue"):
-        paper.main(["--venue", "predictit"])
+        paper.main(["--venue", "manifold"])
 
 
 # 2. Egress ----------------------------------------------------------------------------------------------------------

@@ -107,8 +107,10 @@ def _f(x) -> float:
     return math.nan if x is None else float(x)
 
 
-def books(conn, venue: str, now: dt.datetime, horizon_h: float) -> list[tuple[Row, Market]]:
-    """The latest recorded book of every unresolved open yes outcome closing within horizon_h, oldest quote first."""
+def books(conn, venue: str, now: dt.datetime, horizon_h: float, unsized: float = math.nan) -> list[tuple[Row, Market]]:
+    """The latest recorded book of every unresolved open yes outcome closing within horizon_h, oldest quote first.
+    A side whose recorder stores no size (polymarket_us, predictit) shows `unsized` contracts, `[paper] unsized_depth`;
+    NaN, the default, leaves it unfillable, as backtest.take reads it."""
     rows = conn.execute(
         """SELECT o.market_id, o.quoted_at, o.bid, o.ask, o.ask_size, o.bid_size, m.event_id, m.series_id, m.title,
                   m.subtitle, m.market_type, m.open_time, m.close_time
@@ -118,8 +120,8 @@ def books(conn, venue: str, now: dt.datetime, horizon_h: float) -> list[tuple[Ro
              AND NOT EXISTS (SELECT 1 FROM resolutions r WHERE r.venue = o.venue AND r.market_id = o.market_id)
            ORDER BY o.quoted_at, o.market_id""",
         (venue, now, now + dt.timedelta(hours=horizon_h))).fetchall()
-    return [(Row(r[0], pd.Timestamp(r[1]), _f(r[2]), _f(r[3]), _f(r[4]), _f(r[5])), Market(r[0], *r[6:]))
-            for r in rows]
+    return [(Row(r[0], pd.Timestamp(r[1]), _f(r[2]), _f(r[3]), unsized if r[4] is None else _f(r[4]),
+                 unsized if r[5] is None else _f(r[5])), Market(r[0], *r[6:])) for r in rows]
 
 
 def line_books(conn, venue: str, now: dt.datetime, horizon_h: float,
@@ -331,7 +333,7 @@ def run_pass(conn, venue: str, cfg: dict, now: dt.datetime) -> dict:
         age = book_age(conn, venue, now)
         fresh = age is not None and age <= dt.timedelta(minutes=pcfg["max_book_age_min"])
         book, fairs = ((line_books(conn, venue, now, pcfg["horizon_h"], bcfg["sportsbook_depth"]) if sportsbook
-                        else (books(conn, venue, now, pcfg["horizon_h"]), {})) if fresh else ([], {}))
+                        else (books(conn, venue, now, pcfg["horizon_h"], pcfg.get("unsized_depth", {}).get(venue, math.nan)), {})) if fresh else ([], {}))
         meetings = meetings_of(conn, venue) if any(f == "tt_totals" for _, f, _ in league) else None
         forecasts = (Forecasts(inputs.readings(conn, "nws_high", now - FRESH, now + dt.timedelta(seconds=1)))
                      if any(f == "weather" for _, f, _ in league) else None)

@@ -139,7 +139,9 @@ timeout_s = 60
 [venues.odds_api]
 # Swept every 6 h (home-config markets-venue-recorders, "7 */6 * * *"): stale after one missed run and 30 min of slack.
 stale_after_min = 390
-# Sportsbook implied odds, read-only; the key comes from ODDS_API_KEY. Credits a run: per sport, 1 per region per
+# Sportsbook implied odds, read-only; the key comes from ODDS_API_KEY. The free tier's limit is 500 credits a month
+# (read 2026-11-17, https://the-odds-api.com/): the one sport below already uses 480, so there is no room to add a sport,
+# a market or a faster cadence until a paid plan; each run prints the credits it spent (lab/markets/odds.py). Credits a run: per sport, 1 per region per
 # market for the odds plus 2 for /scores. One sport with h2h and totals is 4 a run, 480 a month every 6 h, inside the
 # free tier's 500 (read 2026-11-14); adding spreads makes it 600, so spreads, the cadence and the sports list wait on
 # the plan the human buys (docs/markets.md, The Odds API). /v4/sports?all=true lists no table tennis (2026-11-14).
@@ -310,13 +312,18 @@ edge = 0.06
 [paper]
 # python -m lab.markets.paper (lab/markets/paper.py): each variant the readiness gate passed (market_readiness, ready) is
 # one paper account, if its family needs no fit and no key (lab/markets/paper.py docstring); the rest are retired.
-# Kalshi's books, and odds_api's sportsbook totals lines (lab/markets/paper.py line_books).
-venues = ["kalshi", "odds_api"]
+# Kalshi's books, odds_api's sportsbook totals lines (lab/markets/paper.py line_books), and the quotes polymarket_us and
+# predictit record every 5 min. Manifold stays data only: its recorder stores a probability and no bid or ask, so
+# there is no price to fill at. Polymarket global stays data only too: a US resident may not trade it.
+venues = ["kalshi", "odds_api", "polymarket_us", "predictit"]
 # Families that join a venue's league with every variant of their grid, without the readiness gate, as a forward
 # test. Paper costs nothing, so every family that can run here trades on paper from day one and the gate decides only
 # promotion (candidate, live). Gating paper left the league at 0 orders from 2026-11-15: the gate needs six whole test
 # months and had none (plan see-keen-goose). tt_totals has no backtest window until a source sells table tennis history.
-forward = { kalshi = ["longshot", "weather"], odds_api = ["tt_totals"] }
+forward = { kalshi = ["longshot", "weather"], odds_api = ["tt_totals"], polymarket_us = ["longshot"], predictit = ["longshot"] }
+# Contracts each side of a quote shows on a venue whose recorder stores no sizes (polymarket_us, predictit), so a fill is
+# limited by `stake` and depth_share and not by a size nobody recorded; the same figure as [backtest] sportsbook_depth.
+unsized_depth = { polymarket_us = 1000, predictit = 1000 }
 # A forward test runs this many days from its first fill and to this many settled bets, whichever is later
 # (paper.report; plan see-my-cousing-betegin-scalable-floyd, phase 5).
 forward_days = 28

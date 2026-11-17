@@ -13,7 +13,7 @@ from psycopg.rows import dict_row
 
 from lab import inputs
 from lab.db import connect
-from lab.markets import sweep_ages
+from lab.markets import paper_venues, sweep_ages
 from lab.suggest import load_config
 
 RUN_KINDS = ("analysis", "walkforward", "reproduce", "calibration")
@@ -74,6 +74,10 @@ MARKOUTS = ("SELECT bot, horizon_min, count(net) AS n, avg(net) AS net, avg(null
             "FROM markouts GROUP BY 1, 2")
 RECONCILE = ("SELECT bot, kind, count(*) AS n, avg(delay_s) AS delay_s, avg(price_gap) AS price, avg(fee_gap) AS fee, "
              "avg(profit_gap) AS profit FROM reconcile GROUP BY 1, 2")
+# Paper orders sent in the last day per venue, filled or not: a venue in [paper] venues at 0 while its recorder is
+# fresh is a league that stopped placing orders (0 from 2026-11-15 to 11-17 with every job green; tr-327).
+PAPER_ORDERS = ("SELECT a.venue, count(*) AS n FROM paper_orders o JOIN paper_accounts a USING (account) "
+                "WHERE o.sent_at > now() - interval '24 hours' GROUP BY 1")
 PAPER = "SELECT account, capital, equity, open_positions, marked_at FROM paper_accounts WHERE marked_at IS NOT NULL"
 # The decision record (lab/decisions.py, migration 055): decisions per action, each account's newest pass
 # through the funnel, and the fills since a league's first traced entry that have no decision (a bot trade counts
@@ -138,6 +142,7 @@ class TraderCollector:
                 last_sweep = cur.execute(LAST_SWEEP).fetchall()
                 links = cur.execute(LINKS).fetchall()
                 paper = cur.execute(PAPER).fetchall()
+                orders = {r["venue"]: r["n"] for r in cur.execute(PAPER_ORDERS).fetchall()}
                 decisions = cur.execute(DECISIONS).fetchall()
                 funnel = cur.execute(FUNNEL).fetchall()
                 untraced = cur.execute(UNTRACED).fetchall()
@@ -168,7 +173,7 @@ class TraderCollector:
         yield family("trader_climate_passing", "Strategies or mixtures whose out-of-sample interval in the market climate "
                      "clears zero at its low end", ["regime", "kind"], (([c["cell"], c["kind"]], c["n"]) for c in climate))
         yield from market_metrics(now, sweeps, last_sweep, links)
-        yield from paper_metrics(now, paper)
+        yield from paper_metrics(now, paper, orders)
         yield from decision_metrics(decisions, funnel, untraced)
         yield from shadow_metrics(now, shadow, shadow_marked)
         yield from broker_metrics(now, brokers)
@@ -300,7 +305,10 @@ def decision_metrics(decisions, funnel, untraced):
                  ["league"], (([u["league"]], u["n"]) for u in untraced))
 
 
-def paper_metrics(now, paper):
+def paper_metrics(now, paper, orders):
+    yield family("trader_paper_orders_24h", "Paper orders sent in the last 24 hours, filled or not, for each venue in "
+                 "[paper] venues (0 when none)", ["venue"],
+                 (([v], orders.get(v, 0)) for v in dict.fromkeys([*paper_venues(), *orders])))
     yield family("trader_paper_equity", "A paper account's equity at its last mark: capital, realized, open marked",
                  ["account"], (([p["account"]], p["equity"]) for p in paper))
     yield family("trader_paper_capital", "A paper account's starting capital", ["account"],

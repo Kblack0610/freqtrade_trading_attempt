@@ -171,6 +171,9 @@ def test_market_metrics(conn):
     conn.execute("INSERT INTO paper_accounts (account, family, venue, variant, params, capital, started_at, equity, open_positions, marked_at) "
                  "VALUES ('paper-a', 'longshot', 'kalshi', 'v', '{}', 1000, %s, 900, 4, %s), "
                  "('paper-new', 'longshot', 'kalshi', 'w', '{}', 1000, %s, NULL, NULL, NULL)", (now, now - dt.timedelta(minutes=5), now))
+    for mid, at in (("K1", now - dt.timedelta(hours=1)), ("K0", now - dt.timedelta(hours=25))):
+        conn.execute("INSERT INTO paper_orders (account, market_id, side, stake, sent_at, quoted_at, contracts, price, "
+                     "fee) VALUES ('paper-a', %s, 'no', 10, %s, %s, 0, NULL, 0)", (mid, at, at))
     conn.execute("INSERT INTO broker_balances (broker, read_at, paper, equity, error) VALUES ('alpaca_paper', %s, true, 100000, NULL), "
                  "('alpaca_paper', %s, true, NULL, 'HTTP 503'), ('robinhood_crypto', %s, false, 5000, NULL)",
                  (now - dt.timedelta(minutes=10), now, now - dt.timedelta(minutes=10)))
@@ -186,6 +189,8 @@ def test_market_metrics(conn):
     assert m['trader_paper_equity{account="paper-a"}'] == 900 and m['trader_paper_capital{account="paper-a"}'] == 1000
     assert m['trader_paper_open_positions{account="paper-a"}'] == 4
     assert 290 < m['trader_paper_marked_age_seconds{account="paper-a"}'] < 320
+    assert m['trader_paper_orders_24h{venue="kalshi"}'] == 1  # K1 counts though unfilled; K0 is over a day old
+    assert m['trader_paper_orders_24h{venue="odds_api"}'] == 0  # in [paper] venues with no order: the volume watch's red
     assert not any('account="paper-new"' in k for k in m)  # never marked: no equity to alert on yet
     assert not any(k.startswith("trader_shadow_marked_age") for k in m)  # no mark yet: nothing to call stale
     conn.execute("INSERT INTO shadow_accounts (account, strategy, exchange, cohort, capital, promoted_on, entry, state) "
