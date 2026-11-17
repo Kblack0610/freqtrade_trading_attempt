@@ -17,7 +17,7 @@ Tier: primary means the paper or page was read; snippet means a search summary o
 
 | Finding | Source | Tier |
 | --- | --- | --- |
-| Kalshi, 300k plus contracts: a clear favorite-longshot bias, stronger for takers than makers; the average contract returns about -20% before fees | Burgi, Deng, Whelan, "Makers and Takers: The Economics of the Kalshi Prediction Market" (2025), https://papers.ssrn.com/sol3/papers.cfm?abstract_id=5502658, working paper https://www.ucd.ie/economics/t4media/WP2025_19.pdf; summary https://cepr.org/voxeu/columns/economics-kalshi-prediction-market | snippet |
+| Kalshi, 12,403 events, over 300,000 prices (both sides of each trade): a clear favorite-longshot bias, more pronounced for prices takers accept than makers; contracts under 10c lose over 60% of the money; the average contract returns -20% before fees and -22% after (verified in the paper's text 2026-11-17) | Burgi, Deng, Whelan, "Makers and Takers: The Economics of the Kalshi Prediction Market" (2025), https://papers.ssrn.com/sol3/papers.cfm?abstract_id=5502658, text read at the MPRA copy https://mpra.ub.uni-muenchen.de/126350/1/MPRA_paper_126350.pdf (September 2025; the UCD, SSRN and CEPR pages return 403) | primary |
 | 46,168 resolved Kalshi and Polymarket markets: Kalshi's calibration slope rises from 1.02 at 30 days out to 1.22 an hour out; the bias sits in thin markets (1.18) and is absent in the most-traded third (1.02); 0-2c longshots bought at the ask lose 89c a dollar; no bucket pays after spread and taker fees | https://github.com/hrishi-tailor/prediction-market-calibration (one author and unreviewed, but reproducible from public APIs) | primary |
 | Polymarket, 588M trades: under-10c contracts lose about 19.3c per dollar in raw flow, 90c plus earn about 0.83c; by contract -6.3c, by event +4.1c; present in crypto and politics, largely absent in sports | Cardozo, Rivero-Wildemauwe, arXiv 2609.12878 (2026-09-11), https://arxiv.org/abs/2609.12878 | primary |
 | No general longshot bias on Polymarket over 124M trades | Reichenbach, Walther (2025), SSRN | snippet |
@@ -26,9 +26,9 @@ Tier: primary means the paper or page was read; snippet means a search summary o
 | The bias comes from misjudged probabilities more than a taste for risk, so it should persist where retail traders dominate | Snowberg, Wolfers, NBER w15923 (2010), https://www.nber.org/papers/w15923 | primary |
 | The classic survey of racetrack betting anomalies | Thaler, Ziemba, "Anomalies: Parimutuel Betting Markets", JEP 2(2), 1988, https://pubs.aeaweb.org/doi/abs/10.1257/jep.2.2.161 | snippet |
 | How prediction market prices become forecasts | Wolfers, Zitzewitz, "Prediction Markets", JEP 18(2), 2004, https://www.aeaweb.org/articles?id=10.1257/0895330041371321 | primary |
-| Closing line value against a devigged sharp close (Pinnacle) is the standard test of betting skill | Buchdahl, "Using the Closing Line to Test Your Skill in Betting", https://www.pinnacle.com/betting-resources/en/author/joseph-buchdahl | snippet (body did not load) |
+| Beating the margin-free ("fair") Pinnacle closing price is a much more reliable indicator of bettor skill than a betting history, provided the closing line is efficient; in his worked record possibly two-thirds of the profit over 1,214 bets was luck | Buchdahl, "Using the closing line to test your skill in betting" (Pinnacle, 2019-04-04), body read at https://www.sportstradingnetwork.com/article/using-the-closing-line-to-test-your-skill-in-betting/ (the Pinnacle page renders no body) | primary |
 | Free historical football odds with Pinnacle closing prices from 2012/13; its notice says Pinnacle's public API has been unreliable since 2025-07-23 | https://www.football-data.co.uk/data.php | primary |
-| Full Kelly is very sensitive to errors in the estimated mean; bet a fraction | MacLean, Thorp, Ziemba (2010), https://www.stat.berkeley.edu/~aldous/157/Papers/Good_Bad_Kelly.pdf | snippet |
+| Expected log growth is extremely sensitive to errors in the mean estimate, so wagers should be reduced; even half Kelly can lose heavily in the paper's example | MacLean, Thorp, Ziemba (2010), PDF read at https://www.stat.berkeley.edu/~aldous/157/Papers/Good_Bad_Kelly.pdf | primary |
 
 ## What this means for the lab
 
@@ -39,12 +39,12 @@ Tier: primary means the paper or page was read; snippet means a search summary o
 | Thin markets close to settlement | Where the miscalibration is largest, and where depth is smallest | The `hours` window and `depth_share` already bound it |
 | `calibration` | On Polymarket the sign of the longshot result depends on grouping by contract or by event | Candidate: score by event as well as by contract |
 | `gap` against sportsbooks | The bias is weak in sports, so a sports gap has to come from the devigged sharp price | Fair price is the median devigged book |
-| Skill measurement | CLV shows skill in weeks; settled profit takes far longer | `close_mid` is recorded per fill; reading CLV per account is a candidate report |
+| Skill measurement | CLV needs far fewer bets than settled profit to show skill, if the close is efficient (Buchdahl gives no time in weeks) | `close_mid` is recorded per fill; reading CLV per account is a candidate report |
 | Sizing | Fractional Kelly at most, and only after a verified edge | Fixed $10 stakes per bet (`lab/markets.toml`) |
 
 ## Not checked
 
 - The Kalshi fee schedule PDF (429); [markets.md](../markets.md) keeps the checked formula.
-- The Burgi, Deng, Whelan numbers from the paper itself (403); they come from summaries.
-- The bodies of Pinnacle's CLV articles.
+- The Burgi, Deng, Whelan maker and taker return levels: the abstract and body give the -20% and -22% averages, and the maker and taker averages differ between versions in search summaries (UCD, CESifo), so none is quoted here.
+- Pinnacle's other CLV articles; only the one above was read. Whether Thaler and Ziemba's page says what the search summary says (AEA returns 403; citation and DOI confirmed by search).
 - Whether The Odds API carries Kalshi or Polymarket prices.
