@@ -220,6 +220,45 @@ FlowSurge_15m = { family = "flow", inputs = ["ohlcv"] }
 FlowSurge_1d = { family = "flow", inputs = ["ohlcv"] }
 FlowSurge_4h = { family = "flow", inputs = ["ohlcv"] }
 
+# user_data/strategies/forecast/: Carver's AFTS forecasts, long only, one per rung (docs/carver-afts.md)
+CarverAccel16 = { family = "momentum", inputs = ["ohlcv"], note = "Buys a trend speeding up; nearest family is momentum." }
+CarverAccel16_15m = { family = "momentum", inputs = ["ohlcv"], note = "Buys a trend speeding up; nearest family is momentum." }
+CarverAccel16_1h = { family = "momentum", inputs = ["ohlcv"], note = "Buys a trend speeding up; nearest family is momentum." }
+CarverAccel16_4h = { family = "momentum", inputs = ["ohlcv"], note = "Buys a trend speeding up; nearest family is momentum." }
+CarverDipFast_15m = { family = "mean-reversion", inputs = ["ohlcv"] }
+CarverDipFast_1h = { family = "mean-reversion", inputs = ["ohlcv"] }
+CarverDipSafe_15m = { family = "mean-reversion", inputs = ["ohlcv"] }
+CarverDipSafe_1h = { family = "mean-reversion", inputs = ["ohlcv"] }
+CarverEwmac64 = { family = "trend", inputs = ["ohlcv"] }
+CarverEwmac64_15m = { family = "trend", inputs = ["ohlcv"] }
+CarverEwmac64_1h = { family = "trend", inputs = ["ohlcv"] }
+CarverEwmac64_4h = { family = "trend", inputs = ["ohlcv"] }
+CarverNegSkew = { family = "mean-reversion", inputs = ["ohlcv"], note = "Buys after negative return skew; the nearest family is a dip buy." }
+CarverNegSkew_15m = { family = "mean-reversion", inputs = ["ohlcv"], note = "Buys after negative return skew; the nearest family is a dip buy." }
+CarverNegSkew_1h = { family = "mean-reversion", inputs = ["ohlcv"], note = "Buys after negative return skew; the nearest family is a dip buy." }
+CarverNegSkew_4h = { family = "mean-reversion", inputs = ["ohlcv"], note = "Buys after negative return skew; the nearest family is a dip buy." }
+CarverRange80 = { family = "breakout", inputs = ["ohlcv"] }
+CarverRange80_15m = { family = "breakout", inputs = ["ohlcv"] }
+CarverRange80_1h = { family = "breakout", inputs = ["ohlcv"] }
+CarverRange80_4h = { family = "breakout", inputs = ["ohlcv"] }
+CarverRegimeMix = { family = "trend", inputs = ["ohlcv"] }
+CarverRegimeMix_15m = { family = "trend", inputs = ["ohlcv"] }
+CarverRegimeMix_1h = { family = "trend", inputs = ["ohlcv"] }
+CarverRegimeMix_4h = { family = "trend", inputs = ["ohlcv"] }
+CarverTrendMix = { family = "trend", inputs = ["ohlcv"] }
+CarverTrendMix_15m = { family = "trend", inputs = ["ohlcv"] }
+CarverTrendMix_1h = { family = "trend", inputs = ["ohlcv"] }
+CarverTrendMix_4h = { family = "trend", inputs = ["ohlcv"] }
+CarverTrendStrength16 = { family = "trend", inputs = ["ohlcv"] }
+CarverTrendStrength16_15m = { family = "trend", inputs = ["ohlcv"] }
+CarverTrendStrength16_1h = { family = "trend", inputs = ["ohlcv"] }
+CarverTrendStrength16_4h = { family = "trend", inputs = ["ohlcv"] }
+CarverTrendStrength64 = { family = "trend", inputs = ["ohlcv"] }
+CarverTrendStrength64_15m = { family = "trend", inputs = ["ohlcv"] }
+CarverTrendStrength64_1h = { family = "trend", inputs = ["ohlcv"] }
+CarverTrendStrength64_4h = { family = "trend", inputs = ["ohlcv"] }
+CarverVolHold = { family = "trend", inputs = ["ohlcv"], note = "Always long; only the volatility scale sizes it, so it is a risk-scaled hold, not a signal." }
+
 # Signal origin is separate from inputs (the data dependency). Horizons describe the exit rule;
 # measured holding-time cohorts stay in the diversity archive rather than being guessed here.
 [signal_sources]

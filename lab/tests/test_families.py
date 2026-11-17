@@ -20,6 +20,7 @@ CANDLES = ACTIVE / "candles"
 CHART = ACTIVE / "chart"
 TREND = ACTIVE / "trend"
 RANGE = ACTIVE / "range"
+FORECAST = ACTIVE / "forecast"
 BREAKOUT = ACTIVE / "breakout"
 CLOCK = ACTIVE / "clock"
 FLOW = ACTIVE / "flow"
@@ -113,6 +114,7 @@ def bias_data(tmp_path, monkeypatch):
     # One of each family, across the rungs: every member of a family shares its template and signal module.
     ("CandleENGULFING", CANDLES, False), ("ChartResistanceBreak", CHART, False),
     ("TrendDonchianFast", TREND, False), ("TrendDonchian_4h", TREND, False), ("RangeZ24", RANGE, False),
+    ("CarverTrendStrength16_1h", FORECAST, False), ("CarverDipSafe_15m", FORECAST, False), ("CarverRegimeMix_1h", FORECAST, False),
     ("BreakoutAtr", BREAKOUT, False), ("BreakoutSqueeze_15m", BREAKOUT, False),
     ("ClockEvening_15m", CLOCK, False), ("ClockWeekend_1d", CLOCK, False),
     ("FlowSurge_15m", FLOW, False), ("FlowObv", FLOW, False),
@@ -152,7 +154,7 @@ def test_every_active_family_member_is_discovered():
     """Switched on means scanned: the nightly analysis finds every rung of every family under user_data/strategies."""
     from lab import analyze
 
-    assert {f.name for f in ACTIVE_FAMILIES} >= {"candles", "chart", "trend", "range", "breakout", "clock", "flow"}
+    assert {f.name for f in ACTIVE_FAMILIES} >= {"candles", "chart", "trend", "range", "breakout", "clock", "flow", "forecast"}
     discovered = {s["name"]: s for s in analyze.Cli().discover()}
     for fam in ACTIVE_FAMILIES:
         expected = {p.stem for p in fam.glob("*.py")}
