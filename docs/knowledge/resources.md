@@ -35,7 +35,7 @@ Free material worth the time, by subject, each with what it covers and why it ma
 | Resource | What it gives | Why it matters |
 | --- | --- | --- |
 | Thorp, [The Kelly criterion in blackjack, sports betting and the stock market](https://gwern.net/doc/statistics/decision/2006-thorp.pdf) (2006) | Kelly derived, fractional Kelly, what an overestimated edge does | Why [avenues.md](../avenues.md) rejects Kelly sizing for now; checked in lab `research.md`, section 3 |
-| MacLean, Thorp, Ziemba, "Good and bad properties of the Kelly criterion" (Quantitative Finance, 2010; snippet) | Full Kelly is very sensitive to errors in the mean | The same lesson from the source |
+| MacLean, Thorp, Ziemba, "Good and bad properties of the Kelly criterion" (Quantitative Finance, 2010; PDF read) | Expected log growth is extremely sensitive to errors in the mean, so size bets down | The same lesson from the source |
 
 ## Podcasts
 
