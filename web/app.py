@@ -538,16 +538,84 @@ PAPER_PROFITS = """
 SELECT account, array_agg(profit ORDER BY settled_at, id) AS profits FROM paper_orders
 WHERE contracts > 0 AND settled_at IS NOT NULL GROUP BY account
 """
-NEWEST_FILLS = """
+# /today: every dry run of one UTC day. Orders are the paper_orders sent that day (filled or not); a crypto or stock
+# fill is its own order. Day P&L is the profit of fills that closed that day.
+DRY_SOURCES = ("freqtrade", "paper", "stock")
+TODAY_FILLS = """
+SELECT f.source, f.venue, CASE WHEN f.source = 'freqtrade' THEN NULL ELSE f.strategy END AS family,
+       count(DISTINCT f.account) AS accounts, count(DISTINCT f.strategy) AS strategies,
+       count(*) FILTER (WHERE f.open_date >= %(a)s AND f.open_date < %(b)s) AS fills,
+       count(DISTINCT f.instrument) FILTER (WHERE f.open_date >= %(a)s AND f.open_date < %(b)s) AS markets,
+       sum(f.profit_abs) FILTER (WHERE f.close_date >= %(a)s AND f.close_date < %(b)s) AS pnl
+FROM fills f
+WHERE f.source = ANY(%(src)s) AND ((f.open_date >= %(a)s AND f.open_date < %(b)s) OR (f.close_date >= %(a)s AND f.close_date < %(b)s))
+GROUP BY 1, 2, 3
+"""
+TODAY_ORDERS = """
+SELECT a.venue, a.family, count(*) AS orders FROM paper_orders o JOIN paper_accounts a USING (account)
+WHERE o.sent_at >= %s AND o.sent_at < %s GROUP BY 1, 2
+"""
+TODAY_BEST = """
 SELECT f.*, m.title FROM fills f
 LEFT JOIN markets m ON f.source = 'paper' AND m.venue = f.venue AND m.market_id = f.instrument
-WHERE f.source = %s ORDER BY f.open_date DESC, f.fill_id DESC LIMIT 20
+WHERE f.source = ANY(%s) AND f.close_date >= %s AND f.close_date < %s AND f.profit_ratio IS NOT NULL
+ORDER BY f.profit_ratio {order}, f.fill_id LIMIT 10
 """
+TODAY_ACTIVE = """
+SELECT 'paper' AS source, venue, family FROM paper_accounts WHERE retired_at IS NULL GROUP BY 2, 3
+UNION ALL SELECT 'stock', 'alpaca', family FROM stock_accounts WHERE retired_at IS NULL GROUP BY 3
+"""
+
+
+def today_board(fills: list[dict], orders: list[dict], active: list[dict]) -> dict:
+    """The /today table: one row per (source, venue, family), the day's totals, and the families that run but placed nothing."""
+    placed = {(o["venue"], o["family"]): o["orders"] for o in orders}
+    table = []
+    for f in fills:
+        paper = f["source"] == "paper"
+        n = placed.pop((f["venue"], f["family"]), 0) if paper else f["fills"]
+        table.append({**f, "orders": max(n, f["fills"]), "label": f["venue"] if f["source"] != "freqtrade"
+                      else f"crypto ({f['accounts']} bots)", "family": f["family"] or f"{f['strategies']} strategies"})
+    for (venue, family), n in placed.items():  # orders that never filled: the family still traded today
+        table.append({"source": "paper", "venue": venue, "family": family, "label": venue, "orders": n, "fills": 0,
+                      "markets": 0, "pnl": None, "accounts": None})
+    seen = {(r["source"], r["venue"], r["family"]) for r in table}
+    table.sort(key=lambda r: (-r["orders"], r["label"], r["family"]))
+    return {"table": table,
+            "orders": sum(r["orders"] for r in table), "fills": sum(r["fills"] for r in table),
+            "markets": sum(r["markets"] for r in table), "venues": len({r["venue"] for r in table}),
+            "idle": sorted((a["source"], a["venue"], a["family"]) for a in active
+                           if (a["source"], a["venue"], a["family"]) not in seen)}
+
+
+@app.get("/today", response_class=HTMLResponse)
+def today(request: Request, day: str = ""):
+    """Every dry run of one UTC day on one page: orders, fills and day P&L per venue and family, the day's best and worst."""
+    user_of(request)
+    try:
+        d = dt.date.fromisoformat(day) if day else dt.datetime.now(dt.timezone.utc).date()
+    except ValueError:
+        raise HTTPException(404, "day is YYYY-MM-DD")
+    a = dt.datetime.combine(d, dt.time(), dt.timezone.utc)
+    b = a + dt.timedelta(days=1)
+    board = today_board(rows(TODAY_FILLS, {"a": a, "b": b, "src": list(DRY_SOURCES)}), rows(TODAY_ORDERS, (a, b)),
+                        rows(TODAY_ACTIVE))
+    return page(request, "today.html", day=d, prev=d - dt.timedelta(days=1),
+                next=d + dt.timedelta(days=1) if b <= dt.datetime.now(dt.timezone.utc) else None, **board,
+                best=rows(TODAY_BEST.format(order="DESC"), (list(DRY_SOURCES), a, b)),
+                worst=rows(TODAY_BEST.format(order="ASC"), (list(DRY_SOURCES), a, b)))
+
+
+
+def fills_today(source: str) -> int:
+    """Fills a league opened today (UTC), for the count that links to /today."""
+    start = dt.datetime.combine(dt.datetime.now(dt.timezone.utc).date(), dt.time(), dt.timezone.utc)
+    return rows("SELECT count(*) AS n FROM fills WHERE source = %s AND open_date >= %s", (source, start))[0]["n"]
 
 
 @app.get("/leagues", response_class=HTMLResponse)
 def leagues(request: Request):
-    """How the paper accounts are doing: one scorecard, the same columns for every league, and its newest fills."""
+    """How the paper accounts are doing: one scorecard, the same columns for every league; the day's fills are /today."""
     user_of(request)
     methods = suggest.load_config(FAMILIES)
     watching = {w["bot"]: w for w in rows(KILL_SWITCH)}
@@ -559,13 +627,13 @@ def leagues(request: Request):
     stocks = league_rows.event_rows(rows(STOCK_ACCOUNTS), {r["account"]: r["profits"] for r in rows(STOCK_PROFITS)},
                                     stocks_lab.rule_of)
     return page(request, "leagues.html", glossary=glossary.load(),
-                tabs=[{"id": "crypto", "title": "Crypto", "rows": crypto, "fills": rows(NEWEST_FILLS, ("freqtrade",)),
+                tabs=[{"id": "crypto", "title": "Crypto", "rows": crypto, "fills": fills_today("freqtrade"),
                        "about": "Freqtrade spot bots on live prices (lab/league.py), grouped into cohorts."},
                       {"id": "event-contracts", "title": "Event contracts", "rows": events,
-                       "fills": rows(NEWEST_FILLS, ("paper",)),
+                       "fills": fills_today("paper"),
                        "forward": [a for a in accounts if a["drifted"] is not None],
                        "about": "One account per family variant, filled against the recorded books (lab/markets/paper.py)."},
-                      {"id": "stocks", "title": "Stocks", "rows": stocks, "fills": rows(NEWEST_FILLS, ("stock",)),
+                      {"id": "stocks", "title": "Stocks", "rows": stocks, "fills": fills_today("stock"),
                        "about": "One account per family variant on a small ETF universe, filled at Alpaca's latest "
                                 "quote with no order sent (lab/stocks.py)."}],
                 hard_stop=suggest.load_config()["book"]["hard_stop"])

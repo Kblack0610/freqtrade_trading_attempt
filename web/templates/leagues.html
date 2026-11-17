@@ -37,20 +37,7 @@
 </table>
 </div>
 {% endif %}
-{% if t.fills %}
-<h3>Newest fills</h3>
-<div class="scroll">
-<table>
-  <thead><tr><th>Opened</th><th>Account</th><th>Instrument</th><th class="n">Stake</th><th>Closed</th><th class="n">Profit</th></tr></thead>
-  <tbody>
-  {% for f in t.fills %}
-  <tr><td><a href="/trades/{{ f.source }}/{{ f.fill_id }}{% if f.source == 'freqtrade' %}?bot={{ f.account | urlencode }}{% endif %}">{{ f.open_date | local }}</a></td><td>{{ f.account }}</td><td>{{ f.title or f.instrument }}</td>
-    <td class="n">{{ f.stake | num(2) }}</td><td>{{ f.close_date | local if f.close_date else "open" }}</td><td class="n {{ f.profit_abs | tone }}">{{ f.profit_abs | num(2) }}</td></tr>
-  {% endfor %}
-  </tbody>
-</table>
-</div>
-{% endif %}
+<p class="muted">{{ t.fills }} fill{{ "" if t.fills == 1 else "s" }} opened today. <a href="/today">Every dry run of the day</a>.</p>
 {% else %}<p class="muted">No accounts in this league yet.</p>{% endif %}
 {% endfor %}
 {% endblock %}

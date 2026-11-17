@@ -94,7 +94,7 @@ def test_healthz_needs_no_sign_in(site):
     assert site[1].get("/healthz").text == "ok"
 
 
-@pytest.mark.parametrize("path", ["/", "/live", "/live/rows", "/bots/x", "/strategies", "/strategies/x", "/suggestions", "/confidence", "/book", "/coverage", "/guide", "/data", "/runs", "/runs/1", "/markets", "/links", "/markets/book", "/accounts", "/leagues", "/trades/paper/1"])
+@pytest.mark.parametrize("path", ["/", "/live", "/live/rows", "/bots/x", "/strategies", "/strategies/x", "/suggestions", "/confidence", "/book", "/coverage", "/guide", "/data", "/runs", "/runs/1", "/markets", "/links", "/markets/book", "/accounts", "/leagues", "/today", "/trades/paper/1"])
 def test_signed_out_goes_to_login(site, path):
     r = site[1].get(path)
     assert r.status_code == 303 and r.headers["location"] == "/login"
@@ -301,7 +301,7 @@ def test_the_event_contract_league_is_not_a_cohort_and_scores_beside_the_crypto_
 
 def test_pages_render_on_an_empty_database(conn, signed_in):
     assert signed_in[1].get("/").text.count('<span class="tag">no data</span>') == 9  # every lane but the guard
-    for path in ("/", "/cohorts", "/data", "/runs", "/strategies", "/suggestions", "/walkforward", "/coverage", "/markets", "/links", "/markets/book", "/accounts", "/calls", "/leagues"):
+    for path in ("/", "/cohorts", "/data", "/runs", "/strategies", "/suggestions", "/walkforward", "/coverage", "/markets", "/links", "/markets/book", "/accounts", "/calls", "/leagues", "/today"):
         assert signed_in[1].get(path).status_code == 200, path
 
 
@@ -625,7 +625,7 @@ def test_markets_pages_render_with_data(conn, signed_in):
              "/markets/book": ["longshot", "abcdef01", "1.23%", "-0.40% to 3.10%", "61%", "0.42", "By contract category", "2.11%", "0.43% to 3.77%", 
                                "Readiness gate", "0 of 1 variants are ready", "not ready: expectancy interval low", "1 of 2 gates, 3 windows",
                                "KXDEMO-1", "canceled"],
-             "/leagues": ["paper-longshot-abcdef01", "987.50", "-1.25%", "stopped", "-8.10% to -1.20% drifted", "San Antonio at Phoenix", "10.08", "15%"]}
+             "/leagues": ["paper-longshot-abcdef01", "987.50", "-1.25%", "stopped", "-8.10% to -1.20% drifted", "15%"]}
     for path, needles in pages.items():
         r = client.get(path)
         assert r.status_code == 200, path
@@ -926,7 +926,6 @@ def paper_fill(c, traced: bool) -> int:
 def test_a_paper_fill_opens_its_decision(conn, signed_in):
     oid = paper_fill(conn, traced=True)
     _, client = signed_in
-    assert f'href="/trades/paper/{oid}"' in client.get("/leagues").text
     body = client.get(f"/trades/paper/{oid}").text
     for needle in ("Miami above 69.99?", "yes 10 @ 0.97", "longshot: buy yes when the yes mid is 0.90-0.99",
                    "mid in band", "0.9 / 0.99", "ask depth", "kalshi recorder", "depth cap 0.5 x 212", "cash 412.30",
@@ -1011,7 +1010,7 @@ def test_a_stock_fill_shows_its_rule_its_checks_and_its_exit(conn, signed_in):
     _, client = signed_in
     page = client.get("/leagues").text
     tab = page[page.index('<h2 id="stocks">'):]
-    assert ts.TREND in tab and f'href="/trades/stock/{pid}"' in tab
+    assert ts.TREND in tab and "fills opened today" in tab
     assert stocks.rule_of("trend", {"sma": 3}) in tab and "No accounts in this league yet" not in tab
     body = client.get(f"/trades/stock/{pid}").text
     for needle in ("SPY", "Stocks", "close above average", "quote fresh", "alpaca latest quote", "Sizing and costs",
@@ -1024,3 +1023,31 @@ def test_a_stock_fill_shows_its_rule_its_checks_and_its_exit(conn, signed_in):
                                   "/trades/nope/1"])
 def test_an_unknown_trade_is_404_not_an_empty_page(conn, signed_in, path):
     assert signed_in[1].get(path).status_code == 404
+
+
+def test_today_counts_the_days_orders_fills_and_what_did_not_trade(conn, signed_in):
+    day = dt.datetime(2026, 1, 5, 12, tzinfo=dt.timezone.utc)
+    seed(conn)
+    conn.execute("INSERT INTO bot_trades (bot, trade_id, open_date, pair, is_open, close_date, stake_amount, profit_ratio, "
+                 "profit_abs, exit_reason, raw) VALUES ('kraken-s001', 9, %s, 'ETH/USD', false, %s, 100, 0.05, 5, 'roi', '{}')",
+                 (day, day + dt.timedelta(hours=1)))
+    conn.execute("INSERT INTO paper_accounts (account, family, venue, variant, params, capital, started_at, retired_at) VALUES "
+                 "('paper-longshot-aaaa1111', 'longshot', 'kalshi', 'aaaa1111', '{}', 1000, now(), NULL), "
+                 "('paper-weather-bbbb2222', 'weather', 'kalshi', 'bbbb2222', '{}', 1000, now(), NULL), "
+                 "('paper-tt_totals-cccc3333', 'tt_totals', 'odds_api', 'cccc3333', '{}', 1000, now(), NULL), "
+                 "('paper-longshot-dddd4444', 'longshot', 'kalshi', 'dddd4444', '{}', 1000, now(), now())")
+    for market, contracts, profit in (("M0", 10, 2.0), ("M1", 10, -1.0), ("M2", 0, None)):  # M2 never filled
+        conn.execute("INSERT INTO paper_orders (account, market_id, side, stake, sent_at, quoted_at, contracts, price, fee, "
+                     "settled_at, payout, profit) VALUES ('paper-longshot-aaaa1111', %s, 'no', 10, %s, %s, %s, 0.9, 0, %s, 1, %s)",
+                     (market, day, day, contracts, day if profit is not None else None, profit))
+    conn.execute("INSERT INTO paper_orders (account, market_id, side, stake, sent_at, quoted_at, contracts, price, fee) VALUES "
+                 "('paper-longshot-aaaa1111', 'OLD', 'no', 10, %s, %s, 5, 0.9, 0)", (day - dt.timedelta(days=3),) * 2)
+    _, client = signed_in
+    page = client.get("/today?day=2026-01-05").text
+    assert "<strong>4</strong> orders" in page  # 3 paper orders (one unfilled) and 1 crypto fill; OLD is another day
+    assert "<strong>3</strong> fills" in page and "<strong>2</strong> venues" in page
+    assert "crypto (1 bots)" in page and "longshot" in page
+    assert "weather on kalshi, tt_totals on odds_api" in page and "longshot on kalshi" not in page
+    best = page[page.index("<h2>Best</h2>"):page.index("<h2>Worst</h2>")]
+    assert best.index("M0") < best.index("ETH/USD") < best.index("M1") and "OLD" not in page  # by return: 22%, 5%, -11%
+    assert "No dry run" in client.get("/today?day=2020-01-01").text and client.get("/today?day=nope").status_code == 404

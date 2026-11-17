@@ -16,6 +16,11 @@ def venues(path: Path = CONFIG) -> list[str]:
     return list(tomllib.loads(path.read_text())["venues"])
 
 
+def paper_venues(path: Path | None = None) -> list[str]:
+    """The venues that run a paper league, `[paper] venues` of lab/markets.toml."""
+    return tomllib.loads((path or CONFIG).read_text())["paper"]["venues"]
+
+
 def sweep_ages(path: Path | None = None) -> tuple[int, dict[str, int]]:
     """Recorder freshness limits in minutes, shared by the site and exporter."""
     cfg = tomllib.loads((path or CONFIG).read_text())
