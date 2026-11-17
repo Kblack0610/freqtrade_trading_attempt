@@ -9,7 +9,7 @@ NOW = dt.datetime(2026, 11, 13, 12, tzinfo=dt.timezone.utc)
 
 def empty(**over) -> dict:
     read = {"stale_h": 2, "bots": [], "paper": [], "paper_max_age_h": {}, "stocks": [], "shadow_counts": [], "shadow_newest": None, "calls": [],
-            "calls_cfg": {"slack_days": 4}, "venues": [], "recorder": [], "recorder_ages": (15, {}), "inputs": {"nws_high": NOW}, "coverage": [],
+            "calls_cfg": {"slack_days": 4}, "venues": [], "recorder": [], "recorder_ages": (15, {}), "inputs": {"nws_high": NOW, "nws_obs": NOW, "nws_cli": NOW}, "coverage": [],
             "runs": [], "confidence": {"ready": 0, "n": 0}, "readiness": {"ready": 0, "n": 0}, "suggestions": [],
             "bankroll": None, "watch": [], "guard_lifted": False}
     return read | over
@@ -106,5 +106,5 @@ def test_a_stale_or_unread_input_turns_the_recorder_card_amber():
     assert by_id(lanes.cards(empty(recorder=[venue]), NOW))["recorder"]["level"] == "green"
     for newest in ({}, {"nws_high": NOW - dt.timedelta(hours=4)}):
         card = by_id(lanes.cards(empty(recorder=[venue], inputs=newest), NOW))["recorder"]
-        assert card["level"] == "amber" and card["first"][0]["text"] == "nws_high"
-        assert {"label": "inputs fresh", "value": "0 of 1", "level": "amber"} in card["parts"]
+        assert card["level"] == "amber" and card["first"][0]["text"] == "nws_cli"  # the first of three, all stale
+        assert {"label": "inputs fresh", "value": "0 of 3", "level": "amber"} in card["parts"]

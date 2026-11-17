@@ -290,13 +290,26 @@ edge = [0.03, 0.06]
 [families.weather]
 # A Kalshi daily high market against the NWS forecast high of its station (lab/inputs.toml nws_high), run on the bars
 # like the others but only on whole months with a forecast read every day. sd is how far off a same-day NWS high
-# runs, in degrees F; 2 to 3 is a guess to be judged by the gate, not a measured error. Kalshi closes a day's market
+# runs, in degrees F; 2 to 3 is a guess until `python -m lab.nws sd` has enough days of forecast against the CLI high
+# to replace it with the measured spread. Kalshi closes a day's market
 # about 1 am local the next day, so 24 h is the day itself.
 stake = 10
 max_spread = 0.05
 hours = 24
 sd = [2.0, 3.0]
 edge = [0.05, 0.10]
+
+[families.observed]
+# A Kalshi daily high, low or rain market the station's own readings of the day have already decided (lab/inputs.toml
+# nws_obs; lab/markets/families.py settled_by): a high above a range's top, a low below its bottom, or measured rain.
+# Buys the settled side while the price still lags it by `edge`; the stake is paid for a payoff of 1, so a lagging price
+# is the whole edge. margin is degrees F of slack for a reading that rounds the other way than the climate report.
+# Run on the bars like the others, but only on whole months with an observation every day (the IEM ASOS backfill).
+stake = 10
+max_spread = 0.05
+hours = 24
+margin = 1
+edge = [0.03, 0.06]
 
 [families.llm]
 # The forecaster is forward only: backtest.replay refuses any book that starts before this, the model's training
@@ -316,7 +329,7 @@ venues = ["kalshi", "odds_api"]
 # test. Paper costs nothing, so every family that can run here trades on paper from day one and the gate decides only
 # promotion (candidate, live). Gating paper left the league at 0 orders from 2026-11-15: the gate needs six whole test
 # months and had none (plan see-keen-goose). tt_totals has no backtest window until a source sells table tennis history.
-forward = { kalshi = ["longshot", "weather"], odds_api = ["tt_totals"] }
+forward = { kalshi = ["longshot", "weather", "observed"], odds_api = ["tt_totals"] }
 # A forward test runs this many days from its first fill and to this many settled bets, whichever is later
 # (paper.report; plan see-my-cousing-betegin-scalable-floyd, phase 5).
 forward_days = 28

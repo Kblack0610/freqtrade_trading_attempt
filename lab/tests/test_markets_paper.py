@@ -135,20 +135,23 @@ def test_only_ready_variants_trade_and_one_that_stops_passing_retires_and_comes_
 
 
 def test_every_family_that_can_run_on_kalshi_trades_paper_without_a_gate_row(conn):
-    """Paper is the forward test: the shipped [paper] forward puts longshot and weather on kalshi with no ready row,
+    """Paper is the forward test: the shipped [paper] forward puts longshot, weather and observed on kalshi with no ready row,
     and a family outside forward still waits on the gate (the negative control)."""
     shipped = load_config()
     forward = shipped["paper"]["forward"]
-    assert set(forward["kalshi"]) == {"longshot", "weather"}
+    assert set(forward["kalshi"]) == {"longshot", "weather", "observed"}
     seed(conn, gate=False)
     out = paper.run_pass(conn, "kalshi", cfg(forward=forward), NOW)
-    weather = {paper.account_of("weather", backtest.variant_of(p)) for p in paper.variants(shipped["families"]["weather"])}
+    weather = {paper.account_of(f, backtest.variant_of(p)) for f in ("weather", "observed")
+               for p in paper.variants(shipped["families"][f])}
     assert set(out["accounts"]) == {ACCOUNT} | weather and out["retired"] == []
     assert out["accounts"][ACCOUNT]["fills"] == 1 and [o[1] for o in orders(conn)] == ["A"]
-    assert all(out["accounts"][a]["orders"] == 0 for a in weather)  # no NWS reading: weather places nothing
+    assert all(out["accounts"][a]["orders"] == 0 for a in weather)  # no NWS reading: weather and observed place nothing
 
     out = paper.run_pass(conn, "kalshi", cfg(forward={"kalshi": ["weather"]}), NOW + dt.timedelta(minutes=1))
-    assert out["retired"] == [ACCOUNT] and ACCOUNT not in out["accounts"]  # longshot without forward or a gate row
+    # longshot and observed have no forward and no gate row now
+    assert ACCOUNT in out["retired"] and ACCOUNT not in out["accounts"]
+    assert {a.split("-")[1] for a in out["retired"]} == {"longshot", "observed"} and set(out["accounts"]) == weather - {a for a in weather if "observed" in a}
 
 
 def test_a_ready_variant_of_a_family_that_needs_a_fit_is_reported_not_traded(conn):
