@@ -97,6 +97,8 @@ wtc = { family = "biased-control", inputs = ["ohlcv"] }
 # lab/research/
 BustShort = { family = "short", inputs = ["ohlcv", "funding"], note = "Funding is measured (funding_rates); trades before its history are counted apart (docs/short-bust.md)." }
 DonchianLongShort = { family = "trend", inputs = ["ohlcv", "funding"], note = "The staged trend family's Donchian ensemble both ways, on futures candles; research only (docs/short-bust.md)." }
+CarverLongShort64 = { family = "trend", inputs = ["ohlcv", "funding"], note = "AFTS 6: CarverEwmac64 both ways, on futures candles; research only (docs/short-bust.md)." }
+CarverLongShort16 = { family = "trend", inputs = ["ohlcv", "funding"], note = "AFTS 8 without its buffer: CarverTrendStrength16 both ways, on futures candles; research only (docs/short-bust.md)." }
 
 # user_data/strategies/candles/: fixed-exit bullish TA-Lib patterns
 Candle3INSIDE = { family = "candlestick-pattern", inputs = ["ohlcv"] }

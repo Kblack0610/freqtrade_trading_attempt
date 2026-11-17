@@ -86,3 +86,31 @@ def test_the_long_short_trend_research_is_causal_and_trades_both_ways():
     assert whole["enter_long"].sum() > 0 and whole["enter_short"].sum() > 0
     cut = both(df.iloc[:450])
     pd.testing.assert_frame_equal(cut, whole.iloc[:450])
+
+
+@pytest.mark.parametrize("name", ["CarverLongShort64", "CarverLongShort16"])
+def test_carver_long_short_is_causal_trades_both_ways_and_mirrors_its_long_half(name):
+    from lab import forecasts
+    from lab.research import CarverLongShort
+
+    rule = getattr(CarverLongShort, name)
+    close = np.r_[np.linspace(100, 300, 600), np.linspace(300, 80, 600)]
+    df = frame(close)
+    whole = CarverLongShort.signals(df, rule.spec)
+    assert whole["enter_long"].sum() > 0 and whole["enter_short"].sum() > 0
+    assert not (whole["enter_long"] & whole["enter_short"]).any()
+    # The long half is the forecast family's class: the same forecast, long above 0.
+    f = forecasts.ewmac(df["close"], rule.spec["args"]["fast"])
+    pd.testing.assert_series_equal(whole["forecast"], f, check_names=False)
+    w = whole["weight"].dropna()
+    assert not w.empty and w.between(0, 1).all()
+    cut = CarverLongShort.signals(df.iloc[:900], rule.spec)
+    pd.testing.assert_frame_equal(cut, whole.iloc[:900])
+
+
+def test_windows_split_the_whole_history_by_side():
+    t = pd.DataFrame([trade("2024-01-01", "2024-01-02"), trade("2024-02-01", "2024-02-02", short=False)])
+    out = bust.windows(t, [(pd.Timestamp("2024-01-01").date(), pd.Timestamp("2024-01-05").date(), -0.3)])
+    assert len(out["whole history"][1]) == 2
+    assert out["whole history, shorts"][1]["is_short"].tolist() == [True]
+    assert out["whole history, longs"][1]["is_short"].tolist() == [False]

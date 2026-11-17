@@ -65,7 +65,7 @@ Status is `scanned` (in `user_data/strategies/`, backtested nightly, a counted t
 
 | Pairs, market neutral | blocked | the short leg needs margin or futures; `lab/league.py` runs spot only |
 | Funding carry and basis | blocked | long spot, short perpetual: needs a futures short. Measured offline in [carry.md](carry.md): it paid in 2024 and not since |
-| Shorts on a trend or a bust | blocked | futures; research only in `lab/research/` (BustShort, DonchianLongShort, docs/short-bust.md) |
+| Shorts on a trend or a bust | blocked | futures; research only in `lab/research/` (BustShort, DonchianLongShort, CarverLongShort64 and 16, docs/short-bust.md) |
 | Cross-venue spread | blocked | needs inventory on two exchanges and two legs at once; a freqtrade bot trades one exchange. The event-contract version is `lab/markets/` cross-venue gaps |
 | Market making | blocked by the backtester | freqtrade fills a limit order when price touches it, with no queue position, so a maker's edge cannot be measured; it would read as free money |
 
