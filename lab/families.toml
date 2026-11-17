@@ -229,6 +229,7 @@ cross-venue = "A price discrepancy between venues."
 event = "A filing, news item or other discrete catalyst."
 sentiment = "Expressed opinion or attention."
 forecast = "An outside forecast of the quantity a market settles on, such as the NWS forecast high."
+observation = "What an official station has already measured of the quantity a market settles on, such as the high so far today."
 
 [family_categories]
 trend = { signal_source = "price", instrument = "crypto", horizon = "strategy-exit" }
@@ -255,3 +256,4 @@ gap = { signal_source = "cross-venue", instrument = "event-contract", horizon = 
 llm = { signal_source = "event", instrument = "event-contract", horizon = "resolution" }
 tt_totals = { signal_source = "structural", instrument = "sportsbook-line", horizon = "resolution" }
 weather = { signal_source = "forecast", instrument = "event-contract", horizon = "resolution" }
+observed = { signal_source = "observation", instrument = "event-contract", horizon = "resolution" }
