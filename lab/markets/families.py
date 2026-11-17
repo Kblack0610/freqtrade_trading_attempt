@@ -82,7 +82,7 @@ from lab.util import s3_from_env
 
 UTC = dt.timezone.utc
 LEAD = dt.timedelta(days=2)  # a line book reads quotes from this long before its window, for games early in it
-COMMANDS = ("longshot", "calibration", "gap", "weather")
+COMMANDS = ("longshot", "calibration", "gap", "weather", "observed")
 LINES = ("tt_totals",)  # a sportsbook venue's families, on its line book (line_book)
 
 
@@ -470,11 +470,13 @@ def degrees(subtitle: str | None) -> tuple[int | None, int | None] | None:
 
 
 def day_of(event_id: str | None) -> dt.date | None:
-    """The date a Kalshi daily event is for: KXHIGHNY-26NOV15 is 2026-11-15."""
-    try:
-        return dt.datetime.strptime((event_id or "").rsplit("-", 1)[-1], "%y%b%d").date()
-    except ValueError:
-        return None
+    """The date a Kalshi daily event is for: KXHIGHNY-26NOV15 and KXRAINDNYC-261115 are 2026-11-15."""
+    for form in ("%y%b%d", "%y%m%d"):
+        try:
+            return dt.datetime.strptime((event_id or "").rsplit("-", 1)[-1], form).date()
+        except ValueError:
+            pass
+    return None
 
 
 def chance(lo: int | None, hi: int | None, mean: float, sd: float) -> float:
@@ -513,7 +515,7 @@ class Weather(Family):
         super().__init__(params)
         e = reg["nws_high"]
         self.forecasts, self.fresh_min = forecasts, e["fresh_min"]
-        self.stations = {st["series"]: key for key, st in e["stations"].items()}
+        self.stations = {s: key for key, st in e["stations"].items() for s in st["series"]}
 
     def rule(self) -> str:
         p = self.params
@@ -541,6 +543,91 @@ class Weather(Family):
         prob = chance(*rng, high, p["sd"])
         side = side_for(prob, *got, p["edge"])
         if not self.passes("edge", {"prob": prob, "bid": got[0], "ask": got[1]}, p["edge"], side is not None):
+            return []
+        return self.order(row, side if q else None)
+
+
+def settled_by(kind: str, rng: tuple | None, obs: dict, margin: int) -> float | None:
+    """1.0 or 0.0 when what the station has measured already decides the market, else None. A day's high only grows
+    and its low only falls, and the report rounds whole degrees, so `margin` degrees of slack keep a reading that
+    rounds the other way from deciding it. Rain is decided only upward: measured rain cannot be undone, a dry day can
+    still turn wet."""
+    if kind == "rain":
+        return 1.0 if obs["rained"] else None
+    lo, hi = rng
+    if kind == "high":
+        high = obs["high"]
+        if high is None:
+            return None
+        if hi is not None and high - margin > hi:
+            return 0.0
+        return 1.0 if hi is None and lo is not None and high - margin >= lo else None
+    low = obs["low"]
+    if low is None:
+        return None
+    if lo is not None and low + margin < lo:
+        return 0.0
+    return 1.0 if lo is None and hi is not None and low + margin <= hi else None
+
+
+class Observed(Family):
+    """A Kalshi daily weather market (high, low, or will it rain) the station's own readings of that day have already
+    decided (settled_by): buys the side the observation settles while the price still lags it by `edge`. The
+    reading is the newest at or before the row, of the market's own day and no older than the input's fresh_min, so a
+    row never sees a reading made after it and a market is never bet before its day has an observation."""
+    name = "observed"
+    CHECKS = ("weather market",) + Family.CHECKS + ("observation known", "observation fresh", "settled by observation",
+                                                    "edge")
+    INPUTS = Family.INPUTS + ("nws_obs",)
+
+    def __init__(self, params: dict, observations: Forecasts, reg: dict):
+        super().__init__(params)
+        e = reg["nws_high"]
+        self.obs, self.fresh_min = observations, reg["nws_obs"]["fresh_min"]
+        self.markets = {}  # series -> (station, kind); the rain event's series holds every city, told by its code
+        for key, st in e["stations"].items():
+            for s in st["series"]:
+                self.markets[s] = (key, "high")
+            self.markets[f"KXLOWT{st['code']}"] = (key, "low")
+            self.markets[f"KXRAIND{st['code']}"] = (key, "rain")
+            self.markets[f"KXRAIN-{st['code']}"] = (key, "rain")
+
+    def rule(self) -> str:
+        p = self.params
+        return (f"observed: buy the side a station's own readings of the day have already settled (the high so far "
+                f"above a range, the low so far below one, measured rain) while the price lags it by {p['edge']}, "
+                f"within {p['hours']} h of close, {p['margin']} F of slack")
+
+    def station(self, m: Market) -> tuple[str, str] | None:
+        s = m.series_id or ""
+        return self.markets.get(f"{s}-{m.market_id.rsplit('-', 1)[-1]}" if s == "KXRAIN" else s)
+
+    def on_book(self, row, m):
+        p, hit = self.params, self.station(m)
+        day, rng = day_of(m.event_id), None if m.subtitle is None else degrees(m.subtitle)
+        known = hit is not None and day is not None and (hit[1] == "rain" or rng is not None)
+        if not self.passes("weather market", m.series_id, "a high, low or rain series of lab/inputs.toml", known):
+            return []
+        q = self.entry(row, m)
+        if not (got := q or (self.checks is not None and self.quoted)):
+            return []
+        key, kind = hit
+        seen = self.obs.at(key, row.ts)
+        obs = None if seen is None or seen[0]["day"] != day.isoformat() else seen[0]
+        self.read("nws_obs", None if obs is None else {"station": key, "day": obs["day"], "high": obs["high"],
+                                                      "low": obs["low"], "rained": obs["rained"]},
+                  None if obs is None else seen[1])
+        if not self.passes("observation known", None if obs is None else obs["n"], f"an observation of {day}",
+                           obs is not None):
+            return []
+        age = (row.ts - seen[1]).total_seconds() / 60
+        if not self.passes("observation fresh", age, self.fresh_min, age <= self.fresh_min):
+            return []
+        fair = settled_by(kind, rng, obs, p["margin"])
+        if not self.passes("settled by observation", fair, "the day's readings decide the market", fair is not None):
+            return []
+        side = side_for(fair, *got, p["edge"])
+        if not self.passes("edge", {"fair": fair, "bid": got[0], "ask": got[1]}, p["edge"], side is not None):
             return []
         return self.order(row, side if q else None)
 
@@ -660,6 +747,15 @@ class Loader:
             self.cache[key] = (tb, *backtest.load_markets(self.conn, self.venue, tb["market_id"].unique()))
         return self.cache[key]
 
+    def observations(self, start: dt.date, end: dt.date) -> Forecasts | None:
+        """The window's station observations, or None unless every day of it has a reading."""
+        key = ("observations", start)
+        if key not in self.cache:
+            covered = inputs.days(self.conn, "nws_obs")
+            self.cache[key] = Forecasts(inputs.readings(self.conn, "nws_obs", _midnight(start) - LEAD, _midnight(end))) \
+                if all(d in covered for d in span(start, end)) else None
+        return self.cache[key]
+
     def forecasts(self, start: dt.date, end: dt.date) -> Forecasts | None:
         """The window's NWS forecasts, from LEAD before it, or None unless every day of it has a reading."""
         key = ("forecasts", start)
@@ -696,6 +792,9 @@ def strategy(family: str, params: dict, loader: Loader, start: dt.date, end: dt.
     if family == "weather":
         f = loader.forecasts(start, end)
         return None if f is None else Weather(params, f, inputs.load())
+    if family == "observed":
+        o = loader.observations(start, end)
+        return None if o is None else Observed(params, o, inputs.load())
     return Gap(params, *loader.ref(start, end, params["ref_venue"], params["source"]))
 
 

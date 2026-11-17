@@ -573,3 +573,101 @@ def test_a_weather_window_runs_only_when_every_day_of_it_has_a_forecast(conn, tm
     s = families.strategy("weather", WX, families.Loader(conn, fs, "kalshi", CFG), start, end, set())
     assert isinstance(s, families.Weather)
     assert s.forecasts.at("KNYC", pd.Timestamp("2026-11-01", tz="UTC"))[0]["highs"] == {"2026-11-01": 50}
+
+
+# observed: a station's own readings of the day decide a market before the day ends (lab/inputs.toml nws_obs)
+
+OB = {**BASE, "hours": 24, "margin": 1, "edge": 0.03}
+
+
+def ob_market(mid, subtitle, series="KXHIGHNY", event="KXHIGHNY-26NOV02"):
+    return Market(mid, event, series, mid, subtitle, "binary", at(-240), at(30))
+
+
+def ob(*readings):
+    """An Observed variant over KNYC readings of (hour, day so far)."""
+    rows = [("KNYC", at(h), {"day": "2026-11-02", "high": None, "low": None, "rained": False, "n": 5} | so_far)
+            for h, so_far in readings]
+    return families.Observed(OB, families.Forecasts(rows), inputs.load())
+
+
+def test_a_reading_settles_a_high_only_past_its_slack_a_low_only_downward_and_rain_only_upward():
+    done = families.settled_by
+    assert done("high", (None, 60), {"high": 62}, 1) == 0.0 and done("high", (None, 60), {"high": 61}, 1) is None
+    assert done("high", (63, None), {"high": 64}, 1) == 1.0 and done("high", (63, None), {"high": 63}, 1) is None
+    assert done("high", (57, 58), {"high": 70}, 1) == 0.0 and done("high", (57, 58), {"high": 58}, 1) is None
+    assert done("low", (40, None), {"low": 38}, 1) == 0.0 and done("low", (40, None), {"low": 40}, 1) is None
+    assert done("low", (None, 44), {"low": 43}, 1) == 1.0 and done("low", (None, 44), {"low": 46}, 1) is None
+    assert done("rain", None, {"rained": True}, 1) == 1.0 and done("rain", None, {"rained": False}, 1) is None
+    assert done("high", (63, None), {"high": None}, 1) is None
+
+
+def test_observed_buys_what_the_station_has_settled_while_the_price_lags():
+    s = ob((9, {"high": 66, "low": 41}))
+    assert sides(s.on_book(row("A", 10, 0.50, 0.52), ob_market("A", "63° or above"))) == [("A", "yes")]  # high 66: yes
+    assert sides(s.on_book(row("B", 10, 0.30, 0.32), ob_market("B", "61° to 62°"))) == [("B", "no")]  # high is past it
+    assert s.on_book(row("C", 10, 0.98, 0.99), ob_market("C", "63° or above")) == []  # the price caught up
+    assert s.on_book(row("D", 10, 0.50, 0.52), ob_market("D", "70° or above")) == []  # not decided: it may still rise
+    assert sides(s.on_book(row("L", 10, 0.50, 0.52), ob_market("L", "40° or above", "KXLOWTNYC", "KXLOWTNYC-26NOV02"))) == []
+    assert sides(s.on_book(row("M", 10, 0.50, 0.52), ob_market("M", "45° or above", "KXLOWTNYC", "KXLOWTNYC-26NOV02"))) \
+        == [("M", "no")]  # the low is already 41, under 45
+    assert sides(s.on_book(row("N", 10, 0.50, 0.52), ob_market("N", "44° or below", "KXLOWTNYC", "KXLOWTNYC-26NOV02"))) \
+        == [("N", "yes")]
+
+
+def test_observed_bets_rain_in_both_market_shapes_and_only_after_rain_is_on_record():
+    wet, dry = ob((9, {"rained": True})), ob((9, {"rained": False}))
+    daily = ob_market("R", "New York City", "KXRAIN", "KXRAIN-26NOV02")
+    daily = Market("KXRAIN-26NOV02-NYC", daily.event_id, "KXRAIN", daily.title, "New York City", "binary", at(-240), at(30))
+    single = Market("KXRAINDNYC-261102-0", "KXRAINDNYC-261102", "KXRAINDNYC", "t", "Above 0 inches", "binary", at(-240), at(30))
+    for m in (daily, single):
+        assert sides(wet.on_book(row(m.market_id, 10, 0.60, 0.62), m)) == [(m.market_id, "yes")]
+        assert dry.on_book(row(m.market_id, 10, 0.60, 0.62), m) == []  # negative control: nothing measured yet
+    other = Market("KXRAIN-26NOV02-TTN", daily.event_id, "KXRAIN", "t", "Trenton", "binary", at(-240), at(30))
+    assert wet.on_book(row(other.market_id, 10, 0.60, 0.62), other) == []  # a city with no station
+
+
+def test_observed_never_reads_a_reading_made_after_the_row_or_of_another_day_or_a_stale_one():
+    market_ = ob_market("A", "63° or above")
+    base = {"high": 66}
+    assert ob((11, base)).on_book(row("A", 10, 0.50, 0.52), market_) == []  # made after the row
+    assert ob((5, base)).on_book(row("A", 10, 0.50, 0.52), market_) == []  # 5 h old
+    old = families.Observed(OB, families.Forecasts([("KNYC", at(9), {"day": "2026-11-01", "high": 66, "low": 40,
+                                                                      "rained": False, "n": 9})]), inputs.load())
+    assert old.on_book(row("A", 10, 0.50, 0.52), market_) == []  # yesterday's high says nothing of today's market
+
+
+def test_a_traced_observed_variant_makes_the_same_orders_and_names_its_observation_input():
+    book = [(row("A", 10, 0.50, 0.52), ob_market("A", "63° or above")),
+            (row("B", 0, 0.50, 0.52), ob_market("B", "63° or above")),  # 30 h out
+            (row("C", 10, 0.98, 0.99), ob_market("C", "63° or above")),
+            (row("D", 10, 0.50, 0.52), ob_market("D", "63° or above", series="S"))]
+    for reads in (((9, {"high": 66}),), ((5, {"high": 66}),), ()):
+        assert run(ob(*reads), book, True) == run(ob(*reads), book, False)
+    s = ob((-1, {"high": 66}))
+    s.checks, s.inputs = [], []
+    s.on_book(row("B", 0, 0.50, 0.52), ob_market("B", "63° or above"))
+    assert [c["name"] for c in s.checks if not c["pass"]] == ["hours to close"]
+    assert {c["name"] for c in s.checks} == set(families.Observed.CHECKS)
+    assert s.inputs == [{"name": "nws_obs", "value": {"station": "KNYC", "day": "2026-11-02", "high": 66, "low": None,
+                                                      "rained": False}, "as_of": at(-1)}]
+
+
+def test_an_observed_window_runs_only_when_every_day_of_it_has_an_observation(conn, tmp_path):
+    fs = pafs.SubTreeFileSystem(str(tmp_path), pafs.LocalFileSystem())
+    start, end = dt.date(2026, 10, 1), dt.date(2026, 11, 1)
+    for d in families.span(start, end - dt.timedelta(days=1)):
+        inputs.write(conn, "nws_obs", "KNYC", dt.datetime.combine(d, dt.time(12), UTC), {"day": d.isoformat()})
+    assert families.strategy("observed", OB, families.Loader(conn, fs, "kalshi", CFG), start, end, set()) is None
+    inputs.write(conn, "nws_obs", "KNYC", dt.datetime(2026, 10, 31, 12, tzinfo=UTC), {"day": "2026-10-31"})
+    assert isinstance(families.strategy("observed", OB, families.Loader(conn, fs, "kalshi", CFG), start, end, set()),
+                      families.Observed)
+
+
+def test_every_weather_series_of_the_registry_names_one_station_and_a_cli_report():
+    stations = inputs.load()["nws_high"]["stations"]
+    assert len(stations) == 23
+    series = [s for st in stations.values() for s in st["series"]]
+    assert len(series) == len(set(series)) and len({st["code"] for st in stations.values()}) == 23
+    assert all(st["cli"].startswith("CLI") and -9 <= st["utc_offset"] <= -5 for st in stations.values())
+    assert families.day_of("KXRAINDNYC-261115") == dt.date(2026, 11, 15)

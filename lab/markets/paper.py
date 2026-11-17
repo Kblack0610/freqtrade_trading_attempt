@@ -6,7 +6,7 @@
 
 A `[paper] forward` family of the venue joins with every variant of its grid, gate or not: paper costs nothing and
 the forward test is the evidence the gate is waiting on, so every family that can run is forward on its venue
-(longshot and weather on kalshi, tt_totals on odds_api) and the gate decides only promotion. A family not in forward
+(longshot, weather and observed on kalshi, tt_totals on odds_api) and the gate decides only promotion. A family not in forward
 follows the readiness gate: every market_readiness row (lab/markets/families.py gate()) on the venue that is ready, of
 a family that can run here (FAMILIES), is one account with `[paper] capital`, trading the params the gate judged. An
 account in neither set is retired (retired_at): it takes no entries, its open fills still settle and mark, and it
@@ -36,8 +36,8 @@ reported under "unrunnable". A pass:
 An account whose `watch` row is stopped (lab/watcher.py --drill) takes no entries; its fills still settle and mark.
 Paper only: nothing here can reach a venue's order API, and nothing places a bet at a sportsbook (lab/live.py
 holds the guard). Families that need a fit or a key are not in the league yet: calibration (a bars fit), gap (odds_api is not deployed) and llm (no LiteLLM key; forward scoring is its only
-scoring, so it joins once the key is in SOPS). weather trades on the NWS forecasts lab/nws.py read within the
-input's fresh_min.
+scoring, so it joins once the key is in SOPS). weather trades on the NWS forecasts and observed on the station
+observations lab/nws.py read, each within its input's fresh_min.
 """
 
 import argparse
@@ -55,14 +55,15 @@ from lab.decisions import decide, funnel, prune
 from lab.grid import variants
 from lab.markets import backtest, fees
 from lab.markets.backtest import Market
-from lab.markets.families import Forecasts, Longshot, TTTotals, Weather, line_book, line_resolution, meetings_of
+from lab.markets.families import Forecasts, Longshot, Observed, TTTotals, Weather, line_book, line_resolution, meetings_of
 from lab.markets.recorder import load_config
 
 UTC = dt.timezone.utc
-FAMILIES = ("longshot", "tt_totals", "weather")
+FAMILIES = ("longshot", "tt_totals", "weather", "observed")
 LEAGUE = "event_contracts"  # decisions.league
 REGISTRY = inputs.load()
-FRESH = dt.timedelta(minutes=REGISTRY["nws_high"]["fresh_min"])  # any older reading is one weather refuses
+# any reading older than the longest fresh_min is one weather and observed both refuse
+FRESH = dt.timedelta(minutes=max(REGISTRY[i]["fresh_min"] for i in ("nws_high", "nws_obs")))
 Row = namedtuple("Row", backtest.BOOK)
 
 
@@ -87,11 +88,14 @@ def accounts(conn, venue: str, cfg: dict) -> tuple[list[tuple[str, str, dict]], 
     return [(a, f, p) for a, (f, p) in sorted(league.items())], unrunnable
 
 
-def strategy_of(family: str, params: dict, meetings, fairs: dict, forecasts: Forecasts | None = None):
+def strategy_of(family: str, params: dict, meetings, fairs: dict, forecasts: Forecasts | None = None,
+                observations: Forecasts | None = None):
     """A fresh strategy for one pass; tt_totals reads the venue's meetings and the line book's no-vig fairs, weather
-    the NWS forecasts read within the input's fresh_min."""
+    the NWS forecasts and observed the station observations read within the input's fresh_min."""
     if family == "tt_totals":
         return TTTotals(params, meetings, fairs)
+    if family == "observed":
+        return Observed(params, observations, REGISTRY)
     return Weather(params, forecasts, REGISTRY) if family == "weather" else Longshot(params)
 
 
@@ -337,13 +341,15 @@ def run_pass(conn, venue: str, cfg: dict, now: dt.datetime) -> dict:
         meetings = meetings_of(conn, venue) if any(f == "tt_totals" for _, f, _ in league) else None
         forecasts = (Forecasts(inputs.readings(conn, "nws_high", now - FRESH, now + dt.timedelta(seconds=1)))
                      if any(f == "weather" for _, f, _ in league) else None)
+        observations = (Forecasts(inputs.readings(conn, "nws_obs", now - FRESH, now + dt.timedelta(seconds=1)))
+                        if any(f == "observed" for _, f, _ in league) else None)
         stopped = {b for (b,) in conn.execute("SELECT bot FROM watch WHERE stopped_at IS NOT NULL")}
         capital = dict(conn.execute("SELECT account, capital FROM paper_accounts WHERE venue = %s", (venue,)).fetchall())
         out = {"settled": settled, "book": len(book), "fresh": fresh, "stopped": sorted(stopped & capital.keys()),
                "retired": sorted(retired), "unrunnable": unrunnable, "accounts": {}}
         trading = [(a, f, p) for a, f, p in league if a not in stopped]
         for a, f, p in trading:
-            out["accounts"][a] = trade(conn, a, strategy_of(f, p, meetings, fairs, forecasts), book, capital[a],
+            out["accounts"][a] = trade(conn, a, strategy_of(f, p, meetings, fairs, forecasts, observations), book, capital[a],
                                        bcfg["depth_share"], fee_cfg, now, pcfg["max_open"], venue, pcfg["near_misses"])
         if not fresh:
             funnel(conn, LEAGUE, venue, now, {(a, "stale_book"): 1 for a, _, _ in trading})
