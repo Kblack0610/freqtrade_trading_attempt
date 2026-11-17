@@ -313,8 +313,10 @@ edge = 0.06
 # Kalshi's books, and odds_api's sportsbook totals lines (lab/markets/paper.py line_books).
 venues = ["kalshi", "odds_api"]
 # Families that join a venue's league with every variant of their grid, without the readiness gate, as a forward
-# test: tt_totals has no backtest window until a source sells table tennis history (docs/markets.md, Table tennis data).
-forward = { odds_api = ["tt_totals"] }
+# test. Paper costs nothing, so every family that can run here trades on paper from day one and the gate decides only
+# promotion (candidate, live). Gating paper left the league at 0 orders from 2026-11-15: the gate needs six whole test
+# months and had none (plan see-keen-goose). tt_totals has no backtest window until a source sells table tennis history.
+forward = { kalshi = ["longshot", "weather"], odds_api = ["tt_totals"] }
 # A forward test runs this many days from its first fill and to this many settled bets, whichever is later
 # (paper.report; plan see-my-cousing-betegin-scalable-floyd, phase 5).
 forward_days = 28

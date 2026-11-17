@@ -15,9 +15,11 @@ BAND = {"stake": 10, "max_spread": 0.05, "hours": 24, "bands": [{"buy": "no", "l
 
 
 def cfg(**paper_over):
+    """The shipped config with one longshot variant (BAND) and no forward family, so the readiness gate decides the
+    league and a test sees only the accounts it seeded; a test of the forward path passes forward=."""
     c = copy.deepcopy(load_config())
     c["families"]["longshot"] = BAND
-    c["paper"].update(paper_over)
+    c["paper"].update({"forward": {}, **paper_over})
     return c
 
 
@@ -130,6 +132,23 @@ def test_only_ready_variants_trade_and_one_that_stops_passing_retires_and_comes_
     out = paper.run_pass(conn, "kalshi", cfg(), NOW + dt.timedelta(minutes=3))
     assert out["retired"] == [] and out["accounts"][ACCOUNT]["fills"] == 1
     assert conn.execute("SELECT retired_at FROM paper_accounts").fetchone()[0] is None
+
+
+def test_every_family_that_can_run_on_kalshi_trades_paper_without_a_gate_row(conn):
+    """Paper is the forward test: the shipped [paper] forward puts longshot and weather on kalshi with no ready row,
+    and a family outside forward still waits on the gate (the negative control)."""
+    shipped = load_config()
+    forward = shipped["paper"]["forward"]
+    assert set(forward["kalshi"]) == {"longshot", "weather"}
+    seed(conn, gate=False)
+    out = paper.run_pass(conn, "kalshi", cfg(forward=forward), NOW)
+    weather = {paper.account_of("weather", backtest.variant_of(p)) for p in paper.variants(shipped["families"]["weather"])}
+    assert set(out["accounts"]) == {ACCOUNT} | weather and out["retired"] == []
+    assert out["accounts"][ACCOUNT]["fills"] == 1 and [o[1] for o in orders(conn)] == ["A"]
+    assert all(out["accounts"][a]["orders"] == 0 for a in weather)  # no NWS reading: weather places nothing
+
+    out = paper.run_pass(conn, "kalshi", cfg(forward={"kalshi": ["weather"]}), NOW + dt.timedelta(minutes=1))
+    assert out["retired"] == [ACCOUNT] and ACCOUNT not in out["accounts"]  # longshot without forward or a gate row
 
 
 def test_a_ready_variant_of_a_family_that_needs_a_fit_is_reported_not_traded(conn):
