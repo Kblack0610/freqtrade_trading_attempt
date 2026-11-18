@@ -332,10 +332,15 @@ def run_pass(conn, venue: str, cfg: dict, now: dt.datetime) -> dict:
             "INSERT INTO paper_accounts (account, family, venue, variant, params, capital, started_at) "
             "VALUES (%s, %s, %s, %s, %s, %s, %s) ON CONFLICT (account) DO NOTHING",
             [(a, f, venue, backtest.variant_of(p), Jsonb(p), pcfg["capital"], now) for a, f, p in league])
+        taken = conn.execute("SELECT account, venue FROM paper_accounts WHERE account = ANY(%s) AND venue <> %s",
+                             (names, venue)).fetchall()
+        if taken:
+            raise RuntimeError(f"{venue}: account names held by another venue: {taken}")
         retired = [a for (a,) in conn.execute(
             "UPDATE paper_accounts SET retired_at = %s WHERE venue = %s AND retired_at IS NULL "
             "AND NOT account = ANY(%s) RETURNING account", (now, venue, names)).fetchall()]
-        conn.execute("UPDATE paper_accounts SET retired_at = NULL WHERE account = ANY(%s)", (names,))
+        conn.execute("UPDATE paper_accounts SET retired_at = NULL WHERE venue = %s AND account = ANY(%s)",
+                     (venue, names))
         settled = settle(conn, venue, fee_cfg)
         age = book_age(conn, venue, now)
         fresh = age is not None and age <= dt.timedelta(minutes=pcfg["max_book_age_min"])

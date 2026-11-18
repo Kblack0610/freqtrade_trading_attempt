@@ -456,6 +456,9 @@ def test_two_venues_trading_one_variant_each_get_their_own_account(conn):
     assert other != ACCOUNT and paper.run_pass(conn, "polymarket_us", c, NOW)["accounts"][other]["fills"] == 1
     assert dict(conn.execute("SELECT account, venue FROM paper_accounts").fetchall()) == {
         ACCOUNT: "kalshi", other: "polymarket_us"}
+    conn.execute("UPDATE paper_accounts SET venue = 'kalshi' WHERE account = %s", (other,))
+    with pytest.raises(RuntimeError, match="held by another venue"):  # a clash says so, not a bare KeyError
+        paper.run_pass(conn, "polymarket_us", c, NOW)
 
 
 def test_without_unsized_depth_a_sizeless_quote_cannot_fill(conn):
