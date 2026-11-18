@@ -352,10 +352,11 @@ WARMUP_REFUSED = re.compile(r"This strategy requires \d+ candles to start, which
 def nothing_to_run(out: str) -> str | None:
     """Why a failed freqtrade backtest had nothing to run, when no retry changes it, else None: no candles in the
     period, none left once the warm-up is taken from the data's start, or a warm-up longer than the one OHLCV call a
-    history-less venue serves, which freqtrade refuses before it loads any data."""
-    if "No data found" in out:
+    history-less venue serves, which freqtrade refuses before it loads any data. Each is freqtrade's whole message,
+    since a crash can follow a per-pair "No data found for (pair, ...)" warning."""
+    if "No data found. Terminating." in out:
         return NO_DATA
-    if "No data left after adjusting for startup candles" in out:
+    if "No data left after adjusting for startup candles." in out:
         return NO_CANDLES_LEFT
     return _errors(out) if WARMUP_REFUSED.search(out) else None
 

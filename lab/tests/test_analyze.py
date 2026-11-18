@@ -247,26 +247,31 @@ def test_a_year_with_no_candles_is_stored_once_and_is_no_failure(lab):
     assert one(lab, "SELECT count(*) FROM strategy_windows WHERE strategy = 'Good' AND exchange = 'binanceus'") > 0
 
 
-FT_REFUSALS = {
-    # freqtrade 2026.10's output for each, from the 2026-11-18 analysis
-    "2026-11-18 05:59:35,248 - freqtrade - ERROR - Configuration error: This strategy requires 1100 candles to start, "
-    "which is more than (719 candles) the amount of candles Kraken provides for 4h.": None,
-    "2026-11-18 05:59:35,248 - freqtrade - ERROR - No data left after adjusting for startup candles.":
-        analyze.NO_CANDLES_LEFT,
-    "2026-11-18 05:59:35,248 - freqtrade - ERROR - No data found. Terminating.": analyze.NO_DATA,
-}
+WARMUP = ("Configuration error: This strategy requires 1100 candles to start, which is more than (719 candles) the amount"
+          " of candles Kraken provides for 4h.")
+LOG = "2026-11-18 05:59:35,248 - freqtrade - ERROR - "
+FT_REFUSALS = [  # freqtrade 2026.10's output and exit code for each, from the 2026-11-18 analysis's backtest_chunks
+    (LOG + WARMUP, 0, WARMUP),
+    (LOG + "No data left after adjusting for startup candles.", 2, analyze.NO_CANDLES_LEFT),
+    (LOG + "No data found. Terminating.", 2, analyze.NO_DATA),
+]
 
 
-@pytest.mark.parametrize("out,why", FT_REFUSALS.items())
-def test_a_backtest_freqtrade_has_nothing_to_run_in_is_stored_once_and_is_no_failure(monkeypatch, out, why):
-    """628 of 4766 chunks failed on 2026-11-18, every one of them one of these, so the night was red on them alone."""
-    monkeypatch.setattr(analyze.subprocess, "run", lambda *a, **k: types.SimpleNamespace(
-        returncode=0 if "Configuration error" in out else 2, stdout=out, stderr=""))
-    r = analyze.Cli().backtest("CarverTrendMix_4h", "kraken", dt.date(2025, 1, 1), dt.date(2026, 1, 1))
-    assert r["ok"] is False and r["no_data"] is True
-    assert r["error"] == (why or "Configuration error: This strategy requires 1100 candles to start, which is more than"
-                                 " (719 candles) the amount of candles Kraken provides for 4h.")
-    assert analyze.nothing_to_run("exit 1: KeyError: 'close'") is None
+def fake_freqtrade(monkeypatch, out: str, code: int) -> dict:
+    monkeypatch.setattr(analyze.subprocess, "run", lambda *a, **k: types.SimpleNamespace(returncode=code, stdout=out, stderr=""))
+    return analyze.Cli().backtest("CarverTrendMix_4h", "kraken", dt.date(2025, 1, 1), dt.date(2026, 1, 1))
+
+
+@pytest.mark.parametrize("out,code,why", FT_REFUSALS)
+def test_a_backtest_freqtrade_has_nothing_to_run_in_is_no_data(monkeypatch, out, code, why):
+    """628 of 4766 chunks failed on 2026-11-18, every one of them one of these, so the night was red on them alone;
+    no_data stores a chunk once and counts it with the empty ones (test_a_year_with_no_candles_...)."""
+    assert fake_freqtrade(monkeypatch, out, code) == {"ok": False, "no_data": True, "error": why, "duration_s": pytest.approx(0, abs=5)}
+
+
+def test_a_crash_after_a_pairs_no_data_warning_is_still_a_failure(monkeypatch):
+    r = fake_freqtrade(monkeypatch, "WARNING - No data found for (ETH/USD, 4h, spot).\nKeyError: 'close'", 1)
+    assert r["ok"] is False and "no_data" not in r and "KeyError" in r["error"]
 
 
 def test_a_window_whose_mean_trade_is_barely_positive_stores_its_trades_needed(lab):
