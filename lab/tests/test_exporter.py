@@ -146,7 +146,30 @@ def test_a_paper_account_on_a_slow_venue_is_blind_only_past_its_venue_limit(conn
     book, venues = sweep_ages()
     assert venues["odds_api"] > book  # the premise: odds_api is swept slower than the paper book age
     assert m['trader_watch_unseen_limit_seconds{bot="paper-tt"}'] == venues["odds_api"] * 60
-    assert m['trader_watch_unseen_limit_seconds{bot="paper-ls"}'] == 300  # kalshi, at the book age: the watcher's own
+    assert m['trader_watch_unseen_limit_seconds{bot="paper-ls"}'] == book * 60  # kalshi: the paper book age
+
+
+def test_an_account_marked_by_a_5_minute_pass_is_not_blind_when_one_pass_ends_late(conn):
+    """A kalshi or stock account is marked once a */5 pass, so a 300 s limit was one pass with no slack: half the gaps
+    run 300 to 412 s, and TraderWatchBotBlind fired for a dozen accounts every hour (2026-11-18). A bot the watcher
+    reads itself keeps [watcher] unseen_after_seconds."""
+    from lab import db, stocks
+    from web.exporter import TraderCollector
+
+    now = dt.datetime.now(dt.timezone.utc)
+    late = now - dt.timedelta(seconds=380)  # one pass that ended 80 s after the one before
+    conn.execute("INSERT INTO paper_accounts (account, family, venue, variant, params, capital, started_at) VALUES "
+                 "('paper-ls', 'longshot', 'kalshi', 'v', '{}', 100, %s)", (now,))
+    conn.execute("INSERT INTO stock_accounts (account, family, variant, params, capital, started_at) VALUES "
+                 "('stock-trend-v', 'trend', 'v', '{}', 10000, %s)", (now,))
+    conn.execute("INSERT INTO watch (bot, checked_at, seen_at) VALUES ('paper-ls', %s, %s), ('stock-trend-v', %s, %s), "
+                 "('bot', %s, %s)", (now, late, now, late, now, late))
+    conn.commit()
+    m = scrape(TraderCollector(db.connect))
+    for bot in ("paper-ls", "stock-trend-v"):
+        assert m[f'trader_watch_unseen_seconds{{bot="{bot}"}}'] < m[f'trader_watch_unseen_limit_seconds{{bot="{bot}"}}']
+    assert m['trader_watch_unseen_limit_seconds{bot="stock-trend-v"}'] == stocks.load_config()["max_quote_age_min"] * 60
+    assert m['trader_watch_unseen_seconds{bot="bot"}'] > m['trader_watch_unseen_limit_seconds{bot="bot"}'] == 300
 
 
 def test_market_metrics(conn):

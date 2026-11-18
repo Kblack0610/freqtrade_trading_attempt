@@ -473,7 +473,7 @@ The event-contract paper league's accounts (`paper-<venue>-<family>-<variant>`, 
 | `trader_ingest_age_seconds` | | Since any snapshot was written |
 | `trader_watch_age_seconds` | | Since the watcher last finished a pass |
 | `trader_watch_unseen_seconds`, `trader_watch_running`, `trader_watch_breached`, `trader_watch_day_loss_ratio` | `bot` | Since the last good read, 1 when taking entries, 1 after a daily loss breach, and the loss so far today as a share of capital |
-| `trader_watch_unseen_limit_seconds` | `bot` | Unread past this, the bot is blind (TraderWatchBotBlind): `[watcher] unseen_after_seconds`, or for a paper account on a venue swept slower than the paper book age, that venue's `stale_after_min` |
+| `trader_watch_unseen_limit_seconds` | `bot` | Unread past this, the bot is blind (TraderWatchBotBlind): `[watcher] unseen_after_seconds`, or for a paper or stock account, marked once its league's 5-min (or slower) pass, that league's freshness limit if longer: its venue's `stale_after_min` or `[paper] max_book_age_min`, or `lab/stocks.toml` `max_quote_age_min` |
 | `trader_run_started_timestamp_seconds`, `trader_run_finished_timestamp_seconds`, `trader_run_ok`, `trader_run_last_ok_timestamp_seconds` | `kind` (`analysis`, `walkforward`, `reproduce`, `calibration`) | Newest run started, newest run finished and whether it succeeded, newest success |
 | `trader_candle_age_seconds`, `trader_coverage_age_seconds`, `trader_coverage_series` | `exchange` | Newest stored candle, newest backfill write, series stored |
 | `trader_futures_age_seconds` | `kind`, `exchange` | Newest funding (`funding`) or open interest (`open_interest`) row |
