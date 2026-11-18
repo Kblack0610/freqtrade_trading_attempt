@@ -36,7 +36,9 @@
 
 Returns are realized (on trade close); a trade still open at a chunk's end is closed there.
 A year with no candles in the data (binanceus has none from 2023-07 to 2025-02, when its USD pairs were
-suspended) is stored as empty, never retried, and is not a failure.
+suspended) is stored as empty, never retried, and is not a failure. So is a chunk freqtrade has nothing to run in for
+a reason no retry changes (`nothing_to_run`): its warm-up eats every candle, or the venue's API serves fewer candles
+than the warm-up, which freqtrade refuses on Kraken (720) for a strategy it could never start live there.
 Shards: with ANALYZE_SHARDS above 1 the run is an Indexed Job, each pod's JOB_COMPLETION_INDEX its shard. A strategy x
 exchange (its chunks, its overlay chunks, its bias checks) belongs to one shard by a hash of its names (`shard_of`), so
 every pod plans the same split. Each pod runs its share of steps 2 and 3 and records an `analysis_shard` row named
@@ -60,6 +62,7 @@ import json
 import math
 import os
 import queue
+import re
 import subprocess
 import sys
 import tempfile
@@ -341,6 +344,23 @@ def _errors(text: str) -> str:
     return " | ".join(bad[-3:] or lines[-3:])[:800]
 
 
+NO_CANDLES_LEFT = "no candles left after the strategy's warm-up"
+# freqtrade's Exchange.validate_required_startup_candles, on a venue whose OHLCV API has no history (Kraken)
+WARMUP_REFUSED = re.compile(r"This strategy requires \d+ candles to start, which is more than \(\d+ candles\) the amount")
+
+
+def nothing_to_run(out: str) -> str | None:
+    """Why a failed freqtrade backtest had nothing to run, when no retry changes it, else None: no candles in the
+    period, none left once the warm-up is taken from the data's start, or a warm-up longer than the one OHLCV call a
+    history-less venue serves, which freqtrade refuses before it loads any data. Each is freqtrade's whole message,
+    since a crash can follow a per-pair "No data found for (pair, ...)" warning."""
+    if "No data found. Terminating." in out:
+        return NO_DATA
+    if "No data left after adjusting for startup candles." in out:
+        return NO_CANDLES_LEFT
+    return _errors(out) if WARMUP_REFUSED.search(out) else None
+
+
 def load_error(source: str, name: str) -> str | None:
     """freqtrade loads a strategy by name only from a file containing the literal `class <name>(`, so a space before the paren imports fine yet never loads."""
     return None if f"class {name}(" in source else f"freqtrade cannot load it by name: write `class {name}(` with no space"
@@ -403,12 +423,13 @@ class Cli:
                 p = subprocess.run(cmd, capture_output=True, text=True, timeout=CHUNK_TIMEOUT)
             except subprocess.TimeoutExpired:
                 return {"ok": False, "error": f"timed out after {CHUNK_TIMEOUT}s", "duration_s": time.monotonic() - t0}
-            if p.returncode and "No data found" in p.stdout + p.stderr:
-                return {"ok": False, "no_data": True, "error": NO_DATA, "duration_s": time.monotonic() - t0}
             # freqtrade exits 0 on some errors; the result zip is the proof of a run
             if p.returncode or not list(Path(d).glob("*.zip")):
-                return {"ok": False, "error": f"exit {p.returncode}: {_errors(p.stdout + p.stderr)}",
-                        "duration_s": time.monotonic() - t0}
+                out = p.stdout + p.stderr
+                why = nothing_to_run(out)
+                if why:
+                    return {"ok": False, "no_data": True, "error": why, "duration_s": time.monotonic() - t0}
+                return {"ok": False, "error": f"exit {p.returncode}: {_errors(out)}", "duration_s": time.monotonic() - t0}
             s = load_backtest_stats(Path(d))["strategy"][strategy]
             trades = load_backtest_data(Path(d), strategy)
         return {"ok": True, "error": None, "duration_s": time.monotonic() - t0, "trades": trades,
@@ -1038,7 +1059,7 @@ def main(runner: Runner | None = None, today: dt.date | None = None) -> int:
                                 failures.append(f"{task['strategy']} {task['exchange']}{' ' + task['overlay'] if task.get('overlay') else ''}"
                                                 f" {task['start']}: {res['error']}")
                         if done % 25 == 0 or done == len(todo):
-                            print(f"analyze: {done}/{len(todo)} chunks, {failed} failed, {empty} with no candles", flush=True)
+                            print(f"analyze: {done}/{len(todo)} chunks, {failed} failed, {empty} with nothing to run", flush=True)
                 except BaseException:
                     # leaving the with block waits for every queued task, hours of work whose results cannot be stored
                     pool.shutdown(cancel_futures=True)
