@@ -1,6 +1,6 @@
 # Shorting a bust
 
-Research only, from `lab/research/bust.py`, first run on 2026-11-05 with funding assumed, rerun on 2026-11-07 with measured funding. Nothing here trades, and `BustShort` and `DonchianLongShort` stay out of `user_data/strategies`, so no job or bot finds them. Every basket counts in the trial register (migrations 017 and 032).
+Research only, from `lab/research/bust.py`, first run on 2026-11-05 with funding assumed, rerun on 2026-11-07 with measured funding. Nothing here trades, and `BustShort`, `DonchianLongShort` and `CarverLongShort` stay out of `user_data/strategies`, so no job or bot finds them. Every basket counts in the trial register (migrations 017, 032 and 060). Carver's long-short trend, AFTS 6 and 8 (`CarverLongShort64` and `CarverLongShort16`), was added on 2026-11-17.
 
 ## Result
 
@@ -45,6 +45,36 @@ Returns are on the whole wallet. Won: 19% of majors trades and 26% of ai trades.
 | Outside every fall | +260.3% | 40 | +6.9% | +1.4% | 14 | +9.1% | 50 | -3.5% | -4.1% | 5 |
 | Whole history | +261.5% | 67 | -6.6% | -11.5% | 33 | +13.9% | 75 | -3.1% | -3.4% | 9 |
 
+## Carver long-short
+
+Carver's slow and fast trend run both ways (AFTS 6 and 8, [carver-afts.md](carver-afts.md#part-one-basic-directional)) do no better, and the short half adds nothing. `CarverLongShort64` is EWMAC(64, 256) long above 0 and short below it, with the stake set by volatility alone. `CarverLongShort16` is EWMAC(16, 64) the same way, with the stake set by its strength, and without the book's buffer (that needs position adjustment). Each long half is the forecast family's own class (`CarverEwmac64` and `CarverTrendStrength16`, read from `user_data/strategies/forecast/family.toml`), so only the short half is new here. The baskets, candles, fees and funding are the same as above. The run is from 2026-11-17, with candles to 2026-11-16, which adds one more fall (2026-09-21 to 2026-11-14), so `DonchianLongShort` was rerun beside them.
+
+Whole history, all trades, with no funding counted, then the trades from 2024 on with measured funding, before and after it:
+
+| Rule | Basket | Side | No funding | Trades | Measured, no funding | Measured funding | Measured trades |
+|---|---|---|---|---|---|---|---|
+| CarverLongShort64 | majors | both | +36.8% | 34 | -38.7% | -39.5% | 17 |
+| CarverLongShort64 | majors | shorts | -15.9% | 19 | -4.2% | -2.6% | 10 |
+| CarverLongShort64 | ai | both | -0.7% | 31 | -5.7% | -5.8% | 9 |
+| CarverLongShort64 | ai | shorts | -2.5% | 19 | -4.6% | -4.1% | 5 |
+| CarverLongShort16 | majors | both | +30.7% | 123 | -0.1% | -0.5% | 61 |
+| CarverLongShort16 | majors | shorts | +0.7% | 60 | +0.6% | +0.7% | 31 |
+| CarverLongShort16 | ai | both | +13.5% | 143 | +0.3% | +0.3% | 19 |
+| CarverLongShort16 | ai | shorts | +4.1% | 71 | +0.3% | +0.3% | 10 |
+| DonchianLongShort | majors | both | +268.2% | 70 | +0.0% | -4.8% | 36 |
+| DonchianLongShort | majors | shorts | -0.8% | 36 | -0.5% | +0.2% | 20 |
+| DonchianLongShort | ai | both | +12.9% | 78 | -4.1% | -4.4% | 9 |
+| DonchianLongShort | ai | shorts | -1.1% | 41 | -2.9% | -2.5% | 5 |
+
+What it shows:
+
+- Over the measured years, neither Carver rule made money: AFTS 6 lost 39.5% on majors after funding, nearly all of it in its long half (7 long trades, none won), and AFTS 8 ended within a point of zero on both baskets.
+- The short halves, the only new part, made -4.1% to +0.7% over the measured years on 5 to 31 trades. Over the whole history the best was +4.1% (AFTS 8 on ai) and the worst -15.9% (AFTS 6 on majors). Shorting below a zero trend forecast did not pay here.
+- Funding moved each Carver row by under 2.5 points and the Donchian longs by 5.7. Shorts received it on average and longs paid it, because the rates were mostly positive.
+- As with Donchian, the whole-history gains on majors are long trades before 2024, where no funding is measured.
+
+So Carver's long-short trend is NO-GO on this evidence, like `DonchianLongShort`. These are two parameter sets on two baskets, counted as four trials (migration 060), so this result describes what happened and claims no edge either way. The long halves keep running in the nightly analysis as forecast-family classes, and their numbers are on their own strategy pages.
+
 ## Limits
 
 - No AI crash is in this data, so this is a scenario. BTC falls stand in for it, and the AI tokens may not fall the way AI stocks would.
@@ -73,4 +103,4 @@ Equity puts and inverse ETFs need data this lab does not hold, so they stay unte
 
 ## Run it
 
-`python lab/research/bust.py <userdir> [BustShort|DonchianLongShort]` inside the image, with `DATABASE_URL` set for the funding. It downloads into the userdir once, about 20 minutes.
+`python lab/research/bust.py <userdir> [BustShort|DonchianLongShort|CarverLongShort64|CarverLongShort16]` inside the image, with `DATABASE_URL` set for the funding. It downloads into the userdir once, about 20 minutes.
