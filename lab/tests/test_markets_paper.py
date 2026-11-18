@@ -30,11 +30,11 @@ ACCOUNT = paper.account_of("longshot", VARIANT, "kalshi")
 
 def ready(conn, family="longshot", params=PARAMS, ok=True):
     """The readiness gate's row for one variant (lab/markets/families.py gate())."""
-    conn.execute("DELETE FROM market_readiness WHERE family = %s AND variant = %s",
+    conn.execute("DELETE FROM readiness WHERE market = 'events' AND family = %s AND variant = %s",
                  (family, backtest.variant_of(params)))
-    conn.execute("INSERT INTO market_readiness (family, venue, variant, params, windows, trades, trials, ready, passed, "
-                 "gates) VALUES (%s, 'kalshi', %s, %s, 6, 400, 30, %s, 7, '[]')",
-                 (family, backtest.variant_of(params), Jsonb(params), ok))
+    conn.execute("INSERT INTO readiness (market, strategy, family, venue, variant, params, windows, trades, trials, ready, passed, "
+                 "gates) VALUES ('events', %s, %s, 'kalshi', %s, %s, 6, 400, 30, %s, 7, '[]')",
+                 (f"{family}/{backtest.variant_of(params)}", family, backtest.variant_of(params), Jsonb(params), ok))
 
 
 def seed(conn, sweep_age=dt.timedelta(minutes=5), gate=True):

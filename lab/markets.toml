@@ -323,7 +323,7 @@ hours = 168
 edge = 0.06
 
 [paper]
-# python -m lab.markets.paper (lab/markets/paper.py): each variant the readiness gate passed (market_readiness, ready) is
+# python -m lab.markets.paper (lab/markets/paper.py): each variant the readiness gate passed (readiness, market events, ready) is
 # one paper account, if its family needs no fit and no key (lab/markets/paper.py docstring); the rest are retired.
 # Kalshi's books and the quotes polymarket_us and predictit record every 5 min. Manifold stays data only: its recorder
 # stores a probability and no bid or ask, so there is no price to fill at. Polymarket global stays data only too: a US

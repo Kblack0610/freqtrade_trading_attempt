@@ -16,7 +16,7 @@ The gate (gate, verdict) pools each variant's windows before the lockbox and app
 thresholds that fit a betting variant: enough trades, the interval low end above zero net of fees with whole events
 resampled, the deflated Sharpe and the minimum backtest length at the betting lane's trial count, PBO over the
 family's variants (metrics.pbo_panel), and enough positive months. A variant that passes all of them replays the
-lockbox once and passes only if it is positive there too. One market_readiness row per variant.
+lockbox once and passes only if it is positive there too. One readiness row per variant.
 
 Knobs and grids are [families] and [families.<name>] in lab/markets.toml, expanded by lab/grid.py. Every family enters a market at most once, on its first row that qualifies, and holds to resolution, and it skips a row whose spread is wider
 than `max_spread`.
@@ -68,7 +68,7 @@ from pyarrow import fs as pafs
 
 from psycopg.types.json import Jsonb
 
-from lab import confidence, inputs, metrics, suggest, taxonomy
+from lab import confidence, inputs, metrics, readiness, suggest, taxonomy
 from lab.db import connect
 from lab.grid import variants
 from lab.market import Order, Resolution
@@ -885,7 +885,7 @@ ROWS = f"SELECT {', '.join(COLS)} FROM market_backtests WHERE venue = %s"
 
 
 def gate(conn, loader: Loader, names, test, lockbox, done: set, cfg: dict, ccfg: dict) -> dict:
-    """Write each current variant's market_readiness row (module docstring); replays the lockbox for those that pass
+    """Write each current variant's readiness row (module docstring); replays the lockbox for those that pass
     every other gate. Returns the passing count per family."""
     venue, starts = loader.venue, {s for s, _ in test}
     rows = defaultdict(list)
@@ -914,15 +914,11 @@ def gate(conn, loader: Loader, names, test, lockbox, done: set, cfg: dict, ccfg:
                 if day(r["start_at"]) in keep:
                     held[r["variant"]].append(r)
             result.update({v: judge(v, held[v]) for v in near})
-        with conn.cursor() as cur:
-            cur.execute("DELETE FROM market_readiness WHERE family = %s AND venue = %s", (family, venue))
-            cur.executemany(
-                "INSERT INTO market_readiness (family, venue, variant, params, windows, trades, expectancy, "
-                "expectancy_lo, expectancy_hi, dsr, pbo, trials, ready, passed, gates) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
-                [(family, venue, v, Jsonb(grid[v]), r["windows"], r["trades"], r["expectancy"], r["expectancy_lo"],
-                  r["expectancy_hi"], r["dsr"], r["pbo"], r["trials"], r["ready"], r["passed"], Jsonb(r["gates"]))
-                 for v, r in result.items()])
+        readiness.store(conn, readiness.EVENTS, [
+            {**{k: r[k] for k in ("windows", "trades", "expectancy", "expectancy_lo", "expectancy_hi", "dsr", "pbo",
+                                  "trials", "ready", "passed", "gates")},
+             "venue": venue, "strategy": f"{family}/{v}", "family": family, "variant": v, "params": grid[v]}
+            for v, r in result.items()], venue=venue, family=family)
         out[family] = sum(r["ready"] for r in result.values())
     return out
 

@@ -142,9 +142,9 @@ def test_a_promotion_files_a_board_row_and_opens_no_roster_pr(monkeypatch):
 
 
 def ready(conn, variant, ok, lo=0.012):
-    conn.execute("INSERT INTO market_readiness (family, venue, variant, params, windows, trades, expectancy, expectancy_lo, "
-                 "expectancy_hi, dsr, pbo, trials, ready, passed, gates) VALUES ('longshot', 'kalshi', %s, '{\"edge\": 0.06}', "
-                 "4, 120, 0.02, %s, 0.03, 0.97, 0.1, 9, %s, 7, '[]')", (variant, lo, ok))
+    conn.execute("INSERT INTO readiness (market, strategy, family, venue, variant, params, windows, trades, expectancy, expectancy_lo, "
+                 "expectancy_hi, dsr, pbo, trials, ready, passed, gates) VALUES ('events', 'longshot/' || %s, 'longshot', 'kalshi', %s, '{\"edge\": 0.06}', "
+                 "4, 120, 0.02, %s, 0.03, 0.97, 0.1, 9, %s, 7, '[]')", (variant, variant, lo, ok))
 
 
 def paper(conn, account, drifted, retired=False):
@@ -174,7 +174,7 @@ def test_betting_gate_and_paper_drift_are_events_against_the_markets_trial_count
     assert events[0]["action"].startswith("paper -0.0300 per trade over 40 settled, backtest 0.0200 over 120")
     assert loop.run(conn)["research_enters"] == 0
 
-    conn.execute("UPDATE market_readiness SET ready = NOT ready")
+    conn.execute("UPDATE readiness SET ready = NOT ready")
     conn.execute("UPDATE paper_accounts SET drifted = false")
     assert loop.run(conn) == {"research_passing": 0, "research_enters": 1, "research_leaves": 2, "bet_ready": 1,
                               "bet_drifted": 0}

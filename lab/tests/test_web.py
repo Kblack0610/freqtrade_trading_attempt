@@ -347,8 +347,8 @@ def test_confidence_shows_every_gate_and_the_first_it_fails(conn, signed_in):
     assert "Nothing scored yet" in signed_in[1].get("/confidence").text
     gates = [{"gate": "bias", "value": "clean", "need": "clean", "pass": True},
              {"gate": "drift", "value": None, "need": "inside the interval", "pass": False}]
-    conn.execute("INSERT INTO confidence (strategy, exchange, score, ready, passed, oos_trades, gates) "
-                 "VALUES ('Alpha', 'binanceus', 71.4, false, 1, 42, %s)", (Jsonb(gates),))
+    conn.execute("INSERT INTO readiness (market, strategy, venue, score, ready, passed, trades, gates) "
+                 "VALUES ('crypto', 'Alpha', 'binanceus', 71.4, false, 1, 42, %s)", (Jsonb(gates),))
     body = signed_in[1].get("/confidence").text
     assert "not ready: drift" in body and "1 of 2 gates" in body and "inside the interval" in body
 
@@ -368,8 +368,8 @@ def test_cache_serves_until_a_run_finishes(conn, signed_in, monkeypatch):
     monkeypatch.setattr(app_mod, "CACHE_TTL", 60.0)
     assert "Nothing scored yet" in client.get("/confidence").text
     gates = [{"gate": "bias", "value": "clean", "need": "clean", "pass": True}]
-    conn.execute("INSERT INTO confidence (strategy, exchange, score, ready, passed, oos_trades, gates) "
-                 "VALUES ('Alpha', 'binanceus', 71.4, true, 1, 42, %s)", (Jsonb(gates),))
+    conn.execute("INSERT INTO readiness (market, strategy, venue, score, ready, passed, trades, gates) "
+                 "VALUES ('crypto', 'Alpha', 'binanceus', 71.4, true, 1, 42, %s)", (Jsonb(gates),))
     assert "Nothing scored yet" in client.get("/confidence").text
     conn.execute("INSERT INTO runs (kind, name, raw, started_at, finished_at, ok) VALUES ('analysis', 'a', '{}', now(), now(), true)")
     assert "Nothing scored yet" not in client.get("/confidence").text
@@ -378,23 +378,23 @@ def test_cache_serves_until_a_run_finishes(conn, signed_in, monkeypatch):
 def test_book_shows_no_number_until_a_strategy_is_scored(conn, signed_in):
     body = signed_in[1].get("/book").text
     assert "Not enough evidence" in body and "0 of 20" in body and "Stage 1" in body
-    conn.execute("INSERT INTO confidence (strategy, exchange, score, ready, passed, oos_trades, gates) "
-                 "VALUES ('Alpha', 'binanceus', 71.4, false, 1, 42, %s)", (Jsonb([{"gate": "bias", "pass": True}],),))
+    conn.execute("INSERT INTO readiness (market, strategy, venue, score, ready, passed, trades, gates) "
+                 "VALUES ('crypto', 'Alpha', 'binanceus', 71.4, false, 1, 42, %s)", (Jsonb([{"gate": "bias", "pass": True}],),))
     assert "not enough months" in signed_in[1].get("/book").text
 
 
 def test_until_scored_both_pages_show_how_far_the_population_is(conn, signed_in):
     gates = Jsonb([{"gate": "bias", "pass": True}, {"gate": "score", "pass": False}])
     for name, trades, mean in (("Alpha", 42, 0.0123), ("Beta", 12, -0.004)):
-        conn.execute("INSERT INTO confidence (strategy, exchange, score, ready, passed, oos_trades, oos_expectancy, gates) "
-                     "VALUES (%s, 'okx', NULL, false, 1, %s, %s, %s)", (name, trades, mean, gates))
+        conn.execute("INSERT INTO readiness (market, strategy, venue, score, ready, passed, trades, expectancy, gates) "
+                     "VALUES ('crypto', %s, 'okx', NULL, false, 1, %s, %s, %s)", (name, trades, mean, gates))
     for path in ("/book", "/confidence"):
         body = signed_in[1].get(path).text
         assert "<strong>1 of 20</strong>" in body and "Unscored" in body, path
         assert "1.23%" in body and "-0.40%" in body and "no, 18 short" in body, path
         assert body.index("Alpha") < body.index("Beta"), path
     # Negative control: once anything is scored, the scored board replaces the panel.
-    conn.execute("UPDATE confidence SET score = 71.4 WHERE strategy = 'Alpha'")
+    conn.execute("UPDATE readiness SET score = 71.4 WHERE strategy = 'Alpha'")
     for path in ("/book", "/confidence"):
         assert "How close the score is" not in signed_in[1].get(path).text, path
 
@@ -407,8 +407,8 @@ def test_guide_lists_every_page_in_reading_order(conn, signed_in):
 
 
 def test_book_sets_a_strategy_beside_hold(conn, signed_in):
-    conn.execute("INSERT INTO confidence (strategy, exchange, score, ready, passed, oos_trades, gates) "
-                 "VALUES ('Alpha', 'binanceus', 71.4, false, 1, 42, %s)", (Jsonb([{"gate": "bias", "pass": True}],),))
+    conn.execute("INSERT INTO readiness (market, strategy, venue, score, ready, passed, trades, gates) "
+                 "VALUES ('crypto', 'Alpha', 'binanceus', 71.4, false, 1, 42, %s)", (Jsonb([{"gate": "bias", "pass": True}],),))
     for basis, mid in (("strategy", 0.31), ("hold", 0.12)):
         for months in (12, 60):
             conn.execute("INSERT INTO book (strategy, exchange, basis, horizon_months, p5, p50, p95, prob_loss, "
@@ -544,8 +544,8 @@ def test_coverage_joins_the_families_to_the_results(conn, signed_in):
                  "('Strategy001', 'binanceus', 'p1'), ('Strategy001', 'kraken', 'as-is'), ('Mystery', 'binanceus', 'as-is')")
     gates = [{"gate": g, "pass": True} for g in "abcde"]
     for exchange, passed, oos in (("binanceus", 3, 42), ("kraken", 4, 8)):
-        conn.execute("INSERT INTO confidence (strategy, exchange, score, ready, passed, oos_trades, gates) "
-                     "VALUES ('Strategy001', %s, NULL, false, %s, %s, %s)", (exchange, passed, oos, Jsonb(gates)))
+        conn.execute("INSERT INTO readiness (market, strategy, venue, score, ready, passed, trades, gates) "
+                     "VALUES ('crypto', 'Strategy001', %s, NULL, false, %s, %s, %s)", (exchange, passed, oos, Jsonb(gates)))
     trend = sum(t["family"] == "trend" for t in families()["strategies"].values())
     body = signed_in[1].get("/coverage").text
     for needle in (f'1 of {trend}<br><span class="muted">2 months, 2 trials</span>',  # binanceus: a failed fold is no month
@@ -596,8 +596,8 @@ def seed_markets(c):
               (Jsonb({"edge": 0.06}), Jsonb({"winrate": 0.61})))
     c.execute("INSERT INTO market_category_results (family, venue, variant, start_at, category, trades, mean, lo, hi) "
               "VALUES ('longshot', 'kalshi', 'abcdef0123456789', '2025-01-01', 'sports', 450, 0.0211, 0.0043, 0.0377)")
-    c.execute("INSERT INTO market_readiness (family, venue, variant, params, windows, trades, expectancy, expectancy_lo, expectancy_hi, "
-              "dsr, pbo, trials, ready, passed, gates) VALUES ('longshot', 'kalshi', 'abcdef0123456789', %s, 3, 800, 0.0123, -0.004, 0.031, "
+    c.execute("INSERT INTO readiness (market, strategy, family, venue, variant, params, windows, trades, expectancy, expectancy_lo, expectancy_hi, "
+              "dsr, pbo, trials, ready, passed, gates) VALUES ('events', 'longshot/abcdef0123456789', 'longshot', 'kalshi', 'abcdef0123456789', %s, 3, 800, 0.0123, -0.004, 0.031, "
               "0.42, 0.2, 16, false, 1, %s)",
               (Jsonb({"edge": 0.06}), Jsonb([{"gate": "out-of-sample trades", "value": 800, "need": ">= 100", "pass": True},
                                             {"gate": "expectancy interval low", "value": -0.004, "need": "> 0 at 90%", "pass": False}])))
@@ -752,8 +752,8 @@ def test_account_evidence_is_exact_pair_and_explicit_window(conn, signed_in):
     conn.execute("INSERT INTO strategy_windows (strategy, exchange, win, days, trades, total_return) "
                  "VALUES ('Strategy001', 'kraken', '365d', 12, 2, -0.8), "
                  "('Strategy001', 'binanceus', 'all', 900, 100, 9)")
-    conn.execute("INSERT INTO confidence (strategy, exchange, ready, passed, oos_trades, gates) "
-                 "VALUES ('Strategy001', 'binanceus', false, 1, 40, '[]')")
+    conn.execute("INSERT INTO readiness (market, strategy, venue, ready, passed, trades, gates) "
+                 "VALUES ('crypto', 'Strategy001', 'binanceus', false, 1, 40, '[]')")
     client = signed_in[1]
     found = client.get('/accounts/evidence', params={'strategy': 'Strategy001', 'exchange': 'binanceus'}).json()
     assert found['available'] and found['window'] == '365d'

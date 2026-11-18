@@ -26,7 +26,7 @@ from psycopg.types.json import Jsonb
 from scipy.cluster.hierarchy import leaves_list, linkage
 from scipy.spatial.distance import squareform
 
-from lab import confidence, metrics, scorecard, suggest
+from lab import confidence, metrics, readiness, scorecard, suggest
 from lab.db import connect
 from lab.grid import variant_of
 
@@ -37,7 +37,7 @@ SELECT strategy, exchange, fold_start, test_end FROM walkforward
 WHERE ok AND (params IS NOT NULL OR %(variant)s = 'base') AND test_end <= %(lockbox)s ORDER BY 1, 2, 3
 """
 DAILY = "SELECT strategy, exchange, day, ret FROM walkforward_daily WHERE variant = %(variant)s AND day < %(lockbox)s"
-ORDER = "SELECT strategy, exchange FROM confidence ORDER BY ready DESC, score DESC NULLS LAST, strategy, exchange"
+ORDER = ("SELECT strategy, exchange FROM (" + readiness.CRYPTO_ROWS + ") c ORDER BY ready DESC, score DESC NULLS LAST, strategy, exchange")
 LABELS = {"equal": "1/N", "inverse_vol": "inverse vol", "hrp": "HRP"}
 
 

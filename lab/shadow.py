@@ -30,13 +30,13 @@ import pandas as pd
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
-from lab import diversity, metrics, suggest
+from lab import diversity, metrics, readiness, suggest
 from lab.db import connect
 
 GATED = "win, sharpe_lo, expectancy_lo, trades, median_hold_hours"
 CANDIDATES = (f"SELECT w.*, c.oos_trades, c.oos_expectancy FROM (SELECT strategy, exchange, '' AS overlay, {GATED} "
               f"FROM strategy_windows UNION ALL SELECT strategy, exchange, overlay, {GATED} FROM overlay_windows) w "
-              "JOIN confidence c USING (strategy, exchange) WHERE w.win = %s ORDER BY w.strategy, w.exchange, w.overlay")
+              f"JOIN ({readiness.CRYPTO_ROWS}) c USING (strategy, exchange) WHERE w.win = %s ORDER BY w.strategy, w.exchange, w.overlay")
 ACCOUNTS = "SELECT * FROM shadow_accounts ORDER BY account"
 # The last day each series covers: chunks end exclusive, the current month's at today.
 THROUGH = "SELECT strategy, exchange, overlay, max(chunk_end) - 1 FROM backtest_chunks WHERE ok GROUP BY 1, 2, 3"

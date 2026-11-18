@@ -53,7 +53,7 @@ def good_facts():
 
 
 def result(facts, trials=30):
-    return next(r for r in confidence.rows(facts, trials, CFG) if (r["strategy"], r["exchange"]) == PAIR)
+    return next(r for r in confidence.rows(facts, trials, CFG) if (r["strategy"], r["venue"]) == PAIR)
 
 
 def failed(row):
@@ -97,7 +97,7 @@ def test_a_planted_edge_cannot_be_ready_without_historical_universe_research():
     assert row["score"] >= C["ready_score"]
     g = next(g for g in row["gates"].obj if g["gate"] == "survivorship")
     assert "not tested" in g["value"] and "delisted" in g["value"]
-    assert row["oos_trades"] == 300
+    assert row["trades"] == 300
 
 
 def spoil(facts, name):
@@ -280,7 +280,7 @@ def test_a_decayed_bot_is_retired_through_the_database_and_cleared_when_it_recov
     assert retires() == [("bot-s",)]
     trades([0.02] * 150)
     assert confidence.run(conn)["decayed"] == 0 and retires() == []
-    gate = conn.execute("SELECT gates FROM confidence").fetchone()[0]
+    gate = conn.execute("SELECT gates FROM readiness").fetchone()[0]
     assert next(g for g in gate if g["gate"] == "not decayed")["pass"]
 
 
@@ -300,7 +300,7 @@ def test_no_walkforward_is_not_ready_and_says_so():
     facts = good_facts()
     facts["walkforward"] = {}
     row = result(facts)
-    assert row["score"] is None and not row["ready"] and row["oos_trades"] == 0
+    assert row["score"] is None and not row["ready"] and row["trades"] == 0
     assert {"out-of-sample trades", "expectancy interval low", "months positive", "score"} <= set(failed(row))
 
 
@@ -348,7 +348,7 @@ def test_run_stores_a_row_and_replaces_the_last(conn):
     assert confidence.run(conn)["confidence"] == 1
     conn.execute("DELETE FROM strategy_windows")
     assert confidence.run(conn)["confidence"] == 0
-    assert conn.execute("SELECT count(*) FROM confidence").fetchone()[0] == 0
+    assert conn.execute("SELECT count(*) FROM readiness").fetchone()[0] == 0
 
 
 def test_nothing_inside_the_lockbox_reaches_the_score(conn):
@@ -404,8 +404,8 @@ def test_no_reader_takes_a_stored_fold_whose_test_month_is_in_the_lockbox(conn):
         conn.execute("INSERT INTO walkforward_trades (strategy, exchange, variant, fold_start, pair, open_date, close_date, "
                      "profit_ratio) VALUES ('S', 'binanceus', 'tuned', %s, 'BTC/USD', %s, %s, 0.01)",
                      (start, start, start + dt.timedelta(days=2)))
-    conn.execute("INSERT INTO confidence (strategy, exchange, score, ready, passed, oos_trades, gates) "
-                 "VALUES ('S', 'binanceus', 50, false, 0, 1, '[]')")
+    conn.execute("INSERT INTO readiness (market, strategy, venue, score, ready, passed, trades, gates) "
+                 "VALUES ('crypto', 'S', 'binanceus', 50, false, 0, 1, '[]')")
     key, before = ("S", "binanceus"), dt.date(2026, 4, 1)
     facts = confidence.load(conn, cfg)  # the score and retune both read suggest.load_facts
     assert [f["fold_start"] for f in facts["walkforward"][key]] == [before]

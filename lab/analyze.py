@@ -587,7 +587,7 @@ def plan(conn, found: list[dict], first: dict, today: dt.date, ft_version: str, 
         "SELECT strategy, exchange, overlay, chunk_start, cache_key, ok, attempts, chunk_end FROM backtest_chunks")}
     score = {(s, e): lo for s, e, lo in conn.execute(
         "SELECT strategy, exchange, sharpe_lo FROM strategy_windows WHERE win = '365d' AND sharpe_lo IS NOT NULL")}
-    scored = {(s, e) for s, e in conn.execute("SELECT strategy, exchange FROM confidence WHERE score IS NOT NULL")}
+    scored = {(s, e) for s, e in conn.execute("SELECT strategy, venue FROM readiness WHERE market = 'crypto' AND score IS NOT NULL")}
     shadowed = set(conn.execute("SELECT strategy, exchange, overlay FROM shadow_accounts "
                                 "WHERE overlay <> '' AND state <> 'retired'").fetchall())
     todo, over, cached, skipped = [], [], 0, []

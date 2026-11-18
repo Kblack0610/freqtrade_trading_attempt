@@ -287,7 +287,7 @@ def outcomes(facts: dict, trials: int, cfg: dict, strategies: list[dict], months
         gates = {gate_name(g): bool(g["pass"]) for g in r["gates"].obj}
         out.append({"strategy": r["strategy"], "edge": edge[r["strategy"]], "oos_months": months,
                     "ready": all(v for k, v in gates.items() if k not in PAPER), "gates": gates,
-                    "oos_trades": r["oos_trades"], "oos_expectancy": r["oos_expectancy"], "score": r["score"]})
+                    "oos_trades": r["trades"], "oos_expectancy": r["expectancy"], "score": r["score"]})
     return out
 
 
