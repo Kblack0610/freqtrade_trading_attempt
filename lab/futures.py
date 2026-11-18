@@ -4,8 +4,9 @@
 Through ccxt's public endpoints, into funding_rates and open_interest (migration 018); this is their only writer.
 Free history is short and only grows by collecting, so each run fetches from the newest stored row on:
 - funding: from FUNDING_FROM on the first run, in 30-day windows (kucoin pages hold 100 rows, 8h funding fills 90);
-- open interest: the daily history each exchange serves (okx 100 days, kucoin about 98), one row per UTC day,
-  overlapping the stored rows, so a missed day is refilled on the next run.
+- open interest: the daily history each exchange serves (okx 100 days, kucoin about 98), on the UTC day,
+  overlapping the stored rows, so a missed day is refilled on the next run. okx rows before 2026-11-18 are on
+  its UTC+8 day (ts 16:00 UTC); each run drops those its UTC rows now cover, so a day is read once.
 Freqtrade cannot download kucoin futures, so both venues go through ccxt the same way.
 Exits 1 if any series failed; the others are still written.
 """
@@ -31,7 +32,7 @@ CCXT_ID = {"okx": "okx", "kucoin": "kucoinfutures"}
 # kucoin serves 30 days unless ccxt pages back from a since, then about 98
 OI_PAGED = {"okx": False, "kucoin": True}
 # okx's 1D day opens at 16:00 UTC (UTC+8 midnight), so its newest row was up to 38 hours old before the next
-# daily run; 1Dutc opens at 00:00 UTC like kucoin's day (migration 061). ccxt accepts only 1d as the timeframe,
+# daily run; 1Dutc opens at 00:00 UTC like kucoin's day. ccxt accepts only 1d as the timeframe,
 # and a period param overrides what it sends.
 OI_PARAMS = {"okx": {"period": "1Dutc"}}
 # okx caps open-interest history at 5 requests per 2s per IP, shared with the league bots, so a 429 waits and retries
@@ -107,6 +108,9 @@ def collect_oi(v: Venue, conn, exchange: str, symbol: str, now: int) -> int:
             """INSERT INTO open_interest (exchange, pair, ts, contracts, value_usd) VALUES (%s, %s, %s, %s, %s)
                ON CONFLICT (exchange, pair, ts) DO UPDATE SET contracts = EXCLUDED.contracts, value_usd = EXCLUDED.value_usd""",
             [(exchange, symbol, utc(t), a, val) for t, a, val in rows])
+        if rows:  # the UTC+8 day rows (okx before OI_PARAMS) that this UTC series now covers
+            conn.execute("DELETE FROM open_interest WHERE exchange = %s AND pair = %s AND ts >= %s "
+                         "AND ts <> date_trunc('day', ts, 'UTC')", (exchange, symbol, utc(min(t for t, _, _ in rows))))
     return len(rows)
 
 

@@ -132,14 +132,13 @@ def test_a_call_still_throttled_after_every_retry_raises():
     assert waits == list(futures.RETRY_WAITS)
 
 
-def test_migration_061_drops_only_the_okx_utc8_rows_the_utc_refetch_replaces(conn):
-    today = dt.datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
-    rows = [("okx", today - dt.timedelta(days=d, hours=8)) for d in (0, 98, 99, 100)]  # 16:00 UTC, okx's 1D
-    rows += [("okx", today - dt.timedelta(days=d)) for d in (0, 99)] + [("kucoin", today - dt.timedelta(days=1))]
-    conn.cursor().executemany("INSERT INTO open_interest (exchange, pair, ts, value_usd) VALUES (%s, 'BTC/USDT:USDT', %s, 1)",
-                              rows)
-    conn.execute((futures.Path(futures.__file__).parent / "migrations" / "061_okx_open_interest_utc_day.sql").read_text())
-    kept = conn.execute("SELECT exchange, ts FROM open_interest ORDER BY exchange, ts").fetchall()
-    assert kept == [("kucoin", today - dt.timedelta(days=1)),
-                    ("okx", today - dt.timedelta(days=100, hours=8)), ("okx", today - dt.timedelta(days=99, hours=8)),
-                    ("okx", today - dt.timedelta(days=99)), ("okx", today)]
+def test_okx_utc8_day_rows_the_utc_series_covers_are_dropped(conn):
+    today = futures.ms(dt.datetime(2026, 11, 18, tzinfo=UTC))
+    old = [today - k * DAY - DAY // 3 for k in range(5)]  # okx's 1D day: 16:00 UTC, 0 to 4 days back
+    conn.cursor().executemany("INSERT INTO open_interest (exchange, pair, ts, value_usd) VALUES ('okx', %s, %s, 1)",
+                              [(p, utc(t)) for t in old for p in ("BTC/USDT:USDT", "GONE/USDT:USDT")])
+    v = FakeVenue(listed=today, now=today)  # 1Dutc: today and the two UTC days before
+    assert futures.collect_oi(v, conn, "okx", "BTC/USDT:USDT", today) == 3
+    kept = conn.execute("SELECT pair, ts FROM open_interest ORDER BY pair, ts").fetchall()
+    assert kept == ([("BTC/USDT:USDT", utc(t)) for t in sorted(old[2:] + [today - k * DAY for k in range(3)])]
+                    + [("GONE/USDT:USDT", utc(t)) for t in sorted(old)])  # a pair not refetched keeps every row
