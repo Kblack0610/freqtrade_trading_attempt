@@ -457,7 +457,7 @@ python lab/watcher.py --bankroll-clear
 
 Dry-run bots and paper accounts are never in the bankroll, so today it reads 0 accounts. `/book` shows it under Budget.
 
-The event-contract paper league's accounts (`paper-<family>-<variant>`) get watch rows too, read from `paper_accounts` rather than an API, with `seen_at` the last paper pass. A drill on one sets `stopped_at`, and the next `markets.paper` pass takes no entries for it while its open fills still settle and mark; `--drill-end` clears the row, which is all that starts it again.
+The event-contract paper league's accounts (`paper-<venue>-<family>-<variant>`, `paper-<family>-<variant>` on Kalshi) get watch rows too, read from `paper_accounts` rather than an API, with `seen_at` the last paper pass. A drill on one sets `stopped_at`, and the next `markets.paper` pass takes no entries for it while its open fills still settle and mark; `--drill-end` clears the row, which is all that starts it again.
 
 ### Metrics
 

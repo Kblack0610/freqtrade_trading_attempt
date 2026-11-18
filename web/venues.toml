@@ -3,6 +3,7 @@
 #   broker  broker_balances, keyed by broker (lab/broker.py read, hourly)
 #   drill   demo_orders, keyed by venue (the order drills: lab/broker.py, lab/markets/kalshi_trade.py, manifold_trade.py)
 #   paper   paper_accounts, keyed by venue, newest mark (lab/markets/paper.py, after each recorder sweep)
+#   sweep   market_sweeps, keyed by venue, newest sweep and its error (lab/markets/recorder.py)
 #   wallet  wallet_balances, keyed by account (lab/wallet.py)
 # match is the key, or a prefix ending in "*". human is what the person does while a check finds nothing; a venue
 # with no checks is not connected from here yet and shows only its human step.
@@ -23,8 +24,8 @@ human = "Nothing: the demo keys are deployed, so an error here is ours to fix"
 
 [[venue]]
 name = "The Odds API"
-money = "the paper league on the sportsbook totals lines; no bet is ever placed"
-checks = [{source = "paper", match = "odds_api", max_age_h = 7}]
+money = "none: the recorder reads the sportsbook lines for the backtest engine; no bet is ever placed"
+checks = [{source = "sweep", match = "odds_api", max_age_h = 7}]
 human = "Nothing: the read key is deployed (trader-odds-api), so an error here is ours to fix"
 
 [[venue]]

@@ -6,11 +6,12 @@
 
 A `[paper] forward` family of the venue joins with every variant of its grid, gate or not: paper costs nothing and
 the forward test is the evidence the gate is waiting on, so every family that can run is forward on its venue
-(longshot, weather and observed on kalshi, tt_totals on odds_api) and the gate decides only promotion. A family not in forward
-follows the readiness gate: every market_readiness row (lab/markets/families.py gate()) on the venue that is ready, of
-a family that can run here (FAMILIES), is one account with `[paper] capital`, trading the params the gate judged. An
-account in neither set is retired (retired_at): it takes no entries, its open fills still settle and mark, and it
-comes back if it joins again. A ready variant of a family that cannot run here is
+(longshot, weather and observed on kalshi, longshot on polymarket_us and predictit) and the gate decides only
+promotion. A family not in forward follows the readiness gate: every market_readiness row (lab/markets/families.py
+gate()) on the venue that is ready, of a family that can run here (FAMILIES), is one account with `[paper] capital`,
+trading the params the gate judged. An account in neither set is retired (retired_at): it takes no entries, its open
+fills still settle and mark, and it comes back if it joins again. A venue taken out of `[paper] venues` gets no pass,
+and its accounts drop off the site, the exporter and the watcher. A ready variant of a family that cannot run here is
 reported under "unrunnable". A pass:
 0. Opens an account for each forward or ready variant and retires the rest.
 1. Settles every open fill whose market has a resolution, with backtest.payout and fees.settlement.
@@ -67,8 +68,10 @@ FRESH = dt.timedelta(minutes=max(REGISTRY[i]["fresh_min"] for i in ("nws_high", 
 Row = namedtuple("Row", backtest.BOOK)
 
 
-def account_of(family: str, variant: str) -> str:
-    return f"paper-{family}-{variant[:8]}"
+def account_of(family: str, variant: str, venue: str) -> str:
+    """One account per venue, family and variant. Kalshi's names carry no venue: they predate a second venue running
+    the same family, and their orders and watch rows are keyed by them."""
+    return f"paper-{family}-{variant[:8]}" if venue == "kalshi" else f"paper-{venue}-{family}-{variant[:8]}"
 
 
 def accounts(conn, venue: str, cfg: dict) -> tuple[list[tuple[str, str, dict]], list[str]]:
@@ -79,12 +82,12 @@ def accounts(conn, venue: str, cfg: dict) -> tuple[list[tuple[str, str, dict]], 
             "SELECT family, variant, params FROM market_readiness WHERE venue = %s AND ready ORDER BY family, variant",
             (venue,)).fetchall():
         if fam in FAMILIES:
-            league[account_of(fam, variant)] = (fam, params)
+            league[account_of(fam, variant, venue)] = (fam, params)
         else:
             unrunnable.append(f"{fam}/{variant[:8]}")
     for fam in cfg["paper"].get("forward", {}).get(venue, []):
         for params in variants(cfg["families"][fam]):
-            league.setdefault(account_of(fam, backtest.variant_of(params)), (fam, params))
+            league.setdefault(account_of(fam, backtest.variant_of(params), venue), (fam, params))
     return [(a, f, p) for a, (f, p) in sorted(league.items())], unrunnable
 
 
@@ -329,10 +332,15 @@ def run_pass(conn, venue: str, cfg: dict, now: dt.datetime) -> dict:
             "INSERT INTO paper_accounts (account, family, venue, variant, params, capital, started_at) "
             "VALUES (%s, %s, %s, %s, %s, %s, %s) ON CONFLICT (account) DO NOTHING",
             [(a, f, venue, backtest.variant_of(p), Jsonb(p), pcfg["capital"], now) for a, f, p in league])
+        taken = conn.execute("SELECT account, venue FROM paper_accounts WHERE account = ANY(%s) AND venue <> %s",
+                             (names, venue)).fetchall()
+        if taken:
+            raise RuntimeError(f"{venue}: account names held by another venue: {taken}")
         retired = [a for (a,) in conn.execute(
             "UPDATE paper_accounts SET retired_at = %s WHERE venue = %s AND retired_at IS NULL "
             "AND NOT account = ANY(%s) RETURNING account", (now, venue, names)).fetchall()]
-        conn.execute("UPDATE paper_accounts SET retired_at = NULL WHERE account = ANY(%s)", (names,))
+        conn.execute("UPDATE paper_accounts SET retired_at = NULL WHERE venue = %s AND account = ANY(%s)",
+                     (venue, names))
         settled = settle(conn, venue, fee_cfg)
         age = book_age(conn, venue, now)
         fresh = age is not None and age <= dt.timedelta(minutes=pcfg["max_book_age_min"])

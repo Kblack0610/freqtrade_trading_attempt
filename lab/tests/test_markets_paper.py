@@ -25,7 +25,7 @@ def cfg(**paper_over):
 
 PARAMS = {"stake": 10, "max_spread": 0.05, "hours": 24, "buy": "no", "lo": 0.01, "hi": 0.10}
 VARIANT = backtest.variant_of(PARAMS)
-ACCOUNT = paper.account_of("longshot", VARIANT)
+ACCOUNT = paper.account_of("longshot", VARIANT, "kalshi")
 
 
 def ready(conn, family="longshot", params=PARAMS, ok=True):
@@ -142,7 +142,7 @@ def test_every_family_that_can_run_on_kalshi_trades_paper_without_a_gate_row(con
     assert set(forward["kalshi"]) == {"longshot", "weather", "observed"}
     seed(conn, gate=False)
     out = paper.run_pass(conn, "kalshi", cfg(forward=forward), NOW)
-    weather = {paper.account_of(f, backtest.variant_of(p)) for f in ("weather", "observed")
+    weather = {paper.account_of(f, backtest.variant_of(p), "kalshi") for f in ("weather", "observed")
                for p in paper.variants(shipped["families"][f])}
     assert set(out["accounts"]) == {ACCOUNT} | weather and out["retired"] == []
     assert out["accounts"][ACCOUNT]["fills"] == 1 and [o[1] for o in orders(conn)] == ["A"]
@@ -243,6 +243,19 @@ def test_a_paper_loss_past_the_day_limit_breaches_without_stopping(conn):
     assert breached is not None and stopped is None and seen == NOW + dt.timedelta(minutes=5)
 
 
+def test_the_watcher_skips_an_account_whose_venue_left_paper(conn):
+    """No pass marks an account once its venue leaves [paper] venues (odds_api, ar-2743), so watching it would report
+    it blind forever; a kalshi account is still watched (the control)."""
+    seed(conn)
+    paper.run_pass(conn, "kalshi", cfg(), NOW)
+    conn.execute("INSERT INTO paper_accounts (account, family, venue, variant, params, capital, started_at, equity, "
+                 "marked_at) VALUES ('paper-tt_totals-gone', 'tt_totals', 'odds_api', 'v', '{}', 1000, %s, 1000, %s)",
+                 (NOW, NOW))
+    assert "odds_api" not in load_config()["paper"]["venues"]
+    watcher.tick(conn, [], 0.03, None, NOW, BANK)
+    assert {b for (b,) in conn.execute("SELECT bot FROM watch")} == {ACCOUNT}
+
+
 # tt_totals on a sportsbook: the forward test of a family no backtest can judge yet
 def seed_odds(conn, meetings=6):
     """Ann and Bea met `meetings` times before NOW, every one 75 points (over 70.5 and 72.5); their next game, G,
@@ -274,6 +287,7 @@ def sweep(conn, at):
 def test_tt_totals_trades_the_line_book_without_a_gate_row_settles_its_line_and_reports_roi_and_clv(conn):
     seed_odds(conn)
     c = load_config()
+    c["paper"]["forward"] = {"odds_api": ["tt_totals"]}  # no shipped venue runs tt_totals until one records table tennis
     out = paper.run_pass(conn, "odds_api", c, NOW)
     n = len(paper.variants(c["families"]["tt_totals"]))
     assert out["fresh"] and out["book"] == 2 and len(out["accounts"]) == n == 4  # every variant, no readiness row
@@ -303,12 +317,13 @@ def test_tt_totals_trades_the_line_book_without_a_gate_row_settles_its_line_and_
                         "forward test runs to 2026-12-04 and 300 settled bets")
     assert len(lines) == 3 and all(l.endswith(f"1 bets, 1-0, ROI +100.0%, CLV {mid - 0.5:+.3f} over 1")
                                    for l in lines[1:])
-    assert all(l.startswith("  2026-W45 paper-tt_totals-") for l in lines[1:])
+    assert all(l.startswith("  2026-W45 paper-odds_api-tt_totals-") for l in lines[1:])
 
 
 def test_tt_totals_needs_its_meetings_and_a_fresh_book(conn):
     seed_odds(conn, meetings=4)
     c = load_config()
+    c["paper"]["forward"] = {"odds_api": ["tt_totals"]}
     gated = copy.deepcopy(c)
     gated["paper"]["forward"] = {}
     assert paper.run_pass(conn, "odds_api", gated, NOW)["accounts"] == {}  # without forward, the gate decides
@@ -392,7 +407,7 @@ def test_weather_joins_the_league_only_once_a_variant_passes_and_trades_on_the_n
     ready(conn, "weather", WEATHER, ok=False)
     assert paper.run_pass(conn, "kalshi", cfg(), NOW)["accounts"] == {}  # failed the gate: not in the league
     ready(conn, "weather", WEATHER)
-    account = paper.account_of("weather", backtest.variant_of(WEATHER))
+    account = paper.account_of("weather", backtest.variant_of(WEATHER), "kalshi")
     out = paper.run_pass(conn, "kalshi", cfg(), NOW + dt.timedelta(minutes=1))
     assert out["accounts"][account]["fills"] == 1 and orders(conn)[0][:3] == (account, "W", "yes")
     [d] = [r for r in decisions(conn) if r[2] == "enter"]
@@ -420,13 +435,30 @@ def test_a_venue_that_records_no_sizes_trades_paper_at_its_quote_and_a_stale_boo
     shipped = load_config()
     assert venue in shipped["paper"]["venues"] and shipped["paper"]["forward"][venue] == ["longshot"]
     c = cfg(forward={venue: ["longshot"]})
+    account = paper.account_of("longshot", VARIANT, venue)
     seed_unsized(conn, venue, sweep_age=dt.timedelta(minutes=30))
-    assert paper.run_pass(conn, venue, c, NOW)["accounts"][ACCOUNT]["orders"] == 0  # older than max_book_age_min
+    assert paper.run_pass(conn, venue, c, NOW)["accounts"][account]["orders"] == 0  # older than max_book_age_min
     conn.execute("INSERT INTO market_sweeps (venue, started_at, finished_at, seen, new_markets, changes, resolved, ok) "
                  "VALUES (%s, %s, %s, 1, 0, 0, 0, true)", (venue, NOW, NOW))
     out = paper.run_pass(conn, venue, c, NOW + dt.timedelta(minutes=1))
-    assert out["accounts"][ACCOUNT]["fills"] == 1
+    assert out["accounts"][account]["fills"] == 1
     assert [(o[1], o[2], o[4]) for o in orders(conn)] == [("A", "no", 0.95)]
+
+
+def test_two_venues_trading_one_variant_each_get_their_own_account(conn):
+    """The same longshot variant on kalshi and polymarket_us: one name for both made the second venue's insert a
+    no-op, and its pass died on a KeyError for the account (ar-2743)."""
+    c = cfg(forward={"kalshi": ["longshot"], "polymarket_us": ["longshot"]})
+    seed(conn, gate=False)
+    seed_unsized(conn, "polymarket_us")
+    assert paper.run_pass(conn, "kalshi", c, NOW)["accounts"][ACCOUNT]["fills"] == 1
+    other = paper.account_of("longshot", VARIANT, "polymarket_us")
+    assert other != ACCOUNT and paper.run_pass(conn, "polymarket_us", c, NOW)["accounts"][other]["fills"] == 1
+    assert dict(conn.execute("SELECT account, venue FROM paper_accounts").fetchall()) == {
+        ACCOUNT: "kalshi", other: "polymarket_us"}
+    conn.execute("UPDATE paper_accounts SET venue = 'kalshi' WHERE account = %s", (other,))
+    with pytest.raises(RuntimeError, match="held by another venue"):  # a clash says so, not a bare KeyError
+        paper.run_pass(conn, "polymarket_us", c, NOW)
 
 
 def test_without_unsized_depth_a_sizeless_quote_cannot_fill(conn):

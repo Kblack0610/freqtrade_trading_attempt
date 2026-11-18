@@ -38,6 +38,7 @@ from lab import guard
 from lab.db import connect
 from lab.ingest import ROSTER, Fetch, http_fetch
 from lab.league import roster_rows
+from lab.markets import paper_venues
 from lab.suggest import load_config
 
 UPSERT = """
@@ -134,10 +135,12 @@ def tick(conn, bots: list[str], day_loss: float, fetch: Fetch, now: dt.datetime,
     bank = bank_step(prev_bank, money, lim, now)
     conn.execute(BANK, bank)
     stopped = bank["breached_at"] is not None
+    # Only a [paper] venue has a pass that marks its accounts (as web/exporter.py PAPER): one taken out would read blind.
     for name, capital, equity, marked_at in conn.execute(
             "SELECT account, capital, equity, marked_at FROM paper_accounts WHERE marked_at IS NOT NULL "
-            "UNION ALL SELECT account, capital, equity, marked_at FROM stock_accounts WHERE marked_at IS NOT NULL"
-    ).fetchall():
+            "AND venue = ANY(%s) "
+            "UNION ALL SELECT account, capital, equity, marked_at FROM stock_accounts WHERE marked_at IS NOT NULL",
+            (paper_venues(),)).fetchall():
         p = prev.get(name)
         row = step(p, {"dry_run": True, "state": None, "capital": capital, "equity": equity}, now, day_loss)
         if p is not None and p["drill_at"] is not None:
