@@ -25,7 +25,7 @@ def cfg(**paper_over):
 
 PARAMS = {"stake": 10, "max_spread": 0.05, "hours": 24, "buy": "no", "lo": 0.01, "hi": 0.10}
 VARIANT = backtest.variant_of(PARAMS)
-ACCOUNT = paper.account_of("longshot", VARIANT)
+ACCOUNT = paper.account_of("longshot", VARIANT, "kalshi")
 
 
 def ready(conn, family="longshot", params=PARAMS, ok=True):
@@ -142,7 +142,7 @@ def test_every_family_that_can_run_on_kalshi_trades_paper_without_a_gate_row(con
     assert set(forward["kalshi"]) == {"longshot", "weather", "observed"}
     seed(conn, gate=False)
     out = paper.run_pass(conn, "kalshi", cfg(forward=forward), NOW)
-    weather = {paper.account_of(f, backtest.variant_of(p)) for f in ("weather", "observed")
+    weather = {paper.account_of(f, backtest.variant_of(p), "kalshi") for f in ("weather", "observed")
                for p in paper.variants(shipped["families"][f])}
     assert set(out["accounts"]) == {ACCOUNT} | weather and out["retired"] == []
     assert out["accounts"][ACCOUNT]["fills"] == 1 and [o[1] for o in orders(conn)] == ["A"]
@@ -317,7 +317,7 @@ def test_tt_totals_trades_the_line_book_without_a_gate_row_settles_its_line_and_
                         "forward test runs to 2026-12-04 and 300 settled bets")
     assert len(lines) == 3 and all(l.endswith(f"1 bets, 1-0, ROI +100.0%, CLV {mid - 0.5:+.3f} over 1")
                                    for l in lines[1:])
-    assert all(l.startswith("  2026-W45 paper-tt_totals-") for l in lines[1:])
+    assert all(l.startswith("  2026-W45 paper-odds_api-tt_totals-") for l in lines[1:])
 
 
 def test_tt_totals_needs_its_meetings_and_a_fresh_book(conn):
@@ -407,7 +407,7 @@ def test_weather_joins_the_league_only_once_a_variant_passes_and_trades_on_the_n
     ready(conn, "weather", WEATHER, ok=False)
     assert paper.run_pass(conn, "kalshi", cfg(), NOW)["accounts"] == {}  # failed the gate: not in the league
     ready(conn, "weather", WEATHER)
-    account = paper.account_of("weather", backtest.variant_of(WEATHER))
+    account = paper.account_of("weather", backtest.variant_of(WEATHER), "kalshi")
     out = paper.run_pass(conn, "kalshi", cfg(), NOW + dt.timedelta(minutes=1))
     assert out["accounts"][account]["fills"] == 1 and orders(conn)[0][:3] == (account, "W", "yes")
     [d] = [r for r in decisions(conn) if r[2] == "enter"]
@@ -435,13 +435,27 @@ def test_a_venue_that_records_no_sizes_trades_paper_at_its_quote_and_a_stale_boo
     shipped = load_config()
     assert venue in shipped["paper"]["venues"] and shipped["paper"]["forward"][venue] == ["longshot"]
     c = cfg(forward={venue: ["longshot"]})
+    account = paper.account_of("longshot", VARIANT, venue)
     seed_unsized(conn, venue, sweep_age=dt.timedelta(minutes=30))
-    assert paper.run_pass(conn, venue, c, NOW)["accounts"][ACCOUNT]["orders"] == 0  # older than max_book_age_min
+    assert paper.run_pass(conn, venue, c, NOW)["accounts"][account]["orders"] == 0  # older than max_book_age_min
     conn.execute("INSERT INTO market_sweeps (venue, started_at, finished_at, seen, new_markets, changes, resolved, ok) "
                  "VALUES (%s, %s, %s, 1, 0, 0, 0, true)", (venue, NOW, NOW))
     out = paper.run_pass(conn, venue, c, NOW + dt.timedelta(minutes=1))
-    assert out["accounts"][ACCOUNT]["fills"] == 1
+    assert out["accounts"][account]["fills"] == 1
     assert [(o[1], o[2], o[4]) for o in orders(conn)] == [("A", "no", 0.95)]
+
+
+def test_two_venues_trading_one_variant_each_get_their_own_account(conn):
+    """The same longshot variant on kalshi and polymarket_us: one name for both made the second venue's insert a
+    no-op, and its pass died on a KeyError for the account (ar-2743)."""
+    c = cfg(forward={"kalshi": ["longshot"], "polymarket_us": ["longshot"]})
+    seed(conn, gate=False)
+    seed_unsized(conn, "polymarket_us")
+    assert paper.run_pass(conn, "kalshi", c, NOW)["accounts"][ACCOUNT]["fills"] == 1
+    other = paper.account_of("longshot", VARIANT, "polymarket_us")
+    assert other != ACCOUNT and paper.run_pass(conn, "polymarket_us", c, NOW)["accounts"][other]["fills"] == 1
+    assert dict(conn.execute("SELECT account, venue FROM paper_accounts").fetchall()) == {
+        ACCOUNT: "kalshi", other: "polymarket_us"}
 
 
 def test_without_unsized_depth_a_sizeless_quote_cannot_fill(conn):

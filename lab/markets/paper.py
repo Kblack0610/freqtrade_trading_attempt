@@ -68,8 +68,10 @@ FRESH = dt.timedelta(minutes=max(REGISTRY[i]["fresh_min"] for i in ("nws_high", 
 Row = namedtuple("Row", backtest.BOOK)
 
 
-def account_of(family: str, variant: str) -> str:
-    return f"paper-{family}-{variant[:8]}"
+def account_of(family: str, variant: str, venue: str) -> str:
+    """One account per venue, family and variant. Kalshi's names carry no venue: they predate a second venue running
+    the same family, and their orders and watch rows are keyed by them."""
+    return f"paper-{family}-{variant[:8]}" if venue == "kalshi" else f"paper-{venue}-{family}-{variant[:8]}"
 
 
 def accounts(conn, venue: str, cfg: dict) -> tuple[list[tuple[str, str, dict]], list[str]]:
@@ -80,12 +82,12 @@ def accounts(conn, venue: str, cfg: dict) -> tuple[list[tuple[str, str, dict]], 
             "SELECT family, variant, params FROM market_readiness WHERE venue = %s AND ready ORDER BY family, variant",
             (venue,)).fetchall():
         if fam in FAMILIES:
-            league[account_of(fam, variant)] = (fam, params)
+            league[account_of(fam, variant, venue)] = (fam, params)
         else:
             unrunnable.append(f"{fam}/{variant[:8]}")
     for fam in cfg["paper"].get("forward", {}).get(venue, []):
         for params in variants(cfg["families"][fam]):
-            league.setdefault(account_of(fam, backtest.variant_of(params)), (fam, params))
+            league.setdefault(account_of(fam, backtest.variant_of(params), venue), (fam, params))
     return [(a, f, p) for a, (f, p) in sorted(league.items())], unrunnable
 
 
