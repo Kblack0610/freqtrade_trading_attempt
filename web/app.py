@@ -32,7 +32,7 @@ from lab import guard as guard_lab
 from lab import inputs as inputs_lab
 from lab import call_rules
 from lab import calls as calls_lab
-from lab import db, diversity, metrics, suggest, universe, taxonomy
+from lab import db, diversity, metrics, readiness, suggest, universe, taxonomy
 from lab import leagues as league_rows
 from lab import stocks as stocks_lab
 from lab.markets import paper as paper_lab, paper_venues, sweep_ages as market_sweep_ages
@@ -61,7 +61,7 @@ COVER = {
     "months": "SELECT strategy, exchange, count(DISTINCT date_trunc('month', fold_start)) FILTER (WHERE ok) AS n "
               "FROM walkforward GROUP BY strategy, exchange",
     "trials": "SELECT strategy, exchange, count(*) AS n FROM trials GROUP BY strategy, exchange",
-    "confidence": "SELECT strategy, exchange, passed, jsonb_array_length(gates) AS gates, ready, oos_trades FROM confidence",
+    "confidence": f"SELECT strategy, exchange, passed, jsonb_array_length(gates) AS gates, ready, oos_trades FROM ({readiness.CRYPTO_ROWS}) c",
 }
 
 BOTS = """
@@ -126,15 +126,15 @@ SECTIONS = [
     ("retune", "Retune", "Walk-forward: hyperopt's parameters beat the strategy as it is on months hyperopt never saw."),
     ("watch", "Watch", "Lookahead-clean candidates one gate short of promotion, best Sharpe interval first."),
 ]
-CONFIDENCE = "SELECT * FROM confidence ORDER BY ready DESC, score DESC NULLS LAST, passed DESC, strategy, exchange"
-BOOK = """
+CONFIDENCE = f"SELECT * FROM ({readiness.CRYPTO_ROWS}) c ORDER BY ready DESC, score DESC NULLS LAST, passed DESC, strategy, exchange"
+BOOK = f"""
 SELECT c.strategy, c.exchange, c.score, c.ready, c.passed, jsonb_array_length(c.gates) AS gates, w.trades, w.fee_per_trade
-FROM confidence c LEFT JOIN strategy_windows w ON w.strategy = c.strategy AND w.exchange = c.exchange AND w.win = '365d'
+FROM ({readiness.CRYPTO_ROWS}) c LEFT JOIN strategy_windows w ON w.strategy = c.strategy AND w.exchange = c.exchange AND w.win = '365d'
 WHERE c.score IS NOT NULL ORDER BY c.ready DESC, c.score DESC, c.strategy, c.exchange
 """
 # Until confidence.scores() has min_population members it scores nobody; these show how far off that is.
-MEMBERS = "SELECT count(*) AS n FROM confidence WHERE oos_trades >= %s"
-NEAR = """SELECT strategy, exchange, oos_trades, oos_expectancy FROM confidence WHERE oos_trades > 0
+MEMBERS = f"SELECT count(*) AS n FROM ({readiness.CRYPTO_ROWS}) c WHERE oos_trades >= %s"
+NEAR = f"""SELECT strategy, exchange, oos_trades, oos_expectancy FROM ({readiness.CRYPTO_ROWS}) c WHERE oos_trades > 0
 ORDER BY oos_trades DESC, strategy, exchange LIMIT 30"""
 SUGGESTIONS = "SELECT * FROM suggestions ORDER BY score DESC NULLS LAST, strategy, exchange, bot"
 MIN_TRADES = 20  # below this a window's numbers are shown but not ranked
@@ -207,7 +207,7 @@ ORDER BY l.proposed_at DESC, l.id DESC LIMIT 200
 """
 LINK_ASKS = "SELECT model, venue_b, count(*) AS asked, sum(proposed) AS proposed, max(asked_at) AS last FROM market_link_asks GROUP BY model, venue_b ORDER BY model, venue_b"
 MARKET_BACKTESTS = "SELECT * FROM market_backtests ORDER BY start_at DESC, expectancy_lo DESC NULLS LAST, family, venue, variant"
-MARKET_READINESS = "SELECT * FROM market_readiness ORDER BY ready DESC, passed DESC, expectancy_lo DESC NULLS LAST, family, venue, variant"
+MARKET_READINESS = f"SELECT * FROM ({readiness.EVENT_ROWS}) r ORDER BY ready DESC, passed DESC, expectancy_lo DESC NULLS LAST, family, venue, variant"
 MARKET_CATEGORIES = "SELECT * FROM market_category_results ORDER BY category, lo DESC NULLS LAST, family, venue, variant"
 PAPER_ACCOUNTS = """
 SELECT a.*, w.state, w.breached_at, w.stopped_at,
@@ -487,7 +487,7 @@ def overview(request: Request):
 
 def lane_reads(bots: list[dict], paper: list[dict]) -> dict:
     """The rows each lane card maps (web/lanes.py), from the same SQL as the lane's own tab."""
-    ready = "SELECT count(*) FILTER (WHERE ready) AS ready, count(*) AS n FROM {}"
+    ready = "SELECT count(*) FILTER (WHERE ready) AS ready, count(*) AS n FROM readiness WHERE market = %s"
     paper_age = {c["match"]: c["max_age_h"] for v in venue_roster.load() for c in v["checks"] if c["source"] == "paper"}
     return {"stale_h": STALE.total_seconds() / 3600, "bots": bots, "paper": paper, "paper_max_age_h": paper_age,
             "stocks": rows(STOCK_ACCOUNTS),
@@ -497,7 +497,7 @@ def lane_reads(bots: list[dict], paper: list[dict]) -> dict:
             "recorder": rows(MARKET_VENUES), "recorder_ages": sweep_ages(),
             "inputs": {r["input"]: r["newest"] for r in rows(inputs_lab.NEWEST)},
             "coverage": rows(COVERAGE_BY_EXCHANGE), "runs": rows(RUNS + " LIMIT 50"),
-            "confidence": rows(ready.format("confidence"))[0], "readiness": rows(ready.format("market_readiness"))[0],
+            "confidence": rows(ready, (readiness.CRYPTO,))[0], "readiness": rows(ready, (readiness.EVENTS,))[0],
             "suggestions": rows("SELECT kind, count(*) AS n FROM suggestions GROUP BY kind ORDER BY kind"),
             "bankroll": next(iter(rows("SELECT * FROM bankroll")), None), "watch": rows(KILL_SWITCH),
             "guard_lifted": guard_lab.GUARD_LIFTED}
@@ -811,7 +811,7 @@ def strategy(request: Request, name: str, exchange: str = ""):
         trades=rows(STRATEGY_TRADES, key),
         card=card(rows("SELECT * FROM strategy_windows WHERE strategy = %s AND exchange = %s AND win = %s",
                        (*key, dcfg["window"])),
-                  rows("SELECT * FROM confidence WHERE strategy = %s AND exchange = %s", key),
+                  rows(f"SELECT * FROM ({readiness.CRYPTO_ROWS}) c WHERE strategy = %s AND exchange = %s", key),
                   rows("SELECT cell, lo FROM climate_scorecard WHERE kind = 'strategy' AND name = %s AND exchange = %s",
                        key),
                   walkforward_by_pair("WHERE strategy = %s AND exchange = %s", key).get(key, []), dcfg["payoff_haircut"]))
@@ -1149,7 +1149,7 @@ def account_evidence(request: Request, strategy: str, exchange: str):
     checks = rows("SELECT * FROM (" + BIAS + ") b WHERE strategy = %s", (strategy,))
     bias = checks[0]["biased"] if checks else None
     unstable = checks[0]["unstable"] if checks else None
-    confidence = rows("SELECT ready FROM confidence WHERE strategy = %s AND exchange = %s", (strategy, exchange))
+    confidence = rows(f"SELECT ready FROM ({readiness.CRYPTO_ROWS}) c WHERE strategy = %s AND exchange = %s", (strategy, exchange))
     return {"strategy": strategy, "exchange": exchange, "window": "365d", "available": bool(result),
             "start_day": None, "end_day": None, "days": None, "trades": None, "total_return": None,
             "max_drawdown": None, "computed_at": None, **(result[0] if result else {}),

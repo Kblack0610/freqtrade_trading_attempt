@@ -7,7 +7,7 @@
 A `[paper] forward` family of the venue joins with every variant of its grid, gate or not: paper costs nothing and
 the forward test is the evidence the gate is waiting on, so every family that can run is forward on its venue
 (longshot, weather and observed on kalshi, longshot on polymarket_us and predictit) and the gate decides only
-promotion. A family not in forward follows the readiness gate: every market_readiness row (lab/markets/families.py
+promotion. A family not in forward follows the readiness gate: every events readiness row (lab/markets/families.py
 gate()) on the venue that is ready, of a family that can run here (FAMILIES), is one account with `[paper] capital`,
 trading the params the gate judged. An account in neither set is retired (retired_at): it takes no entries, its open
 fills still settle and mark, and it comes back if it joins again. A venue taken out of `[paper] venues` gets no pass,
@@ -80,7 +80,7 @@ def accounts(conn, venue: str, cfg: dict) -> tuple[list[tuple[str, str, dict]], 
     of a `[paper] forward` family of the venue, and the family/variant of every ready one that cannot run here."""
     league, unrunnable = {}, []
     for fam, variant, params in conn.execute(
-            "SELECT family, variant, params FROM market_readiness WHERE venue = %s AND ready ORDER BY family, variant",
+            "SELECT family, variant, params FROM readiness WHERE market = 'events' AND venue = %s AND ready ORDER BY family, variant",
             (venue,)).fetchall():
         if fam in FAMILIES:
             league[account_of(fam, variant, venue)] = (fam, params)

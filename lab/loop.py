@@ -7,7 +7,7 @@ climate_scorecard cell has its low end above zero (signal climate) and every ope
 promote). Each member that entered or left a set since the last run becomes a `research_events` row, and the set
 is stored in `research_state` for the next run. Qualified monthly retune fits join the set, keyed by their
 action digest (training dates and parameters), so a new fit is reported once, even if the parameters match.
-The betting lane adds two sets: every event-contract variant whose market_readiness row is ready (signal bet-ready,
+The betting lane adds two sets: every event-contract variant whose readiness row is ready (signal bet-ready,
 written by lab/markets/families.py) and every unretired paper account whose forward check drifted from its
 backtest (signal bet-drift, written by lab/markets/paper.py). Their events carry the betting lane's trial count,
 the others the crypto lab's. The first run has no previous set, so everything passing enters.
@@ -33,7 +33,7 @@ CLIMATE = ("SELECT 'climate', kind, name, exchange, variant, cell, lo, annual, '
            "WHERE kind IN ('strategy', 'mixture') AND lo > 0")
 PROMOTE = "SELECT strategy, exchange FROM suggestions WHERE kind = 'promote'"
 BET_READY = ("SELECT 'bet-ready', 'family', family, venue, variant, '', expectancy_lo, NULL::float8, params::text "
-             "FROM market_readiness WHERE ready")
+             "FROM readiness WHERE market = 'events' AND ready")
 BET_DRIFT = ("SELECT 'bet-drift', 'paper', family, venue, variant, account, gap_lo, NULL::float8, "
              "format('paper %s per trade over %s settled, backtest %s over %s, gap %s to %s', round(paper_expectancy::numeric, 4), "
              "paper_trades, round(backtest_expectancy::numeric, 4), backtest_trades, round(gap_lo::numeric, 4), round(gap_hi::numeric, 4)) "

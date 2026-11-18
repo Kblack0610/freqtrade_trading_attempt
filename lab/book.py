@@ -14,12 +14,12 @@ import sys
 
 import pandas as pd
 
-from lab import metrics, suggest
+from lab import metrics, readiness, suggest
 from lab.db import connect
 
-FOLDS = """
+FOLDS = f"""
 SELECT w.strategy, w.exchange, w.fold_start, w.test_end, coalesce(w.tuned_profit, 0)
-FROM walkforward w JOIN confidence c USING (strategy, exchange)
+FROM walkforward w JOIN ({readiness.CRYPTO_ROWS}) c USING (strategy, exchange)
 WHERE c.score IS NOT NULL AND w.ok AND w.params IS NOT NULL AND w.test_end <= %s ORDER BY 1, 2, 3
 """
 COLS = ["strategy", "exchange", "basis", "horizon_months", "p5", "p50", "p95", "prob_loss", "exp_max_drawdown", "paths",

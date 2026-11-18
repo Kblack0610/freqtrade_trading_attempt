@@ -476,8 +476,8 @@ def scored(conn, monkeypatch, *pairs) -> None:
 
     def score() -> None:
         for s, e in pairs:
-            conn.execute("INSERT INTO confidence (strategy, exchange, score, ready, passed, oos_trades, gates) "
-                         "VALUES (%s, %s, 60, false, 0, 40, '{}') ON CONFLICT (strategy, exchange) DO UPDATE SET score = 60",
+            conn.execute("INSERT INTO readiness (market, strategy, venue, score, ready, passed, trades, gates) "
+                         "VALUES ('crypto', %s, %s, 60, false, 0, 40, '{}') ON CONFLICT (market, venue, strategy) DO UPDATE SET score = 60",
                          (s, e))
 
     monkeypatch.setattr(analyze.confidence, "run", lambda conn: (rebuild(conn), score())[0])

@@ -267,7 +267,7 @@ def walkforward_book(conn, fs, yes_rate):
 def readiness(conn):
     """(buy, lo, hours) -> (ready, windows, gates)."""
     return {r[:3]: r[3:] for r in conn.execute(
-        "SELECT params->>'buy', params->>'lo', (params->>'hours')::int, ready, windows, gates FROM market_readiness "
+        "SELECT params->>'buy', params->>'lo', (params->>'hours')::int, ready, windows, gates FROM readiness "
         "WHERE family = 'longshot'").fetchall()}
 
 
@@ -295,7 +295,7 @@ def test_no_edge_fails_the_gate_and_never_reads_the_lockbox(conn, tmp_path):
     walkforward_book(conn, fs, 0.86)
     assert families.main(["--family", "longshot"], fs=fs, today=TODAY) == 0
     assert not any(v[0] for v in readiness(conn).values())
-    traded = conn.execute("SELECT gates FROM market_readiness WHERE family = 'longshot' AND trades > 0").fetchall()
+    traded = conn.execute("SELECT gates FROM readiness WHERE family = 'longshot' AND trades > 0").fetchall()
     assert traded and all(next(g for g in r[0] if g["gate"].startswith("expectancy"))["pass"] is False for r in traded)
     assert conn.execute("SELECT count(*) FROM market_backtests WHERE start_at >= '2026-10-01'").fetchone()[0] == 0
 
@@ -449,7 +449,7 @@ def test_tt_totals_walks_forward_on_a_sportsbook_and_counts_every_variant_as_a_t
     assert all(r[2] == 30 and r[3] > 0 for r in september)  # one bet a game, overs paying 0.9 x 1.9
     # bought at 0.526, closing mid (0.588 + 1 - 0.476) / 2
     assert all(r[4] == pytest.approx((0.588 + 0.524) / 2 - 1 / 1.9, abs=2e-3) for r in september)
-    assert conn.execute("SELECT count(*) FROM market_readiness WHERE family = 'tt_totals'").fetchone()[0] == n
+    assert conn.execute("SELECT count(*) FROM readiness WHERE family = 'tt_totals'").fetchone()[0] == n
 
 
 def test_a_lookahead_variant_is_refused_in_the_walk_forward(odds_trials, tmp_path, monkeypatch):

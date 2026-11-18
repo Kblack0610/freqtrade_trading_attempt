@@ -75,8 +75,8 @@ def test_budget_traces_to_config():
 
 def test_run_stores_only_scored_pairs_and_replaces_the_last(conn):
     conn.execute("INSERT INTO strategies (name, file, file_hash) VALUES ('Good', 'x', 'h'), ('Bad', 'y', 'h')")
-    conn.execute("INSERT INTO confidence (strategy, exchange, score, ready, passed, oos_trades, gates) VALUES "
-                 "('Good', 'binanceus', 80, false, 3, 300, '[]'), ('Bad', 'binanceus', NULL, false, 0, 0, '[]')")
+    conn.execute("INSERT INTO readiness (market, strategy, venue, score, ready, passed, trades, gates) VALUES "
+                 "('crypto', 'Good', 'binanceus', 80, false, 3, 300, '[]'), ('crypto', 'Bad', 'binanceus', NULL, false, 0, 0, '[]')")
     for name in ("Good", "Bad"):
         for start, end, r in folds([0.02, -0.01] * 4):
             conn.execute("INSERT INTO walkforward (strategy, exchange, fold_start, train_start, test_end, cache_key, ok, params, "
@@ -139,8 +139,8 @@ def test_every_benchmark_starts_together_and_a_short_history_gets_none():
 def test_run_books_the_months_before_the_lockbox(conn):
     conn.execute("INSERT INTO strategies (name, file, file_hash) VALUES ('A', 'x', 'h'), ('B', 'y', 'h')")
     for name in ("A", "B"):
-        conn.execute("INSERT INTO confidence (strategy, exchange, score, ready, passed, oos_trades, gates) VALUES "
-                     "(%s, 'x', 80, false, 3, 300, '[]')", (name,))
+        conn.execute("INSERT INTO readiness (market, strategy, venue, score, ready, passed, trades, gates) VALUES "
+                     "('crypto', %s, 'x', 80, false, 3, 300, '[]')", (name,))
         for start, end, r in folds([0.02, -0.01] * 4):
             conn.execute("INSERT INTO walkforward (strategy, exchange, fold_start, train_start, test_end, cache_key, ok, params, "
                          "tuned_profit) VALUES (%s, 'x', %s, %s, %s, 'k', true, '{\"buy\": {}}', %s)", (name, start, start, end, r))

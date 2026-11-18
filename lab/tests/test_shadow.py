@@ -167,9 +167,9 @@ def seed(conn):
     conn.execute("INSERT INTO strategy_windows (strategy, exchange, win, days, trades, sharpe_lo, expectancy_lo, "
                  "median_hold_hours) VALUES ('S', 'binanceus', '365d', 365, 100, 1.0, 0.001, 4), "
                  "('Bad', 'binanceus', '365d', 365, 100, 2.0, -0.001, 4)")
-    conn.execute("INSERT INTO confidence (strategy, exchange, score, ready, passed, oos_trades, oos_expectancy, gates) "
-                 "VALUES ('S', 'binanceus', 10, false, 1, 80, 0.002, '[]'), "
-                 "('Bad', 'binanceus', 10, false, 1, 80, 0.002, '[]')")
+    conn.execute("INSERT INTO readiness (market, strategy, venue, score, ready, passed, trades, expectancy, gates) "
+                 "VALUES ('crypto', 'S', 'binanceus', 10, false, 1, 80, 0.002, '[]'), "
+                 "('crypto', 'Bad', 'binanceus', 10, false, 1, 80, 0.002, '[]')")
     conn.execute("INSERT INTO backtest_chunks (strategy, exchange, chunk_start, chunk_end, cache_key, ok) "
                  "VALUES ('S', 'binanceus', '2026-11-01', '2026-11-06', 'k', true)")
 

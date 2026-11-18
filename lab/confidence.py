@@ -34,7 +34,7 @@ import pandas as pd
 from psycopg.types.json import Jsonb
 from scipy.stats import norm
 
-from lab import call_rules, metrics, robustness, suggest
+from lab import call_rules, metrics, readiness, robustness, suggest
 from lab.db import connect
 from lab.markets import venues as market_venues
 from lab.suggest import gate
@@ -401,9 +401,9 @@ def rows(facts: dict, trials: int, cfg: dict) -> list[dict]:
     for pair in sorted(set(facts["series"]) | set(ev)):
         g = gates(pair, facts, ev.get(pair), score.get(pair), trials, cfg, venue_agreement(pair[0], ev, cfg["confidence"]))
         e = ev.get(pair) or {}
-        out.append({"strategy": pair[0], "exchange": pair[1], "score": score.get(pair), "ready": all(x["pass"] for x in g),
-                    "passed": sum(x["pass"] for x in g), "oos_trades": e.get("trades", 0),
-                    "oos_expectancy": e.get("mean"), "gates": Jsonb(g)})
+        out.append({"venue": pair[1], "strategy": pair[0], "score": score.get(pair), "ready": all(x["pass"] for x in g),
+                    "passed": sum(x["pass"] for x in g), "trades": e.get("trades", 0), "expectancy": e.get("mean"),
+                    "trials": trials, "gates": Jsonb(g)})
     return out
 
 
@@ -433,12 +433,7 @@ def run(conn, cfg: dict | None = None) -> dict:
     trials = register(conn)
     facts = load(conn, cfg)
     out = rows(facts, trials, cfg)
-    with conn.transaction():
-        conn.execute("DELETE FROM confidence")
-        with conn.cursor() as cur:
-            cur.executemany("INSERT INTO confidence (strategy, exchange, score, ready, passed, oos_trades, oos_expectancy, "
-                            "gates) VALUES (%(strategy)s, %(exchange)s, %(score)s, %(ready)s, %(passed)s, %(oos_trades)s, "
-                            "%(oos_expectancy)s, %(gates)s)", out)
+    readiness.store(conn, readiness.CRYPTO, out)
     retired = suggest.store(conn, retire_rows(facts, cfg), suggest.DECAY)
     return {"confidence": len(out), "confidence_ready": sum(r["ready"] for r in out), "trial_register": trials,
             "decayed": sum(retired["suggestions"].values())}

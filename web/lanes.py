@@ -199,7 +199,7 @@ def prices(read: dict, now: dt.datetime, cfg: dict) -> dict:
 def research(read: dict, now: dt.datetime, cfg: dict) -> dict:
     runs, crypto_, betting_ = read["runs"], read["confidence"], read["readiness"]
     if not runs and not crypto_["n"] and not betting_["n"]:
-        return empty("no analysis has run", "runs, confidence, market_readiness: no rows")
+        return empty("no analysis has run", "runs, readiness: no rows")
     parts = [part("crypto pairs ready", f"{crypto_['ready']} of {crypto_['n']}"),
              part("betting variants ready", f"{betting_['ready']} of {betting_['n']}"),
              part("suggestions", ", ".join(f"{k['n']} {k['kind']}" for k in read["suggestions"]) or "none")]
@@ -219,7 +219,7 @@ def research(read: dict, now: dt.datetime, cfg: dict) -> dict:
                          f"/runs/{good['id']}" if good else "/runs", good["finished_at"] if good else None))
         level = "amber"
     return card(crypto_["ready"] + betting_["ready"], "pass every gate", level,
-                f"confidence and market_readiness rows with ready set; the newest good analysis, stale past "
+                f"readiness rows with ready set; the newest good analysis, stale past "
                 f"{cfg['max_age_h']} h", parts, first)
 
 

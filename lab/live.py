@@ -16,7 +16,7 @@ import sqlite3
 import sys
 from pathlib import Path
 
-from lab import guard, suggest
+from lab import guard, readiness, suggest
 from lab.db import connect
 
 USER_DATA = Path(os.environ.get("FT_USER_DATA", "/repo/user_data"))
@@ -117,9 +117,7 @@ def edited_while_open(state: Path, fp: str, trades: int) -> bool:
 
 
 def at_ready(conn, strategy: str, exchange: str) -> bool:
-    row = conn.execute("SELECT ready FROM confidence WHERE strategy = %s AND exchange = %s",
-                       (strategy, exchange)).fetchone()
-    return bool(row and row[0])
+    return readiness.at_ready(conn, readiness.CRYPTO, exchange, strategy)
 
 
 def main() -> None:
