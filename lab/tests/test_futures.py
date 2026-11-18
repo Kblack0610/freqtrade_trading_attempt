@@ -90,19 +90,29 @@ class Throttled(Exception):
 
 class FlakyExchange:
     def __init__(self, fails: int):
-        self.fails = fails
+        self.fails, self.calls = fails, []
 
     def fetch_open_interest_history(self, symbol, timeframe, since=None, params=None):
+        self.calls.append((timeframe, params))
         if self.fails:
             self.fails -= 1
             raise Throttled("50011 Too Many Requests")
         return [{"timestamp": 1, "openInterestAmount": 2.0, "openInterestValue": 3.0}]
 
 
-def ccxt_venue(fails: int):
+def ccxt_venue(fails: int, exchange="okx"):
     v, waits = object.__new__(futures.Ccxt), []
-    v.ex, v.throttled, v.sleep = FlakyExchange(fails), Throttled, waits.append
+    v.exchange, v.ex, v.throttled, v.sleep = exchange, FlakyExchange(fails), Throttled, waits.append
     return v, waits
+
+
+def test_okx_open_interest_asks_for_the_utc_day_like_kucoin():
+    okx, _ = ccxt_venue(fails=0)
+    okx.open_interest("SOL/USDT:USDT", None)
+    kucoin, _ = ccxt_venue(fails=0, exchange="kucoin")
+    kucoin.open_interest("SOL/USDT:USDT", 1)
+    assert okx.ex.calls == [("1d", {"paginate": False, "period": "1Dutc"})]  # 1D would open at 16:00 UTC
+    assert kucoin.ex.calls == [("1d", {"paginate": True})]
 
 
 def test_a_rate_limited_call_waits_and_retries():
@@ -120,3 +130,15 @@ def test_a_call_still_throttled_after_every_retry_raises():
     else:
         raise AssertionError("expected the last throttle to surface")
     assert waits == list(futures.RETRY_WAITS)
+
+
+def test_okx_utc8_day_rows_the_utc_series_covers_are_dropped(conn):
+    today = futures.ms(dt.datetime(2026, 11, 18, tzinfo=UTC))
+    old = [today - k * DAY - DAY // 3 for k in range(5)]  # okx's 1D day: 16:00 UTC, 0 to 4 days back
+    conn.cursor().executemany("INSERT INTO open_interest (exchange, pair, ts, value_usd) VALUES ('okx', %s, %s, 1)",
+                              [(p, utc(t)) for t in old for p in ("BTC/USDT:USDT", "GONE/USDT:USDT")])
+    v = FakeVenue(listed=today, now=today)  # 1Dutc: today and the two UTC days before
+    assert futures.collect_oi(v, conn, "okx", "BTC/USDT:USDT", today) == 3
+    kept = conn.execute("SELECT pair, ts FROM open_interest ORDER BY pair, ts").fetchall()
+    assert kept == ([("BTC/USDT:USDT", utc(t)) for t in sorted(old[2:] + [today - k * DAY for k in range(3)])]
+                    + [("GONE/USDT:USDT", utc(t)) for t in sorted(old)])  # a pair not refetched keeps every row
