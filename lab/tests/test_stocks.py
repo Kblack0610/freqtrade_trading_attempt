@@ -6,7 +6,8 @@ from datetime import date as D
 
 import pytest
 
-from lab import broker, stocks, watcher
+from lab import broker, calls, stocks, watcher
+from lab.market import Span, bps_fee
 
 ET = dt.timezone(dt.timedelta(hours=-5))
 MONDAY = dt.datetime(2026, 11, 16, 10, tzinfo=ET)  # in session
@@ -194,3 +195,26 @@ def test_the_rule_in_words_and_the_toml_families_load():
     assert stocks.rule_of("nope", {}) == "nope"
     assert "5-session fall of 3%" in stocks.rule_of("reversion", {"lookback": 5, "drop": 0.03, "exit_sma": 5,
                                                                    "max_days": 10})
+
+
+def test_stocks_are_a_market_venue_and_history_over_alpaca_data():
+    """AlpacaStocks implements lab/market.py Venue and History: one quote page for the universe, no resolutions or
+    settled history, and daily closes as bars ending at the session close; any other bar period is refused."""
+    data = Data()
+    venue = stocks.AlpacaStocks(data, ["SPY", "TLT"], "iex")
+    [page] = list(venue.open_markets())
+    q = {x.market_id: x for x in page}["SPY"]
+    assert (q.outcome, q.market_type, q.ts) == ("long", "stock", data.at - dt.timedelta(minutes=1))
+    assert (q.bid, q.ask) == (pytest.approx(107.99), pytest.approx(108.01))
+    assert data.calls == [("quotes", ("SPY", "TLT"), "iex")]
+    assert list(venue.resolutions(MONDAY)) == [] and list(venue.settled(None)) == []
+    span = Span("SPY", None, dt.datetime(2026, 11, 3, tzinfo=dt.timezone.utc), MONDAY)
+    bars = venue.bars(span, 86400)
+    assert [b.close for b in bars] == [float(c) for c in CLOSES["SPY"]]
+    assert bars[0].ts == calls.close_at(SESSIONS[0]) and {b.period_s for b in bars} == {86400}
+    with pytest.raises(ValueError):
+        venue.bars(span, 3600)
+
+
+def test_a_stock_side_costs_its_basis_points_of_notional():
+    assert bps_fee(2, 1000.0) == pytest.approx(0.2) and bps_fee(2) == pytest.approx(0.0002) and bps_fee(0, 50.0) == 0

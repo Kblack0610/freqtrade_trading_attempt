@@ -71,12 +71,12 @@ from psycopg.types.json import Jsonb
 from lab import confidence, inputs, metrics, suggest, taxonomy
 from lab.db import connect
 from lab.grid import variants
+from lab.market import Order, Resolution
 from lab.markets import backtest
-from lab.markets.backtest import Lookahead, Market, Order
+from lab.markets.backtest import Lookahead, Market
 from lab.markets.history import _midnight
 from lab.markets.links import LINE, outcome_word, pays
 from lab.markets.recorder import load_config
-from lab.markets.venue import Resolution
 from lab.suggest import gate as check
 from lab.util import s3_from_env
 

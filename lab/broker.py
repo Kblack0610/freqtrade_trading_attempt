@@ -49,9 +49,10 @@ import requests
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from lab.db import connect
-from lab.markets.api import Api, num, when
+from lab.market import Fill, Position
+from lab.markets.api import Api, https_host, num, when
 from lab.markets.drill import await_terminal, rest_and_cancel
-from lab.markets.venue import Fill, Position
+from lab.markets.polymarket import PolymarketUSRead
 
 CONFIG = Path(os.environ.get("BROKER_CONFIG", Path(__file__).resolve().parent / "broker.toml"))
 PAPER_HOST = "paper-api.alpaca.markets"
@@ -61,17 +62,6 @@ TERMINAL = frozenset({"canceled", "filled", "expired", "rejected", "replaced", "
 
 class NotPaper(ValueError):
     """An Alpaca client pointed anywhere but the paper API."""
-
-
-class WrongHost(ValueError):
-    """A read-only client pointed anywhere but its platform's API."""
-
-
-def https_host(cfg: dict, host: str) -> str:
-    url = urlparse(cfg["base_url"])
-    if url.scheme != "https" or url.hostname != host:
-        raise WrongHost(f"refusing {cfg['base_url']}: this client reads {host} only")
-    return cfg["base_url"].rstrip("/")
 
 
 def blank_row(broker_name: str, paper: bool) -> dict:
@@ -355,57 +345,31 @@ class KrakenRead:
         return [row]
 
 
-class PolymarketUSRead:
-    """The Polymarket US Retail API, GET only. Each request signs timestamp (ms) + method + path with the Ed25519 key,
-    sent as X-PM-Signature beside X-PM-Access-Key and X-PM-Timestamp; a timestamp is good for 30 s
-    (docs.polymarket.us/api-reference/authentication)."""
-
-    venue = "polymarket_us"
-    host = "api.polymarket.us"
-
-    def __init__(self, cfg: dict, key_id: str, secret_b64: str, session=None, clock=None, sleep=None):
-        https_host(cfg, self.host)
-        self.key_id = key_id
-        self.key = Ed25519PrivateKey.from_private_bytes(base64.b64decode(secret_b64)[:32])
-        self.currency = cfg["currency"]
-        self.api = Api(self.venue, cfg, session, sleep)
-        self.clock = clock or time.time
-
-    def signed(self, path: str) -> dict:
-        ts = str(int(self.clock() * 1000))
-        sig = self.key.sign(f"{ts}GET{path}".encode())
-        return {"X-PM-Access-Key": self.key_id, "X-PM-Timestamp": ts, "X-PM-Signature": base64.b64encode(sig).decode()}
-
-    def get(self, path: str):
-        r = self.api.request("GET", path, headers=lambda _: self.signed(path))
-        if r.status_code >= 400:
-            raise RuntimeError(f"polymarket_us GET {path}: HTTP {r.status_code}: {str(r.text)[:300]}")
-        return r.json()
-
-    def read(self) -> list[dict]:
-        """One row: cash is the currency's balance, equity adds the notional of every position, positions counts the
-        markets with a net position. An account with no balance entry yet (never funded) reads as zero."""
-        row = blank_row(self.venue, False)
-        try:
-            balances = self.get("/v1/account/balances")["balances"]
-            bal = next((b for b in balances if b["currency"] == self.currency), None)
-            if bal is None and balances:
-                raise RuntimeError(f"polymarket_us: no {self.currency} balance among {[b['currency'] for b in balances]}")
-            bal = bal or {}
-            pos = self.get("/v1/portfolio/positions")
-            held = [p for p in pos["positions"].values() if num(p.get("netPosition"))]
-            cash, notional = num(bal.get("currentBalance")) or 0.0, num(bal.get("assetNotional")) or 0.0
-            row.update(status="open", currency=self.currency, cash=cash, equity=cash + notional,
-                       buying_power=num(bal.get("buyingPower")) or 0.0, positions=len(held))
-            if not pos.get("eof", True):
-                row["error"] = "polymarket_us: positions span more than one page, so the count is short"
-        except RuntimeError as e:
-            row["error"] = str(e)
-        except KeyError as e:
-            row["error"] = f"polymarket_us: no field {e}"
-        except requests.RequestException as e:
-            row["error"] = f"polymarket_us: {type(e).__name__}"
-        return [row]
+def polymarket_us(client: PolymarketUSRead) -> list[dict]:
+    """One row read through lab/markets/polymarket.py PolymarketUSRead: cash is the currency's balance, equity adds
+    the notional of every position, positions counts the markets with a net position. An account with no balance
+    entry yet (never funded) reads as zero."""
+    row = blank_row(client.venue, False)
+    try:
+        balances = client.balances()
+        bal = next((b for b in balances if b["currency"] == client.currency), None)
+        if bal is None and balances:
+            raise RuntimeError(f"polymarket_us: no {client.currency} balance among {[b['currency'] for b in balances]}")
+        bal = bal or {}
+        pos = client.positions()
+        held = [p for p in pos["positions"].values() if num(p.get("netPosition"))]
+        cash, notional = num(bal.get("currentBalance")) or 0.0, num(bal.get("assetNotional")) or 0.0
+        row.update(status="open", currency=client.currency, cash=cash, equity=cash + notional,
+                   buying_power=num(bal.get("buyingPower")) or 0.0, positions=len(held))
+        if not pos.get("eof", True):
+            row["error"] = "polymarket_us: positions span more than one page, so the count is short"
+    except RuntimeError as e:
+        row["error"] = str(e)
+    except KeyError as e:
+        row["error"] = f"polymarket_us: no field {e}"
+    except requests.RequestException as e:
+        row["error"] = f"polymarket_us: {type(e).__name__}"
+    return [row]
 
 
 class TastytradeRead:
@@ -517,8 +481,9 @@ def sources(session=None, sleep=None) -> list:
         out.append(KrakenRead(cfg["kraken"], env("KRAKEN_API_KEY"), env("KRAKEN_API_SECRET"), session,
                               sleep=sleep).read)
     if env("POLYMARKET_US_KEY_ID") and env("POLYMARKET_US_SECRET_KEY"):
-        out.append(PolymarketUSRead(cfg["polymarket_us"], env("POLYMARKET_US_KEY_ID"), env("POLYMARKET_US_SECRET_KEY"),
-                                    session, sleep=sleep).read)
+        pm = PolymarketUSRead(cfg["polymarket_us"], env("POLYMARKET_US_KEY_ID"), env("POLYMARKET_US_SECRET_KEY"),
+                              session, sleep=sleep)
+        out.append(lambda: polymarket_us(pm))
     if env("TASTYTRADE_CLIENT_ID") and env("TASTYTRADE_CLIENT_SECRET") and env("TASTYTRADE_REFRESH_TOKEN"):
         out.append(TastytradeRead(cfg["tastytrade"], env("TASTYTRADE_CLIENT_ID"), env("TASTYTRADE_CLIENT_SECRET"),
                                   env("TASTYTRADE_REFRESH_TOKEN"), session, sleep=sleep).read)

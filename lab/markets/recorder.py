@@ -28,7 +28,7 @@ from lab.markets.manifold import Manifold
 from lab.markets.odds import OddsApi
 from lab.markets.polymarket import Polymarket, PolymarketUS
 from lab.markets.predictit import PredictIt
-from lab.markets.venue import Quote, Venue
+from lab.market import Quote, Venue
 from lab.util import s3_from_env
 
 ADAPTERS = {a.name: a for a in (Kalshi, PolymarketUS, Polymarket, PredictIt, Manifold, OddsApi)}

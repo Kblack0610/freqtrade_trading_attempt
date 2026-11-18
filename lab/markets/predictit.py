@@ -13,7 +13,7 @@ from typing import Iterator
 from zoneinfo import ZoneInfo
 
 from lab.markets.api import Api, num
-from lab.markets.venue import Quote, Resolution
+from lab.market import Quote, Resolution
 
 EASTERN = ZoneInfo("America/New_York")
 

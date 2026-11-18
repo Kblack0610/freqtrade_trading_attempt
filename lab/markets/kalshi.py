@@ -16,7 +16,7 @@ import datetime as dt
 from typing import Iterator
 
 from lab.markets.api import Api, epoch_s, num, when
-from lab.markets.venue import Bar, Quote, Resolution, Settled, Span, Trade
+from lab.market import Bar, Quote, Resolution, Settled, Span, Trade
 
 MAX_CANDLES = 5000
 

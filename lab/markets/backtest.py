@@ -16,7 +16,7 @@ The replay (replay, settle):
   the price but not the fee. A strategy exits early by buying the other side: a YES and a NO pay exactly one.
 - A strategy with a `cutoff` (an LLM forecaster's training cutoff) is refused outright on a book that starts
   before it: its forecasts of those events are lookahead.
-- Fees are lab/markets/fees.py, from `[backtest.fees.<venue>]`.
+- Fills (take, payout) and fees (entry_fee, settlement_fee, from `[backtest.fees.<venue>]`) are lab/market.py.
 
 The result (evaluate) is a trade table in the shape metrics.window_metrics reads, one row per fill: open_date the
 fill, close_date the settlement, open_rate the price, close_rate the payout per contract, profit_abs net of every
@@ -31,7 +31,6 @@ trial on any markets venue (trial_count). Pooling windows into a verdict is lab/
 """
 
 import datetime as dt
-import math
 from dataclasses import dataclass
 from typing import Iterable, Protocol
 
@@ -43,13 +42,11 @@ from pyarrow import fs as pafs
 
 from lab import confidence, metrics, suggest
 from lab.grid import variant_of
-from lab.markets import fees
+from lab.market import Order, Resolution, entry_fee, payout, settlement_fee, take
 from lab.markets.recorder import load_config
-from lab.markets.venue import Resolution
 from lab.util import finite
 
 BOOK = ["market_id", "ts", "bid", "ask", "depth_yes", "depth_no"]
-SIDES = ("yes", "no")
 
 
 class Lookahead(ValueError):
@@ -66,14 +63,6 @@ class Market:
     market_type: str
     open_time: dt.datetime | None
     close_time: dt.datetime | None
-
-
-@dataclass(frozen=True, slots=True)
-class Order:
-    market_id: str
-    side: str  # yes or no
-    stake: float  # dollars of contracts, before fees
-    limit: float | None = None  # the most it pays per contract
 
 
 class Strategy(Protocol):
@@ -154,30 +143,6 @@ def load_markets(conn, venue: str, ids: Iterable[str]) -> tuple[dict, dict]:
     return markets, res
 
 
-def take(o: Order, bid: float, ask: float, depth_yes: float, depth_no: float, taken: float,
-         share: float) -> tuple[int, float] | None:
-    """The whole contracts and price a taker order gets from one book row (module docstring), `taken` contracts of
-    its side already gone to earlier orders; None when it gets nothing. The paper league fills through this too."""
-    if o.side not in SIDES:
-        raise ValueError(f"order side {o.side!r}")
-    price = ask if o.side == "yes" else 1.0 - bid
-    if not 0 < price < 1 or (o.limit is not None and price > o.limit):
-        return None
-    room = (depth_yes if o.side == "yes" else depth_no) * share - taken
-    n = min(math.floor(o.stake / price + 1e-9), math.floor(room)) if np.isfinite(room) else 0
-    return (n, float(price)) if n >= 1 else None
-
-
-def payout(side: str, price: float, res: Resolution) -> float | None:
-    """What one contract bought at `price` pays at resolution (module docstring); None for an unknown result."""
-    if res.result == "void":
-        return price
-    v = res.value if res.value is not None else {"yes": 1.0, "no": 0.0}.get(res.result)
-    if v is None:
-        return None
-    return v if side == "yes" else 1.0 - v
-
-
 def replay(book: pd.DataFrame, markets: dict, resolutions: dict, strategy: Strategy, bcfg: dict,
            fee_cfg: dict | None) -> tuple[pd.DataFrame, int]:
     """Every fill the strategy's orders get from the book, and how many orders it sent."""
@@ -208,7 +173,7 @@ def replay(book: pd.DataFrame, markets: dict, resolutions: dict, strategy: Strat
         n, price = got
         taken[(r, o.side)] = taken.get((r, o.side), 0) + n
         return {"market_id": o.market_id, "side": o.side, "open_date": at, "contracts": n, "price": price,
-                "fee": fees.entry(fee_cfg, n, price)}
+                "fee": entry_fee(fee_cfg, n, price)}
 
     for i, row in enumerate(book.itertuples(index=False)):
         m = markets.get(row.market_id)
@@ -230,7 +195,7 @@ def settle(fills: pd.DataFrame, resolutions: dict, fee_cfg: dict | None) -> pd.D
         if res is None or (pay := payout(f.side, f.price, res)) is None:
             continue
         cost = f.contracts * f.price + f.fee
-        profit = f.contracts * pay - cost - fees.settlement(fee_cfg, f.contracts * f.price, f.contracts * pay)
+        profit = f.contracts * pay - cost - settlement_fee(fee_cfg, f.contracts * f.price, f.contracts * pay)
         out.append({"market_id": f.market_id, "side": f.side, "contracts": f.contracts, "open_date": f.open_date,
                     "close_date": pd.Timestamp(res.settled_at), "open_rate": f.price, "close_rate": float(pay),
                     "fee": f.fee, "profit_abs": profit, "profit_ratio": profit / cost, "min_rate": np.nan})

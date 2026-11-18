@@ -32,6 +32,7 @@ import requests
 
 from lab import broker, metrics, taxonomy
 from lab.db import connect
+from lab.market import bps_fee
 
 CONFIG = Path(__file__).resolve().parent / "calls.toml"
 ET = ZoneInfo("America/New_York")
@@ -86,7 +87,7 @@ def score(direction: str, entry: dt.date, horizon: int, closes: list, bench: lis
     sign = 1 if direction == "long" else -1
     ret, bret = c1 / c0 - 1, b[d1] / b[d0] - 1
     borrow = cfg["borrow_apr"] * (d1 - d0).days / 360 if sign < 0 else 0.0
-    pnl = sign * ret - borrow - 2 * cfg["cost_bps"] / 1e4
+    pnl = sign * ret - borrow - 2 * bps_fee(cfg["cost_bps"])
     return {"exit_session": d1, "entry_close": c0, "exit_close": c1, "bench_entry": b[d0], "bench_exit": b[d1],
             "ret": ret, "pnl": pnl, "excess": sign * (ret - bret)}
 

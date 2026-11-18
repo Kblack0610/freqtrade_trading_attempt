@@ -8,6 +8,7 @@ import psycopg
 import pytest
 
 from lab import broker, calls
+from lab.markets.api import WrongHost
 
 CFG = {"cost_bps": 2, "borrow_apr": 0.003, "settle_hours": 2, "slack_days": 4, "alpha": 0.05, "bound": 1.0}
 DATA = {"base_url": "https://data.alpaca.markets", "feed": "sip", "timeout_s": 5, "page_gap_s": 0, "retries": 2}
@@ -88,7 +89,7 @@ def test_the_data_client_reads_every_page_and_refuses_anything_but_a_get_to_its_
             c.call(method, "/v2/orders")
     assert len(s.calls) == 2  # refused before a request left
     for url in ("https://paper-api.alpaca.markets", "https://api.alpaca.markets", "http://data.alpaca.markets"):
-        with pytest.raises(broker.WrongHost):
+        with pytest.raises(WrongHost):
             broker.AlpacaData({**DATA, "base_url": url}, "k", "s")
 
 

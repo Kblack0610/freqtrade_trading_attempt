@@ -5,7 +5,7 @@ import pyarrow.parquet as pq
 from pyarrow import fs as pafs
 
 from lab.markets import recorder
-from lab.markets.venue import Quote, Resolution
+from lab.market import Quote, Resolution
 
 UTC = dt.timezone.utc
 T0 = dt.datetime(2026, 11, 6, 6, 0, tzinfo=UTC)

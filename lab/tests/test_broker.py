@@ -11,9 +11,10 @@ import requests
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from lab import broker
+from lab.broker import AlpacaPaper, KrakenRead, NotPaper, RobinhoodCrypto, SnapTrade, TastytradeRead
 from lab.markets import drill
-from lab.broker import (AlpacaPaper, KrakenRead, NotPaper, PolymarketUSRead, RobinhoodCrypto, SnapTrade,
-                        TastytradeRead, WrongHost)
+from lab.markets.api import WrongHost
+from lab.markets.polymarket import PolymarketUSRead
 
 PAPER = {"base_url": "https://paper-api.alpaca.markets", "timeout_s": 5, "page_gap_s": 0, "retries": 2}
 ACCOUNT = {"id": "a1", "status": "ACTIVE", "currency": "USD", "equity": "100012.50", "cash": "99000.00",
@@ -463,7 +464,7 @@ def pm(s):
 
 def test_polymarket_us_reads_cash_buying_power_and_the_value_of_open_markets():
     s = Polymarket()
-    [row] = pm(s).read()
+    [row] = broker.polymarket_us(pm(s))
     assert row == {"broker": "polymarket_us", "paper": False, "status": "open", "currency": "USD", "equity": 52.75,
                    "cash": 40.25, "buying_power": 38.0, "positions": 1, "error": None}
     assert [(m, p) for m, p, _ in s.calls] == [("GET", "/v1/account/balances"), ("GET", "/v1/portfolio/positions")]
@@ -471,7 +472,7 @@ def test_polymarket_us_reads_cash_buying_power_and_the_value_of_open_markets():
 
 def test_polymarket_us_signs_millisecond_timestamp_method_and_path_with_the_ed25519_key():
     s = Polymarket()
-    pm(s).read()
+    broker.polymarket_us(pm(s))
     for _, path, h in s.calls:
         assert (h["X-PM-Access-Key"], h["X-PM-Timestamp"]) == ("pm-key", "1700000000500")
         Ed25519PrivateKey.from_private_bytes(SEED).public_key().verify(
@@ -479,22 +480,22 @@ def test_polymarket_us_signs_millisecond_timestamp_method_and_path_with_the_ed25
 
 
 def test_an_unfunded_polymarket_us_account_reads_as_zero():
-    [row] = pm(Polymarket(balances=[])).read()
+    [row] = broker.polymarket_us(pm(Polymarket(balances=[])))
     assert (row["cash"], row["equity"], row["buying_power"], row["error"]) == (0.0, 0.0, 0.0, None)
 
 
 def test_a_polymarket_us_balance_in_another_currency_is_an_error_not_a_zero():
-    [row] = pm(Polymarket(balances=[{"currency": "USDC", "currentBalance": 9}])).read()
+    [row] = broker.polymarket_us(pm(Polymarket(balances=[{"currency": "USDC", "currentBalance": 9}])))
     assert row["cash"] is None and "no USD balance among ['USDC']" in row["error"]
 
 
 def test_a_polymarket_us_positions_list_past_one_page_says_its_count_is_short():
-    [row] = pm(Polymarket(eof=False)).read()
+    [row] = broker.polymarket_us(pm(Polymarket(eof=False)))
     assert row["positions"] == 1 and "more than one page" in row["error"]
 
 
 def test_a_refused_polymarket_us_read_is_a_row_without_the_key():
-    [row] = pm(Polymarket(status=401)).read()
+    [row] = broker.polymarket_us(pm(Polymarket(status=401)))
     assert row["equity"] is None and row["error"].startswith("polymarket_us GET /v1/account/balances: HTTP 401")
     assert "pm-key" not in row["error"] and PM_SECRET not in row["error"]
 
@@ -508,7 +509,7 @@ def test_main_reads_polymarket_us_when_its_keys_are_set(conn, monkeypatch):
 
 
 def test_alpaca_paper_reads_signed_positions_and_fills_newest_first():
-    from lab.markets.venue import Fill, Position
+    from lab.market import Fill, Position
     c = client(Paper())
     assert c.positions() == [Position("SPY", 3.0, 1500.30), Position("QQQ", -2.0, None)]
     sold, bought = c.fills()

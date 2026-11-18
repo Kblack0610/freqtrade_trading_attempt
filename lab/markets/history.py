@@ -41,7 +41,7 @@ from pyarrow import fs as pafs
 
 from lab.db import connect
 from lab.markets.recorder import ADAPTERS, META, load_config
-from lab.markets.venue import Span
+from lab.market import Span
 from lab.util import s3_from_env
 
 TS = pa.timestamp("us", tz="UTC")

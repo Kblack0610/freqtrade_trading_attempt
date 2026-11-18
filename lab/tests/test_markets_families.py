@@ -13,7 +13,7 @@ from lab.markets.backtest import Lookahead, Market
 from lab.markets.families import Calibration, Forecaster, Gap, Longshot, RefBook, day
 from lab.markets.history import SCHEMAS
 from lab.markets.recorder import load_config
-from lab.markets.venue import Resolution
+from lab.market import Resolution
 
 UTC = dt.timezone.utc
 T0 = dt.datetime(2026, 11, 1, tzinfo=UTC)

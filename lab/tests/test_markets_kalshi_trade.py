@@ -196,7 +196,7 @@ def test_the_demo_config_points_at_the_demo():
 
 
 def test_positions_and_fills_are_signed_on_the_yes_side():
-    from lab.markets.venue import Position
+    from lab.market import Position
     c = KalshiDemo(DEMO, "key-1", pem(RSA), session=Demo(), sleep=lambda s: None)
     assert c.positions() == [Position("T-A", 3.0, 1.26), Position("T-B", -2.0, None)]
     no_buy, yes_sell = c.fills()

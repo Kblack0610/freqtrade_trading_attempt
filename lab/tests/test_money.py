@@ -27,9 +27,11 @@ from test_markets_kalshi_trade import RSA, Demo, pem
 from test_markets_manifold_trade import Manifold
 
 from lab import broker, league
-from lab.markets import backtest, fees, kalshi_trade, manifold_trade, paper
-from lab.markets.backtest import Market, Order
+from lab.market import Order, entry_fee, settlement_fee
+from lab.markets import backtest, kalshi_trade, manifold_trade, paper
+from lab.markets.backtest import Market
 from lab.markets.families import Family
+from lab.markets.polymarket import PolymarketUSRead
 from lab.markets.recorder import load_config
 
 REPO = Path(__file__).resolve().parents[2]
@@ -76,7 +78,7 @@ class Venue:
     equity_settled: float      # after Y, N and V settle; U stays open
 
 
-# Each number by hand from the fee schedule in lab/markets.toml, so a change to fees.py or paper.py cannot move both
+# Each number by hand from the fee schedule in lab/markets.toml, so a change to lab/market.py or paper.py cannot move both
 # sides of an assertion. Kalshi: ceil(0.07 C P (1 - P)) to the cent on entry. PredictIt: 10% of a win, at settlement.
 VENUES = [
     Venue("kalshi", {"Y": 0.42, "N": 0.30, "V": 0.18, "U": 0.12}, {"Y": 14.58, "N": -6.30, "V": -0.18},
@@ -176,10 +178,10 @@ def test_paper_money_adds_up_through_fills_fees_and_settlement(conn, v):
 
 def test_a_settlement_fee_is_charged_on_a_win_only_and_on_the_profit():
     pi = load_config()["backtest"]["fees"]["predictit"]
-    assert fees.entry(pi, 25, 0.40) == 0
-    assert fees.settlement(pi, cost=10.0, payout=25.0) == pytest.approx(1.50)
-    assert fees.settlement(pi, cost=6.0, payout=0.0) == 0
-    assert fees.settlement(pi, cost=5.0, payout=5.0) == 0
+    assert entry_fee(pi, 25, 0.40) == 0
+    assert settlement_fee(pi, cost=10.0, payout=25.0) == pytest.approx(1.50)
+    assert settlement_fee(pi, cost=6.0, payout=0.0) == 0
+    assert settlement_fee(pi, cost=5.0, payout=5.0) == 0
 
 
 def test_the_paper_league_runs_only_on_its_paper_venues(monkeypatch):
@@ -252,9 +254,10 @@ MONEY_MAP = {
         lambda cfg, s: broker.KrakenRead(cfg, "k", KR_SECRET, s, sleep=lambda _: None), lambda c, conn: c.read(),
         Kraken, reads=frozenset({"/0/private/Balance", "/0/private/TradeBalance"}),
         declared_reads=lambda: broker.KrakenRead.READS),
-    ("lab/broker.py", "PolymarketUSRead"): Client(
-        "read", frozenset({"api.polymarket.us"}), lambda: {broker.PolymarketUSRead.host}, _broker("polymarket_us"),
-        lambda cfg, s: broker.PolymarketUSRead(cfg, "k", PM_SECRET, s, sleep=lambda _: None), lambda c, conn: c.read(),
+    ("lab/markets/polymarket.py", "PolymarketUSRead"): Client(
+        "read", frozenset({"api.polymarket.us"}), lambda: {PolymarketUSRead.host}, _broker("polymarket_us"),
+        lambda cfg, s: PolymarketUSRead(cfg, "k", PM_SECRET, s, sleep=lambda _: None),
+        lambda c, conn: broker.polymarket_us(c),
         Polymarket),
     ("lab/broker.py", "TastytradeRead"): Client(
         "read", frozenset({"api.tastyworks.com"}), lambda: {broker.TastytradeRead.host}, _broker("tastytrade"),

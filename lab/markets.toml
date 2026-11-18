@@ -198,7 +198,7 @@ bar_volume_share = 0.1
 # a winning account long before it, so a fill here is no claim a stake would be taken.
 sportsbook_depth = 1000
 
-# Fees per venue (lab/markets/fees.py; facts in docs/markets.md, Fees). A venue with no table costs nothing.
+# Fees per venue (lab/market.py entry_fee and settlement_fee; facts in docs/markets.md, Fees). A venue with no table costs nothing.
 [backtest.fees.kalshi]
 # ceil(0.07 * C * P * (1 - P)) up to the cent per order. The maker rate is not modelled: every fill here is a taker.
 kind = "pq"
