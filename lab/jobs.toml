@@ -1,0 +1,37 @@
+# Job name -> the commands a pod runs, so home-config names jobs and never module paths.
+# `python -m lab run <job>` runs each step in order as `python -m <step>` (cwd /repo), always all of them, and exits
+# with the first nonzero code. A step may name an env var ($WF_EXCHANGES); it is expanded before the step is split.
+# Moving a module changes this file and nothing in home-config.
+
+[jobs]
+migrate = ["lab.migrate"]
+watcher = ["lab.watcher"]
+league = ["lab.league"]
+backfill = ["lab.backfill"]
+ingest = ["lab.ingest"]
+analysis = ["lab.analyze"]
+walkforward = ["lab.snapshot fetch $WF_EXCHANGES", "lab.walkforward"]
+snapshot-publish = ["lab.snapshot publish"]
+futures = ["lab.futures"]
+calibration = ["lab.calibration"]
+call-rules = ["lab.call_rules"]
+wallet = ["lab.wallet"]
+nws = ["lab.nws"]
+stocks = ["lab.stocks"]
+broker-read = ["lab.broker read"]
+broker-drill = ["lab.broker drill"]
+kalshi-drill = ["lab.markets.kalshi_trade drill"]
+manifold-drill = ["lab.markets.manifold_trade drill"]
+markets-links = ["lab.markets.links"]
+markets-families = ["lab.markets.families"]
+markets-compact = ["lab.markets.compact"]
+markets-history-settled = ["lab.markets.history settled"]
+markets-history-bars = ["lab.markets.history bars"]
+markets-history-trades = ["lab.markets.history trades"]
+# A recorder sweep, then the paper pass on the same venue: the pass runs even when the sweep failed.
+markets-recorder = ["lab.markets.recorder", "lab.markets.paper"]
+markets-recorder-polymarket-us = ["lab.markets.recorder polymarket_us", "lab.markets.paper --venue polymarket_us"]
+markets-recorder-predictit = ["lab.markets.recorder predictit", "lab.markets.paper --venue predictit"]
+markets-recorder-polymarket = ["lab.markets.recorder polymarket"]
+markets-recorder-manifold = ["lab.markets.recorder manifold"]
+markets-recorder-odds-api = ["lab.markets.recorder odds_api"]

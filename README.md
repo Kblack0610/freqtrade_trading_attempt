@@ -12,7 +12,7 @@ Results go to the `trader` database in the cluster's shared Postgres, which the 
 
 ## Layout
 
-`lab` and `web` are packages imported from the repo root: `from lab import metrics`, `from lab.markets import fees`. The image sets `PYTHONPATH=/repo`; a job runs as `python /repo/lab/<job>.py`, or `python -m lab.markets.<module>` for the markets jobs.
+`lab` and `web` are packages imported from the repo root: `from lab import metrics`, `from lab.markets import fees`. The image sets `PYTHONPATH=/repo`; a job runs by name, `python -m lab run <job>`, from the registry `lab/jobs.toml` (`python -m lab list` prints the names; an unknown name exits 2). Each step is a `python -m <module>` process, every step runs, and the exit code is the first nonzero one. Home-config CronJobs name jobs and never module paths, so moving a module edits `jobs.toml` only (`lab/tests/test_jobs.py` checks every step resolves).
 
 | Path | What it is |
 |---|---|
