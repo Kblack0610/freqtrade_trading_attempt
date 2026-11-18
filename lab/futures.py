@@ -4,8 +4,8 @@
 Through ccxt's public endpoints, into funding_rates and open_interest (migration 018); this is their only writer.
 Free history is short and only grows by collecting, so each run fetches from the newest stored row on:
 - funding: from FUNDING_FROM on the first run, in 30-day windows (kucoin pages hold 100 rows, 8h funding fills 90);
-- open interest: the daily history each exchange serves (okx about 180 days, kucoin about 98), overlapping
-  the stored rows, so a missed day is refilled on the next run.
+- open interest: the daily history each exchange serves (okx 100 days, kucoin about 98), one row per UTC day,
+  overlapping the stored rows, so a missed day is refilled on the next run.
 Freqtrade cannot download kucoin futures, so both venues go through ccxt the same way.
 Exits 1 if any series failed; the others are still written.
 """
@@ -27,9 +27,13 @@ FUNDING_FROM = dt.datetime.fromisoformat(os.environ.get("FUNDING_FROM", "2024-01
 DAY_MS = 86_400_000
 WINDOW_MS = 30 * DAY_MS
 CCXT_ID = {"okx": "okx", "kucoin": "kucoinfutures"}
-# okx rejects a since on open interest ("Illegal time range") and serves 180 days without one;
+# okx rejects a since on open interest ("Illegal time range") and serves 100 days without one;
 # kucoin serves 30 days unless ccxt pages back from a since, then about 98
 OI_PAGED = {"okx": False, "kucoin": True}
+# okx's 1D day opens at 16:00 UTC (UTC+8 midnight), so its newest row was up to 38 hours old before the next
+# daily run; 1Dutc opens at 00:00 UTC like kucoin's day (migration 061). ccxt accepts only 1d as the timeframe,
+# and a period param overrides what it sends.
+OI_PARAMS = {"okx": {"period": "1Dutc"}}
 # okx caps open-interest history at 5 requests per 2s per IP, shared with the league bots, so a 429 waits and retries
 RETRY_WAITS = (2.0, 4.0, 8.0)
 
@@ -43,7 +47,7 @@ class Venue(Protocol):
 class Ccxt:
     def __init__(self, exchange: str, sleep=time.sleep):
         import ccxt
-        self.ex = getattr(ccxt, CCXT_ID[exchange])({"enableRateLimit": True})
+        self.exchange, self.ex = exchange, getattr(ccxt, CCXT_ID[exchange])({"enableRateLimit": True})
         self.throttled, self.sleep = ccxt.RateLimitExceeded, sleep
 
     def _call(self, fetch, *args, **kwargs):
@@ -63,7 +67,7 @@ class Ccxt:
 
     def open_interest(self, symbol, since):
         rows = self._call(self.ex.fetch_open_interest_history, symbol, "1d", since=since,
-                          params={"paginate": since is not None})
+                          params={"paginate": since is not None, **OI_PARAMS.get(self.exchange, {})})
         return [(r["timestamp"], r.get("openInterestAmount"), r.get("openInterestValue")) for r in rows]
 
 

@@ -90,19 +90,29 @@ class Throttled(Exception):
 
 class FlakyExchange:
     def __init__(self, fails: int):
-        self.fails = fails
+        self.fails, self.calls = fails, []
 
     def fetch_open_interest_history(self, symbol, timeframe, since=None, params=None):
+        self.calls.append((timeframe, params))
         if self.fails:
             self.fails -= 1
             raise Throttled("50011 Too Many Requests")
         return [{"timestamp": 1, "openInterestAmount": 2.0, "openInterestValue": 3.0}]
 
 
-def ccxt_venue(fails: int):
+def ccxt_venue(fails: int, exchange="okx"):
     v, waits = object.__new__(futures.Ccxt), []
-    v.ex, v.throttled, v.sleep = FlakyExchange(fails), Throttled, waits.append
+    v.exchange, v.ex, v.throttled, v.sleep = exchange, FlakyExchange(fails), Throttled, waits.append
     return v, waits
+
+
+def test_okx_open_interest_asks_for_the_utc_day_like_kucoin():
+    okx, _ = ccxt_venue(fails=0)
+    okx.open_interest("SOL/USDT:USDT", None)
+    kucoin, _ = ccxt_venue(fails=0, exchange="kucoin")
+    kucoin.open_interest("SOL/USDT:USDT", 1)
+    assert okx.ex.calls == [("1d", {"paginate": False, "period": "1Dutc"})]  # 1D would open at 16:00 UTC
+    assert kucoin.ex.calls == [("1d", {"paginate": True})]
 
 
 def test_a_rate_limited_call_waits_and_retries():
@@ -120,3 +130,16 @@ def test_a_call_still_throttled_after_every_retry_raises():
     else:
         raise AssertionError("expected the last throttle to surface")
     assert waits == list(futures.RETRY_WAITS)
+
+
+def test_migration_061_drops_only_the_okx_utc8_rows_the_utc_refetch_replaces(conn):
+    today = dt.datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+    rows = [("okx", today - dt.timedelta(days=d, hours=8)) for d in (0, 98, 99, 100)]  # 16:00 UTC, okx's 1D
+    rows += [("okx", today - dt.timedelta(days=d)) for d in (0, 99)] + [("kucoin", today - dt.timedelta(days=1))]
+    conn.cursor().executemany("INSERT INTO open_interest (exchange, pair, ts, value_usd) VALUES (%s, 'BTC/USDT:USDT', %s, 1)",
+                              rows)
+    conn.execute((futures.Path(futures.__file__).parent / "migrations" / "061_okx_open_interest_utc_day.sql").read_text())
+    kept = conn.execute("SELECT exchange, ts FROM open_interest ORDER BY exchange, ts").fetchall()
+    assert kept == [("kucoin", today - dt.timedelta(days=1)),
+                    ("okx", today - dt.timedelta(days=100, hours=8)), ("okx", today - dt.timedelta(days=99, hours=8)),
+                    ("okx", today - dt.timedelta(days=99)), ("okx", today)]
