@@ -11,7 +11,7 @@ from prometheus_client import CollectorRegistry, start_http_server
 from prometheus_client.core import GaugeMetricFamily
 from psycopg.rows import dict_row
 
-from lab import inputs
+from lab import inputs, stocks
 from lab.db import connect
 from lab.markets import paper_venues, sweep_ages
 from lab.suggest import load_config
@@ -28,8 +28,8 @@ FROM bot_snapshots s JOIN bots b ON b.name = s.bot ORDER BY s.bot, s.ts DESC
 # forever (the agg bots renamed 2026-11-10). It stays in the table with its breach and stop state; only the
 # per-bot series skip it, and a dead watcher still ages every row of its last pass.
 WATCH = ("SELECT w.bot, w.checked_at, w.seen_at, w.state, w.capital, w.equity, w.day_open, w.breached_at, p.venue, "
-         "w.checked_at = max(w.checked_at) OVER () AS current "
-         "FROM watch w LEFT JOIN paper_accounts p ON p.account = w.bot")
+         "s.account IS NOT NULL AS stock, w.checked_at = max(w.checked_at) OVER () AS current "
+         "FROM watch w LEFT JOIN paper_accounts p ON p.account = w.bot LEFT JOIN stock_accounts s ON s.account = w.bot")
 RUNS = """
 SELECT k AS kind,
        (SELECT max(started_at) FROM runs WHERE kind = k) AS started_at,
@@ -218,10 +218,21 @@ def watch_metrics(now, watch):
                  (([w["bot"]], age(now, w["seen_at"])) for w in watch))
     unseen = load_config()["watcher"].get("unseen_after_seconds", 300)
     book, venues = sweep_ages()
-    slow = {v: m * 60 for v, m in venues.items() if m > book}  # swept slower than the paper book age
+    quote = stocks.load_config()["max_quote_age_min"]
+
+    def limit(w):
+        # A paper or stock account is read only when its league's pass marks it, once a 5-min CronJob at the
+        # fastest, so `unseen` (five watcher cadences) would be one pass with no slack: it gets its league's own
+        # freshness limit, past which that league takes no entries either.
+        if w["stock"]:
+            return max(unseen, quote * 60)
+        if w["venue"]:
+            return max(unseen, venues.get(w["venue"], book) * 60)
+        return unseen
+
     yield family("trader_watch_unseen_limit_seconds", "Seconds unread past which the bot is blind: [watcher] "
-                 "unseen_after_seconds, or a paper account's venue limit when that venue is swept slower", ["bot"],
-                 (([w["bot"]], max(unseen, slow.get(w["venue"], 0))) for w in watch))
+                 "unseen_after_seconds, or for a paper or stock account its league's freshness limit", ["bot"],
+                 (([w["bot"]], limit(w)) for w in watch))
     yield family("trader_watch_running", "1 when the bot takes entries, 0 when it is paused or stopped", ["bot"],
                  (([w["bot"]], None if w["state"] is None else int(w["state"] == "running")) for w in watch))
     yield family("trader_watch_breached", "1 when the bot broke the daily loss limit this UTC day", ["bot"],
