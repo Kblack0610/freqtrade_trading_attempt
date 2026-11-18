@@ -4,7 +4,7 @@ import pyarrow.parquet as pq
 from pyarrow import fs as pafs
 
 from lab.markets import backtest, compact, recorder
-from lab.markets.venue import Quote
+from lab.market import Quote
 
 UTC = dt.timezone.utc
 D = dt.datetime(2026, 11, 6, tzinfo=UTC)

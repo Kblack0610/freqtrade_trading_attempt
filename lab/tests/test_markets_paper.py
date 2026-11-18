@@ -462,7 +462,7 @@ def test_two_venues_trading_one_variant_each_get_their_own_account(conn):
 
 
 def test_without_unsized_depth_a_sizeless_quote_cannot_fill(conn):
-    """The negative control: books() leaves an unrecorded size NaN, which backtest.take reads as no room."""
+    """The negative control: books() leaves an unrecorded size NaN, which market.take reads as no room."""
     seed_unsized(conn, "predictit")
     row, _ = paper.books(conn, "predictit", NOW, 168)[0]
     assert row.depth_yes != row.depth_yes

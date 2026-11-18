@@ -9,7 +9,7 @@ from lab.markets import history
 from lab.markets.kalshi import Kalshi
 from lab.markets.manifold import Manifold
 from lab.markets.polymarket import Polymarket, PolymarketUS
-from lab.markets.venue import Bar, Quote, Resolution, Settled, Span, Trade
+from lab.market import Bar, Quote, Resolution, Settled, Span, Trade
 
 UTC = dt.timezone.utc
 D1, D2 = dt.date(2026, 11, 3), dt.date(2026, 11, 4)

@@ -8,10 +8,10 @@ import pytest
 from pyarrow import fs as pafs
 
 from lab import suggest
-from lab.markets import backtest, fees
-from lab.markets.backtest import Lookahead, Market, Order
+from lab.market import Order, Resolution, _cents, entry_fee, settlement_fee
+from lab.markets import backtest
+from lab.markets.backtest import Lookahead, Market
 from lab.markets.recorder import SCHEMA, load_config
-from lab.markets.venue import Resolution
 
 UTC = dt.timezone.utc
 T0 = dt.datetime(2026, 11, 1, 12, tzinfo=UTC)
@@ -65,30 +65,30 @@ def go(b, strategy, markets=None, res=None, fee_cfg=KALSHI, **bcfg):
 @pytest.mark.parametrize("contracts, price, fee", [(100, 0.50, 1.75), (100, 0.10, 0.63), (100, 0.90, 0.63),
                                                    (1, 0.50, 0.02), (10, 0.37, 0.17)])
 def test_kalshi_fee_matches_the_schedule(contracts, price, fee):
-    assert fees.entry(KALSHI, contracts, price) == fee
+    assert entry_fee(KALSHI, contracts, price) == fee
 
 
 def test_kalshi_rounds_each_order_up_not_to_nearest():
-    assert fees.entry({**KALSHI, "rounding": "none"}, 1, 0.5) == pytest.approx(0.0175)
-    assert fees.entry(KALSHI, 1, 0.5) == 0.02  # nearest would be 0.02 too; 0.0063 shows the ceiling
-    assert fees.entry(KALSHI, 1, 0.1) == 0.01 and fees.entry({**KALSHI, "rounding": "none"}, 1, 0.1) < 0.007
+    assert entry_fee({**KALSHI, "rounding": "none"}, 1, 0.5) == pytest.approx(0.0175)
+    assert entry_fee(KALSHI, 1, 0.5) == 0.02  # nearest would be 0.02 too; 0.0063 shows the ceiling
+    assert entry_fee(KALSHI, 1, 0.1) == 0.01 and entry_fee({**KALSHI, "rounding": "none"}, 1, 0.1) < 0.007
 
 
 def test_polymarket_us_rounds_half_to_even():
     pm = BCFG["fees"]["polymarket_us"]
-    assert fees._cents(0.125, "half_even") == 0.12 and fees._cents(0.135, "half_even") == 0.14
-    assert fees.entry(pm, 100, 0.5) == 1.74  # 0.0695 * 100 * 0.25 = 1.7375
+    assert _cents(0.125, "half_even") == 0.12 and _cents(0.135, "half_even") == 0.14
+    assert entry_fee(pm, 100, 0.5) == 1.74  # 0.0695 * 100 * 0.25 = 1.7375
 
 
 def test_predictit_takes_a_tenth_of_a_win_and_nothing_on_entry():
     pi = BCFG["fees"]["predictit"]
-    assert fees.entry(pi, 10, 0.4) == 0.0
-    assert fees.settlement(pi, 4.0, 10.0) == pytest.approx(0.6)
-    assert fees.settlement(pi, 4.0, 0.0) == 0.0
+    assert entry_fee(pi, 10, 0.4) == 0.0
+    assert settlement_fee(pi, 4.0, 10.0) == pytest.approx(0.6)
+    assert settlement_fee(pi, 4.0, 0.0) == 0.0
 
 
 def test_a_venue_without_a_table_costs_nothing():
-    assert fees.entry(BCFG["fees"].get("manifold"), 100, 0.5) == 0.0
+    assert entry_fee(BCFG["fees"].get("manifold"), 100, 0.5) == 0.0
 
 
 # Fills
@@ -103,7 +103,7 @@ def test_yes_buys_at_the_ask_and_no_at_one_minus_the_bid():
 def test_a_fill_takes_whole_contracts_within_the_stake_and_pays_the_fee_on_top():
     fills, _, t = go(book(("A", 0, 0.40, 0.45, 1000, 1000)), Once("yes", stake=10.0))
     assert fills["contracts"].tolist() == [22]  # floor(10 / 0.45)
-    assert t["profit_abs"].iloc[0] == pytest.approx(22 * (1 - 0.45) - fees.entry(KALSHI, 22, 0.45))
+    assert t["profit_abs"].iloc[0] == pytest.approx(22 * (1 - 0.45) - entry_fee(KALSHI, 22, 0.45))
 
 
 def test_depth_caps_a_fill_and_a_second_order_on_the_same_row_gets_what_is_left():

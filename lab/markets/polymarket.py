@@ -1,4 +1,5 @@
-"""Polymarket, read-only, both books: the US exchange (gateway.polymarket.us) and global prices (Gamma). No key.
+"""Polymarket, read-only, both books: the US exchange (gateway.polymarket.us) and global prices (Gamma), with no key;
+and one Polymarket US account's balances and positions on the signed Retail API (PolymarketUSRead), also GET only.
 
 A US resident may not trade global; we only read it (docs/markets.md, Polymarket global). Every market on either
 book is binary, so each is one outcome, yes: on US the long side, on global the first outcome token, whose label
@@ -15,12 +16,16 @@ host takes the yes token id, not the condition id, so each market's token is loo
 per bucket goes in `close`, and it pages by cursor.
 """
 
+import base64
 import datetime as dt
 import json
+import time
 from typing import Iterator
 
-from lab.markets.api import Api, epoch_s, num, result_of, when
-from lab.markets.venue import Bar, Quote, Resolution, Settled, Span
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+from lab.market import Bar, Quote, Resolution, Settled, Span
+from lab.markets.api import Api, epoch_s, https_host, num, result_of, when
 
 DATA_API = "https://data-api.polymarket.com"
 
@@ -103,6 +108,42 @@ class PolymarketUS:
                     return
                 if (r := us_resolution(m)) is not None:
                     yield r
+
+
+class PolymarketUSRead:
+    """One Polymarket US account over the Retail API (api.polymarket.us), GET only: its balances and positions, which
+    lab/broker.py polymarket_us turns into a broker_balances row. Each request signs timestamp (ms) + method + path
+    with the Ed25519 key, sent as X-PM-Signature beside X-PM-Access-Key and X-PM-Timestamp; a timestamp is good for
+    30 s (docs.polymarket.us/api-reference/authentication). Its config is lab/broker.toml [polymarket_us]."""
+
+    venue = "polymarket_us"
+    host = "api.polymarket.us"
+
+    def __init__(self, cfg: dict, key_id: str, secret_b64: str, session=None, clock=None, sleep=None):
+        https_host(cfg, self.host)
+        self.key_id = key_id
+        self.key = Ed25519PrivateKey.from_private_bytes(base64.b64decode(secret_b64)[:32])
+        self.currency = cfg["currency"]
+        self.api = Api(self.venue, cfg, session, sleep)
+        self.clock = clock or time.time
+
+    def signed(self, path: str) -> dict:
+        ts = str(int(self.clock() * 1000))
+        sig = self.key.sign(f"{ts}GET{path}".encode())
+        return {"X-PM-Access-Key": self.key_id, "X-PM-Timestamp": ts, "X-PM-Signature": base64.b64encode(sig).decode()}
+
+    def get(self, path: str):
+        r = self.api.request("GET", path, headers=lambda _: self.signed(path))
+        if r.status_code >= 400:
+            raise RuntimeError(f"polymarket_us GET {path}: HTTP {r.status_code}: {str(r.text)[:300]}")
+        return r.json()
+
+    def balances(self) -> list[dict]:
+        return self.get("/v1/account/balances")["balances"]
+
+    def positions(self) -> dict:
+        """The positions page: {"positions": {slug: {...netPosition...}}, "eof": ...}."""
+        return self.get("/v1/portfolio/positions")
 
 
 def global_quote(m: dict, ts: dt.datetime) -> Quote:

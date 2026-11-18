@@ -4,7 +4,7 @@ from lab import guard, suggest
 from lab.broker import AlpacaPaper
 from lab.markets.kalshi_trade import KalshiDemo
 from lab.markets.manifold_trade import ManifoldBets
-from lab.markets.venue import Orders
+from lab.market import Orders
 
 LIVE = {"venues": ["kraken"]}
 STAGE = {"stake": 50.0, "max_open": 3}

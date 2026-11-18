@@ -29,7 +29,7 @@ from lab.markets.api import Api, num, when
 from lab.markets.budget import Budget
 from lab.markets.drill import await_terminal, rest_and_cancel
 from lab.markets.recorder import load_config
-from lab.markets.venue import Fill, Position
+from lab.market import Fill, Position
 
 MANIFOLD_HOSTS = frozenset({"api.manifold.markets"})
 

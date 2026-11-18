@@ -12,7 +12,7 @@ import datetime as dt
 from typing import Iterator
 
 from lab.markets.api import Api, num, result_of, when
-from lab.markets.venue import Quote, Resolution, Settled
+from lab.market import Quote, Resolution, Settled
 
 MAX_OFFSET = 1000
 

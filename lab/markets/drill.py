@@ -1,7 +1,7 @@
 """The order drill: the proof that an order path works end to end on mock funds.
 
 Rests one order, reads it back, cancels it and reads it back, writing each step to demo_orders (migration 023). A
-client is an Orders (lab/markets/venue.py), whose cancel() returns once await_terminal does. The row's error is None only when the order was seen resting and then canceled. A place is never retried: a timeout could
+client is an Orders (lab/market.py), whose cancel() returns once await_terminal does. The row's error is None only when the order was seen resting and then canceled. A place is never retried: a timeout could
 have placed it, and a second one would double it. A read-back that fails says nothing about the order, so the drill
 cancels before it reports the failure; only a status it did read, and that is not resting, leaves the order alone.
 """
@@ -9,7 +9,7 @@ cancels before it reports the failure; only a status it did read, and that is no
 import datetime as dt
 import uuid
 
-from lab.markets.venue import Orders
+from lab.market import Orders
 
 UTC = dt.timezone.utc
 # A cancel is asynchronous on every venue we drill, and none offers an end-of-cancel event a one-shot job can wait on

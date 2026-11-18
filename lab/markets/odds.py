@@ -25,7 +25,7 @@ from typing import Iterator
 import requests
 
 from lab.markets.api import Api, num, when
-from lab.markets.venue import Quote, Resolution
+from lab.market import Quote, Resolution
 
 
 def market_id(event_id: str, key: str) -> str:

@@ -21,6 +21,7 @@ import datetime as dt
 import email.utils
 import threading
 import time
+from urllib.parse import urlparse
 
 import requests
 
@@ -57,6 +58,18 @@ def result_of(value: float | None) -> str:
     if value is None:
         return "void"
     return "yes" if value == 1 else "no" if value == 0 else "split"
+
+
+class WrongHost(ValueError):
+    """A read-only client pointed anywhere but its platform's API."""
+
+
+def https_host(cfg: dict, host: str) -> str:
+    """The config's base URL, refused unless it is https on exactly `host`: a read client's host guard."""
+    url = urlparse(cfg["base_url"])
+    if url.scheme != "https" or url.hostname != host:
+        raise WrongHost(f"refusing {cfg['base_url']}: this client reads {host} only")
+    return cfg["base_url"].rstrip("/")
 
 
 def retry_after(r) -> float | None:

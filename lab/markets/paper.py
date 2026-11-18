@@ -14,13 +14,13 @@ fills still settle and mark, and it comes back if it joins again. A venue taken 
 and its accounts drop off the site, the exporter and the watcher. A ready variant of a family that cannot run here is
 reported under "unrunnable". A pass:
 0. Opens an account for each forward or ready variant and retires the rest.
-1. Settles every open fill whose market has a resolution, with backtest.payout and fees.settlement.
+1. Settles every open fill whose market has a resolution, with market.payout and market.settlement_fee (lab/market.py).
 2. Shows each account the venue's latest recorded book: the recorder's `outcomes` row of every open yes outcome
    closing within `horizon_h`, as the row backtest.replay would show it; a sportsbook's (kind sportsbook) is its
    line book (line_books, families.line_book), one row per totals line. It does so only when the venue's last good
    sweep is under `max_book_age_min` old, so a dead recorder means no entries and not entries on old prices.
-3. Fills each order with backtest.take against that row (crossing the spread, at most `[backtest] depth_share` of
-   the side's size) and fees.entry, so a paper fill and a backtest fill of the same book cost the same. Every order
+3. Fills each order with market.take against that row (crossing the spread, at most `[backtest] depth_share` of
+   the side's size) and market.entry_fee, so a paper fill and a backtest fill of the same book cost the same. Every order
    is stored, filled or not, so an account enters a market once, as in a backtest. An order the account's cash
    cannot pay for, or one past `[paper] max_open` open positions, is dropped unstored and asked again next pass.
    Each stored order gets a `decisions` row in the same transaction (the family's rule in words, every check it ran
@@ -54,7 +54,8 @@ from lab import inputs, metrics
 from lab.db import connect
 from lab.decisions import decide, funnel, prune
 from lab.grid import variants
-from lab.markets import backtest, fees
+from lab.market import entry_fee, payout, settlement_fee, take
+from lab.markets import backtest
 from lab.markets.backtest import Market
 from lab.markets.families import Forecasts, Longshot, Observed, TTTotals, Weather, line_book, line_resolution, meetings_of
 from lab.markets.recorder import load_config
@@ -117,7 +118,7 @@ def _f(x) -> float:
 def books(conn, venue: str, now: dt.datetime, horizon_h: float, unsized: float = math.nan) -> list[tuple[Row, Market]]:
     """The latest recorded book of every unresolved open yes outcome closing within horizon_h, oldest quote first.
     A side whose recorder stores no size (polymarket_us, predictit) shows `unsized` contracts, `[paper] unsized_depth`;
-    NaN, the default, leaves it unfillable, as backtest.take reads it."""
+    NaN, the default, leaves it unfillable, as market.take reads it."""
     rows = conn.execute(
         """SELECT o.market_id, o.quoted_at, o.bid, o.ask, o.ask_size, o.bid_size, m.event_id, m.series_id, m.title,
                   m.subtitle, m.market_type, m.open_time, m.close_time
@@ -173,9 +174,9 @@ def settle(conn, venue: str, fee_cfg: dict | None) -> int:
                WHERE a.venue = %s AND p.settled_at IS NULL AND p.contracts > 0""", (venue,)).fetchall():
         r = backtest.Resolution(*res)
         r = line_resolution(mid, r) if "|" in mid else r
-        if (pay := backtest.payout(side, price, r)) is None:
+        if (pay := payout(side, price, r)) is None:
             continue
-        profit = n * pay - (n * price + fee) - fees.settlement(fee_cfg, n * price, n * pay)
+        profit = n * pay - (n * price + fee) - settlement_fee(fee_cfg, n * price, n * pay)
         done.append((r.settled_at, pay, profit, oid))
     with conn.cursor() as cur:
         cur.executemany("UPDATE paper_orders SET settled_at = %s, payout = %s, profit = %s WHERE id = %s", done)
@@ -250,9 +251,9 @@ def trade(conn, account: str, strategy, book: list[tuple[Row, Market]], capital:
             continue
         for o in orders:
             before = taken.get((o.market_id, o.side), 0)
-            got = backtest.take(o, row.bid, row.ask, row.depth_yes, row.depth_no, before, share)
+            got = take(o, row.bid, row.ask, row.depth_yes, row.depth_no, before, share)
             n, price = got or (0, None)
-            fee = fees.entry(fee_cfg, n, price) if n else 0.0
+            fee = entry_fee(fee_cfg, n, price) if n else 0.0
             if n and open_ >= max_open:
                 strategy.seen -= {o.market_id, m.event_id}
                 capped += 1
