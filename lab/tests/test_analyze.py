@@ -247,6 +247,44 @@ def test_a_year_with_no_candles_is_stored_once_and_is_no_failure(lab):
     assert one(lab, "SELECT count(*) FROM strategy_windows WHERE strategy = 'Good' AND exchange = 'binanceus'") > 0
 
 
+FT_REFUSALS = {
+    # freqtrade 2026.10's output for each, from the 2026-11-18 analysis
+    "2026-11-18 05:59:35,248 - freqtrade - ERROR - Configuration error: This strategy requires 1100 candles to start, "
+    "which is more than (719 candles) the amount of candles Kraken provides for 4h.": None,
+    "2026-11-18 05:59:35,248 - freqtrade - ERROR - No data left after adjusting for startup candles.":
+        analyze.NO_CANDLES_LEFT,
+    "2026-11-18 05:59:35,248 - freqtrade - ERROR - No data found. Terminating.": analyze.NO_DATA,
+}
+
+
+@pytest.mark.parametrize("out,why", FT_REFUSALS.items())
+def test_a_backtest_freqtrade_has_nothing_to_run_in_is_stored_once_and_is_no_failure(monkeypatch, out, why):
+    """628 of 4766 chunks failed on 2026-11-18, every one of them one of these, so the night was red on them alone."""
+    monkeypatch.setattr(analyze.subprocess, "run", lambda *a, **k: types.SimpleNamespace(
+        returncode=0 if "Configuration error" in out else 2, stdout=out, stderr=""))
+    r = analyze.Cli().backtest("CarverTrendMix_4h", "kraken", dt.date(2025, 1, 1), dt.date(2026, 1, 1))
+    assert r["ok"] is False and r["no_data"] is True
+    assert r["error"] == (why or "Configuration error: This strategy requires 1100 candles to start, which is more than"
+                                 " (719 candles) the amount of candles Kraken provides for 4h.")
+    assert analyze.nothing_to_run("exit 1: KeyError: 'close'") is None
+
+
+def test_a_window_whose_mean_trade_is_barely_positive_stores_its_trades_needed(lab):
+    """2026-11-18: one window needed 4,089,182,763 more trades, past integer, and the whole derive step failed."""
+    class Thin(FakeRunner):
+        def backtest(self, strategy, exchange, start, end, overlay=None):
+            res = super().backtest(strategy, exchange, start, end, overlay)
+            ratio = np.resize([0.02, -0.02 + 2e-7], len(res["trades"]))
+            res["trades"] = res["trades"].assign(profit_ratio=ratio, profit_abs=300.0 * ratio, close_rate=100.0 * (1 + ratio))
+            res["final_balance"] = 1000.0 + float(res["trades"]["profit_abs"].sum())
+            return res
+
+    assert analyze.main(Thin([strat("Good")]), TODAY) == 0
+    assert one(lab, "SELECT max(trades_needed) FROM strategy_windows") > 2 ** 31
+    assert {t for t, in lab.execute("SELECT data_type FROM information_schema.columns WHERE column_name = 'trades_needed'")} \
+        == {"bigint"}
+
+
 def test_a_deleted_strategy_takes_its_results(lab):
     analyze.main(FakeRunner([strat("Good"), strat("Gone")]), TODAY)
     assert analyze.main(FakeRunner([strat("Good")]), TODAY) == 0

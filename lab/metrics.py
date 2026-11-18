@@ -405,15 +405,24 @@ def shrink(x: np.ndarray, se: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     return (1 - b) * x + b * mu, np.sqrt((1 - b) * se ** 2 + b ** 2 * mu_var)
 
 
+BIGINT_MAX = 2 ** 63 - 1  # the trades_needed columns are bigint (migration 061)
+
+
 def trades_needed(x: np.ndarray, z: float = 1.645) -> int | None:
     """More trades needed before the low end of a 90% interval on the mean per-trade return clears
-    zero, if the mean and spread hold: (z sd / mean)^2 less the trades so far. None when the mean is
-    not positive, since then no number of trades gets there.
+    zero, if the mean and spread hold: (z sd / mean)^2 less the trades so far. It grows without bound
+    as a positive mean nears zero (billions at a mean 1/40,000 of the spread). None when the mean is
+    not positive, since then no number of trades gets there, and when the count passes a bigint (a
+    mean under about 5e-10 of the spread), where no count means more than that.
     """
     x = np.asarray(x, dtype=float)
     if len(x) < 2 or x.mean() <= 0:
         return None
-    return max(0, math.ceil((z * x.std(ddof=1) / x.mean()) ** 2) - len(x))
+    ratio = z * x.std(ddof=1) / x.mean()
+    need = ratio ** 2 if ratio < 2 ** 32 else math.inf  # a tiny mean's ratio squared overflows
+    if not need < BIGINT_MAX:
+        return None
+    return max(0, math.ceil(need) - len(x))
 
 
 def _paths(ret: np.ndarray, horizon: int, seed: int, paths: int, block: int) -> tuple[np.ndarray, np.ndarray]:

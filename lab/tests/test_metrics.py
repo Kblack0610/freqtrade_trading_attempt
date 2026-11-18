@@ -242,6 +242,13 @@ def test_trades_needed_matches_the_closed_form():
     assert metrics.trades_needed(np.array([-0.01, 0.005])) is None
 
 
+def test_trades_needed_of_a_barely_positive_mean_is_huge_and_past_a_bigint_none():
+    thin = np.array([0.02, -0.02 + 1e-6] * 50)  # mean 5e-7: about 4.3 billion, past a Postgres integer
+    assert metrics.trades_needed(thin) > 2 ** 31
+    assert metrics.trades_needed(np.array([0.02, -0.02 + 1e-15] * 50)) is None
+    assert metrics.trades_needed(np.array([0.02, -0.02, 3e-300])) is None  # (sd / mean)^2 is inf
+
+
 def test_diff_ci_straddles_zero_for_one_sample_and_clears_it_for_a_shifted_one():
     rng = np.random.default_rng(3)
     x = rng.normal(0.001, 0.01, 400)
