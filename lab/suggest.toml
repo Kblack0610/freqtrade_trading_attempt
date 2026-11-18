@@ -208,9 +208,8 @@ stoploss_on_exchange_interval = 60
 # One pass over every bot. A bot has no equity event, so this is a poll.
 cadence_seconds = 60
 # A bot unread this long is blind (home-config TraderWatchBotBlind, through trader_watch_unseen_limit_seconds): five
-# cadences. A paper or stock account is read once its league's pass marks it, every 5 min at the fastest, so this
-# would be one pass with no slack: it is blind past its league's freshness limit instead (lab/markets.toml
-# stale_after_min or [paper] max_book_age_min for its venue, lab/stocks.toml max_quote_age_min), if that is longer.
+# cadences. A paper or stock account is marked only by its league's 5-min (or slower) pass, so it gets a longer
+# limit: README metrics table, trader_watch_unseen_limit_seconds.
 unseen_after_seconds = 300
 # Equity down this share of capital since the UTC day's first reading. Alert only at Stage 0.
 day_loss = 0.03

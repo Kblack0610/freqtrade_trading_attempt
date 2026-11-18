@@ -224,8 +224,11 @@ def watch_metrics(now, watch):
         # A paper or stock account is read only when its league's pass marks it, once a 5-min CronJob at the
         # fastest, so `unseen` (five watcher cadences) would be one pass with no slack: it gets its league's own
         # freshness limit, past which that league takes no entries either.
-        m = quote if w["stock"] else venues.get(w["venue"], book) if w["venue"] else 0
-        return max(unseen, m * 60)
+        if w["stock"]:
+            return max(unseen, quote * 60)
+        if w["venue"]:
+            return max(unseen, venues.get(w["venue"], book) * 60)
+        return unseen
 
     yield family("trader_watch_unseen_limit_seconds", "Seconds unread past which the bot is blind: [watcher] "
                  "unseen_after_seconds, or for a paper or stock account its league's freshness limit", ["bot"],

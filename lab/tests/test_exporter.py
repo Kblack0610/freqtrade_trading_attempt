@@ -169,7 +169,21 @@ def test_an_account_marked_by_a_5_minute_pass_is_not_blind_when_one_pass_ends_la
     for bot in ("paper-ls", "stock-trend-v"):
         assert m[f'trader_watch_unseen_seconds{{bot="{bot}"}}'] < m[f'trader_watch_unseen_limit_seconds{{bot="{bot}"}}']
     assert m['trader_watch_unseen_limit_seconds{bot="stock-trend-v"}'] == stocks.load_config()["max_quote_age_min"] * 60
-    assert m['trader_watch_unseen_seconds{bot="bot"}'] > m['trader_watch_unseen_limit_seconds{bot="bot"}'] == 300
+    assert m['trader_watch_unseen_limit_seconds{bot="bot"}'] == 300
+    assert m['trader_watch_unseen_seconds{bot="bot"}'] > 300
+
+
+def test_a_league_limit_under_the_watcher_default_keeps_the_default(conn, monkeypatch):
+    from lab import db, stocks
+    from web.exporter import TraderCollector
+
+    now = dt.datetime.now(dt.timezone.utc)
+    monkeypatch.setattr(stocks, "load_config", lambda: {"max_quote_age_min": 2})
+    conn.execute("INSERT INTO stock_accounts (account, family, variant, params, capital, started_at) VALUES "
+                 "('stock-trend-v', 'trend', 'v', '{}', 10000, %s)", (now,))
+    conn.execute("INSERT INTO watch (bot, checked_at, seen_at) VALUES ('stock-trend-v', %s, %s)", (now, now))
+    conn.commit()
+    assert scrape(TraderCollector(db.connect))['trader_watch_unseen_limit_seconds{bot="stock-trend-v"}'] == 300
 
 
 def test_market_metrics(conn):
