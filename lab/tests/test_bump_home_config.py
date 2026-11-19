@@ -70,17 +70,18 @@ def test_superseded_prs_close_with_a_note_and_no_issue_comment(monkeypatch):
 
 def test_merge_squashes_and_checks_it_merged(monkeypatch):
     calls = []
+    posted_merges = True
     def fake(method, path, body=None, ok_404=False):
         calls.append((method, path, body))
-        return {"merged": merged, "mergeable": True, "merge_commit_sha": "abcdef0123", "state": "closed"}
+        merged = posted_merges and any(c[0] == "POST" for c in calls)
+        return {"merged": merged, "mergeable": True, "merge_commit_sha": "abcdef0123", "state": "closed" if merged else "open"}
     monkeypatch.setattr(bump_home_config, "call", fake)
-    merged = True
     bump_home_config.merge(645)
     assert calls == [("GET", "/repos/kblack0610/home-config/pulls/645", None),
                      ("POST", "/repos/kblack0610/home-config/pulls/645/merge",
                       {"Do": "squash", "delete_branch_after_merge": True}),
                      ("GET", "/repos/kblack0610/home-config/pulls/645", None)]
-    merged = False
+    posted_merges = False
     with pytest.raises(SystemExit):
         bump_home_config.merge(645)
 

@@ -130,7 +130,7 @@ def wait_mergeable(number):
         pr = call("GET", f"/repos/{REPO}/pulls/{number}")
         if pr.get("merged") or pr.get("mergeable"):
             return pr
-        if pr.get("state") != "open":
+        if pr.get("state") == "closed":
             raise SystemExit(f"PR #{number} is {pr.get('state')}, not mergeable")
         if time.monotonic() >= deadline:
             raise SystemExit(f"PR #{number} not mergeable after {MERGEABLE_TIMEOUT_S}s (state {pr.get('state')}, mergeable {pr.get('mergeable')})")
