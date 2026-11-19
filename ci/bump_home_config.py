@@ -124,12 +124,14 @@ def main():
 
 
 def wait_mergeable(number):
-    """Poll the PR until Forgejo reports it mergeable; exit non-zero past the timeout."""
+    """Poll the PR until Forgejo reports it mergeable or merged and return it; exit non-zero if it is closed or past the timeout."""
     deadline = time.monotonic() + MERGEABLE_TIMEOUT_S
     while True:
         pr = call("GET", f"/repos/{REPO}/pulls/{number}")
         if pr.get("merged") or pr.get("mergeable"):
-            return
+            return pr
+        if pr.get("state") != "open":
+            raise SystemExit(f"PR #{number} is {pr.get('state')}, not mergeable")
         if time.monotonic() >= deadline:
             raise SystemExit(f"PR #{number} not mergeable after {MERGEABLE_TIMEOUT_S}s (state {pr.get('state')}, mergeable {pr.get('mergeable')})")
         time.sleep(MERGEABLE_POLL_S)
@@ -140,10 +142,11 @@ def merge(number):
 
     Forgejo answers the merge call 200 even when nothing merged, so the PR is read back.
     """
-    wait_mergeable(number)
-    call("POST", f"/repos/{REPO}/pulls/{number}/merge",
-         {"Do": "squash", "delete_branch_after_merge": True})
-    pr = call("GET", f"/repos/{REPO}/pulls/{number}")
+    pr = wait_mergeable(number)
+    if not pr.get("merged"):
+        call("POST", f"/repos/{REPO}/pulls/{number}/merge",
+             {"Do": "squash", "delete_branch_after_merge": True})
+        pr = call("GET", f"/repos/{REPO}/pulls/{number}")
     if not pr.get("merged"):
         raise SystemExit(f"PR #{number} did not merge (state {pr.get('state')}, mergeable {pr.get('mergeable')})")
     print(f"merged #{number} as {pr.get('merge_commit_sha', '')[:7]}")

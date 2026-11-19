@@ -99,5 +99,22 @@ def test_wait_mergeable_gives_up_at_the_deadline(monkeypatch):
     monkeypatch.setattr(bump_home_config, "call", lambda *a, **k: {"mergeable": False, "state": "open"})
     monkeypatch.setattr(bump_home_config.time, "sleep", lambda s: None)
     monkeypatch.setattr(bump_home_config.time, "monotonic", lambda: next(clock))
-    with pytest.raises(SystemExit):
+    with pytest.raises(SystemExit, match="not mergeable after"):
         bump_home_config.wait_mergeable(645)
+
+
+def test_wait_mergeable_fails_at_once_on_a_closed_pr(monkeypatch):
+    monkeypatch.setattr(bump_home_config, "call", lambda *a, **k: {"mergeable": False, "state": "closed"})
+    monkeypatch.setattr(bump_home_config.time, "sleep", lambda s: pytest.fail("slept"))
+    with pytest.raises(SystemExit, match="closed"):
+        bump_home_config.wait_mergeable(645)
+
+
+def test_merge_skips_the_post_when_already_merged(monkeypatch):
+    calls = []
+    def fake(method, path, body=None, ok_404=False):
+        calls.append(method)
+        return {"merged": True, "merge_commit_sha": "abcdef0123", "state": "closed"}
+    monkeypatch.setattr(bump_home_config, "call", fake)
+    bump_home_config.merge(645)
+    assert calls == ["GET"]
