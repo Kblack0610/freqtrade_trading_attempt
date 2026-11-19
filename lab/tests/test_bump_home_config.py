@@ -72,13 +72,32 @@ def test_merge_squashes_and_checks_it_merged(monkeypatch):
     calls = []
     def fake(method, path, body=None, ok_404=False):
         calls.append((method, path, body))
-        return {"merged": merged, "merge_commit_sha": "abcdef0123", "state": "closed"}
+        return {"merged": merged, "mergeable": True, "merge_commit_sha": "abcdef0123", "state": "closed"}
     monkeypatch.setattr(bump_home_config, "call", fake)
     merged = True
     bump_home_config.merge(645)
-    assert calls == [("POST", "/repos/kblack0610/home-config/pulls/645/merge",
+    assert calls == [("GET", "/repos/kblack0610/home-config/pulls/645", None),
+                     ("POST", "/repos/kblack0610/home-config/pulls/645/merge",
                       {"Do": "squash", "delete_branch_after_merge": True}),
                      ("GET", "/repos/kblack0610/home-config/pulls/645", None)]
     merged = False
     with pytest.raises(SystemExit):
         bump_home_config.merge(645)
+
+
+def test_wait_mergeable_polls_until_forgejo_says_so(monkeypatch):
+    answers = iter([{"mergeable": False}, {"mergeable": False}, {"mergeable": True}])
+    sleeps = []
+    monkeypatch.setattr(bump_home_config, "call", lambda *a, **k: next(answers))
+    monkeypatch.setattr(bump_home_config.time, "sleep", sleeps.append)
+    bump_home_config.wait_mergeable(645)
+    assert sleeps == [bump_home_config.MERGEABLE_POLL_S] * 2
+
+
+def test_wait_mergeable_gives_up_at_the_deadline(monkeypatch):
+    clock = iter([0, 1, bump_home_config.MERGEABLE_TIMEOUT_S + 1])
+    monkeypatch.setattr(bump_home_config, "call", lambda *a, **k: {"mergeable": False, "state": "open"})
+    monkeypatch.setattr(bump_home_config.time, "sleep", lambda s: None)
+    monkeypatch.setattr(bump_home_config.time, "monotonic", lambda: next(clock))
+    with pytest.raises(SystemExit):
+        bump_home_config.wait_mergeable(645)

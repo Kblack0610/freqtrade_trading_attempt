@@ -5,7 +5,8 @@ CI runs this after `publish` on each master push. It rewrites the `trader` and
 `trader-ml` entries under `images:` in apps/freqtrade/kustomization.yaml (the
 analysis job runs trader-ml, so both move together) through the Forgejo
 API (no clone), pushes it as branch trader-sha-<7>, opens the PR, and closes
-any older open trader-sha-* PR it supersedes, then squash-merges it. That merge
+any older open trader-sha-* PR it supersedes, then squash-merges it once Forgejo
+reports it mergeable (right after opening it answers 405). That merge
 is the deploy: Flux rolls the bots onto the new digest. The image already
 passed this repo's test gate before publish, and home-config's own PR checks
 never exercise a digest line, so the merge does not wait on them.
@@ -18,6 +19,7 @@ import json
 import os
 import re
 import sys
+import time
 import urllib.error
 import urllib.request
 
@@ -26,6 +28,11 @@ REPO = "kblack0610/home-config"
 FILE = "apps/freqtrade/kustomization.yaml"
 BASE = "master"
 PREFIX = "trader-sha-"
+# Forgejo computes mergeability after the PR opens and answers the merge call 405
+# "Please try again later" until it has. It has no event for that, so the PR is
+# polled at this cadence, bounded by MERGEABLE_TIMEOUT_S.
+MERGEABLE_POLL_S = 2
+MERGEABLE_TIMEOUT_S = 120
 DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 
@@ -116,11 +123,24 @@ def main():
     merge(mine["number"])
 
 
+def wait_mergeable(number):
+    """Poll the PR until Forgejo reports it mergeable; exit non-zero past the timeout."""
+    deadline = time.monotonic() + MERGEABLE_TIMEOUT_S
+    while True:
+        pr = call("GET", f"/repos/{REPO}/pulls/{number}")
+        if pr.get("merged") or pr.get("mergeable"):
+            return
+        if time.monotonic() >= deadline:
+            raise SystemExit(f"PR #{number} not mergeable after {MERGEABLE_TIMEOUT_S}s (state {pr.get('state')}, mergeable {pr.get('mergeable')})")
+        time.sleep(MERGEABLE_POLL_S)
+
+
 def merge(number):
     """Squash-merge the bump PR and delete its branch; exit non-zero if it did not merge.
 
     Forgejo answers the merge call 200 even when nothing merged, so the PR is read back.
     """
+    wait_mergeable(number)
     call("POST", f"/repos/{REPO}/pulls/{number}/merge",
          {"Do": "squash", "delete_branch_after_merge": True})
     pr = call("GET", f"/repos/{REPO}/pulls/{number}")
