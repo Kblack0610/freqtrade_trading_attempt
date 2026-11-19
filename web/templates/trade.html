@@ -1,9 +1,9 @@
 {% extends "base.html" %}
 {% block title %}{{ source }} fill {{ fill.fill_id }}{% endblock %}
 {% block body %}
-{% set league = {"paper": "Event contracts", "freqtrade": "Crypto", "drill": "Order drill", "call": "Calls", "stock": "Stocks"}[source] %}
+{% set league = {"paper": "Event contracts", "freqtrade": "Crypto", "drill": "Order drill", "call": "Calls"}[source] if not position else "Stocks" %}
 <h1>Fill {{ fill.fill_id }} - {% if source == "freqtrade" %}<a href="/bots/{{ fill.account }}">{{ fill.account }}</a>{% else %}{{ fill.account }}{% endif %} <span class="tag">{{ league }}</span></h1>
-{% if order %}<p>{{ order.title or order.market_id }}{% if order.subtitle %} <span class="muted">{{ order.subtitle }}</span>{% endif %} <strong>{{ order.side }} {{ order.contracts }} @ {{ order.price | num(2) }}</strong></p>
+{% if order %}<p>{{ order.title or order.market_id }}{% if order.subtitle %} <span class="muted">{{ order.subtitle }}</span>{% endif %} <strong>{{ order.side }} {{ "%g" | format(order.contracts) }} @ {{ order.price | num(2) }}</strong></p>
 {% elif bot_trade %}<p>{{ bot_trade.pair }} <strong>{{ bot_trade.amount | num(6) }} @ {{ bot_trade.open_rate | num(4) }}</strong>, stake {{ bot_trade.stake_amount | num(2) }} on {{ fill.venue }}{% if fill.strategy %} <span class="muted">{{ fill.strategy }}</span>{% endif %}</p>
 {% elif drill %}<p>{{ drill.ticker }} <strong>{{ drill.count }} @ {{ drill.price | num(2) }}</strong> on {{ drill.venue }}, status {{ drill.status or "-" }}</p>
 {% elif position %}<p>{{ position.ticker }} <strong>{{ position.shares | num(4) }} @ {{ position.entry_price | num(2) }}</strong> <span class="muted">{{ position.family }}</span></p>
@@ -90,7 +90,7 @@
 <h2>Outcome</h2>
 {% if order %}
 <ul class="plain">
-  <li>cost {{ cost | num(2) }} ({{ order.contracts }} x {{ order.price | num(2) }} + fee {{ order.fee | num(2) }}), quoted {{ order.bid | num(2) }} / {{ order.ask | num(2) }} at {{ order.quoted_at | local("%H:%M:%S") }}</li>
+  <li>cost {{ cost | num(2) }} ({{ "%g" | format(order.contracts) }} x {{ order.price | num(2) }} + fee {{ order.fee | num(2) }}), quoted {{ order.bid | num(2) }} / {{ order.ask | num(2) }} at {{ order.quoted_at | local("%H:%M:%S") }}</li>
   {% if order.settled_at %}<li>settled {{ order.settled_at | local }}{% if order.result %}: {{ order.result }}{% endif %}, payout {{ order.payout | num(2) }} a contract, profit <span class="{{ order.profit | tone }}">{{ order.profit | num(2) }}</span></li>
   {% else %}<li>open{% if order.close_time %}, closes {{ order.close_time | local }}{% endif %}: profit if {{ order.side }} <span class="up">{{ if_win | num(2) }}</span>, otherwise <span class="down">{{ if_lose | num(2) }}</span></li>{% endif %}
   {% if order.close_mid is not none %}<li>closing line {{ order.close_mid | num(2) }} at {{ order.close_at | local }}</li>{% endif %}

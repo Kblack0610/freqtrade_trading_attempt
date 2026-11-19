@@ -19,7 +19,7 @@ way a live breach will:
   python lab/watcher.py --bankroll-clear    clear a bankroll breach; a human starts each money bot again
 
 The event-contract and stock leagues' accounts (lab/markets/paper.py, lab/stocks.py) are watched the same way, one
-row each, read from paper_accounts and stock_accounts: equity is the last pass's mark, and seen_at that pass's time,
+row each, read from paper_accounts: equity is the last pass's mark, and seen_at that pass's time,
 so a dead pass job ages its rows like a dead bot. A drilled account is stopped by its watch row, which the next pass
 obeys; no API is called.
 """
@@ -39,6 +39,7 @@ from lab.db import connect
 from lab.ingest import ROSTER, Fetch, http_fetch
 from lab.league import roster_rows
 from lab.markets import paper_venues
+from lab.stocks import VENUE as STOCK_VENUE
 from lab.suggest import load_config
 
 UPSERT = """
@@ -135,12 +136,11 @@ def tick(conn, bots: list[str], day_loss: float, fetch: Fetch, now: dt.datetime,
     bank = bank_step(prev_bank, money, lim, now)
     conn.execute(BANK, bank)
     stopped = bank["breached_at"] is not None
-    # Only a [paper] venue has a pass that marks its accounts (as web/exporter.py PAPER): one taken out would read blind.
+    # Only a [paper] venue or the stock league has a pass that marks its accounts (as web/exporter.py PAPER): one taken out would read blind.
     for name, capital, equity, marked_at in conn.execute(
             "SELECT account, capital, equity, marked_at FROM paper_accounts WHERE marked_at IS NOT NULL "
-            "AND venue = ANY(%s) "
-            "UNION ALL SELECT account, capital, equity, marked_at FROM stock_accounts WHERE marked_at IS NOT NULL",
-            (paper_venues(),)).fetchall():
+            "AND venue = ANY(%s)",
+            ([*paper_venues(), STOCK_VENUE],)).fetchall():
         p = prev.get(name)
         row = step(p, {"dry_run": True, "state": None, "capital": capital, "equity": equity}, now, day_loss)
         if p is not None and p["drill_at"] is not None:

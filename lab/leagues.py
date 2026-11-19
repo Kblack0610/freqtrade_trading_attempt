@@ -38,7 +38,7 @@ def watch_state(retired_at=None, stopped_at=None, breached_at=None, state: str |
 
 
 def event_rows(accounts: list[dict], profits: dict[str, list[float]], rule_of) -> list[dict]:
-    """The event-contract and stock leagues: paper_accounts or stock_accounts rows (with fills and settled counts),
+    """The event-contract and stock leagues: paper_accounts rows (with fills and settled counts),
     each account's settled profits oldest first, and a function from (family, params) to the rule in words."""
     return [row(a["account"], "", rule_of(a["family"], a["params"]),
                 a["capital"], a["equity"], a["realized"], a["open_positions"], a["fills"], a["settled"],

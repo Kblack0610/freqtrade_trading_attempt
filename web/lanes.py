@@ -94,7 +94,7 @@ def betting(read: dict, now: dt.datetime, cfg: dict) -> dict:
 def stocks(read: dict, now: dt.datetime, cfg: dict) -> dict:
     accounts = read["stocks"]
     if not accounts:
-        return empty("no stock accounts", "stock_accounts: no rows")
+        return empty("no stock accounts", "paper_accounts: no stock rows")
     late = [a for a in accounts if old(a["marked_at"], now, read["stale_h"])]
     marked = [a for a in accounts if a["marked_at"] and a["equity"] is not None]
     parts = [part("fills", sum(a["fills"] for a in accounts)), part("closed", sum(a["settled"] for a in accounts)),

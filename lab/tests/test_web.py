@@ -1006,20 +1006,20 @@ def test_a_stock_fill_shows_its_rule_its_checks_and_its_exit(conn, signed_in):
     ts.run(conn)
     fell = {**ts.CLOSES, "SPY": ts.CLOSES["SPY"][:-1] + [100]}
     ts.run(conn, ts.Data(fell, at=ts.LATER), now=ts.LATER)
-    pid = conn.execute("SELECT id FROM stock_positions WHERE account = %s", (ts.TREND,)).fetchone()[0]
+    pid = conn.execute("SELECT id FROM paper_orders WHERE account = %s", (ts.TREND,)).fetchone()[0]
     _, client = signed_in
     page = client.get("/leagues").text
     tab = page[page.index('<h2 id="stocks">'):]
     assert ts.TREND in tab and "fills opened today" in tab
     assert stocks.rule_of("trend", {"sma": 3}) in tab and "No accounts in this league yet" not in tab
-    body = client.get(f"/trades/stock/{pid}").text
+    body = client.get(f"/trades/paper/{pid}").text
     for needle in ("SPY", "Stocks", "close above average", "quote fresh", "alpaca latest quote", "Sizing and costs",
                    "2 bp of the notional", "sold at the bid 99.99", "close below average", "Exit checks"):
         assert needle in body, needle
     assert "Recorded before decisions were traced" not in body
 
 
-@pytest.mark.parametrize("path", ["/trades/paper/999", "/trades/call/999", "/trades/drill/999", "/trades/stock/999",
+@pytest.mark.parametrize("path", ["/trades/paper/999", "/trades/call/999", "/trades/drill/999",
                                   "/trades/nope/1"])
 def test_an_unknown_trade_is_404_not_an_empty_page(conn, signed_in, path):
     assert signed_in[1].get(path).status_code == 404

@@ -160,15 +160,15 @@ def test_an_account_marked_by_a_5_minute_pass_is_not_blind_when_one_pass_ends_la
     late = now - dt.timedelta(seconds=380)  # one pass that ended 80 s after the one before
     conn.execute("INSERT INTO paper_accounts (account, family, venue, variant, params, capital, started_at) VALUES "
                  "('paper-ls', 'longshot', 'kalshi', 'v', '{}', 100, %s)", (now,))
-    conn.execute("INSERT INTO stock_accounts (account, family, variant, params, capital, started_at) VALUES "
-                 "('stock-trend-v', 'trend', 'v', '{}', 10000, %s)", (now,))
+    conn.execute("INSERT INTO paper_accounts (account, family, venue, variant, params, capital, started_at) VALUES "
+                 "('stock-trend-v', 'trend', 'alpaca', 'v', '{}', 10000, %s)", (now,))
     conn.execute("INSERT INTO watch (bot, checked_at, seen_at) VALUES ('paper-ls', %s, %s), ('stock-trend-v', %s, %s), "
                  "('bot', %s, %s)", (now, late, now, late, now, late))
     conn.commit()
     m = scrape(TraderCollector(db.connect))
     for bot in ("paper-ls", "stock-trend-v"):
         assert m[f'trader_watch_unseen_seconds{{bot="{bot}"}}'] < m[f'trader_watch_unseen_limit_seconds{{bot="{bot}"}}']
-    assert m['trader_watch_unseen_limit_seconds{bot="stock-trend-v"}'] == stocks.load_config()["max_quote_age_min"] * 60
+    assert m['trader_watch_unseen_limit_seconds{bot="stock-trend-v"}'] == stocks.load_config()["paper"]["max_quote_age_min"] * 60
     assert m['trader_watch_unseen_limit_seconds{bot="bot"}'] == 300
     assert m['trader_watch_unseen_seconds{bot="bot"}'] > 300
 
@@ -178,9 +178,9 @@ def test_a_league_limit_under_the_watcher_default_keeps_the_default(conn, monkey
     from web.exporter import TraderCollector
 
     now = dt.datetime.now(dt.timezone.utc)
-    monkeypatch.setattr(stocks, "load_config", lambda: {"max_quote_age_min": 2})
-    conn.execute("INSERT INTO stock_accounts (account, family, variant, params, capital, started_at) VALUES "
-                 "('stock-trend-v', 'trend', 'v', '{}', 10000, %s)", (now,))
+    monkeypatch.setattr(stocks, "load_config", lambda: {"paper": {"max_quote_age_min": 2}})
+    conn.execute("INSERT INTO paper_accounts (account, family, venue, variant, params, capital, started_at) VALUES "
+                 "('stock-trend-v', 'trend', 'alpaca', 'v', '{}', 10000, %s)", (now,))
     conn.execute("INSERT INTO watch (bot, checked_at, seen_at) VALUES ('stock-trend-v', %s, %s)", (now, now))
     conn.commit()
     assert scrape(TraderCollector(db.connect))['trader_watch_unseen_limit_seconds{bot="stock-trend-v"}'] == 300
@@ -289,10 +289,10 @@ def test_decision_metrics(conn):
     # B has no decision; OLD was sent before the first traced entry, so it is not counted
     assert m['trader_fills_untraced{league="event_contracts"}'] == 1
     assert m['trader_fills_untraced{league="stocks"}'] == 0
-    conn.execute("INSERT INTO stock_accounts (account, family, variant, params, capital, started_at) VALUES "
-                 "('stock-a', 'trend', 'v', '{}', 1000, now())")
-    conn.execute("INSERT INTO stock_positions (account, ticker, shares, entered_at, quoted_at, entry_price, entry_cost) "
-                 "VALUES ('stock-a', 'SPY', 1, now(), now(), 600, 0.12)")
+    conn.execute("INSERT INTO paper_accounts (account, family, venue, variant, params, capital, started_at) VALUES "
+                 "('stock-a', 'trend', 'alpaca', 'v', '{}', 1000, now())")
+    conn.execute("INSERT INTO paper_orders (account, market_id, side, stake, sent_at, quoted_at, contracts, price, fee) "
+                 "VALUES ('stock-a', 'SPY', 'long', 600, now(), now(), 1, 600, 0.12)")
     assert scrape(TraderCollector(db.connect))['trader_fills_untraced{league="stocks"}'] == 1
 
 

@@ -217,18 +217,6 @@ FROM paper_accounts a LEFT JOIN watch w ON w.bot = a.account
 WHERE a.venue = ANY(%s)
 ORDER BY a.equity DESC NULLS LAST, a.account
 """
-# The stock league's accounts (lab/stocks.py), in PAPER_ACCOUNTS' columns: settled counts closed positions.
-STOCK_ACCOUNTS = """
-SELECT a.*, w.state, w.breached_at, w.stopped_at,
-       (SELECT count(*) FROM stock_positions p WHERE p.account = a.account) AS fills,
-       (SELECT count(*) FROM stock_positions p WHERE p.account = a.account AND p.exited_at IS NOT NULL) AS settled
-FROM stock_accounts a LEFT JOIN watch w ON w.bot = a.account
-ORDER BY a.equity DESC NULLS LAST, a.account
-"""
-STOCK_PROFITS = """
-SELECT account, array_agg(profit ORDER BY exited_at, id) AS profits FROM stock_positions
-WHERE exited_at IS NOT NULL GROUP BY account
-"""
 DEMO_ORDERS = "SELECT * FROM demo_orders ORDER BY placed_at DESC, id DESC LIMIT 20"
 BROKERS = "SELECT DISTINCT ON (broker) * FROM broker_balances ORDER BY broker, read_at DESC"
 WALLETS = "SELECT DISTINCT ON (account, coin) * FROM wallet_balances ORDER BY account, coin, read_at DESC"
@@ -490,7 +478,7 @@ def lane_reads(bots: list[dict], paper: list[dict]) -> dict:
     ready = "SELECT count(*) FILTER (WHERE ready) AS ready, count(*) AS n FROM readiness WHERE market = %s"
     paper_age = {c["match"]: c["max_age_h"] for v in venue_roster.load() for c in v["checks"] if c["source"] == "paper"}
     return {"stale_h": STALE.total_seconds() / 3600, "bots": bots, "paper": paper, "paper_max_age_h": paper_age,
-            "stocks": rows(STOCK_ACCOUNTS),
+            "stocks": rows(PAPER_ACCOUNTS, ([stocks_lab.VENUE],)),
             "shadow_counts": rows(SHADOW_COUNTS),
             "shadow_newest": rows("SELECT max(day) AS day FROM shadow_marks")[0]["day"],
             "calls": rows(CALLS), "calls_cfg": calls_lab.load_config(), "venues": venue_roster.rows(rows),
@@ -544,9 +532,9 @@ PAPER_PROFITS = """
 SELECT account, array_agg(profit ORDER BY settled_at, id) AS profits FROM paper_orders
 WHERE contracts > 0 AND settled_at IS NOT NULL GROUP BY account
 """
-# /today: every dry run of one UTC day. Orders are the paper_orders sent that day (filled or not); a crypto or stock
+# /today: every dry run of one UTC day. Orders are the paper_orders sent that day (filled or not); a crypto
 # fill is its own order. Day P&L is the profit of fills that closed that day.
-DRY_SOURCES = ("freqtrade", "paper", "stock")
+DRY_SOURCES = ("freqtrade", "paper")
 TODAY_FILLS = """
 SELECT f.source, f.venue, CASE WHEN f.source = 'freqtrade' THEN NULL ELSE f.strategy END AS family,
        count(DISTINCT f.account) AS accounts, count(DISTINCT f.strategy) AS strategies,
@@ -569,7 +557,6 @@ ORDER BY f.profit_ratio {order}, f.fill_id LIMIT 10
 """
 TODAY_ACTIVE = """
 SELECT 'paper' AS source, venue, family FROM paper_accounts WHERE retired_at IS NULL GROUP BY 2, 3
-UNION ALL SELECT 'stock', 'alpaca', family FROM stock_accounts WHERE retired_at IS NULL GROUP BY 3
 """
 
 
@@ -613,10 +600,11 @@ def today(request: Request, day: str = ""):
 
 
 
-def fills_today(source: str) -> int:
-    """Fills a league opened today (UTC), for the count that links to /today."""
+def fills_today(source: str, venues: list[str] | None = None) -> int:
+    """Fills a league opened today (UTC), for the count that links to /today; `venues` narrows a paper source."""
     start = dt.datetime.combine(dt.datetime.now(dt.timezone.utc).date(), dt.time(), dt.timezone.utc)
-    return rows("SELECT count(*) AS n FROM fills WHERE source = %s AND open_date >= %s", (source, start))[0]["n"]
+    return rows("SELECT count(*) AS n FROM fills WHERE source = %s AND open_date >= %s AND (%s::text[] IS NULL OR venue = ANY(%s))",
+                (source, start, venues, venues))[0]["n"]
 
 
 @app.get("/leagues", response_class=HTMLResponse)
@@ -630,16 +618,16 @@ def leagues(request: Request):
         rows(BOTS), watching, lambda s: f"{s}: {strategy_method(s, methods)['description']}")
     accounts = paper_accounts()
     events = league_rows.event_rows(accounts, profits, paper_lab.rule_of)
-    stocks = league_rows.event_rows(rows(STOCK_ACCOUNTS), {r["account"]: r["profits"] for r in rows(STOCK_PROFITS)},
+    stocks = league_rows.event_rows(rows(PAPER_ACCOUNTS, ([stocks_lab.VENUE],)), profits,
                                     stocks_lab.rule_of)
     return page(request, "leagues.html", glossary=glossary.load(),
                 tabs=[{"id": "crypto", "title": "Crypto", "rows": crypto, "fills": fills_today("freqtrade"),
                        "about": "Freqtrade spot bots on live prices (lab/league.py), grouped into cohorts."},
                       {"id": "event-contracts", "title": "Event contracts", "rows": events,
-                       "fills": fills_today("paper"),
+                       "fills": fills_today("paper", paper_venues()),
                        "forward": [a for a in accounts if a["drifted"] is not None],
                        "about": "One account per family variant, filled against the recorded books (lab/markets/paper.py)."},
-                      {"id": "stocks", "title": "Stocks", "rows": stocks, "fills": fills_today("stock"),
+                      {"id": "stocks", "title": "Stocks", "rows": stocks, "fills": fills_today("paper", [stocks_lab.VENUE]),
                        "about": "One account per family variant on a small ETF universe, filled at Alpaca's latest "
                                 "quote with no order sent (lab/stocks.py)."}],
                 hard_stop=suggest.load_config()["book"]["hard_stop"])
@@ -673,7 +661,7 @@ def bot(request: Request, name: str):
 
 # One fill or trade of any league with everything recorded about it (plan recorder-links-vivid-stream P2): the
 # `fills` view row is the key; a freqtrade trade id is per bot, so its URL carries ?bot=.
-TRADE_SOURCES = ("paper", "freqtrade", "drill", "call", "stock")
+TRADE_SOURCES = ("paper", "freqtrade", "drill", "call")
 FILL = "SELECT * FROM fills WHERE source = %s AND fill_id = %s AND (%s = '' OR account = %s) ORDER BY open_date DESC LIMIT 1"
 # A crypto decision is the bot trade's (lab/ingest.py, migration 057): same bot and open_date.
 DECISION = """SELECT * FROM decisions WHERE fill_source = %s AND fill_id = %s AND account = %s
@@ -692,7 +680,6 @@ WHERE o.id = %s"""
 BOT_TRADE = """SELECT t.bot, t.trade_id, t.open_date, t.pair, t.is_open, t.close_date, t.open_rate, t.close_rate,
        t.amount, t.stake_amount, t.profit_ratio, t.profit_abs, t.exit_reason, t.enter_tag
 FROM bot_trades t WHERE t.bot = %s AND t.trade_id = %s AND t.open_date = %s"""
-STOCK_POSITION = "SELECT p.*, a.family, a.params FROM stock_positions p JOIN stock_accounts a USING (account) WHERE p.id = %s"
 # An exit's decision is keyed by its account, ticker and time: the entry's decision holds the fill key.
 STOCK_EXIT = ("SELECT * FROM decisions WHERE league = 'stocks' AND action = 'exit' AND account = %s AND instrument = %s "
               "AND decided_at = %s")
@@ -732,17 +719,20 @@ def trade(request: Request, source: str, fill_id: int, bot: str = ""):
                  "funnel": funnel, "source": source}
     if source == "paper":
         o = rows(PAPER_ORDER, (fill_id,))[0]
-        cost = o["contracts"] * o["price"] + o["fee"]
-        ctx |= {"order": o, "cost": cost, "if_win": o["contracts"] - cost, "if_lose": -cost}
+        if o["venue"] == stocks_lab.VENUE:
+            p = o | {"ticker": o["market_id"], "shares": o["contracts"], "entry_price": o["price"],
+                     "entry_cost": o["fee"], "exited_at": o["settled_at"], "exit_price": o["payout"],
+                     "exit_cost": o["exit_fee"]}
+            ctx |= {"position": p, "exit": (rows(STOCK_EXIT, (p["account"], p["ticker"], p["exited_at"])) or [None])[0]}
+        else:
+            cost = o["contracts"] * o["price"] + o["fee"]
+            ctx |= {"order": o, "cost": cost, "if_win": o["contracts"] - cost, "if_lose": -cost}
     elif source == "freqtrade":
         key = (fill["account"], fill_id, fill["open_date"])
         ctx |= {"bot_trade": rows(BOT_TRADE, key)[0], "markouts": rows(MARKOUTS, key),
                 "reconcile": rows(RECONCILE, (fill["account"], fill["instrument"], fill["open_date"]))}
     elif source == "drill":
         ctx["drill"] = rows("SELECT * FROM demo_orders WHERE id = %s", (fill_id,))[0]
-    elif source == "stock":
-        p = rows(STOCK_POSITION, (fill_id,))[0]
-        ctx |= {"position": p, "exit": (rows(STOCK_EXIT, (p["account"], p["ticker"], p["exited_at"])) or [None])[0]}
     else:
         ctx |= {"call": rows("SELECT * FROM calls WHERE id = %s", (fill_id,))[0],
                 "scores": rows("SELECT * FROM call_scores WHERE call_id = %s ORDER BY horizon", (fill_id,))}
