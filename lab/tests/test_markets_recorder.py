@@ -129,17 +129,25 @@ def test_resolutions_read_from_the_last_good_sweep_and_settle_the_market(conn, t
     assert conn.execute("SELECT status FROM markets WHERE market_id = 'A'").fetchone() == ("settled",)
 
 
-def test_a_resolution_read_again_later_is_not_written_again(conn, tmp_path):
+def test_a_settled_resolution_read_again_is_not_written_again(conn, tmp_path):
     fs, root = pafs.LocalFileSystem(), str(tmp_path / "b")
     t1 = T0 + dt.timedelta(minutes=5)
-    r = Resolution(market_id="A", result="no", value=0.0, settled_at=t1)
-    recorder.sweep(FakeVenue([[q("A", 0.1, 0.2)]], resolved=[r]), VCFG, conn, fs, root, LOOKBACK, t1)
+    a, c = (Resolution(market_id=m, result="no", value=0.0, settled_at=t1) for m in "AC")
+    recorder.sweep(FakeVenue([[q("A", 0.1, 0.2), q("B", 0.1, 0.2), q("C", 0.1, 0.2)]], resolved=[a]), VCFG, conn,
+                   fs, root, LOOKBACK, t1)
+    # C's resolution came from another writer (the history walk), which leaves its market active
+    conn.execute("INSERT INTO resolutions (venue, market_id, result, value, settled_at) VALUES ('fake', 'C', 'no', 0, %s)",
+                 (t1,))
 
-    t2 = T0 + dt.timedelta(days=5)  # the venue re-stamped A days after it settled
-    restamped = dataclasses.replace(r, settled_at=t2)
-    s = recorder.sweep(FakeVenue([[]], resolved=[restamped]), VCFG, conn, fs, root, LOOKBACK, t2)
-    assert s["resolved"] == 0
-    assert conn.execute("SELECT settled_at FROM resolutions WHERE market_id = 'A'").fetchone() == (t1,)
+    t2 = T0 + dt.timedelta(days=5)  # the venue re-stamped A and C days after they settled; B settles now
+    again = [dataclasses.replace(a, settled_at=t2), Resolution(market_id="B", result="yes", value=1.0, settled_at=t2),
+             dataclasses.replace(c, settled_at=t2)]
+    s = recorder.sweep(FakeVenue([[]], resolved=again), VCFG, conn, fs, root, LOOKBACK, t2)
+    assert s["resolved"] == 2
+    assert conn.execute("SELECT market_id, settled_at FROM resolutions ORDER BY 1").fetchall() == [
+        ("A", t1), ("B", t2), ("C", t1)]
+    assert conn.execute("SELECT market_id, status FROM markets ORDER BY 1").fetchall() == [
+        ("A", "settled"), ("B", "settled"), ("C", "settled")]
 
 
 def test_a_venue_that_fails_midway_writes_nothing_and_logs_a_failed_sweep(conn, tmp_path, monkeypatch):
