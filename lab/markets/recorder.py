@@ -56,6 +56,18 @@ def state(conn, venue: str, market_ids: list[str]) -> tuple[dict, dict]:
     return meta, book
 
 
+def new_resolutions(conn, venue: str, resolved: list) -> list:
+    """Each market once, the first (newest) read, and only if not already stored. A venue may re-stamp markets it
+    settled long ago: Polymarket US moved updatedAt on about 170k closed markets on 2026-11-18, and writing each one
+    again pushed the sweep past its Job's deadline, so the anchor never moved and every later sweep re-read them."""
+    fresh = {}
+    for r in resolved:
+        fresh.setdefault(r.market_id, r)
+    known = {row[0] for row in conn.execute(
+        "SELECT market_id FROM resolutions WHERE venue = %s AND market_id = ANY(%s)", (venue, list(fresh)))}
+    return [r for m, r in fresh.items() if m not in known]
+
+
 def write_quotes(fs: pafs.FileSystem, root: str, venue: str, started: dt.datetime, quotes: list[Quote]) -> str:
     key = f"{root}/venue={venue}/date={started:%Y-%m-%d}/{started:%H%M%S}Z.parquet"
     cols = {"venue": [venue] * len(quotes), "market_id": [q.market_id for q in quotes],
@@ -83,7 +95,7 @@ def sweep(v: Venue, vcfg: dict, conn, fs: pafs.FileSystem, root: str, lookback: 
                 changed.append(q)
 
     last = conn.execute("SELECT max(started_at) FROM market_sweeps WHERE venue = %s AND ok", (v.name,)).fetchone()[0]
-    resolved = list(v.resolutions((last or started) - lookback))
+    resolved = new_resolutions(conn, v.name, list(v.resolutions((last or started) - lookback)))
 
     key = write_quotes(fs, root, v.name, started, changed) if changed else None
     with conn.transaction():

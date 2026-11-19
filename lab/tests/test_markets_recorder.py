@@ -124,9 +124,22 @@ def test_resolutions_read_from_the_last_good_sweep_and_settle_the_market(conn, t
     r = Resolution(market_id="A", result="no", value=0.0, settled_at=t1)
     later = FakeVenue([[]], resolved=[r, r])  # the overlap returns it twice; stored once
     s = recorder.sweep(later, VCFG, conn, fs, root, LOOKBACK, t1)
-    assert later.since == T0 - LOOKBACK and s["resolved"] == 2
+    assert later.since == T0 - LOOKBACK and s["resolved"] == 1
     assert conn.execute("SELECT result, value FROM resolutions WHERE market_id = 'A'").fetchone() == ("no", 0.0)
     assert conn.execute("SELECT status FROM markets WHERE market_id = 'A'").fetchone() == ("settled",)
+
+
+def test_a_resolution_read_again_later_is_not_written_again(conn, tmp_path):
+    fs, root = pafs.LocalFileSystem(), str(tmp_path / "b")
+    t1 = T0 + dt.timedelta(minutes=5)
+    r = Resolution(market_id="A", result="no", value=0.0, settled_at=t1)
+    recorder.sweep(FakeVenue([[q("A", 0.1, 0.2)]], resolved=[r]), VCFG, conn, fs, root, LOOKBACK, t1)
+
+    t2 = T0 + dt.timedelta(days=5)  # the venue re-stamped A days after it settled
+    restamped = dataclasses.replace(r, settled_at=t2)
+    s = recorder.sweep(FakeVenue([[]], resolved=[restamped]), VCFG, conn, fs, root, LOOKBACK, t2)
+    assert s["resolved"] == 0
+    assert conn.execute("SELECT settled_at FROM resolutions WHERE market_id = 'A'").fetchone() == (t1,)
 
 
 def test_a_venue_that_fails_midway_writes_nothing_and_logs_a_failed_sweep(conn, tmp_path, monkeypatch):
