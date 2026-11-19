@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
 """The stock league: paper accounts trading a small ETF universe against Alpaca's live quotes with simulated fills.
+It is a market adapter of the one paper pass (lab/stages/paper.py, Stocks below); its accounts and positions are
+paper_accounts (venue alpaca) and paper_orders rows, a position one order with its exit on it.
 
   python -m lab.stocks     # one pass; the CronJob runs it every 5 minutes
 
-Every family variant of lab/stocks.toml is one account with `capital`; a variant no longer in the toml is retired
+Every family variant of lab/stocks.toml is one account with `[paper] capital`; a variant no longer in the toml is retired
 (retired_at): it takes no entries and its open positions still exit and mark. A pass:
 1. Reads each ticker's final daily closes (lab/calls.py final: a bar counts settle_hours after the 16:00 ET close)
    from Alpaca's daily bars, and, inside the session hours, each ticker's latest quote. Outside the session, or when
-   no quote is fresher than `max_quote_age_min` (a holiday), the market is closed: each account gets one funnel row
+   no quote is fresher than `[paper] max_quote_age_min` (a holiday), the market is closed: each account gets one funnel row
    `market_closed` and nothing trades.
 2. Exits first: each open position whose family's exit check passes sells at the bid, when its quote is fresh,
-   valid and within `max_spread_bps`.
+   valid and within `[paper] max_spread_bps`.
 3. Entries: each ticker of the universe not held, whose family's entry checks and the quote checks all pass, buys
    `stake` of fractional shares at the ask, unless the account holds `max_open` positions or its cash cannot pay.
    Each side pays lab/calls.toml cost_bps on its notional.
@@ -35,18 +37,17 @@ from pathlib import Path
 from typing import Iterator
 from zoneinfo import ZoneInfo
 
-from psycopg.types.json import Jsonb
-
 from lab import calls, inputs
 from lab.db import connect
-from lab.decisions import decide, funnel, prune
+from lab.decisions import decide, funnel
 from lab.grid import variant_of, variants
 from lab.market import Bar, Quote, Resolution, Settled, Span, bps_fee
+from lab.stages import paper as stage
 
 CONFIG = Path(__file__).resolve().parent / "stocks.toml"
 LEAGUE = "stocks"   # decisions.league
 VENUE = "alpaca"    # decisions.venue and the fills view's venue
-SOURCE = "stock"    # the fills view's source
+SOURCE = "paper"    # the fills view's source: one paper ledger
 REGISTRY = inputs.load()
 QUOTE_CHECKS = ("quote fresh", "quote valid", "spread")
 
@@ -195,22 +196,6 @@ def read_inputs(ticker: str, bars: list[tuple[dt.date, float]], q: Quote | None)
     return [{**i, "ticker": ticker, "source": inputs.source(REGISTRY, i["name"], VENUE)} for i in out]
 
 
-def positions(conn, account: str) -> dict[str, dict]:
-    cols = ("id", "ticker", "shares", "entered_at", "entry_price", "entry_cost")
-    return {r[1]: dict(zip(cols, r)) for r in conn.execute(
-        f"SELECT {', '.join(cols)} FROM stock_positions WHERE account = %s AND exited_at IS NULL ORDER BY id",
-        (account,)).fetchall()}
-
-
-def cash(conn, account: str, capital: float) -> float:
-    """Capital plus realized profit less what the open positions cost."""
-    realized, held = conn.execute(
-        "SELECT coalesce(sum(profit) FILTER (WHERE exited_at IS NOT NULL), 0), "
-        "coalesce(sum(shares * entry_price + entry_cost) FILTER (WHERE exited_at IS NULL), 0) "
-        "FROM stock_positions WHERE account = %s", (account,)).fetchone()
-    return capital + realized - held
-
-
 def sessions_held(bars: list[tuple[dt.date, float]], entered_at: dt.datetime) -> int:
     """Final daily closes since the position was entered, its entry session's included."""
     day = entered_at.astimezone(calls.ET).date()
@@ -219,63 +204,61 @@ def sessions_held(bars: list[tuple[dt.date, float]], entered_at: dt.datetime) ->
 
 def trade(conn, account: str, fam, cfg: dict, bars: dict, quotes: dict, capital: float, bps: float,
           now: dt.datetime, entries: bool) -> dict:
-    """One account's pass: exits first, then entries when `entries` (not retired, not stopped)."""
+    """One account's pass: exits first, then entries when `entries` (not retired, not stopped). `cfg` is the toml:
+    its universe and its [paper] table."""
+    pc = cfg["paper"]
     rule, counts, near = fam.rule(), Counter(), 0
-    held, left = positions(conn, account), cash(conn, account, capital)
+    held, left = stage.open_orders(conn, account), stage.cash(conn, account, capital)
     out = {"exits": 0, "entries": 0, "no_cash": 0, "capped": 0}
     for ticker, p in held.items():
         b, q = bars.get(ticker, []), quotes.get(ticker)
-        want = fam.exit([c for _, c in b], sessions_held(b, p["entered_at"]))
-        qc = quote_checks(q, now, cfg)
+        want = fam.exit([c for _, c in b], sessions_held(b, p["sent_at"]))
+        qc = quote_checks(q, now, pc)
         if not any(c["pass"] for c in want):
             counts[(account, "held")] += 1
             continue
         if failed := [c["name"] for c in qc if not c["pass"]]:
             counts[(account, f"exit waits: {failed[0]}")] += 1
             continue
-        price = q.bid
-        fee = bps_fee(bps, p["shares"] * price)
-        profit = p["shares"] * (price - p["entry_price"]) - p["entry_cost"] - fee
+        price, shares = q.bid, p["contracts"]
+        fee = bps_fee(bps, shares * price)
+        profit = shares * (price - p["price"]) - p["fee"] - fee
         reason = next(c["name"] for c in want if c["pass"])
-        conn.execute("UPDATE stock_positions SET exited_at = %s, exit_price = %s, exit_cost = %s, profit = %s, "
-                     "exit_reason = %s WHERE id = %s", (now, price, fee, profit, reason, p["id"]))
+        stage.close(conn, [(now, price, fee, profit, reason, p["id"])])
         decide(conn, LEAGUE, account, VENUE, ticker, now, "exit", rule, read_inputs(ticker, b, q), want + qc,
-               {"position": p["id"], "shares": p["shares"], "price": price, "cost_bps": bps, "cost": fee,
-                "entry_price": p["entry_price"], "entry_cost": p["entry_cost"], "profit": profit})
+               {"position": p["id"], "shares": shares, "price": price, "cost_bps": bps, "cost": fee,
+                "entry_price": p["price"], "entry_cost": p["fee"], "profit": profit})
         counts[(account, "exited")] += 1
         out["exits"] += 1
-        left += p["shares"] * price - fee
+        left += shares * price - fee
     open_ = len(held) - out["exits"]
     for ticker in cfg["universe"] if entries else ():
         if ticker in held:
             continue
         b, q = bars.get(ticker, []), quotes.get(ticker)
-        checks = fam.entry([c for _, c in b]) + quote_checks(q, now, cfg)
+        checks = fam.entry([c for _, c in b]) + quote_checks(q, now, pc)
         failed = [c["name"] for c in checks if not c["pass"]]
         if failed:
             counts[(account, failed[0])] += 1
-            if len(failed) == 1 and near < cfg["near_misses"]:
+            if len(failed) == 1 and near < pc["near_misses"]:
                 decide(conn, LEAGUE, account, VENUE, ticker, now, "near_miss", rule, read_inputs(ticker, b, q), checks)
                 near += 1
             continue
-        if open_ >= cfg["max_open"]:
+        if open_ >= pc["max_open"]:
             counts[(account, "max_open")] += 1
             out["capped"] += 1
             continue
-        price, stake = q.ask, cfg["stake"]
+        price, stake = q.ask, pc["stake"]
         fee = bps_fee(bps, stake)
         if stake + fee > left:
             counts[(account, "no_cash")] += 1
             out["no_cash"] += 1
             continue
         shares = stake / price
-        (pid,) = conn.execute(
-            "INSERT INTO stock_positions (account, ticker, shares, entered_at, quoted_at, entry_price, entry_cost) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id",
-            (account, ticker, shares, now, q.ts, price, fee)).fetchone()
+        pid = stage.enter(conn, account, ticker, "long", stake, None, now, q.ts, q.bid, q.ask, shares, price, fee)
         decide(conn, LEAGUE, account, VENUE, ticker, now, "enter", rule, read_inputs(ticker, b, q), checks,
                {"stake": stake, "price": price, "shares": shares, "cost_bps": bps, "cost": fee, "cash": left,
-                "open": open_, "max_open": cfg["max_open"]}, (SOURCE, pid))
+                "open": open_, "max_open": pc["max_open"]}, (SOURCE, pid))
         counts[(account, "ordered")] += 1
         out["entries"] += 1
         open_ += 1
@@ -284,21 +267,43 @@ def trade(conn, account: str, fam, cfg: dict, bars: dict, quotes: dict, capital:
     return out
 
 
-def mark(conn, now: dt.datetime, prices: dict[str, float]) -> None:
-    """Each account's equity: capital, realized profit, and open positions at `prices` less their cost; a ticker
-    with no price marks at its cost."""
-    for account, capital in conn.execute("SELECT account, capital FROM stock_accounts").fetchall():
-        realized, unrealized, n = 0.0, 0.0, 0
-        for ticker, shares, entry, cost, profit, exited in conn.execute(
-                "SELECT ticker, shares, entry_price, entry_cost, profit, exited_at FROM stock_positions "
-                "WHERE account = %s", (account,)).fetchall():
-            if exited is not None:
-                realized += profit
-                continue
-            n += 1
-            unrealized += shares * (prices.get(ticker, entry) - entry) - cost
-        conn.execute("UPDATE stock_accounts SET equity = %s, realized = %s, open_positions = %s, marked_at = %s "
-                     "WHERE account = %s", (capital + realized + unrealized, realized, n, now, account))
+class Stocks:
+    """The stock league as a lab/stages/paper.py adapter. The pass's reads (daily closes and quotes) are made before
+    the transaction opens, so no request is held inside it."""
+    league, venue = LEAGUE, VENUE
+    exits_retired = True   # a retired or stopped account still sells what it holds
+
+    def __init__(self, cfg: dict, ccfg: dict, bars: dict, quotes: dict, now: dt.datetime):
+        self.cfg, self.ccfg, self.bars, self.quotes = cfg, ccfg, bars, quotes
+        self.capital, self.trace_days = cfg["paper"]["capital"], cfg["paper"]["trace_days"]
+        limit = dt.timedelta(minutes=cfg["paper"]["max_quote_age_min"])
+        self.is_open = any(now - q.ts <= limit for q in quotes.values())
+        marks = {s: v[-1][1] for s, v in bars.items() if v}
+        self.marks = marks | {s: q.bid for s, q in quotes.items()
+                              if all(c["pass"] for c in quote_checks(q, now, cfg["paper"]))}
+
+    def accounts(self, conn):
+        return league_of(self.cfg)
+
+    def prepare(self, conn, now, league):
+        return None
+
+    def idle(self, ctx):
+        return None if self.is_open else "market_closed"
+
+    def report(self, ctx):
+        return {"open": self.is_open, "quotes": len(self.quotes)}
+
+    def trade(self, conn, ctx, account, family, params, capital, entries, now):
+        return trade(conn, account, FAMILIES[family](params), self.cfg, self.bars, self.quotes, capital,
+                     self.ccfg["cost_bps"], now, entries)
+
+    def prices(self, conn, ctx, held):
+        """A position marks at the bid of a fresh valid quote, else the last final close, else its cost."""
+        return {(m, s): self.marks[m] for m, s in held if m in self.marks}
+
+    def after(self, conn, ctx, now):
+        return {}
 
 
 def run_pass(conn, cfg: dict, data, now: dt.datetime, ccfg: dict | None = None) -> dict:
@@ -310,35 +315,7 @@ def run_pass(conn, cfg: dict, data, now: dt.datetime, ccfg: dict | None = None) 
         tickers, now.date() - dt.timedelta(days=cfg["history_days"]), now - dt.timedelta(minutes=16)).items()}
     venue = AlpacaStocks(data, tickers, cfg["quote_feed"])
     quotes = {q.market_id: q for page in venue.open_markets() for q in page} if in_session(now, cfg["session"]) else {}
-    limit = dt.timedelta(minutes=cfg["max_quote_age_min"])
-    is_open = any(now - q.ts <= limit for q in quotes.values())
-    with conn.transaction():
-        league = league_of(cfg)
-        names = [a for a, _, _ in league]
-        conn.cursor().executemany(
-            "INSERT INTO stock_accounts (account, family, variant, params, capital, started_at) "
-            "VALUES (%s, %s, %s, %s, %s, %s) ON CONFLICT (account) DO NOTHING",
-            [(a, f, variant_of(p), Jsonb(p), cfg["capital"], now) for a, f, p in league])
-        retired = [a for (a,) in conn.execute(
-            "UPDATE stock_accounts SET retired_at = %s WHERE retired_at IS NULL AND NOT account = ANY(%s) "
-            "RETURNING account", (now, names)).fetchall()]
-        conn.execute("UPDATE stock_accounts SET retired_at = NULL WHERE account = ANY(%s)", (names,))
-        stopped = {b for (b,) in conn.execute("SELECT bot FROM watch WHERE stopped_at IS NOT NULL")}
-        accounts = conn.execute("SELECT account, family, params, capital, retired_at FROM stock_accounts "
-                                "ORDER BY account").fetchall()
-        out = {"open": is_open, "quotes": len(quotes), "retired": sorted(retired),
-               "stopped": sorted(stopped & {a for a, *_ in accounts}), "accounts": {}}
-        if is_open:
-            for a, f, p, capital, retired_at in accounts:
-                out["accounts"][a] = trade(conn, a, FAMILIES[f](p), cfg, bars, quotes, capital, ccfg["cost_bps"], now,
-                                           retired_at is None and a not in stopped)
-        else:
-            funnel(conn, LEAGUE, VENUE, now, {(a, "market_closed"): 1 for a, *_ in accounts})
-        prune(conn, LEAGUE, VENUE, now - dt.timedelta(days=cfg["trace_days"]))
-        prices = {s: v[-1][1] for s, v in bars.items() if v}
-        prices |= {s: q.bid for s, q in quotes.items() if all(c["pass"] for c in quote_checks(q, now, cfg))}
-        mark(conn, now, prices)
-    return out
+    return stage.run_pass(conn, Stocks(cfg, ccfg, bars, quotes, now), now)
 
 
 def main(argv: list[str] | None = None) -> int:

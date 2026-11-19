@@ -437,7 +437,9 @@ def test_a_venue_that_records_no_sizes_trades_paper_at_its_quote_and_a_stale_boo
     c = cfg(forward={venue: ["longshot"]})
     account = paper.account_of("longshot", VARIANT, venue)
     seed_unsized(conn, venue, sweep_age=dt.timedelta(minutes=30))
-    assert paper.run_pass(conn, venue, c, NOW)["accounts"][account]["orders"] == 0  # older than max_book_age_min
+    stale = paper.run_pass(conn, venue, c, NOW)  # older than max_book_age_min: a funnel row, no pass for the account
+    assert account not in stale["accounts"] and not orders(conn)
+    assert conn.execute("SELECT reason FROM decision_funnel WHERE account = %s", (account,)).fetchone()[0] == "stale_book"
     conn.execute("INSERT INTO market_sweeps (venue, started_at, finished_at, seen, new_markets, changes, resolved, ok) "
                  "VALUES (%s, %s, %s, 1, 0, 0, 0, true)", (venue, NOW, NOW))
     out = paper.run_pass(conn, venue, c, NOW + dt.timedelta(minutes=1))

@@ -48,12 +48,12 @@ import sys
 from collections import Counter, namedtuple
 
 import pandas as pd
-from psycopg.types.json import Jsonb
 
 from lab import inputs, metrics
 from lab.db import connect
-from lab.decisions import decide, funnel, prune
+from lab.decisions import decide, funnel
 from lab.grid import variants
+from lab.stages import paper as stage
 from lab.market import entry_fee, payout, settlement_fee, take
 from lab.markets import backtest
 from lab.markets.backtest import Market
@@ -177,45 +177,17 @@ def settle(conn, venue: str, fee_cfg: dict | None) -> int:
         if (pay := payout(side, price, r)) is None:
             continue
         profit = n * pay - (n * price + fee) - settlement_fee(fee_cfg, n * price, n * pay)
-        done.append((r.settled_at, pay, profit, oid))
-    with conn.cursor() as cur:
-        cur.executemany("UPDATE paper_orders SET settled_at = %s, payout = %s, profit = %s WHERE id = %s", done)
+        done.append((r.settled_at, pay, None, profit, None, oid))
+    stage.close(conn, done)
     return len(done)
 
 
 def mark(conn, venue: str, now: dt.datetime) -> None:
     """Each account's equity: capital, realized profit, and open fills at their exit price less their cost."""
-    conn.execute(
-        """UPDATE paper_accounts a SET equity = a.capital + s.realized + s.unrealized, realized = s.realized,
-               open_positions = s.open, marked_at = %s
-           FROM (SELECT a.account,
-                        coalesce(sum(p.profit) FILTER (WHERE p.settled_at IS NOT NULL), 0) AS realized,
-                        coalesce(sum(p.contracts * coalesce(
-                            CASE WHEN p.side = 'yes' AND o.bid > 0 AND o.bid < 1 THEN o.bid
-                                 WHEN p.side = 'no' AND o.ask > 0 AND o.ask < 1 THEN 1 - o.ask END, p.price)
-                            - p.contracts * p.price - p.fee)
-                          FILTER (WHERE p.settled_at IS NULL AND p.contracts > 0), 0) AS unrealized,
-                        count(*) FILTER (WHERE p.settled_at IS NULL AND p.contracts > 0) AS open
-                 FROM paper_accounts a LEFT JOIN paper_orders p USING (account)
-                 LEFT JOIN outcomes o ON o.venue = a.venue AND o.market_id = p.market_id AND o.outcome = 'yes'
-                 WHERE a.venue = %s GROUP BY a.account) s
-           WHERE a.account = s.account""", (now, venue))
+    stage.mark(conn, Events(venue, load_config()), None, now)
 
 
-def cash(conn, account: str, capital: float) -> float:
-    """Capital plus realized profit less what the open fills cost."""
-    realized, held = conn.execute(
-        "SELECT coalesce(sum(profit) FILTER (WHERE settled_at IS NOT NULL), 0), "
-        "coalesce(sum(contracts * price + fee) FILTER (WHERE settled_at IS NULL AND contracts > 0), 0) "
-        "FROM paper_orders WHERE account = %s", (account,)).fetchone()
-    return capital + realized - held
-
-
-def held(conn, account: str) -> int:
-    """Open positions: fills not yet settled."""
-    return conn.execute("SELECT count(*) FROM paper_orders WHERE account = %s AND settled_at IS NULL AND contracts > 0",
-                        (account,)).fetchone()[0]
-
+cash, held = stage.cash, stage.held
 
 def traced(strategy, row: Row, m: Market, venue: str) -> tuple[list, list, list]:
     """The strategy's orders on one book row, the checks it ran and the inputs it read: the row's quote and the
@@ -264,19 +236,15 @@ def trade(conn, account: str, strategy, book: list[tuple[Row, Market]], capital:
                 broke += 1
                 counts[(account, "no_cash")] += 1
                 continue
-            stored = conn.execute(
-                """INSERT INTO paper_orders (account, market_id, side, stake, max_price, sent_at, quoted_at, bid, ask,
-                       contracts, price, fee) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                   ON CONFLICT (account, market_id) DO NOTHING RETURNING id""",
-                (account, o.market_id, o.side, o.stake, o.limit, now, row.ts.to_pydatetime(),
-                 None if math.isnan(row.bid) else row.bid, None if math.isnan(row.ask) else row.ask, n, price,
-                 fee)).fetchone()
+            stored = stage.enter(conn, account, o.market_id, o.side, o.stake, o.limit, now, row.ts.to_pydatetime(),
+                                 None if math.isnan(row.bid) else row.bid, None if math.isnan(row.ask) else row.ask,
+                                 n, price, fee)
             counts[(account, "ordered" if stored else "already entered")] += 1
             if stored:
                 decide(conn, LEAGUE, account, venue, o.market_id, now, "enter", rule, inputs, checks,
                        {"side": o.side, "stake": o.stake, "limit": o.limit, "share": share, "taken": before,
                         "depth": row.depth_yes if o.side == "yes" else row.depth_no, "cash": left, "contracts": n,
-                        "price": price, "fee": fee, "fees": fee_cfg}, ("paper", stored[0]))
+                        "price": price, "fee": fee, "fees": fee_cfg}, ("paper", stored))
             sent += 1
             if n:
                 filled += 1
@@ -322,52 +290,71 @@ def forward(conn, venue: str, min_trades: int, now: dt.datetime) -> int:
     return drifted
 
 
-def run_pass(conn, venue: str, cfg: dict, now: dt.datetime) -> dict:
-    pcfg, bcfg = cfg["paper"], cfg["backtest"]
-    fee_cfg = bcfg.get("fees", {}).get(venue)
-    sportsbook = cfg["venues"][venue].get("kind") == "sportsbook"
-    with conn.transaction():
-        league, unrunnable = accounts(conn, venue, cfg)
-        names = [a for a, _, _ in league]
-        conn.cursor().executemany(
-            "INSERT INTO paper_accounts (account, family, venue, variant, params, capital, started_at) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s) ON CONFLICT (account) DO NOTHING",
-            [(a, f, venue, backtest.variant_of(p), Jsonb(p), pcfg["capital"], now) for a, f, p in league])
-        taken = conn.execute("SELECT account, venue FROM paper_accounts WHERE account = ANY(%s) AND venue <> %s",
-                             (names, venue)).fetchall()
-        if taken:
-            raise RuntimeError(f"{venue}: account names held by another venue: {taken}")
-        retired = [a for (a,) in conn.execute(
-            "UPDATE paper_accounts SET retired_at = %s WHERE venue = %s AND retired_at IS NULL "
-            "AND NOT account = ANY(%s) RETURNING account", (now, venue, names)).fetchall()]
-        conn.execute("UPDATE paper_accounts SET retired_at = NULL WHERE venue = %s AND account = ANY(%s)",
-                     (venue, names))
-        settled = settle(conn, venue, fee_cfg)
+class Events:
+    """The event-contract league as a lab/stages/paper.py adapter: the venue's recorded book is what accounts trade."""
+    league = LEAGUE
+    exits_retired = False   # an event fill has no exit: it settles
+
+    def __init__(self, venue: str, cfg: dict):
+        self.venue, self.cfg = venue, cfg
+        self.pcfg, self.bcfg = cfg["paper"], cfg["backtest"]
+        self.capital, self.trace_days = self.pcfg["capital"], self.pcfg["trace_days"]
+        self.fee_cfg = self.bcfg.get("fees", {}).get(venue)
+        self.sportsbook = cfg["venues"][venue].get("kind") == "sportsbook"
+
+    def accounts(self, conn):
+        league, self.unrunnable = accounts(conn, self.venue, self.cfg)
+        return league
+
+    def prepare(self, conn, now, league):
+        venue, pcfg, bcfg = self.venue, self.pcfg, self.bcfg
+        settled = settle(conn, venue, self.fee_cfg)
         age = book_age(conn, venue, now)
         fresh = age is not None and age <= dt.timedelta(minutes=pcfg["max_book_age_min"])
-        book, fairs = ((line_books(conn, venue, now, pcfg["horizon_h"], bcfg["sportsbook_depth"]) if sportsbook
-                        else (books(conn, venue, now, pcfg["horizon_h"], pcfg.get("unsized_depth", {}).get(venue, math.nan)), {})) if fresh else ([], {}))
+        unsized = pcfg.get("unsized_depth", {}).get(venue, math.nan)
+        book, fairs = ((line_books(conn, venue, now, pcfg["horizon_h"], bcfg["sportsbook_depth"]) if self.sportsbook
+                        else (books(conn, venue, now, pcfg["horizon_h"], unsized), {})) if fresh else ([], {}))
         meetings = meetings_of(conn, venue) if any(f == "tt_totals" for _, f, _ in league) else None
         forecasts = (Forecasts(inputs.readings(conn, "nws_high", now - FRESH, now + dt.timedelta(seconds=1)))
                      if any(f == "weather" for _, f, _ in league) else None)
         observations = (Forecasts(inputs.readings(conn, "nws_obs", now - FRESH, now + dt.timedelta(seconds=1)))
                         if any(f == "observed" for _, f, _ in league) else None)
-        stopped = {b for (b,) in conn.execute("SELECT bot FROM watch WHERE stopped_at IS NOT NULL")}
-        capital = dict(conn.execute("SELECT account, capital FROM paper_accounts WHERE venue = %s", (venue,)).fetchall())
-        out = {"settled": settled, "book": len(book), "fresh": fresh, "stopped": sorted(stopped & capital.keys()),
-               "retired": sorted(retired), "unrunnable": unrunnable, "accounts": {}}
-        trading = [(a, f, p) for a, f, p in league if a not in stopped]
-        for a, f, p in trading:
-            out["accounts"][a] = trade(conn, a, strategy_of(f, p, meetings, fairs, forecasts, observations), book, capital[a],
-                                       bcfg["depth_share"], fee_cfg, now, pcfg["max_open"], venue, pcfg["near_misses"])
-        if not fresh:
-            funnel(conn, LEAGUE, venue, now, {(a, "stale_book"): 1 for a, _, _ in trading})
-        keep = now - dt.timedelta(days=pcfg["trace_days"])
-        prune(conn, LEAGUE, venue, keep)
-        closing_line(conn, venue, book, now)
-        mark(conn, venue, now)
-        out["drifted"] = forward(conn, venue, pcfg["drift_min_trades"], now)
-    return out
+        return {"settled": settled, "fresh": fresh, "book": book, "fairs": fairs, "meetings": meetings,
+                "forecasts": forecasts, "observations": observations, "params": {a: p for a, _, p in league}}
+
+    def idle(self, ctx):
+        return None if ctx["fresh"] else "stale_book"
+
+    def report(self, ctx):
+        return {"settled": ctx["settled"], "book": len(ctx["book"]), "fresh": ctx["fresh"],
+                "unrunnable": self.unrunnable}
+
+    def trade(self, conn, ctx, account, family, params, capital, entries, now):
+        strategy = strategy_of(family, ctx["params"].get(account, params), ctx["meetings"], ctx["fairs"],
+                               ctx["forecasts"], ctx["observations"])
+        return trade(conn, account, strategy, ctx["book"], capital, self.bcfg["depth_share"], self.fee_cfg, now,
+                     self.pcfg["max_open"], self.venue, self.pcfg["near_misses"])
+
+    def prices(self, conn, ctx, held):
+        """A yes at the venue's bid, a no at one minus its ask, from the recorder's latest yes outcome; a market with
+        no usable side (a sportsbook's line) has none and marks at its cost."""
+        out = {}
+        for mid, bid, ask in conn.execute(
+                "SELECT market_id, bid, ask FROM outcomes WHERE venue = %s AND outcome = 'yes' "
+                "AND market_id = ANY(%s)", (self.venue, sorted({m for m, _ in held}))).fetchall():
+            if bid is not None and 0 < bid < 1:
+                out[(mid, "yes")] = bid
+            if ask is not None and 0 < ask < 1:
+                out[(mid, "no")] = 1 - ask
+        return out
+
+    def after(self, conn, ctx, now):
+        closing_line(conn, self.venue, ctx["book"], now)
+        return {"drifted": forward(conn, self.venue, self.pcfg["drift_min_trades"], now)}
+
+
+def run_pass(conn, venue: str, cfg: dict, now: dt.datetime) -> dict:
+    return stage.run_pass(conn, Events(venue, cfg), now)
 
 
 def _pct(x: float) -> str:

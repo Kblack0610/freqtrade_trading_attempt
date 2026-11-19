@@ -20,10 +20,14 @@ CLOSES = {"SPY": [100, 101, 102, 103, 104, 105, 106, 107, 108], "TLT": [100] * 7
 
 
 def cfg(**over):
+    """The shipped config with the test universe; a knob of the [paper] table is overridden there, any other at the top."""
     c = copy.deepcopy(stocks.load_config())
-    c.update(universe=["SPY", "TLT", "GLD"], stake=1000.0, capital=10000.0, max_open=8, near_misses=2,
+    c["paper"] |= {"stake": 1000.0, "capital": 10000.0, "max_open": 8, "near_misses": 2}
+    c.update(universe=["SPY", "TLT", "GLD"],
              families={"trend": {"sma": 3}, "reversion": {"lookback": 2, "drop": 0.05, "exit_sma": 2, "max_days": 3}})
-    return c | over
+    for k, v in over.items():
+        (c["paper"] if k in c["paper"] else c)[k] = v
+    return c
 
 
 TREND = stocks.account_of("trend", stocks.variant_of({"sma": 3}))
@@ -53,8 +57,8 @@ def run(conn, data=None, now=MONDAY, **over):
 
 
 def positions(conn):
-    return conn.execute("SELECT account, ticker, shares, entry_price, entry_cost, exited_at, exit_price, profit, "
-                        "exit_reason FROM stock_positions ORDER BY id").fetchall()
+    return conn.execute("SELECT account, market_id, contracts, price, fee, settled_at, payout, profit, "
+                        "exit_reason FROM paper_orders ORDER BY id").fetchall()
 
 
 def test_a_pass_enters_by_each_rule_and_every_fill_has_its_decision(conn):
@@ -78,10 +82,10 @@ def test_a_pass_enters_by_each_rule_and_every_fill_has_its_decision(conn):
     # The funnel counts every ticker each account looked at, by where it stopped.
     funnel = dict(conn.execute("SELECT reason, n FROM decision_funnel WHERE account = %s", (TREND,)).fetchall())
     assert funnel == {"ordered": 1, "close above average": 2} and sum(funnel.values()) == 3
-    fill = conn.execute("SELECT venue, strategy, is_open, stake FROM fills WHERE source = 'stock' AND account = %s",
+    fill = conn.execute("SELECT venue, strategy, is_open, stake FROM fills WHERE source = 'paper' AND venue = 'alpaca' AND account = %s",
                         (TREND,)).fetchone()
     assert fill == ("alpaca", "trend", True, pytest.approx(1000.2))
-    eq, realized, n = conn.execute("SELECT equity, realized, open_positions FROM stock_accounts WHERE account = %s",
+    eq, realized, n = conn.execute("SELECT equity, realized, open_positions FROM paper_accounts WHERE account = %s",
                                    (TREND,)).fetchone()
     assert n == 1 and realized == 0 and eq == pytest.approx(10000 + shares * (107.99 - 108.01) - 0.2)
 
@@ -92,7 +96,7 @@ def test_a_weekend_pass_is_market_closed_reads_no_quote_and_fills_nothing(conn):
     assert not out["open"] and not positions(conn) and [c[0] for c in data.calls] == ["closes"]
     assert conn.execute("SELECT DISTINCT reason, n FROM decision_funnel").fetchall() == [("market_closed", 1)]
     assert conn.execute("SELECT count(*) FROM decisions").fetchone()[0] == 0
-    assert conn.execute("SELECT count(*) FROM stock_accounts WHERE marked_at IS NOT NULL").fetchone()[0] == 2
+    assert conn.execute("SELECT count(*) FROM paper_accounts WHERE marked_at IS NOT NULL").fetchone()[0] == 2
 
 
 def test_a_session_with_no_fresh_quote_is_market_closed(conn):
@@ -114,9 +118,9 @@ def test_an_exit_sells_at_the_bid_and_records_why(conn):
     d = conn.execute("SELECT checks, sizing, fill_source FROM decisions WHERE action = 'exit'").fetchone()
     assert d[0][0]["name"] == "close below average" and d[0][0]["pass"] and d[2] is None
     assert d[1]["profit"] == pytest.approx(profit)
-    eq, realized = conn.execute("SELECT equity, realized FROM stock_accounts WHERE account = %s", (TREND,)).fetchone()
+    eq, realized = conn.execute("SELECT equity, realized FROM paper_accounts WHERE account = %s", (TREND,)).fetchone()
     assert realized == pytest.approx(profit) and eq == pytest.approx(10000 + profit)
-    assert conn.execute("SELECT is_open, profit_abs FROM fills WHERE source = 'stock' AND account = %s",
+    assert conn.execute("SELECT is_open, profit_abs FROM fills WHERE source = 'paper' AND venue = 'alpaca' AND account = %s",
                         (TREND,)).fetchone() == (False, pytest.approx(profit))
 
 
@@ -134,11 +138,11 @@ def test_near_misses_are_capped_and_cash_and_max_open_hold(conn):
     run(conn, Data(flat), near_misses=1)  # flat: every ticker fails one check, close above average
     assert conn.execute("SELECT count(*) FROM decisions WHERE action = 'near_miss' AND account = %s",
                         (TREND,)).fetchone()[0] == 1
-    conn.execute("TRUNCATE decisions, decision_funnel, stock_positions, stock_accounts")
+    conn.execute("TRUNCATE decisions, decision_funnel, paper_orders, paper_accounts")
     rising = {s: list(range(100, 109)) for s in ("SPY", "TLT", "GLD")}
     out = run(conn, Data(rising), max_open=1)
     assert out["accounts"][TREND] == {"exits": 0, "entries": 1, "no_cash": 0, "capped": 2}
-    conn.execute("TRUNCATE decisions, decision_funnel, stock_positions, stock_accounts")
+    conn.execute("TRUNCATE decisions, decision_funnel, paper_orders, paper_accounts")
     out = run(conn, Data(rising), capital=1500.0)
     assert out["accounts"][TREND] == {"exits": 0, "entries": 1, "no_cash": 2, "capped": 0}
 
@@ -147,7 +151,7 @@ def test_a_variant_dropped_from_the_toml_is_retired_and_takes_no_entry(conn):
     run(conn)
     out = run(conn, now=LATER, families={"trend": {"sma": 3}})
     assert out["retired"] == [REV]
-    assert conn.execute("SELECT retired_at IS NOT NULL FROM stock_accounts WHERE account = %s", (REV,)).fetchone()[0]
+    assert conn.execute("SELECT retired_at IS NOT NULL FROM paper_accounts WHERE account = %s", (REV,)).fetchone()[0]
 
 
 def test_the_watcher_rows_a_stock_account_and_its_drill_stops_it(conn):

@@ -28,8 +28,8 @@ FROM bot_snapshots s JOIN bots b ON b.name = s.bot ORDER BY s.bot, s.ts DESC
 # forever (the agg bots renamed 2026-11-10). It stays in the table with its breach and stop state; only the
 # per-bot series skip it, and a dead watcher still ages every row of its last pass.
 WATCH = ("SELECT w.bot, w.checked_at, w.seen_at, w.state, w.capital, w.equity, w.day_open, w.breached_at, p.venue, "
-         "s.account IS NOT NULL AS stock, w.checked_at = max(w.checked_at) OVER () AS current "
-         "FROM watch w LEFT JOIN paper_accounts p ON p.account = w.bot LEFT JOIN stock_accounts s ON s.account = w.bot")
+         "p.venue = 'alpaca' AS stock, w.checked_at = max(w.checked_at) OVER () AS current "
+         "FROM watch w LEFT JOIN paper_accounts p ON p.account = w.bot")
 RUNS = """
 SELECT k AS kind,
        (SELECT max(started_at) FROM runs WHERE kind = k) AS started_at,
@@ -74,7 +74,7 @@ MARKOUTS = ("SELECT bot, horizon_min, count(net) AS n, avg(net) AS net, avg(null
             "FROM markouts GROUP BY 1, 2")
 RECONCILE = ("SELECT bot, kind, count(*) AS n, avg(delay_s) AS delay_s, avg(price_gap) AS price, avg(fee_gap) AS fee, "
              "avg(profit_gap) AS profit FROM reconcile GROUP BY 1, 2")
-# Paper orders sent in the last day per venue, filled or not: a venue in [paper] venues at 0 while its recorder is
+# Paper orders sent in the last day per venue (the stock league's too), filled or not: a venue in [paper] venues at 0 while its recorder is
 # fresh is a league that stopped placing orders (0 from 2026-11-15 to 11-17 with every job green; tr-327).
 PAPER_ORDERS = ("SELECT a.venue, count(*) AS n FROM paper_orders o JOIN paper_accounts a USING (account) "
                 "WHERE o.sent_at > now() - interval '24 hours' GROUP BY 1")
@@ -90,8 +90,8 @@ SELECT f.league, f.account, f.reason, f.n FROM decision_funnel f
 JOIN (SELECT league, account, max(pass_at) AS pass_at FROM decision_funnel GROUP BY 1, 2) l USING (league, account, pass_at)
 """
 UNTRACED = """
-SELECT 'event_contracts' AS league, count(*) AS n FROM paper_orders o
-WHERE o.contracts > 0
+SELECT 'event_contracts' AS league, count(*) AS n FROM paper_orders o JOIN paper_accounts a USING (account)
+WHERE o.contracts > 0 AND a.venue <> 'alpaca'
   AND o.sent_at >= (SELECT min(decided_at) FROM decisions WHERE league = 'event_contracts' AND action = 'enter')
   AND NOT EXISTS (SELECT 1 FROM decisions d WHERE d.fill_source = 'paper' AND d.fill_id = o.id)
 UNION ALL
@@ -101,8 +101,8 @@ WHERE (t.raw->>'nr_of_successful_entries')::int > 0
   AND NOT EXISTS (SELECT 1 FROM decisions d WHERE d.fill_source = 'freqtrade' AND d.account = t.bot
                   AND d.fill_id = t.trade_id AND d.decided_at = t.open_date)
 UNION ALL
-SELECT 'stocks', count(*) FROM stock_positions p
-WHERE NOT EXISTS (SELECT 1 FROM decisions d WHERE d.fill_source = 'stock' AND d.fill_id = p.id)
+SELECT 'stocks', count(*) FROM paper_orders p JOIN paper_accounts a USING (account) WHERE a.venue = 'alpaca'
+  AND NOT EXISTS (SELECT 1 FROM decisions d WHERE d.fill_source = 'paper' AND d.fill_id = p.id)
 """
 # lab/shadow.py: accounts per cohort and state, and the newest day marked (a day's mark lands after it ends).
 SHADOW = "SELECT cohort, state, count(*) AS n FROM shadow_accounts GROUP BY 1, 2"
@@ -218,7 +218,7 @@ def watch_metrics(now, watch):
                  (([w["bot"]], age(now, w["seen_at"])) for w in watch))
     unseen = load_config()["watcher"].get("unseen_after_seconds", 300)
     book, venues = sweep_ages()
-    quote = stocks.load_config()["max_quote_age_min"]
+    quote = stocks.load_config()["paper"]["max_quote_age_min"]
 
     def limit(w):
         # A paper or stock account is read only when its league's pass marks it, once a 5-min CronJob at the
