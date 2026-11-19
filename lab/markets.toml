@@ -7,6 +7,9 @@ bucket = "trader-markets"
 prefix = "quotes"
 # The first run with no earlier sweep reads resolutions this far back; later runs overlap the last one by this.
 resolutions_lookback_h = 1
+# Seconds a sweep walks resolutions before it stops at a page and leaves the rest to the next sweep. The Polymarket US
+# Job's deadline is 600 s with its open walk and the paper pass; a page 100k deep took 4.2 s (2026-11-18).
+resolutions_budget_s = 240
 # What a run with no venue named sweeps. The 5-min CronJob runs it bare, so a venue joins here only once its sweep
 # fits that cadence alongside Kalshi's 3 to 4.5 min; the others run by name (python -m lab.markets.recorder manifold).
 default_venues = ["kalshi"]

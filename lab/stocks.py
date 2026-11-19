@@ -74,7 +74,7 @@ class AlpacaStocks:
                      open_interest=None)
                for s, q in self.data.quotes(self.universe, self.feed).items()]
 
-    def resolutions(self, since: dt.datetime) -> Iterator[Resolution]:
+    def resolutions(self, since: dt.datetime, cursor: str | None = None) -> Iterator[tuple[list[Resolution], str | None]]:
         return iter(())
 
     def settled(self, cursor: str | None) -> Iterator[tuple[list[Settled], str | None]]:

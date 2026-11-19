@@ -85,12 +85,10 @@ class Kalshi:
         for markets, ts, _ in self._walk({"status": "open", "mve_filter": "exclude"}):
             yield [quote(m, ts) for m in markets]
 
-    def resolutions(self, since: dt.datetime) -> Iterator[Resolution]:
+    def resolutions(self, since: dt.datetime, cursor: str | None = None) -> Iterator[tuple[list[Resolution], str | None]]:
         params = {"status": "settled", "mve_filter": "exclude", "min_settled_ts": int(since.timestamp())}
-        for markets, _, _ in self._walk(params):
-            for m in markets:
-                if (r := resolution(m)) is not None:
-                    yield r
+        for markets, _, nxt in self._walk(params, cursor=cursor):
+            yield [r for m in markets if (r := resolution(m)) is not None], nxt
 
     def cutoff(self, field: str) -> dt.datetime:
         if self._cutoff is None:

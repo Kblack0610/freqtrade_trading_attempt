@@ -56,18 +56,17 @@ class Manifold:
                 return
             before = markets[-1]["createdTime"]
 
-    def resolutions(self, since: dt.datetime) -> Iterator[Resolution]:
-        offset = 0
-        while offset <= MAX_OFFSET:
+    def resolutions(self, since: dt.datetime, cursor: str | None = None) -> Iterator[tuple[list[Resolution], str | None]]:
+        offset = int(cursor or 0)
+        while True:
             markets = self._search({"sort": "resolve-date", "filter": "resolved", "offset": offset})
-            for m in markets:
-                if (r := resolution(m)) is not None:
-                    if r.settled_at < since:
-                        return
-                    yield r
-            if len(markets) < self.api.limit:
-                return
+            rs = [r for m in markets if (r := resolution(m)) is not None]
+            fresh = [r for r in rs if r.settled_at >= since]
             offset += self.api.limit
+            done = len(fresh) < len(rs) or len(markets) < self.api.limit or offset > MAX_OFFSET
+            yield fresh, None if done else str(offset)
+            if done:
+                return
 
     def settled(self, cursor: str | None) -> Iterator[tuple[list[Settled], str | None]]:
         before = cursor

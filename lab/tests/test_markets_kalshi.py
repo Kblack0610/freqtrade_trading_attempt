@@ -38,7 +38,7 @@ def test_a_429_past_the_retries_raises():
 def test_resolutions_ask_for_settled_since_and_read_the_result():
     s = Session((200, "kalshi_settled.json"))
     since = dt.datetime(2026, 11, 6, 4, tzinfo=dt.timezone.utc)
-    rs = list(Kalshi(CFG, s, sleep=lambda _: None).resolutions(since))
+    rs = [r for page, _ in Kalshi(CFG, s, sleep=lambda _: None).resolutions(since) for r in page]
     assert s.calls[0][1] == {"status": "settled", "mve_filter": "exclude", "min_settled_ts": int(since.timestamp()), "limit": 2}
     assert len(rs) == 3 and {r.result for r in rs} == {"no"} and rs[0].value == 0.0
     assert rs[0].settled_at.tzinfo is not None

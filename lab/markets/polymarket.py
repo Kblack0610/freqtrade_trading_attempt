@@ -101,13 +101,16 @@ class PolymarketUS:
         for markets, ts in self._pages({"active": "true", "closed": "false"}):
             yield [us_quote(m, ts) for m in markets]
 
-    def resolutions(self, since: dt.datetime) -> Iterator[Resolution]:
-        for markets, _ in self._pages({"closed": "true", "orderBy": "updated_at", "orderDirection": "desc"}):
-            for m in markets:
-                if when(m["updatedAt"]) < since:
-                    return
-                if (r := us_resolution(m)) is not None:
-                    yield r
+    def resolutions(self, since: dt.datetime, cursor: str | None = None) -> Iterator[tuple[list[Resolution], str | None]]:
+        """Offset paging, as settled() is: a market re-stamped mid-walk shifts the rest down, so a page may repeat."""
+        offset = int(cursor or 0)
+        for markets, _ in self._pages({"closed": "true", "orderBy": "updated_at", "orderDirection": "desc"}, offset):
+            offset += len(markets)
+            fresh = [m for m in markets if when(m["updatedAt"]) >= since]
+            done = len(fresh) < len(markets) or len(markets) < self.api.limit
+            yield [r for m in fresh if (r := us_resolution(m)) is not None], None if done else str(offset)
+            if done:
+                return
 
 
 class PolymarketUSRead:
@@ -223,10 +226,10 @@ class Polymarket:
                 params = {**params, "cursor": page["next_cursor"]}
         return list({b.ts: b for b in out}.values())  # a bar on a window edge can come back twice
 
-    def resolutions(self, since: dt.datetime) -> Iterator[Resolution]:
-        for markets, _, _ in self._walk({"closed": "true", "order": "closedTime", "ascending": "false"}):
-            for m in markets:
-                if m.get("closedTime") and when(m["closedTime"]) < since:
-                    return
-                if (r := global_resolution(m)) is not None:
-                    yield r
+    def resolutions(self, since: dt.datetime, cursor: str | None = None) -> Iterator[tuple[list[Resolution], str | None]]:
+        for markets, _, nxt in self._walk({"closed": "true", "order": "closedTime", "ascending": "false"}, cursor):
+            fresh = [m for m in markets if not (m.get("closedTime") and when(m["closedTime"]) < since)]
+            nxt = None if len(fresh) < len(markets) else nxt
+            yield [r for m in fresh if (r := global_resolution(m)) is not None], nxt
+            if nxt is None:
+                return

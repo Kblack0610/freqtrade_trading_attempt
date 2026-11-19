@@ -7,12 +7,15 @@ For each venue it reads every open market a page at a time and diffs each outcom
 in Postgres (outcomes). Only the changed quotes are written, as one parquet object in MinIO, and only then is the
 Postgres state moved forward in one transaction, so a run that dies midway writes nothing it has not also recorded.
 If the database write fails after the object landed, the next run writes those changes again with a later ts;
-readers keep the first row of a run of equal quotes. The only writer of venues, markets, outcomes, resolutions and
+readers keep the first row of a run of equal quotes. The resolution walk gets resolutions_budget_s: one that runs
+past it stops at a page and the next sweep resumes it (migration 064), so a venue that re-stamps many old markets
+cannot keep every sweep past its Job's deadline. The only writer of venues, markets, outcomes, resolutions and
 market_sweeps (migration 019), and of the quote objects. Exits 1 if any venue failed; the others still record.
 """
 
 import datetime as dt
 import sys
+import time
 import tomllib
 import traceback
 from pathlib import Path
@@ -81,8 +84,26 @@ def write_quotes(fs: pafs.FileSystem, root: str, venue: str, started: dt.datetim
     return key
 
 
+def walk_resolutions(conn, v: Venue, started: dt.datetime, lookback: dt.timedelta, budget_s: float):
+    """The resolutions this sweep reads and where its walk stopped: (resolved, since, cursor, walk_started). It resumes
+    the walk the last good sweep left unfinished, else starts one at the start of the last finished walk, less
+    `lookback`. Past `budget_s` it stops after a page, with the cursor the next sweep resumes from."""
+    last = conn.execute("SELECT started_at, walk_since, walk_cursor, walk_started FROM market_sweeps "
+                        "WHERE venue = %s AND ok ORDER BY started_at DESC LIMIT 1", (v.name,)).fetchone()
+    if last and last[2]:
+        since, cursor, top = last[1], last[2], last[3]
+    else:
+        since, cursor, top = ((last[3] or last[0]) if last else started) - lookback, None, started
+    read, nxt, deadline = [], None, time.monotonic() + budget_s
+    for page, nxt in v.resolutions(since, cursor):
+        read += page
+        if nxt is not None and time.monotonic() > deadline:
+            break
+    return new_resolutions(conn, v.name, read), since, nxt, top
+
+
 def sweep(v: Venue, vcfg: dict, conn, fs: pafs.FileSystem, root: str, lookback: dt.timedelta,
-          now: dt.datetime | None = None) -> dict:
+          now: dt.datetime | None = None, budget_s: float = float("inf")) -> dict:
     started = now or dt.datetime.now(dt.timezone.utc)
     seen, new_markets, new_meta, changed = 0, 0, {}, []
     for page in v.open_markets():
@@ -96,8 +117,7 @@ def sweep(v: Venue, vcfg: dict, conn, fs: pafs.FileSystem, root: str, lookback: 
             if book.get((q.market_id, q.outcome)) != tuple(getattr(q, f) for f in BOOK):
                 changed.append(q)
 
-    last = conn.execute("SELECT max(started_at) FROM market_sweeps WHERE venue = %s AND ok", (v.name,)).fetchone()[0]
-    resolved = new_resolutions(conn, v.name, v.resolutions((last or started) - lookback))
+    resolved, since, cursor, top = walk_resolutions(conn, v, started, lookback, budget_s)
 
     key = write_quotes(fs, root, v.name, started, changed) if changed else None
     with conn.transaction():
@@ -124,10 +144,11 @@ def sweep(v: Venue, vcfg: dict, conn, fs: pafs.FileSystem, root: str, lookback: 
         cur.executemany("UPDATE markets SET status = 'settled', updated_at = %s WHERE venue = %s AND market_id = %s "
                         "AND status <> 'settled'", [(r.settled_at, v.name, r.market_id) for r in resolved])
         stats = {"seen": seen, "new_markets": new_markets, "changes": len(changed),
-                 "resolved": len(resolved), "object_key": key}
+                 "resolved": len(resolved), "object_key": key, "walk_cursor": cursor}
         cur.execute("INSERT INTO market_sweeps (venue, started_at, finished_at, seen, new_markets, changes, resolved, "
-                    "object_key, ok) VALUES (%s, %s, now(), %s, %s, %s, %s, %s, true)",
-                    (v.name, started, *stats.values()))
+                    "object_key, walk_cursor, walk_since, walk_started, ok) "
+                    "VALUES (%s, %s, now(), %s, %s, %s, %s, %s, %s, %s, %s, true)",
+                    (v.name, started, *stats.values(), since, top))
     return stats
 
 
@@ -139,12 +160,14 @@ def main(argv: list[str] | None = None, fs: pafs.FileSystem | None = None, adapt
     fs = fs or s3_from_env()
     root = f"{rec['bucket']}/{rec['prefix']}"
     lookback = dt.timedelta(hours=rec.get("resolutions_lookback_h", 1))
+    budget_s = rec.get("resolutions_budget_s", float("inf"))
     failed = []
     with connect(autocommit=True) as conn:
         for name in names:
             started = dt.datetime.now(dt.timezone.utc)
             try:
-                stats = sweep(adapters[name](cfg["venues"][name]), cfg["venues"][name], conn, fs, root, lookback, started)
+                stats = sweep(adapters[name](cfg["venues"][name]), cfg["venues"][name], conn, fs, root, lookback, started,
+                              budget_s)
                 print(f"markets: {name}: {stats}", flush=True)
             except Exception as e:  # one venue down must not stop the rest
                 traceback.print_exc()
