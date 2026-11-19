@@ -70,15 +70,52 @@ def test_superseded_prs_close_with_a_note_and_no_issue_comment(monkeypatch):
 
 def test_merge_squashes_and_checks_it_merged(monkeypatch):
     calls = []
+    posted_merges = True
     def fake(method, path, body=None, ok_404=False):
         calls.append((method, path, body))
-        return {"merged": merged, "merge_commit_sha": "abcdef0123", "state": "closed"}
+        merged = posted_merges and any(c[0] == "POST" for c in calls)
+        return {"merged": merged, "mergeable": True, "merge_commit_sha": "abcdef0123", "state": "closed" if merged else "open"}
     monkeypatch.setattr(bump_home_config, "call", fake)
-    merged = True
     bump_home_config.merge(645)
-    assert calls == [("POST", "/repos/kblack0610/home-config/pulls/645/merge",
+    assert calls == [("GET", "/repos/kblack0610/home-config/pulls/645", None),
+                     ("POST", "/repos/kblack0610/home-config/pulls/645/merge",
                       {"Do": "squash", "delete_branch_after_merge": True}),
                      ("GET", "/repos/kblack0610/home-config/pulls/645", None)]
-    merged = False
+    posted_merges = False
     with pytest.raises(SystemExit):
         bump_home_config.merge(645)
+
+
+def test_wait_mergeable_polls_until_forgejo_says_so(monkeypatch):
+    answers = iter([{"mergeable": False}, {"mergeable": False}, {"mergeable": True}])
+    sleeps = []
+    monkeypatch.setattr(bump_home_config, "call", lambda *a, **k: next(answers))
+    monkeypatch.setattr(bump_home_config.time, "sleep", sleeps.append)
+    bump_home_config.wait_mergeable(645)
+    assert sleeps == [bump_home_config.MERGEABLE_POLL_S] * 2
+
+
+def test_wait_mergeable_gives_up_at_the_deadline(monkeypatch):
+    clock = iter([0, 1, bump_home_config.MERGEABLE_TIMEOUT_S + 1])
+    monkeypatch.setattr(bump_home_config, "call", lambda *a, **k: {"mergeable": False, "state": "open"})
+    monkeypatch.setattr(bump_home_config.time, "sleep", lambda s: None)
+    monkeypatch.setattr(bump_home_config.time, "monotonic", lambda: next(clock))
+    with pytest.raises(SystemExit, match="not mergeable after"):
+        bump_home_config.wait_mergeable(645)
+
+
+def test_wait_mergeable_fails_at_once_on_a_closed_pr(monkeypatch):
+    monkeypatch.setattr(bump_home_config, "call", lambda *a, **k: {"mergeable": False, "state": "closed"})
+    monkeypatch.setattr(bump_home_config.time, "sleep", lambda s: pytest.fail("slept"))
+    with pytest.raises(SystemExit, match="closed"):
+        bump_home_config.wait_mergeable(645)
+
+
+def test_merge_skips_the_post_when_already_merged(monkeypatch):
+    calls = []
+    def fake(method, path, body=None, ok_404=False):
+        calls.append(method)
+        return {"merged": True, "merge_commit_sha": "abcdef0123", "state": "closed"}
+    monkeypatch.setattr(bump_home_config, "call", fake)
+    bump_home_config.merge(645)
+    assert calls == ["GET"]
