@@ -5,7 +5,7 @@
   python -m lab.markets.kalshi_trade drill [--ticker T]   # rest one contract, read it back, cancel it, read it back
 
 KalshiDemo refuses any base URL whose host is not the demo's (DEMO_HOSTS), so no config or env can point it at
-real money; P9 adds Kalshi to the live path behind its own guard (docs/live.md), never by widening this one.
+real money; P9 adds Kalshi to the live path through lab/stages/live.py's door (docs/live.md), never by widening this one.
 Requests are signed as docs.kalshi.com getting_started/api_keys states: KALSHI-ACCESS-KEY, KALSHI-ACCESS-TIMESTAMP
 (epoch ms) and KALSHI-ACCESS-SIGNATURE, the base64 signature of timestamp + method + path (with /trade-api/v2,
 without the query), RSA-PSS SHA-256 with a digest-length salt, or Ed25519. Orders go through the V2 event-order
