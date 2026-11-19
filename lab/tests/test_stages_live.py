@@ -88,13 +88,42 @@ def test_the_league_names_the_guard_when_it_refuses(tmp_path, capsys):
     with pytest.raises(SystemExit):
         league.guard([league.USER_DATA / "config.base.json", league.USER_DATA / "exchanges" / "kraken.json", over])
     err = capsys.readouterr().err
-    assert "dry_run is not true" in err and "no-real-money guard is on" in err and "not at ready" in err
+    assert "dry_run is not true" in err and "no-real-money guard is on" in err and "not at ready" not in err
 
 
-def test_the_league_refuses_whatever_the_guard_says(tmp_path, monkeypatch):
+def test_the_league_refuses_whatever_the_guard_says(tmp_path, monkeypatch, capsys):
+    """The guard lifted and kraken a live venue at a stake the stage allows: the guard names nothing, the league refuses."""
     monkeypatch.setattr(guard, "GUARD_LIFTED", True)
-    monkeypatch.setattr(suggest, "load_config", lambda: CONFIG)
+    lifted = {"live": {"stage": "s1", "venues": ["kraken"]},
+              "book": {"stages": [{"name": "s1", "stake": 1e9, "max_open": 1000}]}}
+    monkeypatch.setattr(suggest, "load_config", lambda: lifted)
     over = tmp_path / "overlay.json"
-    over.write_text('{"dry_run": false}')
+    over.write_text('{"dry_run": false, "stake_amount": 10, "max_open_trades": 1}')
     with pytest.raises(SystemExit):
         league.guard([league.USER_DATA / "config.base.json", league.USER_DATA / "exchanges" / "kraken.json", over])
+    assert capsys.readouterr().err.strip() == "league: refusing to start: dry_run is not true"
+
+
+def test_the_league_refuses_when_the_guard_cannot_be_read(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(suggest, "load_config", lambda: {"live": {"stage": "gone"}, "book": {"stages": []}})
+    over = tmp_path / "overlay.json"
+    over.write_text('{"dry_run": false}')
+    with pytest.raises(SystemExit) as e:
+        league.guard([league.USER_DATA / "config.base.json", league.USER_DATA / "exchanges" / "kraken.json", over])
+    err = capsys.readouterr().err
+    assert e.value.code == 2 and "dry_run is not true" in err and "the guard could not read" in err
+
+
+def test_a_locked_door_reads_neither_the_client_nor_the_database():
+    client = FakeOrders()
+    client.positions = lambda: pytest.fail("read the client")
+    conn = Conn()
+    conn.execute = lambda *a: pytest.fail("read the database")
+    with pytest.raises(live.Refused, match="guard is on"):
+        live.place(client, conn, "events", "s", "T", 0.40, 10, "c1", CONFIG)
+
+
+def test_a_top_up_of_a_held_ticker_takes_no_new_slot(monkeypatch):
+    monkeypatch.setattr(guard, "GUARD_LIFTED", True)
+    client = FakeOrders(["A", "B"])
+    assert live.place(client, Conn(), "events", "s", "A", 0.40, 10, "c1", CONFIG) == {"order_id": "c1"}
