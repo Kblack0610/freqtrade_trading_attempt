@@ -109,11 +109,13 @@ class OddsApi:
             ts = dt.datetime.now(dt.timezone.utc)
             yield [q for e in events for q in quotes(e, ts, self.markets)]
 
-    def resolutions(self, since: dt.datetime) -> Iterator[Resolution]:
+    def resolutions(self, since: dt.datetime, cursor: str | None = None) -> Iterator[tuple[list[Resolution], str | None]]:
+        """A page a sport; the cursor names the next sport, and one no longer configured starts the walk over."""
         days = (dt.datetime.now(dt.timezone.utc) - since).total_seconds() / 86400
         days_from = min(3, max(1, math.ceil(days)))  # the API takes 1 to 3
-        for sport in self.sports:
+        sports = self.sports[self.sports.index(cursor):] if cursor in self.sports else self.sports
+        for i, sport in enumerate(sports):
             scores = self._get(f"/v4/sports/{sport}/scores", {"daysFrom": days_from, "dateFormat": "iso"})
             self.spend(2, sport)
-            for e in scores:
-                yield from resolutions_of(e, self.markets)  # every finished game in the window; storing one is idempotent
+            # every finished game in the window; storing one is idempotent
+            yield [r for e in scores for r in resolutions_of(e, self.markets)], (sports[i + 1:] or [None])[0]

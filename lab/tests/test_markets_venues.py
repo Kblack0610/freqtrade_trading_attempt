@@ -44,7 +44,9 @@ def test_polymarket_us_pages_by_offset_and_reads_the_list_quotes():
 
 def test_polymarket_us_resolutions_read_the_long_side_and_stop_at_since():
     s = Session((200, "polymarket_us_closed.json"))
-    rs = list(PolymarketUS(cfg(page_limit=500), s, sleep=nosleep).resolutions(dt.datetime(2026, 11, 6, 6, tzinfo=UTC)))
+    pages = list(PolymarketUS(cfg(page_limit=500), s, sleep=nosleep).resolutions(dt.datetime(2026, 11, 6, 6, tzinfo=UTC)))
+    assert [c for _, c in pages] == [None]  # a short page ends the walk
+    rs = pages[0][0]
     assert s.calls[0][1] == {"closed": "true", "orderBy": "updated_at", "orderDirection": "desc", "limit": 500, "offset": 0}
     assert [(r.market_id.split("-")[-1], r.result, r.value) for r in rs] == [
         ("06", "yes", 1.0), ("3pt5", "no", 0.0), ("4pt5", "no", 0.0), ("sw3", "yes", 1.0)]
@@ -52,7 +54,19 @@ def test_polymarket_us_resolutions_read_the_long_side_and_stop_at_since():
 
     s = Session((200, "polymarket_us_closed.json"), (200, "polymarket_us_closed.json"))
     later = dt.datetime(2026, 11, 6, 7, tzinfo=UTC)  # every row is older: none read, and no second page asked for
-    assert list(PolymarketUS(cfg(page_limit=4), s, sleep=nosleep).resolutions(later)) == [] and len(s.calls) == 1
+    assert list(PolymarketUS(cfg(page_limit=4), s, sleep=nosleep).resolutions(later)) == [([], None)]
+    assert len(s.calls) == 1
+
+
+def test_polymarket_us_resolutions_hand_back_the_offset_a_later_walk_resumes_from():
+    s = Session((200, "polymarket_us_closed.json"))
+    since = dt.datetime(2026, 11, 6, 6, tzinfo=UTC)
+    walk = PolymarketUS(cfg(page_limit=4), s, sleep=nosleep).resolutions(since)
+    page, cursor = next(walk)  # a full page, every row newer than since: the walk goes on past it
+    assert (len(page), cursor) == (4, "4")
+    s = Session((200, "polymarket_us_closed.json"))
+    next(PolymarketUS(cfg(page_limit=4), s, sleep=nosleep).resolutions(since, cursor))
+    assert s.calls[0][1]["offset"] == 4
 
 
 def test_polymarket_global_asks_gamma_for_markets_over_open_min_volume_on_every_page():
@@ -85,7 +99,9 @@ def test_polymarket_global_follows_the_keyset_cursor():
 def test_polymarket_global_resolutions_take_the_first_outcome_and_parse_short_offsets():
     s = Session((200, "polymarket_closed.json"))
     since = dt.datetime(2026, 11, 6, 6, 46, 20, 500000, tzinfo=UTC)
-    rs = list(Polymarket(cfg(page_limit=100), s, sleep=nosleep).resolutions(since))
+    pages = list(Polymarket(cfg(page_limit=100), s, sleep=nosleep).resolutions(since))
+    assert [c for _, c in pages] == [None]
+    rs = pages[0][0]
     assert s.calls[0][1] == {"closed": "true", "order": "closedTime", "ascending": "false", "limit": 100}
     assert [(r.result, r.value) for r in rs] == [("yes", 1.0), ("no", 0.0), ("no", 0.0)]  # the 4th closed before since
     assert rs[0].settled_at == dt.datetime(2026, 11, 6, 6, 46, 21, tzinfo=UTC)
@@ -130,7 +146,9 @@ def test_manifold_pages_by_before_time_and_stores_probability_as_last():
 def test_manifold_resolutions_map_cancel_to_void_and_stop_at_since():
     s = Session((200, "manifold_resolved.json"))
     since = dt.datetime.fromtimestamp(1793940850, UTC)
-    rs = list(Manifold(cfg(page_limit=1000), s, sleep=nosleep).resolutions(since))
+    pages = list(Manifold(cfg(page_limit=1000), s, sleep=nosleep).resolutions(since))
+    assert [c for _, c in pages] == [None]
+    rs = pages[0][0]
     assert s.calls[0][1] == {"contractType": "BINARY", "limit": 1000, "sort": "resolve-date", "filter": "resolved", "offset": 0}
     assert [(r.market_id, r.result, r.value) for r in rs] == [
         ("SPLttc9cQ8", "no", 0.0), ("RRIL6C0OQ2", "no", 0.0), ("yPq220tpN8", "void", None), ("pE0IcQdnCO", "yes", 1.0)]

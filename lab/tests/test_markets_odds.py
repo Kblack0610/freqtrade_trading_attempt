@@ -50,7 +50,8 @@ def test_configured_markets_are_one_call_and_each_line_is_its_own_market():
 def test_a_finished_game_resolves_each_configured_market_from_its_score():
     s = Session((200, "odds_api_scores.json"))
     since = dt.datetime.now(UTC) - dt.timedelta(hours=30)
-    rs = list(OddsApi(cfg(markets=["h2h", "totals", "spreads"]), s, sleep=lambda _: None, key="k").resolutions(since))
+    rs = [r for page, _ in OddsApi(cfg(markets=["h2h", "totals", "spreads"]), s, sleep=lambda _: None,
+                                   key="k").resolutions(since) for r in page]
     gid = "e912304de2b2ce35b473ce2ecd3d1502"
     assert [(r.market_id, r.result) for r in rs] == [
         (gid, "San Antonio Spurs"), (f"{gid}:totals", "Total 216"), (f"{gid}:spreads", "Phoenix Suns -8"),
@@ -67,11 +68,23 @@ def test_sports_are_paced_and_a_game_with_no_books_yields_no_quotes():
 def test_resolutions_name_the_winner_or_a_draw_and_skip_unfinished_games():
     s = Session((200, "odds_api_scores.json"))
     since = dt.datetime.now(UTC) - dt.timedelta(hours=30)
-    rs = list(OddsApi(cfg(), s, sleep=lambda _: None, key="k").resolutions(since))
+    rs = [r for page, _ in OddsApi(cfg(), s, sleep=lambda _: None, key="k").resolutions(since) for r in page]
     assert s.calls[0][1] == {"apiKey": "k", "daysFrom": 2, "dateFormat": "iso"}
     assert [(r.market_id, r.result, r.value) for r in rs] == [
         ("e912304de2b2ce35b473ce2ecd3d1502", "San Antonio Spurs", 1.0), ("aa11", "Draw", 1.0)]
     assert rs[0].settled_at == dt.datetime(2026, 11, 10, 3, 31, 5, tzinfo=UTC)
+
+
+def test_the_resolution_cursor_names_the_next_sport_and_an_unknown_one_starts_over():
+    since = dt.datetime.now(UTC) - dt.timedelta(hours=30)
+    api = OddsApi(cfg(sports=["basketball_nba", "icehockey_nhl"]), Session((200, []), (200, [])), sleep=lambda _: None,
+                  key="k")
+    assert [c for _, c in api.resolutions(since)] == ["icehockey_nhl", None]
+    for cursor, want in (("icehockey_nhl", ["icehockey_nhl"]), ("dropped_sport", ["basketball_nba", "icehockey_nhl"])):
+        s = Session((200, []), (200, []))
+        list(OddsApi(cfg(sports=["basketball_nba", "icehockey_nhl"]), s, sleep=lambda _: None, key="k")
+             .resolutions(since, cursor))
+        assert [c[0].rsplit("/", 2)[-2] for c in s.calls] == want
 
 
 def test_days_from_stays_within_what_the_api_takes():

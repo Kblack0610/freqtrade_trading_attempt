@@ -68,5 +68,5 @@ class PredictIt:
         ts = dt.datetime.now(dt.timezone.utc)
         yield [q for m in body.get("markets") or [] if m.get("status") == "Open" for q in quotes(m, ts)]
 
-    def resolutions(self, since: dt.datetime) -> Iterator[Resolution]:
+    def resolutions(self, since: dt.datetime, cursor: str | None = None) -> Iterator[tuple[list[Resolution], str | None]]:
         return iter(())

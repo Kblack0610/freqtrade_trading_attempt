@@ -120,8 +120,9 @@ class Venue(Protocol):
         """Every open market, one page at a time, so a 180k-market sweep never sits in memory whole."""
         ...
 
-    def resolutions(self, since: dt.datetime) -> Iterator[Resolution]:
-        """Markets settled at or after `since`."""
+    def resolutions(self, since: dt.datetime, cursor: str | None = None) -> Iterator[tuple[list[Resolution], str | None]]:
+        """Markets settled at or after `since`, a page at a time with the cursor that resumes after that page (None
+        once the walk reaches `since`). A cursor from an earlier walk with the same `since` continues that walk."""
         ...
 
 

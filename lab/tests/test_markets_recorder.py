@@ -23,8 +23,9 @@ def q(mid, bid, ask, ts=T0, status="active"):
 class FakeVenue:
     name = "fake"
 
-    def __init__(self, pages, resolved=(), broken=False):
-        self.pages, self.resolved, self.broken, self.since = pages, list(resolved), broken, None
+    def __init__(self, pages, resolved=(), broken=False, page_size=None):
+        self.pages, self.resolved, self.broken, self.since, self.cursor = pages, list(resolved), broken, None, None
+        self.page_size = page_size or max(len(self.resolved), 1)
 
     def open_markets(self):
         for p in self.pages:
@@ -32,9 +33,12 @@ class FakeVenue:
                 raise RuntimeError("venue down")
             yield p
 
-    def resolutions(self, since):
-        self.since = since
-        return iter(self.resolved)
+    def resolutions(self, since, cursor=None):
+        self.since, self.cursor = since, cursor
+        fresh = [r for r in self.resolved if r.settled_at >= since]  # newest first, as a venue lists them
+        for i in range(int(cursor or 0), len(fresh), self.page_size):
+            nxt = i + self.page_size
+            yield fresh[i:nxt], str(nxt) if nxt < len(fresh) else None
 
 
 def objects(root):
@@ -148,6 +152,55 @@ def test_a_settled_resolution_read_again_is_not_written_again(conn, tmp_path):
         ("A", t1), ("B", t2), ("C", t1)]
     assert conn.execute("SELECT market_id, status FROM markets ORDER BY 1").fetchall() == [
         ("A", "settled"), ("B", "settled"), ("C", "settled")]
+
+
+def test_a_walk_past_its_budget_stops_at_a_page_and_the_next_sweep_resumes_it(conn, tmp_path):
+    fs, root = pafs.LocalFileSystem(), str(tmp_path / "b")
+    recorder.sweep(FakeVenue([[q("A", 0.1, 0.2), q("B", 0.1, 0.2), q("C", 0.1, 0.2)]]), VCFG, conn, fs, root, LOOKBACK, T0)
+    t = [T0 + dt.timedelta(minutes=5 * i) for i in range(5)]
+    rs = [Resolution(market_id=m, result="no", value=0.0, settled_at=t[1]) for m in "ABC"]
+
+    def run(i, budget_s):
+        v = FakeVenue([[q("D", 0.1, 0.2, t[i])]], resolved=rs, page_size=1)
+        return v, recorder.sweep(v, VCFG, conn, fs, root, LOOKBACK, t[i], budget_s=budget_s)
+
+    v, s = run(1, 0)  # out of time after the first page
+    assert (v.since, v.cursor, s["resolved"], s["walk_cursor"]) == (T0 - LOOKBACK, None, 1, "1")
+    v, s = run(2, 0)  # the next sweep resumes that walk, not a new one from its own start
+    assert (v.since, v.cursor, s["resolved"], s["walk_cursor"]) == (T0 - LOOKBACK, "1", 1, "2")
+    v, s = run(3, float("inf"))
+    assert (v.since, v.cursor, s["resolved"], s["walk_cursor"]) == (T0 - LOOKBACK, "2", 1, None)
+    v, s = run(4, float("inf"))  # a new walk from the start of the one that finished, so nothing between is missed
+    assert (v.since, v.cursor, s["resolved"]) == (t[1] - LOOKBACK, None, 0)
+    assert conn.execute("SELECT count(*), bool_and(ok) FROM market_sweeps").fetchone() == (5, True)
+    assert conn.execute("SELECT count(*) FROM markets WHERE status = 'settled'").fetchone() == (3,)
+
+
+def test_a_resumed_walk_still_reads_what_settled_since_it_began_and_a_dead_cursor_walks_again(conn, tmp_path):
+    fs, root = pafs.LocalFileSystem(), str(tmp_path / "b")
+    recorder.sweep(FakeVenue([[q("X", 0.1, 0.2)]]), VCFG, conn, fs, root, LOOKBACK, T0)
+    t1, t2, t3 = (T0 + dt.timedelta(hours=h) for h in (1, 2, 3))
+    old = [Resolution(market_id=m, result="no", value=0.0, settled_at=t1) for m in "ABC"]
+    v = FakeVenue([[q("X", 0.1, 0.2, t1)]], resolved=old, page_size=1)
+    assert recorder.sweep(v, VCFG, conn, fs, root, LOOKBACK, t1, budget_s=0)["walk_cursor"] == "1"
+
+    new = Resolution(market_id="D", result="yes", value=1.0, settled_at=t2)  # settled after the walk began
+    v = FakeVenue([[q("X", 0.1, 0.2, t2)]], resolved=[new, *old], page_size=1)
+    s = recorder.sweep(v, VCFG, conn, fs, root, LOOKBACK, t2, budget_s=0)
+    assert conn.execute("SELECT 1 FROM resolutions WHERE market_id = 'D'").fetchone() == (1,)
+    assert s["walk_cursor"] is not None
+
+    class Refuses(FakeVenue):
+        def resolutions(self, since, cursor=None):
+            if cursor:
+                raise RuntimeError("cursor expired")
+            return super().resolutions(since, cursor)
+
+    s = recorder.sweep(Refuses([[q("X", 0.1, 0.2, t3)]], resolved=[new, *old], page_size=1), VCFG, conn, fs, root,
+                       LOOKBACK, t3)
+    assert s["walk_cursor"] is None
+    assert conn.execute("SELECT count(*) FROM resolutions").fetchone() == (4,)
+    assert conn.execute("SELECT bool_and(ok) FROM market_sweeps").fetchone() == (True,)
 
 
 def test_a_venue_that_fails_midway_writes_nothing_and_logs_a_failed_sweep(conn, tmp_path, monkeypatch):
