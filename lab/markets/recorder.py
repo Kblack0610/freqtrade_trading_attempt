@@ -56,6 +56,20 @@ def state(conn, venue: str, market_ids: list[str]) -> tuple[dict, dict]:
     return meta, book
 
 
+def new_resolutions(conn, venue: str, resolved) -> list:
+    """Each market once, its first (newest) read, unless its resolution is stored and its market settled. A venue can
+    re-stamp markets it settled long ago (Polymarket US's updatedAt, docs/markets.md), and writing each again row by
+    row can outlast the Job, so no good sweep is logged, the lookback never moves and every later sweep re-reads them.
+    One lookup of about 175k ids took 8 s on the live tables."""
+    fresh = {}
+    for r in resolved:
+        fresh.setdefault(r.market_id, r)
+    done = {row[0] for row in conn.execute(
+        "SELECT r.market_id FROM resolutions r JOIN markets m USING (venue, market_id) "
+        "WHERE r.venue = %s AND r.market_id = ANY(%s) AND m.status = 'settled'", (venue, list(fresh)))}
+    return [r for m, r in fresh.items() if m not in done]
+
+
 def write_quotes(fs: pafs.FileSystem, root: str, venue: str, started: dt.datetime, quotes: list[Quote]) -> str:
     key = f"{root}/venue={venue}/date={started:%Y-%m-%d}/{started:%H%M%S}Z.parquet"
     cols = {"venue": [venue] * len(quotes), "market_id": [q.market_id for q in quotes],
@@ -83,7 +97,7 @@ def sweep(v: Venue, vcfg: dict, conn, fs: pafs.FileSystem, root: str, lookback: 
                 changed.append(q)
 
     last = conn.execute("SELECT max(started_at) FROM market_sweeps WHERE venue = %s AND ok", (v.name,)).fetchone()[0]
-    resolved = list(v.resolutions((last or started) - lookback))
+    resolved = new_resolutions(conn, v.name, v.resolutions((last or started) - lookback))
 
     key = write_quotes(fs, root, v.name, started, changed) if changed else None
     with conn.transaction():
