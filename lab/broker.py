@@ -20,7 +20,7 @@ Sources, each with its own env:
 The real-account clients have no order method. Robinhood, SnapTrade and Polymarket US send only GET. Tastytrade
 sends GET, plus the one POST that trades its refresh token for an access token, scoped `read` so it cannot trade. Kraken's
 private API takes POST for every call, reads included, so KrakenRead sends POST to its READS paths only (Balance, TradeBalance) and refuses
-any other path before a request leaves; a key that could trade still cannot from here. A live order would come in behind lab/live.py's guard (docs/live.md), never by widening these. A source with no
+any other path before a request leaves; a key that could trade still cannot from here. A live order would go through lab/stages/live.py's door (docs/live.md), never by widening these. A source with no
 keys is skipped; with none set, `read` prints that and exits 0, as lab/wallet.py does with no accounts, so its job can
 exist before the keys do.
 

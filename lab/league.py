@@ -94,6 +94,17 @@ def guard(configs: list[Path]) -> None:
         if ex.get(field):
             problems.append(f"exchange.{field} is set")
     if problems:
+        # A config that could trade money is a live start, and lab/guard.py is the one door for those, so its reasons
+        # are named here too. The league reads neither readiness nor the bankroll, so those two are not asked. It
+        # refuses whatever the guard says, even when the guard cannot be read: a live bot starts through lab/live.py.
+        from lab import guard as door, suggest
+
+        try:
+            config = suggest.load_config()
+            problems += door.refusals(ex.get("name"), cfg.get("stake_amount"), cfg.get("max_open_trades"),
+                                      config["live"], door.stage_of(config["live"], config["book"]), True, None)
+        except Exception as e:
+            problems.append(f"the guard could not read {suggest.CONFIG}: {e!r}")
         die("refusing to start: " + "; ".join(problems))
 
 

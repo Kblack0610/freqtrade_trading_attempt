@@ -3,7 +3,8 @@
 GUARD_LIFTED is False, and lifting it is a human's PR with the docs that state the rule (docs/live.md). With it lifted,
 refusals() still names why a start may not trade money: a stake or open-position count outside the [live] stage of
 lab/suggest.toml [[book.stages]], a venue outside [live] venues, a strategy not at ready, or the bankroll kill switch
-that lab/watcher.py holds. An engine adds its own config checks on top: lab/live.py for a Freqtrade bot.
+that lab/watcher.py holds. refusals() is the one door: lab/live.py adds a Freqtrade bot's config checks on top, lab/stages/live.py
+places an order for any Orders adapter only through it, and lab/league.py names its reasons when it refuses a config.
 """
 
 GUARD_LIFTED = False

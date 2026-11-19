@@ -4,7 +4,7 @@ Nothing here trades money. `lab/live.py` always refuses, and no manifest starts 
 
 ## What `lab/live.py` checks
 
-The guard has two layers. `lab/guard.py` is the generic one, which any engine's live entry point runs: `GUARD_LIFTED`, the stage caps, the venue list, `confidence.ready` and the bankroll kill switch. `lab/live.py` adds the Freqtrade config checks on top. A later Kalshi or broker live path calls `guard.refusals` the same way and adds its own engine checks, rather than copying these.
+The guard has two layers. `lab/guard.py` `refusals()` is the one door every real-money start runs, whatever the engine: `GUARD_LIFTED`, the stage caps, the venue list, ready (`lab/readiness.py`) and the bankroll kill switch. `lab/live.py` adds the Freqtrade config checks on top. `lab/stages/live.py` `place()` is the door for any `Orders` adapter (Kalshi, Alpaca, Manifold): it reads the stake (price x count), the open positions, ready and the bankroll, and the client is never asked to place while `refusals()` names a reason. A Kalshi or broker live path goes through it and adds only its own engine checks. `lab/league.py` names the same reasons when it refuses a config that could trade money, and refuses it whatever they say.
 
 `GUARD_LIFTED` is False, so `main()` exits 2 before it reads a config, a key or the database. With the guard lifted, it builds the config from the stage named in `[live]` of `lab/suggest.toml` and exits 2 unless all of these hold on the merged config:
 
