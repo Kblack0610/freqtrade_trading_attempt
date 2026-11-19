@@ -75,6 +75,18 @@ def test_resolutions_name_the_winner_or_a_draw_and_skip_unfinished_games():
     assert rs[0].settled_at == dt.datetime(2026, 11, 10, 3, 31, 5, tzinfo=UTC)
 
 
+def test_the_resolution_cursor_names_the_next_sport_and_an_unknown_one_starts_over():
+    since = dt.datetime.now(UTC) - dt.timedelta(hours=30)
+    api = OddsApi(cfg(sports=["basketball_nba", "icehockey_nhl"]), Session((200, []), (200, [])), sleep=lambda _: None,
+                  key="k")
+    assert [c for _, c in api.resolutions(since)] == ["icehockey_nhl", None]
+    for cursor, want in (("icehockey_nhl", ["icehockey_nhl"]), ("dropped_sport", ["basketball_nba", "icehockey_nhl"])):
+        s = Session((200, []), (200, []))
+        list(OddsApi(cfg(sports=["basketball_nba", "icehockey_nhl"]), s, sleep=lambda _: None, key="k")
+             .resolutions(since, cursor))
+        assert [c[0].rsplit("/", 2)[-2] for c in s.calls] == want
+
+
 def test_days_from_stays_within_what_the_api_takes():
     now = dt.datetime.now(UTC)
     for back, want in ((dt.timedelta(minutes=5), 1), (dt.timedelta(days=10), 3)):

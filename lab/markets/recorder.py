@@ -85,21 +85,36 @@ def write_quotes(fs: pafs.FileSystem, root: str, venue: str, started: dt.datetim
 
 
 def walk_resolutions(conn, v: Venue, started: dt.datetime, lookback: dt.timedelta, budget_s: float):
-    """The resolutions this sweep reads and where its walk stopped: (resolved, since, cursor, walk_started). It resumes
-    the walk the last good sweep left unfinished, else starts one at the start of the last finished walk, less
-    `lookback`. Past `budget_s` it stops after a page, with the cursor the next sweep resumes from."""
+    """The resolutions this sweep reads and where its walk stopped: (resolved, since, cursor, walk_started). With no
+    walk left unfinished it starts one at the start of the last finished walk, less `lookback`. With one, it first
+    reads what settled since that walk began (the head of the list), then resumes it; a cursor the venue no longer
+    takes starts that walk again from the newest. Past `budget_s` a walk stops after a page, with the cursor the next
+    sweep resumes from."""
     last = conn.execute("SELECT started_at, walk_since, walk_cursor, walk_started FROM market_sweeps "
                         "WHERE venue = %s AND ok ORDER BY started_at DESC LIMIT 1", (v.name,)).fetchone()
-    if last and last[2]:
-        since, cursor, top = last[1], last[2], last[3]
-    else:
-        since, cursor, top = ((last[3] or last[0]) if last else started) - lookback, None, started
-    read, nxt, deadline = [], None, time.monotonic() + budget_s
-    for page, nxt in v.resolutions(since, cursor):
-        read += page
-        if nxt is not None and time.monotonic() > deadline:
-            break
-    return new_resolutions(conn, v.name, read), since, nxt, top
+    deadline = time.monotonic() + budget_s
+
+    def walk(since, cursor):
+        read, nxt = [], None
+        for page, nxt in v.resolutions(since, cursor):
+            read += page
+            if nxt is not None and time.monotonic() > deadline:
+                break
+        return read, nxt
+
+    if not (last and last[2]):
+        since = ((last[3] or last[0]) if last else started) - lookback
+        read, nxt = walk(since, None)
+        return new_resolutions(conn, v.name, read), since, nxt, started
+    since, cursor, top = last[1], last[2], last[3]
+    head, _ = walk(top - lookback, None)
+    try:
+        tail, nxt = walk(since, cursor)
+    except Exception:
+        traceback.print_exc()
+        print(f"markets: {v.name}: the resolution walk's cursor failed; walking it again from the newest", flush=True)
+        tail, nxt = walk(since, None)
+    return new_resolutions(conn, v.name, head + tail), since, nxt, top
 
 
 def sweep(v: Venue, vcfg: dict, conn, fs: pafs.FileSystem, root: str, lookback: dt.timedelta,
