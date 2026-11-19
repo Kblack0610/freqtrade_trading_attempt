@@ -94,6 +94,14 @@ def guard(configs: list[Path]) -> None:
         if ex.get(field):
             problems.append(f"exchange.{field} is set")
     if problems:
+        # A config that could trade money is a live start, and lab/guard.py is the one door for those; the league runs
+        # every roster strategy, ready or not, so for the guard none is at ready. The league refuses it whatever the
+        # guard says: a live bot starts through lab/live.py.
+        from lab import guard as door, suggest
+
+        config = suggest.load_config()
+        problems += door.refusals(ex.get("name"), cfg.get("stake_amount"), cfg.get("max_open_trades"), config["live"],
+                                  door.stage_of(config["live"], config["book"]), False, None)
         die("refusing to start: " + "; ".join(problems))
 
 
