@@ -232,7 +232,7 @@ class Cli:
             for side, (a, b) in (("tuned", (test_start, test_end)), ("is", (train_start, train_end(test_start)))):
                 r = self.bt.backtest(strategy, exchange, a, b, strategy_path=strat)
                 if not r["ok"]:
-                    return took({"ok": False, "error": f"{side}: {r['error']}"})
+                    return took({"ok": False, "no_data": r.get("no_data", False), "error": f"{side}: {r['error']}"})
                 out[side] = stats(r)
             out["robustness"] = robustness.run(self.bt, strategy, strat, params_file, exchange,
                                                test_start, test_end, suggest.load_config()["confidence"], stats)
