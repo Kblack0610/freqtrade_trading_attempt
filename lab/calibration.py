@@ -376,6 +376,9 @@ def run(conn, cfg: dict, today: dt.date, report: dict) -> bool:
         report.setdefault("stage_s", {})["candles"] = round(time.monotonic() - t0, 1)
         with psycopg.connect(scratch_url(), autocommit=True) as sc:
             cover(sc, cover_spans)
+            # migration 048 seeds production's real calls; with no prices in here they go overdue unscored and the
+            # analysis exits 1, so the synthetic universe runs with an empty ledger, new or resumed
+            sc.execute(f"TRUNCATE {SCHEMA}.calls CASCADE")
         env = scratch_env(repo, results, len(strategies), max(c["oos_months"]))
         analysed = step("analysis", "import sys; from lab import analyze; sys.exit(analyze.main())", env, report)
         walked = step("walkforward", "import sys; from lab import walkforward; sys.exit(walkforward.main())", env, report)

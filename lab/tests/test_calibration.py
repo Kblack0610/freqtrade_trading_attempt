@@ -110,6 +110,7 @@ def test_one_universe_end_to_end(conn, tmp_path, monkeypatch):
     cfg["calibration"] = {**C, "oos_months": [1, 2], "edges": [0.04], "per_edge": 1, "nulls": 1}
     monkeypatch.setattr(suggest, "load_config", lambda path=suggest.CONFIG: cfg)
     assert calibration.main(dt.date(2026, 11, 12)) == 0
+    assert conn.execute("SELECT count(*) FROM calibration_test.calls").fetchone()[0] == 0  # production's ledger stays out
     raw, ok = conn.execute("SELECT raw, ok FROM runs WHERE kind = 'calibration'").fetchone()
     assert ok and raw["universe"] == "0001-2026-W46" and raw["folds"]["folds_left"] == 0, raw
     assert raw["folds"]["candidates"] == 2 and raw["folds"]["folds_run"] == 4, raw
