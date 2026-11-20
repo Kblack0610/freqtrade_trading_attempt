@@ -196,6 +196,7 @@ for kind in ('analysis', 'walkforward'):
 | `stage_s` | Wall seconds per analysis step (plan, backtests, derive, then each step after it), so a slow night shows which step took the time |
 | `chunks_left` | Backtests the analysis budget left for the next night. It should fall night over night |
 | `folds_run`, `folds_left` | Walk-forward done and still queued. `folds_left` should fall night over night |
+| `folds_failed`, `folds_retry` | Walk-forward folds out of retries (more than a tenth of a shard's fails the job) and folds the next run tries again |
 | `skipped` | Strategies and venues left out, with the reason (usually "not fully backfilled") |
 | `trial_register` | Things tried so far. It only grows, and it raises the deflated Sharpe and minimum backtest length bars |
 | `confidence_ready` | Strategies ready for a capped experiment |

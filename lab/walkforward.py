@@ -38,7 +38,8 @@ strategy x venue belongs to one shard by a hash of its names, so every pod plans
 `walkforward_shard` row named WF_JOB#index, a rescheduled pod reusing its index's unfinished row; the shard that finishes last (under an advisory lock) runs the post steps
 and records the run's `walkforward` row, its counts summed over the shards. A shard killed before it records leaves
 the run without that row, so TraderRunStale tells; its folds run next time.
-Exits 1 when more than a tenth of the folds this shard ran failed, or on a crash.
+Exits 1 when more than a tenth of the folds this shard ran failed for the last time (MAX_ATTEMPTS), or on a crash; a
+fold still due a retry counts in `folds_retry`, not as failed.
 """
 
 import datetime as dt
@@ -298,7 +299,8 @@ def plan(conn, found: list[dict], first: dict, today: dt.date, ft_version: str) 
     return todo, cached, skipped
 
 
-def store(conn, task: dict, res: dict) -> None:
+def store(conn, task: dict, res: dict) -> int:
+    """Stores one fold's result; the attempts it now has."""
     side = lambda k: res.get(k) or {}  # noqa: E731
     attempts = MAX_ATTEMPTS if res.get("no_data") else task["attempts"] + 1 if not res["ok"] else 1
     train_start, fold_start, test_end = task["fold"]
@@ -336,6 +338,7 @@ def store(conn, task: dict, res: dict) -> None:
         with conn.cursor() as cur:
             cur.executemany("INSERT INTO walkforward_trades (strategy, exchange, variant, fold_start, pair, open_date, "
                             "close_date, profit_ratio) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)", rows)
+    return attempts
 
 
 def arms(conn) -> list[dict]:
@@ -351,15 +354,16 @@ def arms(conn) -> list[dict]:
 
 
 def run_folds(conn, runner: Runner, today: dt.date, report: dict, spent: float = 0.0) -> bool:
-    """This shard's folds, stored as each finishes; True unless more than FAIL_SHARE of them failed. spent: seconds
-    of WF_BUDGET_S the Job used before this pod started."""
+    """This shard's folds, stored as each finishes; True unless more than FAIL_SHARE of them failed for the last time
+    (MAX_ATTEMPTS). A fold still due a retry is not failed: the next run tries it again. spent: seconds of WF_BUDGET_S
+    the Job used before this pod started."""
     found = candidates(conn)
     todo, cached, skipped = plan(conn, found, analyze.coverage(conn), today, runner.version())
     report.update(candidates=[s["name"] for s in found], folds_run=len(todo), folds_cached=cached,
                   skipped=skipped[:100])
     print(f"walkforward: shard {SHARD + 1}/{SHARDS}: {len(found)} candidates on {' '.join(EXCHANGES)}, {len(todo)} folds "
           f"to run, {cached} cached, {len(skipped)} skipped, {WORKERS} workers", flush=True)
-    failed, done, failures = 0, 0, []
+    failed, retry, done, failures = 0, 0, 0, []
     budget = analyze.Budget(MEMORY_GB)
     stop_at = time.monotonic() + BUDGET_S - spent if BUDGET_S else None
     left = 0
@@ -384,18 +388,21 @@ def run_folds(conn, runner: Runner, today: dt.date, report: dict, spent: float =
                 if res is None:
                     left += 1
                     continue
-                store(conn, task, res)
+                attempts = store(conn, task, res)
                 done += 1
                 if not res["ok"] and not res.get("no_data"):
-                    failed += 1
+                    if attempts >= MAX_ATTEMPTS:
+                        failed += 1
+                    else:
+                        retry += 1
                     failures.append(f"{task['name']} {task['exchange']} {task['fold'][1]:%Y-%m}: {res['error']}"[:300])
-                print(f"walkforward: {done}/{len(todo)} folds, {failed} failed", flush=True)
+                print(f"walkforward: {done}/{len(todo)} folds, {failed} failed, {retry} to retry", flush=True)
         except BaseException:
             pool.shutdown(cancel_futures=True)
             raise
     if left:
         print(f"walkforward: budget of {BUDGET_S:.0f}s spent, {left} folds left for the next run", flush=True)
-    report.update(folds_failed=failed, folds_left=left, failures=failures[:100])
+    report.update(folds_failed=failed, folds_retry=retry, folds_left=left, failures=failures[:100])
     return failed <= FAIL_SHARE * max(done, 1)
 
 
@@ -416,7 +423,7 @@ def finish(conn, job: str, shards: list[tuple]) -> bool:
     report: dict = {k: raws[0].get(k) for k in ("exchanges", "universe", "folds", "train_days", "epochs",
                                                  "epochs_roi", "early_stop", "samplers", "loss")}
     report["shards"] = len(raws)
-    for k in ("folds_run", "folds_cached", "folds_failed", "folds_left"):
+    for k in ("folds_run", "folds_cached", "folds_failed", "folds_retry", "folds_left"):
         report[k] = sum(r.get(k) or 0 for r in raws)
     report["candidates"] = list(dict.fromkeys(x for r in raws for x in r.get("candidates") or []))
     for k in ("skipped", "failures"):

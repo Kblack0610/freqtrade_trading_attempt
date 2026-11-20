@@ -253,15 +253,35 @@ def test_a_run_tests_no_month_inside_the_lockbox(wlab, monkeypatch):
 
 def test_failures_retry_up_to_the_cap_and_a_month_with_no_candles_is_stored_once(wlab, monkeypatch):
     monkeypatch.setattr(wf, "ONLY", {"Live", "Watched"})
-    assert wf.main(FakeRunner(fail={"Live"}, hole={"Watched"}), TODAY) == 1
+    assert wf.main(FakeRunner(fail={"Live"}, hole={"Watched"}), TODAY) == 0, "a fold due a retry is not failed"
     rows = dict(wlab.execute("SELECT strategy, max(attempts) FROM walkforward GROUP BY 1").fetchall())
     assert rows == {"Live": 1, "Watched": analyze.MAX_ATTEMPTS}
-    for _ in range(analyze.MAX_ATTEMPTS):
-        wf.main(FakeRunner(fail={"Live"}, hole={"Watched"}), TODAY)
+    codes = [wf.main(FakeRunner(fail={"Live"}, hole={"Watched"}), TODAY) for _ in range(analyze.MAX_ATTEMPTS)]
+    assert codes == [0] * (analyze.MAX_ATTEMPTS - 2) + [1, 0], "only the attempt that reaches the cap fails the run"
     last = FakeRunner(fail={"Live"}, hole={"Watched"})
     assert wf.main(last, TODAY) == 0 and last.calls == []
     errors = {e for (e,) in wlab.execute("SELECT error FROM walkforward")}
     assert errors == {"hyperopt exit 2: boom", f"base: {analyze.NO_DATA}"}
+
+
+def test_one_timed_out_fold_of_nine_fails_the_shard_only_once_it_reaches_the_cap(wlab):
+    """Run 29917500: one hyperopt timeout among 9 finished folds tripped FAIL_SHARE although the next run retries it."""
+    class OneTimeout(FakeRunner):
+        def fold(self, strategy, file, exchange, fold, seed):
+            if (strategy, fold[1]) == ("Live", dt.date(2026, 10, 1)):
+                self.calls.append((strategy, fold[1], seed, exchange))
+                return {"ok": False, "error": "hyperopt timed out after 10800s", "duration_s": 1.0}
+            return super().fold(strategy, file, exchange, fold, seed)
+
+    assert wf.main(OneTimeout(), TODAY) == 0
+    raw = wlab.execute("SELECT raw FROM runs WHERE kind = 'walkforward' ORDER BY id DESC LIMIT 1").fetchone()[0]
+    assert raw["folds_run"] == 9 and raw["folds_failed"] == 0 and raw["folds_retry"] == 1, raw
+    wlab.execute("UPDATE walkforward SET attempts = %s WHERE strategy = 'Live' AND fold_start = '2026-10-01'",
+                 (analyze.MAX_ATTEMPTS - 1,))
+    again = OneTimeout()
+    assert wf.main(again, TODAY) == 1 and len(again.calls) == 1, "the same fold at MAX_ATTEMPTS is a failure"
+    raw = wlab.execute("SELECT raw FROM runs WHERE kind = 'walkforward' ORDER BY id DESC LIMIT 1").fetchone()[0]
+    assert raw["folds_failed"] == 1 and raw["folds_retry"] == 0, raw
 
 
 def test_a_fold_hyperopt_could_not_tune_is_ok_and_keeps_its_base(wlab, monkeypatch):
