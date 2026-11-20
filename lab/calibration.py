@@ -251,6 +251,8 @@ def open_universe(conn, cfg: dict, today: dt.date) -> dict:
     conn.execute(f"CREATE SCHEMA {SCHEMA}")
     subprocess.run([sys.executable, str(REPO / "lab" / "migrate.py")], check=True,
                    env={**os.environ, "DATABASE_URL": scratch_url()})
+    # the calls ledger a migration seeds is production's: unscored in here, its overdue horizons fail the analysis
+    conn.execute(f"TRUNCATE {SCHEMA}.calls CASCADE")
     conn.execute(f"CREATE TABLE {SCHEMA}.calibration_universe (tag text PRIMARY KEY, seed bigint NOT NULL, "
                  "settings text NOT NULL, started_at timestamptz NOT NULL DEFAULT now(), recorded_at timestamptz)")
     conn.execute(f"INSERT INTO {SCHEMA}.calibration_universe (tag, seed, settings) VALUES (%s, %s, %s)", (tag, seed, key))
