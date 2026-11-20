@@ -129,6 +129,19 @@ def test_no_fold_tunes_on_its_test_month_or_the_embargo_before_it(monkeypatch):
     assert len(leaks(spy, all_folds[-1])) == 2
 
 
+def test_a_hyperopt_with_no_training_candles_is_no_data_and_a_crash_is_a_failure(monkeypatch):
+    """freqtrade's whole "No data found" message is no data, stored once as a backtest's is; any other exit fails."""
+    cli = wf.Cli.__new__(wf.Cli)
+    cli.bt = WindowSpy(monkeypatch)
+    fold = wf.folds(TODAY, n=1)[0]
+    for out, no_data in (("No data found. Terminating.", True),
+                         ("WARNING - No data found for (ETH/USD, 5m, spot).\nKeyError: 'close'", False)):
+        monkeypatch.setattr(wf.subprocess, "run", lambda cmd, out=out, **kw: types.SimpleNamespace(
+            returncode=2, stdout=out, stderr=""))
+        res = cli.fold("Strategy001", "user_data/strategies/Strategy001.py", "binanceus", fold, 1)
+        assert res["ok"] is False and res.get("no_data", False) is no_data, res
+
+
 def backfilled(conn, ex, first):
     for pair in analyze.whitelist(ex):
         conn.execute("INSERT INTO data_coverage (exchange, pair, timeframe, first_ts, last_ts, rows, oldest_reached) "

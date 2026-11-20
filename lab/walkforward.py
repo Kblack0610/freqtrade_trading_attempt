@@ -219,7 +219,9 @@ class Cli:
                 return took({"ok": False, "error": f"hyperopt timed out after {TIMEOUT}s"})
             finally:
                 hyperopt_s = time.monotonic() - h0
-            if p.returncode:
+            if p.returncode:  # a training span with nothing to run is no data, as a backtest's is: no retry changes it
+                if why := analyze.nothing_to_run(p.stdout + p.stderr):
+                    return took({"ok": False, "no_data": True, "error": f"hyperopt: {why}"})
                 return took({"ok": False, "error": f"hyperopt exit {p.returncode}: {analyze._errors(p.stdout + p.stderr)}"})
             stopped = EARLY_STOPPED.search(p.stdout + p.stderr)
             out = {"ok": True, "error": None, "base": stats(base), "params": None,
