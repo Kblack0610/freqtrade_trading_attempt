@@ -234,23 +234,29 @@ def digest(c: dict) -> str:
     return hashlib.sha256(json.dumps(c, sort_keys=True, default=str).encode()).hexdigest()
 
 
+def migrate_scratch() -> None:
+    subprocess.run([sys.executable, str(REPO / "lab" / "migrate.py")], check=True,
+                   env={**os.environ, "DATABASE_URL": scratch_url()})
+
+
 def open_universe(conn, cfg: dict, today: dt.date) -> dict:
-    """The universe in progress, or a new one in a freshly migrated scratch schema when the last was recorded,
-    the settings changed, or there is none."""
+    """The universe in progress, or a new one in a freshly created scratch schema when the last was recorded,
+    the settings changed, or there is none. Either way the schema is migrated to the code's migrations: a universe
+    can take weeks of runs and outlive a migration the analysis and walk-forward read."""
     c, key = cfg["calibration"], digest({**cfg["calibration"], "lockbox": cfg["lockbox"], "train_days": TRAIN_DAYS})
     exists = conn.execute("SELECT 1 FROM information_schema.tables WHERE table_schema = %s "
                           "AND table_name = 'calibration_universe'", (SCHEMA,)).fetchone()
     row = conn.execute(f"SELECT tag, seed, settings FROM {SCHEMA}.calibration_universe WHERE recorded_at IS NULL"
                        ).fetchone() if exists else None
     if row and row[2] == key:
+        migrate_scratch()
         return {"tag": row[0], "seed": row[1], "resumed": True}
     n = conn.execute("SELECT count(DISTINCT run) FROM calibration_outcomes").fetchone()[0]
     tag = f"{n + 1:04d}-{today:%G-W%V}"  # numbered, so two universes recorded in one week still differ
     seed = metrics.seed_of("calibration", tag)
     conn.execute(f"DROP SCHEMA IF EXISTS {SCHEMA} CASCADE")
     conn.execute(f"CREATE SCHEMA {SCHEMA}")
-    subprocess.run([sys.executable, str(REPO / "lab" / "migrate.py")], check=True,
-                   env={**os.environ, "DATABASE_URL": scratch_url()})
+    migrate_scratch()
     conn.execute(f"CREATE TABLE {SCHEMA}.calibration_universe (tag text PRIMARY KEY, seed bigint NOT NULL, "
                  "settings text NOT NULL, started_at timestamptz NOT NULL DEFAULT now(), recorded_at timestamptz)")
     conn.execute(f"INSERT INTO {SCHEMA}.calibration_universe (tag, seed, settings) VALUES (%s, %s, %s)", (tag, seed, key))
