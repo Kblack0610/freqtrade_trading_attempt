@@ -125,6 +125,11 @@ page_gap_s = 1
 budget_rps = 1
 retries = 4
 timeout_s = 30
+# PredictIt gives a close date only to its weekly poll markets (Trump approval on a day); the rest say NA and never
+# reach the league. A new batch opens with spreads of 0.30 to 0.98, so no row passes the spread check until it nears
+# close: no order from 2026-11-20 15:35 UTC, after the last batch closed, while 18 of 559 contracts had a date and all
+# 18 were that wide on the live API (ar-2791). A week without one order is a whole batch missed.
+quiet_after_h = 168
 
 [venues.manifold]
 title = "Manifold"
@@ -364,6 +369,10 @@ max_book_age_min = 15
 # 8 accounts on a 5-min pass that is at most 4.6k near-miss rows a day, 138k kept.
 near_misses = 2
 trace_days = 30
+# Hours a paper venue may go without sending one order, filled or not, before the Sentinel watch trader-paper-volume
+# calls its league stopped (trader_paper_order_age_seconds against trader_paper_order_quiet_seconds). A venue whose
+# tradable books come in batches sets its own [venues.<v>] quiet_after_h.
+quiet_after_h = 24
 
 [demo.kalshi]
 # lab/markets/kalshi_trade.py, mock funds only: the client refuses any host but the demo's (docs/markets.md, Kalshi).

@@ -228,9 +228,11 @@ def test_market_metrics(conn):
     assert m['trader_paper_equity{account="paper-a"}'] == 900 and m['trader_paper_capital{account="paper-a"}'] == 1000
     assert m['trader_paper_open_positions{account="paper-a"}'] == 4
     assert 290 < m['trader_paper_marked_age_seconds{account="paper-a"}'] < 320
-    assert m['trader_paper_orders_24h{venue="kalshi"}'] == 1  # K1 counts though unfilled; K0 is over a day old
-    assert m['trader_paper_orders_24h{venue="polymarket_us"}'] == 0  # in [paper] venues with no order: the volume watch's red
-    assert 'trader_paper_orders_24h{venue="odds_api"}' not in m  # not a paper venue: no series for the watch to read
+    assert 3590 < m['trader_paper_order_age_seconds{venue="kalshi"}'] < 3620  # K1, the newest, though unfilled
+    assert m['trader_paper_order_age_seconds{venue="polymarket_us"}'] == float("inf")  # a paper venue that never sent one
+    assert 'trader_paper_order_age_seconds{venue="odds_api"}' not in m  # not a paper venue: no series for the watch to read
+    assert m['trader_paper_order_quiet_seconds{venue="kalshi"}'] == 24 * 3600
+    assert m['trader_paper_order_quiet_seconds{venue="predictit"}'] == 168 * 3600  # weekly batches (ar-2791)
     assert not any('account="paper-new"' in k for k in m)  # never marked: no equity to alert on yet
     assert not any('account="paper-gone"' in k for k in m)  # its venue left [paper]: no pass marks it again
     assert not any(k.startswith("trader_shadow_marked_age") for k in m)  # no mark yet: nothing to call stale
@@ -339,3 +341,18 @@ def test_recorder_freshness_changes_with_config_and_only_reports_active_venues(t
     metric = next(market_metrics(None, sweeps, [], []))
     assert [(s.labels["venue"], s.value) for s in metric.samples] == [("odds_api", 401 * 60), ("kalshi", 23 * 60)]
     assert not next(market_metrics(None, [], [], [])).samples
+
+
+def test_a_venue_quiet_limit_falls_back_to_the_paper_default_and_covers_only_paper_venues(tmp_path, monkeypatch):
+    from lab import markets
+    from web.exporter import paper_metrics
+
+    cfg = tmp_path / "markets.toml"
+    cfg.write_text('[paper]\nvenues = ["kalshi", "predictit"]\nquiet_after_h = 24\n'
+                   '[venues.kalshi]\n[venues.predictit]\nquiet_after_h = 168\n[venues.odds_api]\nquiet_after_h = 1\n')
+    monkeypatch.setattr(markets, "CONFIG", cfg)
+    now = dt.datetime(2026, 11, 21, 17, tzinfo=dt.timezone.utc)
+    orders = {"predictit": now - dt.timedelta(hours=26), "odds_api": now - dt.timedelta(days=9)}
+    age, quiet = list(paper_metrics(now, [], orders))[:2]
+    assert {s.labels["venue"]: s.value for s in age.samples} == {"kalshi": float("inf"), "predictit": 26 * 3600}
+    assert {s.labels["venue"]: s.value for s in quiet.samples} == {"kalshi": 24 * 3600, "predictit": 168 * 3600}
