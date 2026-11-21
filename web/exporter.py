@@ -5,6 +5,7 @@ site port, never exposes it. home-config scrapes it with a ServiceMonitor and al
 """
 
 import datetime as dt
+import math
 import os
 
 from prometheus_client import CollectorRegistry, start_http_server
@@ -13,7 +14,7 @@ from psycopg.rows import dict_row
 
 from lab import inputs, stocks
 from lab.db import connect
-from lab.markets import paper_venues, sweep_ages
+from lab.markets import paper_venues, quiet_limits, sweep_ages
 from lab.suggest import load_config
 
 RUN_KINDS = ("analysis", "walkforward", "reproduce", "calibration")
@@ -74,10 +75,10 @@ MARKOUTS = ("SELECT bot, horizon_min, count(net) AS n, avg(net) AS net, avg(null
             "FROM markouts GROUP BY 1, 2")
 RECONCILE = ("SELECT bot, kind, count(*) AS n, avg(delay_s) AS delay_s, avg(price_gap) AS price, avg(fee_gap) AS fee, "
              "avg(profit_gap) AS profit FROM reconcile GROUP BY 1, 2")
-# Paper orders sent in the last day per venue (the stock league's too), filled or not: a venue in [paper] venues at 0 while its recorder is
+# Each venue's newest paper order, filled or not: a venue in [paper] venues past its quiet_after_h while its recorder is
 # fresh is a league that stopped placing orders (0 from 2026-11-15 to 11-17 with every job green; tr-327).
-PAPER_ORDERS = ("SELECT a.venue, count(*) AS n FROM paper_orders o JOIN paper_accounts a USING (account) "
-                "WHERE o.sent_at > now() - interval '24 hours' GROUP BY 1")
+PAPER_ORDERS = ("SELECT a.venue, max(o.sent_at) AS newest FROM paper_orders o JOIN paper_accounts a USING (account) "
+                "GROUP BY 1")
 # Only [paper] venues' accounts, as PAPER_ORDERS: a venue taken out of [paper] has no pass to mark its accounts again.
 PAPER = ("SELECT account, capital, equity, open_positions, marked_at FROM paper_accounts "
          "WHERE marked_at IS NOT NULL AND venue = ANY(%s)")
@@ -144,7 +145,7 @@ class TraderCollector:
                 last_sweep = cur.execute(LAST_SWEEP).fetchall()
                 links = cur.execute(LINKS).fetchall()
                 paper = cur.execute(PAPER, (paper_venues(),)).fetchall()
-                orders = {r["venue"]: r["n"] for r in cur.execute(PAPER_ORDERS).fetchall()}
+                orders = {r["venue"]: r["newest"] for r in cur.execute(PAPER_ORDERS).fetchall()}
                 decisions = cur.execute(DECISIONS).fetchall()
                 funnel = cur.execute(FUNNEL).fetchall()
                 untraced = cur.execute(UNTRACED).fetchall()
@@ -319,9 +320,12 @@ def decision_metrics(decisions, funnel, untraced):
 
 
 def paper_metrics(now, paper, orders):
-    yield family("trader_paper_orders_24h", "Paper orders sent in the last 24 hours, filled or not, for each venue in "
-                 "[paper] venues (0 when none)", ["venue"],
-                 (([v], orders.get(v, 0)) for v in dict.fromkeys([*paper_venues(), *orders])))
+    quiet = quiet_limits()
+    yield family("trader_paper_order_age_seconds", "Seconds since the venue's newest paper order, filled or not, for "
+                 "each venue in [paper] venues (+Inf when it never sent one)", ["venue"],
+                 (([v], math.inf if orders.get(v) is None else age(now, orders[v])) for v in quiet))
+    yield family("trader_paper_order_quiet_seconds", "The venue's quiet_after_h in lab/markets.toml, in seconds: "
+                 "longer without an order is a stopped league", ["venue"], (([v], h * 3600) for v, h in quiet.items()))
     yield family("trader_paper_equity", "A paper account's equity at its last mark: capital, realized, open marked",
                  ["account"], (([p["account"]], p["equity"]) for p in paper))
     yield family("trader_paper_capital", "A paper account's starting capital", ["account"],

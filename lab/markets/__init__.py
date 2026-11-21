@@ -26,3 +26,11 @@ def sweep_ages(path: Path | None = None) -> tuple[int, dict[str, int]]:
     cfg = tomllib.loads((path or CONFIG).read_text())
     default = cfg["paper"]["max_book_age_min"]
     return default, {v: c.get("stale_after_min", default) for v, c in cfg["venues"].items()}
+
+
+def quiet_limits(path: Path | None = None) -> dict[str, int]:
+    """Hours each `[paper] venues` venue may go without a paper order before the volume watch calls its league
+    stopped: its `[venues.<v>] quiet_after_h`, else `[paper] quiet_after_h`."""
+    cfg = tomllib.loads((path or CONFIG).read_text())
+    default = cfg["paper"]["quiet_after_h"]
+    return {v: cfg["venues"].get(v, {}).get("quiet_after_h", default) for v in cfg["paper"]["venues"]}
