@@ -3,6 +3,7 @@ it at the configured edge, and one universe runs end to end through the real ana
 
 import datetime as dt
 import os
+import shutil
 
 import numpy as np
 import pandas as pd
@@ -89,6 +90,31 @@ def test_rates_and_intervals():
     lo, hi = calibration.wilson(0, 20)
     assert lo == pytest.approx(0, abs=1e-12) and hi == pytest.approx(0.161, abs=0.001)
     assert calibration.wilson(0, 0) == (None, None)
+
+
+def test_a_resumed_universe_is_migrated_to_the_code(conn, tmp_path, monkeypatch):
+    """A universe can outlive a migration: 0001-2026-W46 opened at 049 on 2026-11-14, 062 replaced confidence with
+    readiness, and its resumed run of 2026-11-21 failed on a missing readiness. Resuming migrates the scratch schema,
+    as opening does."""
+    migrations = sorted((calibration.REPO / "lab" / "migrations").glob("[0-9][0-9][0-9]_*.sql"))
+    behind = tmp_path / "lab"  # the code as it was when the universe opened: every migration but the newest
+    (behind / "migrations").mkdir(parents=True)
+    for f in ("__init__.py", "db.py", "migrate.py"):
+        shutil.copy(calibration.REPO / "lab" / f, behind / f)
+    for f in migrations[:-1]:
+        shutil.copy(f, behind / "migrations" / f.name)
+    monkeypatch.setattr(calibration, "SCHEMA", "calibration_resume_test")
+    cfg = suggest.load_config()
+    applied = "SELECT count(*) FROM calibration_resume_test.schema_migrations"
+    try:
+        with monkeypatch.context() as m:
+            m.setattr(calibration, "REPO", tmp_path)
+            assert not calibration.open_universe(conn, cfg, dt.date(2026, 11, 14))["resumed"]
+        assert conn.execute(applied).fetchone()[0] == len(migrations) - 1
+        assert calibration.open_universe(conn, cfg, dt.date(2026, 11, 21))["resumed"]
+        assert conn.execute(applied).fetchone()[0] == len(migrations)
+    finally:
+        conn.execute("DROP SCHEMA IF EXISTS calibration_resume_test CASCADE")
 
 
 def test_one_universe_end_to_end(conn, tmp_path, monkeypatch):
