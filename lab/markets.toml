@@ -41,7 +41,8 @@ settled_min_volume = 100
 bars_period_min = 60
 # Contracts traded over the market's life. Below 100 there is no real quote to backtest against.
 bars_min_volume = 100
-bars_since_days = 1095
+# One year: at 1095 the 50 min runs fetched 0 to 2 dates each with about 1069 left (2026-11-21, tr-181).
+bars_since_days = 365
 # Trades are what the fill model is fitted on, and Kalshi prints millions a day: the liquid markets of the last 90 days.
 trades_min_volume = 10000
 trades_since_days = 90
@@ -61,7 +62,8 @@ bars_since_days = 45
 settled_min_volume = 1000
 bars_period_min = 60
 bars_min_volume = 1000
-bars_since_days = 1095
+# One year: at 1095 a run fetched about 480 markets, about one date a day, with 1050 left (2026-11-21, tr-181).
+bars_since_days = 365
 
 [venues.kalshi]
 title = "Kalshi"
@@ -125,6 +127,11 @@ page_gap_s = 1
 budget_rps = 1
 retries = 4
 timeout_s = 30
+# PredictIt gives a close date only to its weekly poll markets (Trump approval on a day); the rest say NA and never
+# reach the league. A new batch opens with spreads of 0.30 to 0.98, so no row passes the spread check until it nears
+# close: no order from 2026-11-20 15:35 UTC, after the last batch closed, while 18 of 559 contracts had a date and all
+# 18 were that wide on the live API (ar-2791). A week without one order is a whole batch missed.
+quiet_after_h = 168
 
 [venues.manifold]
 title = "Manifold"
@@ -364,6 +371,10 @@ max_book_age_min = 15
 # 8 accounts on a 5-min pass that is at most 4.6k near-miss rows a day, 138k kept.
 near_misses = 2
 trace_days = 30
+# Hours a paper venue may go without sending one order, filled or not, before the Sentinel watch trader-paper-volume
+# calls its league stopped (trader_paper_order_age_seconds against trader_paper_order_quiet_seconds). A venue whose
+# tradable books come in batches sets its own [venues.<v>] quiet_after_h.
+quiet_after_h = 24
 
 [demo.kalshi]
 # lab/markets/kalshi_trade.py, mock funds only: the client refuses any host but the demo's (docs/markets.md, Kalshi).

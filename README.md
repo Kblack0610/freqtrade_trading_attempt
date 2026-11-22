@@ -488,7 +488,7 @@ The event-contract paper league's accounts (`paper-<venue>-<family>-<variant>`, 
 | `trader_markets_links` | `source` (`rule`, `llm`), `status` | Cross-venue links |
 | `trader_broker_equity`, `trader_broker_read_age_seconds` | `broker` | A broker paper account's equity at its last good read, and the time since. A real account exports only its read age |
 | `trader_paper_equity`, `trader_paper_capital`, `trader_paper_open_positions`, `trader_paper_marked_age_seconds` | `account` | Each marked paper account's equity, starting capital, open positions and time since its last mark |
-| `trader_paper_orders_24h` | `venue` | Paper orders sent in the last 24 hours, filled or not, for each venue in `[paper] venues` (0 when none). The Sentinel watch `trader-paper-volume` goes red on a 0 while that venue's sweep is fresh |
+| `trader_paper_order_age_seconds`, `trader_paper_order_quiet_seconds` | `venue` | Since the venue's newest paper order, filled or not (`+Inf` when it never sent one), and its `quiet_after_h` (`lab/markets.toml`: `[paper]`, or the venue's own), for each venue in `[paper] venues`. The Sentinel watch `trader-paper-volume` goes red when the age passes the limit while that venue's sweep is fresh |
 | `trader_markout_entries`, `trader_markout_net`, `trader_markout_null` | `bot`, `horizon` | Entries marked, their mean markout (BTC beta hedged, net of the round-trip fee) and the random-entry null's, from `markouts` |
 | `trader_shadow_accounts`, `trader_shadow_marked_age_seconds` | `cohort`, `state` | Shadow paper accounts per cohort and state, and seconds since the end of the newest day marked (`lab/shadow.py`) |
 | `trader_markout_fill_slip` | `bot` | Mean fill over the entry candle's open, positive when worse |
