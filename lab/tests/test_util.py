@@ -4,6 +4,7 @@ import math
 import numpy as np
 import pandas as pd
 
+from lab import util
 from lab.util import S3_CONNECT_TIMEOUT, S3_REQUEST_TIMEOUT, finite, s3_from_env, utc
 
 T = pd.Timestamp("2026-11-04 12:00", tz="UTC")
@@ -32,7 +33,9 @@ def test_s3_from_env_outlasts_a_stalled_home_disk(monkeypatch):
     monkeypatch.setenv("S3_ENDPOINT", "http://minio.minio.svc.cluster.local:9000")
     monkeypatch.setenv("S3_ACCESS_KEY", "k")
     monkeypatch.setenv("S3_SECRET_KEY", "s")
-    opts = s3_from_env().__reduce__()[1][0]  # the options pyarrow rebuilds the filesystem from
-    assert opts["endpoint_override"] == "minio.minio.svc.cluster.local:9000" and opts["scheme"] == "http"
-    assert (opts["connect_timeout"], opts["request_timeout"]) == (S3_CONNECT_TIMEOUT, S3_REQUEST_TIMEOUT)
-    assert S3_REQUEST_TIMEOUT >= 30  # the AWS SDK default, 3 s, failed a run on one stalled upload part (ar-4215)
+    seen = {}
+    monkeypatch.setattr(util.pafs, "S3FileSystem", lambda **kw: seen.update(kw))
+    s3_from_env()
+    assert seen["endpoint_override"] == "minio.minio.svc.cluster.local:9000" and seen["scheme"] == "http"
+    # unset, the AWS SDK's 3 s failed a run on one stalled upload part (ar-4215)
+    assert (seen["connect_timeout"], seen["request_timeout"]) == (S3_CONNECT_TIMEOUT, S3_REQUEST_TIMEOUT)

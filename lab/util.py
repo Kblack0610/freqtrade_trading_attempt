@@ -35,8 +35,9 @@ def finite(v):
 
 # Seconds. Unset, the AWS SDK gives a connect 1 s and drops a request that moves no byte for 3 s, sized for AWS
 # and not for a MinIO on a shared home disk: a backup on its node stalled one upload part past 3 s and failed a
-# 20-minute history run (ar-4215).
-S3_CONNECT_TIMEOUT, S3_REQUEST_TIMEOUT = 10, 60
+# 20-minute history run (ar-4215). With the SDK's 3 attempts this rides out about 90 s of stall, and a MinIO that
+# is down still fails a call inside the recorder's 5-minute cadence.
+S3_CONNECT_TIMEOUT, S3_REQUEST_TIMEOUT = 10, 30
 
 
 def s3_from_env() -> pafs.FileSystem:
