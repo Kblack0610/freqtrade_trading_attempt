@@ -41,7 +41,8 @@ settled_min_volume = 100
 bars_period_min = 60
 # Contracts traded over the market's life. Below 100 there is no real quote to backtest against.
 bars_min_volume = 100
-bars_since_days = 1095
+# One year: at 1095 the 50 min runs fetched 0 to 2 dates each with about 1069 left (2026-11-21, tr-181).
+bars_since_days = 365
 # Trades are what the fill model is fitted on, and Kalshi prints millions a day: the liquid markets of the last 90 days.
 trades_min_volume = 10000
 trades_since_days = 90
@@ -61,7 +62,8 @@ bars_since_days = 45
 settled_min_volume = 1000
 bars_period_min = 60
 bars_min_volume = 1000
-bars_since_days = 1095
+# One year: at 1095 a run fetched about 480 markets, about one date a day, with 1050 left (2026-11-21, tr-181).
+bars_since_days = 365
 
 [venues.kalshi]
 title = "Kalshi"
