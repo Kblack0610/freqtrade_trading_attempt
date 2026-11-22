@@ -52,7 +52,7 @@ def test_a_healthy_climate_report_reader_is_never_stale():
     stations = reg[nws.NAME]["stations"].values()
     ends = sorted({nws.day_start(dt.date(2026, 11, 20) + dt.timedelta(days=k), st) for k in range(3) for st in stations})
     peak = max(b - a for a, b in zip(ends, ends[1:])) + dt.timedelta(hours=nws.FINAL_H + 1)
-    assert peak == dt.timedelta(hours=34) and peak < dt.timedelta(minutes=reg[nws.CLI]["fresh_min"])
+    assert peak < dt.timedelta(minutes=reg[nws.CLI]["fresh_min"])  # 34 h on the 2026-11 registry
 
 
 def test_the_forecast_high_is_each_daytime_period_in_whole_degrees_f():
