@@ -33,8 +33,15 @@ def finite(v):
     return v
 
 
+# Seconds. Unset, the AWS SDK gives a connect 1 s and drops a request that moves no byte for 3 s, sized for AWS
+# and not for a MinIO on a shared home disk: a backup on its node stalled one upload part past 3 s and failed a
+# 20-minute history run (ar-4215).
+S3_CONNECT_TIMEOUT, S3_REQUEST_TIMEOUT = 10, 60
+
+
 def s3_from_env() -> pafs.FileSystem:
     """The object store (MinIO) from S3_ENDPOINT, S3_ACCESS_KEY and S3_SECRET_KEY."""
     url = urlparse(os.environ["S3_ENDPOINT"])
     return pafs.S3FileSystem(access_key=os.environ["S3_ACCESS_KEY"], secret_key=os.environ["S3_SECRET_KEY"],
-                             endpoint_override=url.netloc, scheme=url.scheme or "https", region="us-east-1")
+                             endpoint_override=url.netloc, scheme=url.scheme or "https", region="us-east-1",
+                             connect_timeout=S3_CONNECT_TIMEOUT, request_timeout=S3_REQUEST_TIMEOUT)
