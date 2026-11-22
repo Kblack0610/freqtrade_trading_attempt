@@ -45,6 +45,16 @@ def test_an_input_is_stale_past_its_limit_or_never_read():
     assert not stale(180) and stale(181)
 
 
+def test_a_healthy_climate_report_reader_is_never_stale():
+    """A report's as_of is its day's end and it is read FINAL_H later, at the next hourly run (lab.nws.run_cli), so the
+    newest one gets older than the longest gap between two stations' day ends; fresh_min must stay above that peak."""
+    reg = inputs.load()
+    stations = reg[nws.NAME]["stations"].values()
+    ends = sorted({nws.day_start(dt.date(2026, 11, 20) + dt.timedelta(days=k), st) for k in range(3) for st in stations})
+    peak = max(b - a for a, b in zip(ends, ends[1:])) + dt.timedelta(hours=nws.FINAL_H + 1)
+    assert peak == dt.timedelta(hours=34) and peak < dt.timedelta(minutes=reg[nws.CLI]["fresh_min"])
+
+
 def test_the_forecast_high_is_each_daytime_period_in_whole_degrees_f():
     assert nws.highs(FORECAST) == {"2026-11-15": 58, "2026-11-16": 59}
 
@@ -89,7 +99,7 @@ def test_input_metrics_give_each_read_input_its_age_and_limit():
 
     got = {m.name: [(s.labels, s.value) for s in m.samples] for m in input_metrics(NOW, {"nws_high": NOW - dt.timedelta(hours=1)})}
     assert got == {"trader_input_age_seconds": [({"input": "nws_high"}, 3600.0)],
-                   "trader_input_fresh_seconds": [({"input": "nws_cli"}, 108000.0), ({"input": "nws_high"}, 10800.0),
+                   "trader_input_fresh_seconds": [({"input": "nws_cli"}, 126000.0), ({"input": "nws_high"}, 10800.0),
                                                   ({"input": "nws_obs"}, 10800.0)]}
     assert [m.samples for m in input_metrics(NOW, {})][0] == []  # never read: no age, absent() fires
 

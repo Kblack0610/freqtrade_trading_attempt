@@ -298,8 +298,10 @@ signal_source = "observation"
 origin = "NWS climate report (CLI), parsed by IEM"
 cadence = "daily"
 reader = "lab/nws.py"
-# The report is issued after the day ends and a final one the next morning; a day later than 30 h is a missed read.
-fresh_min = 1800
+# A reading's as_of is its day's end, and lab/nws.py reads it FINAL_H (12 h) later at the next hourly run. The
+# stations' day ends fall up to 21 h apart (UTC-5 to UTC-8), so a healthy reader's newest reading reaches 34 h every
+# day (test_inputs.py checks it); 35 h is a report due an hour ago that no run wrote.
+fresh_min = 2100
 
 [inputs.nws_cli.api]
 # Iowa Environmental Mesonet (IEM), mesonet.agron.iastate.edu: the ASOS archive and the NWS CLI reports as JSON, free
