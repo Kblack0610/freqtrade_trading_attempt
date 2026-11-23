@@ -16,7 +16,7 @@ from lab import cohorts, flow_matrix
 MODE = os.environ.get("FLOW_MATRIX", "")
 SHARD, SHARDS = int(os.environ.get("FLOW_SHARD", "0")), int(os.environ.get("FLOW_SHARDS", "1"))
 FAMS = cohorts.families()
-BOOK = [n for n, f in FAMS.items() if f not in flow_matrix.OUTSIDE]
+BOOK = [n for n in FAMS if n not in flow_matrix.research()]
 SAMPLE = flow_matrix.sample(FAMS)
 PLANTED = flow_matrix.REPO / "lab" / "tests" / "fixtures" / "strategies" / "PlantedLookahead.py"
 # A class the scan finds but families.toml has lost: its backtest cell must fail, as /coverage shows it untagged.

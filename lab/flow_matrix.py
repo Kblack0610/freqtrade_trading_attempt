@@ -2,7 +2,7 @@
 """Flow matrix: every strategy in the book through every avenue of the trader flow, on each exchange it is on.
 
 The book is every strategy class the nightly analysis discovers under user_data/strategies, plus every class
-lab/families.toml names outside the families kept outside user_data (OUTSIDE). The avenues, and the exchanges each
+lab/families.toml names outside lab/research (the futures research, which the nightly flow never runs). The avenues, and the exchanges each
 one runs a strategy on:
 - backtest: its backtest chunks, on every analysis venue (ANALYZE_EXCHANGES). A class with no families.toml line
   fails here, as it shows untagged on /coverage.
@@ -35,6 +35,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import re
 import time
 import traceback
 from collections import Counter
@@ -51,7 +52,6 @@ from lab.db import connect
 
 REPO = Path(__file__).resolve().parents[1]
 AVENUES = ("backtest", "bias", "walkforward", "reproduce", "confidence", "paper")
-OUTSIDE = {"short"}  # families.toml families whose classes live outside user_data/strategies (futures research)
 SCHEMA = os.environ.get("FLOW_SCHEMA", "flow_matrix_scratch")
 WORK = Path(os.environ.get("FLOW_WORK") or tempfile.gettempdir()) / "flow_matrix"
 WORKERS = int(os.environ.get("FLOW_WORKERS", str(os.cpu_count() or 2)))
@@ -63,6 +63,7 @@ TIMEFRAMES = ("1m", "5m", "15m", "30m", "1h", "4h", "1d")
 FREQ = {"1m": "min", "5m": "5min", "15m": "15min", "30m": "30min", "1h": "h", "4h": "4h", "1d": "D"}
 MINUTE_VOL = 0.0015  # about 5.7% a day, crypto-like
 START = {"BTC": 30_000.0, "ETH": 2_000.0, "SOL": 100.0}
+RESEARCH_CLASS = re.compile(r"^class (\w+)\(", re.M)
 CLEAN = ": clean"  # a bias cell's reason marks each check that reached a clean verdict
 TOO_QUIET = "signals in"  # lab/analyze.py bias_one: "only N signals in D days", a strategy too quiet to check
 
@@ -88,9 +89,15 @@ def resample(minutes: pd.DataFrame, tf: str) -> pd.DataFrame:
     return out.dropna().reset_index()
 
 
+def research() -> set[str]:
+    """The classes under lab/research: futures research that families.toml tags but the nightly flow never runs."""
+    return {m for f in (REPO / "lab" / "research").glob("*.py") for m in RESEARCH_CLASS.findall(f.read_text())}
+
+
 def book(found: list[dict], fams: dict[str, str]) -> list[str]:
-    """Every discovered class, and every families.toml class outside OUTSIDE, in families.toml order then by name."""
-    names = {s["name"] for s in found} | {n for n, f in fams.items() if f not in OUTSIDE}
+    """Every discovered class, and every families.toml class outside lab/research, in families.toml order then by name."""
+    out = research()
+    names = {s["name"] for s in found} | {n for n in fams if n not in out}
     order = {n: i for i, n in enumerate(fams)}
     return sorted(names, key=lambda n: (order.get(n, len(order)), n))
 
@@ -98,9 +105,9 @@ def book(found: list[dict], fams: dict[str, str]) -> list[str]:
 def sample(fams: dict[str, str]) -> list[str]:
     """The gate's fixed sample: the first class of each family in the book, in families.toml order."""
     seen: set[str] = set()
-    out = []
+    skip, out = research(), []
     for name, fam in fams.items():
-        if fam not in seen and fam not in OUTSIDE:
+        if fam not in seen and name not in skip:
             seen.add(fam)
             out.append(name)
     return out
