@@ -10,7 +10,7 @@ Free material worth the time, by subject, each with what it covers and why it ma
 | [Lookahead analysis](https://www.freqtrade.io/en/stable/lookahead-analysis/) | Reruns with shifted indicators to find a strategy reading the future | The first check on any new strategy |
 | [Recursive analysis](https://www.freqtrade.io/en/stable/recursive-analysis/) | Finds indicators that change with how many candles they start from | Only compares the last row; it does not show whether entries move |
 | [Hyperopt](https://www.freqtrade.io/en/stable/hyperopt/) | The optimiser and its loss functions | Its overfitting advice is one line; walk-forward is ours ([pipeline.md](../pipeline.md)) |
-| [Configuration](https://www.freqtrade.io/en/stable/configuration/) | Stake, minimum stake and `amount_reserve_percent` | Lot-size handling, [glossary.md](glossary.md#lot-size) |
+| [Configuration](https://www.freqtrade.io/en/stable/configuration/) | Stake, minimum stake and `amount_reserve_percent` | Lot-size handling, [the glossary](../../web/glossary.toml), "Lot size" |
 
 ## Overfitting and research method
 

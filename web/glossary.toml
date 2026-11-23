@@ -75,6 +75,237 @@ means = "The kill-switch state (lab/watcher.py): running, day limit hit, stopped
 name = "Marked"
 means = "When the account was last marked."
 
+# Market vocabulary: what a person needs to read the repo, each term with where the trader uses it. Rendered at
+# /guide#trading-terms. Checked against the code at master b9907bd, 2026-11-17.
+
+[[trading]]
+group = "Sizing"
+name = "Lot size"
+means = "The unit a venue makes you trade in: a step every quantity must be a multiple of, and a minimum order. An order between steps is rounded down; an order under the minimum is refused, so rounding leaves part of a small stake unused. Forex: standard lot 100,000 units of the base currency, mini 10,000, micro 1,000. Stocks: 1 share, or fractions at some brokers. Crypto: per pair, an amount step and a minimum amount and cost. Event contracts: 1 contract, which pays $1 if it resolves your way (at 40c, $10 buys 25)."
+uses = "Crypto league: Freqtrade rounds every order to the pair's step and refuses a stake under the pair's minimum (it adds amount_reserve_percent, default 5%, and the stoploss); the repo has no lot-size code of its own. Stakes are fixed per stage, $50, $100 and $200 (lab/suggest.toml [[book.stages]]), well above the usual minimums. Event contracts: lab/markets/backtest.py take buys floor(stake / price) whole contracts, capped by book depth; the paper league fills through the same function. Alpaca paper (lab/broker.py): whole shares, qty an integer."
+
+[[trading]]
+group = "Sizing"
+name = "Position sizing"
+means = "How much goes on each trade. It decides survival more than entries do"
+uses = "Fixed stake per stage, docs/live.md"
+
+[[trading]]
+group = "Sizing"
+name = "Stake"
+means = "The money put into one position"
+uses = "`stake_amount`; `unlimited` is refused for live"
+
+[[trading]]
+group = "Sizing"
+name = "Risk per trade"
+means = "What you lose if the stop is hit: stake times the distance to the stop. A $50 stake with a 10% stop risks $5"
+uses = "Freqtrade `stoploss` per strategy"
+
+[[trading]]
+group = "Sizing"
+name = "Kelly criterion"
+means = "The fraction of capital that maximizes long-run growth for a known edge: for a bet paying b to 1 that wins with probability p, f = p - (1 - p) / b"
+uses = "Not used: docs/avenues.md row \"Kelly or point-estimate stake growth\" is NO-GO"
+
+[[trading]]
+group = "Sizing"
+name = "Fractional Kelly"
+means = "Betting a fraction c of Kelly keeps c(2 - c) of the growth: half Kelly keeps 75% with far less drawdown; double Kelly grows at zero (Thorp 2006)"
+uses = "Why fixed steps from the edge's lower bound win over Kelly while the edge is an estimate"
+
+[[trading]]
+group = "Sizing"
+name = "Volatility targeting"
+means = "Sizing each position so it carries the same expected risk, smaller in wild markets and larger in calm ones (Carver)"
+uses = "Research only: `lab/vol_target.py`"
+
+[[trading]]
+group = "Sizing"
+name = "Leverage"
+means = "Exposure larger than capital, borrowed. It multiplies losses as much as gains"
+uses = "None: `position_adjustment_enable` is false and nothing borrows"
+
+[[trading]]
+group = "Sizing"
+name = "Correlation in a crash"
+means = "Assets that look independent fall together in a crash"
+uses = "Plan as if every crypto bot stops out at once (lab `research.md`, section 3)"
+
+[[trading]]
+group = "Costs and fills"
+name = "Bid, ask, spread"
+means = "The best buy price, the best sell price, and the gap between them. Crossing the spread costs half of it each way"
+uses = "Event-contract fills buy at the ask (YES) or one minus the bid (NO)"
+
+[[trading]]
+group = "Costs and fills"
+name = "Slippage"
+means = "Filling at a worse price than intended, from latency or thin books"
+uses = "Freqtrade backtests assume none, so live runs worse; docs/pipeline.md cost gates"
+
+[[trading]]
+group = "Costs and fills"
+name = "Maker and taker"
+means = "A maker rests an order on the book; a taker crosses the spread to fill now. Takers pay more fee and give up the spread"
+uses = "Our fill models are taker; Kalshi maker orders are a blocked avenue"
+
+[[trading]]
+group = "Costs and fills"
+name = "Fee"
+means = "The venue's charge per order. Kalshi's taker fee is `ceil(0.07 * C * P * (1 - P))`"
+uses = "docs/markets.md Fees"
+
+[[trading]]
+group = "Costs and fills"
+name = "Liquidity and depth"
+means = "How much can trade near the current price before the price moves"
+uses = "`depth_share` (0.5, `lab/markets.toml`) caps how much of the top of the book a fill may take"
+
+[[trading]]
+group = "Costs and fills"
+name = "Limit and market order"
+means = "A limit order names its worst price; a market order takes whatever the book gives"
+uses = "The Alpaca and Kalshi drills rest limit orders far from the market"
+
+[[trading]]
+group = "Costs and fills"
+name = "Stop loss"
+means = "An exit when price falls a set distance. It is a survival rule; one stop-out says nothing about whether a strategy broke"
+uses = "A live position keeps its stop on the exchange, `stoploss_on_exchange` (docs/live.md)"
+
+[[trading]]
+group = "Measuring results"
+name = "Edge, expectancy"
+means = "Average profit per trade, or per dollar, after every cost. Without a positive one nothing else matters"
+uses = "`expectancy_level` interval in the confidence gate"
+
+[[trading]]
+group = "Measuring results"
+name = "Win rate and payoff"
+means = "How often you win, and the average win over the average loss. Neither means anything without the other"
+uses = "Freqtrade's `winrate`, read by `lab/ingest.py`"
+
+[[trading]]
+group = "Measuring results"
+name = "Drawdown"
+means = "The fall from a peak. Recovery from a max drawdown takes about three times as long as the fall under normal returns (Bailey and Lopez de Prado)"
+uses = "Max drawdown column, `/guide#glossary`"
+
+[[trading]]
+group = "Measuring results"
+name = "Sharpe ratio"
+means = "Mean return over its standard deviation, usually annualized. A rough return per unit of risk"
+uses = "`lab/metrics.py`, annualized with sqrt(365) because crypto trades every day"
+
+[[trading]]
+group = "Measuring results"
+name = "Deflated Sharpe"
+means = "The chance a Sharpe beats the best one pure luck would give across everything tried"
+uses = "docs/pipeline.md Step 2 and the trial register"
+
+[[trading]]
+group = "Measuring results"
+name = "Probability of backtest overfitting (PBO)"
+means = "How often the best backtest on one half of the data lands in the bottom half on the other"
+uses = "docs/pipeline.md Step 2"
+
+[[trading]]
+group = "Measuring results"
+name = "Closing line value (CLV)"
+means = "Whether you bought at a better price than the final one before the event. The betting world's standard early proof of skill, read long before settled profit says anything"
+uses = "`close_mid` recorded per open event-contract fill, docs/markets.md"
+
+[[trading]]
+group = "Measuring results"
+name = "Calibration"
+means = "Whether things priced at 30c happen about 30% of the time"
+uses = "The `calibration` family"
+
+[[trading]]
+group = "Research traps"
+name = "Overfitting"
+means = "Tuning a strategy to past noise; it shines in the backtest and fails live"
+uses = "Trial register, deflated Sharpe, PBO"
+
+[[trading]]
+group = "Research traps"
+name = "Lookahead bias"
+means = "A backtest using data it could not have had at the time"
+uses = "`freqtrade lookahead-analysis`"
+
+[[trading]]
+group = "Research traps"
+name = "Recursive or startup bias"
+means = "Indicators that change with how much history they were computed from"
+uses = "`freqtrade recursive-analysis`"
+
+[[trading]]
+group = "Research traps"
+name = "Survivorship bias"
+means = "Testing only on assets that still exist, which hides the ones that died"
+uses = "Lab `research.md`, section 2"
+
+[[trading]]
+group = "Research traps"
+name = "Data snooping or multiple testing"
+means = "Trying many variants and keeping the best; the best of many is lucky by construction"
+uses = "Every variant counts as a trial"
+
+[[trading]]
+group = "Research traps"
+name = "Walk-forward, out-of-sample"
+means = "Tune on one period, test on a later one the tuning never saw"
+uses = "docs/pipeline.md Step 3"
+
+[[trading]]
+group = "Research traps"
+name = "Edge decay"
+means = "A published or discovered edge shrinks once others trade it"
+uses = "Public-strategy selection is NO-GO in docs/avenues.md"
+
+[[trading]]
+group = "Research traps"
+name = "Wash trading"
+means = "Fake volume an exchange trades with itself; over 70% on unregulated exchanges in one study"
+uses = "Lab `research.md`, section 2"
+
+[[trading]]
+group = "Betting and event contracts"
+name = "Event contract"
+means = "A contract paying $1 if an event happens and $0 if not, so its price reads as a probability"
+uses = "docs/markets.md"
+
+[[trading]]
+group = "Betting and event contracts"
+name = "Implied probability"
+means = "The probability a price or odds stand for: 40c is 40%; decimal odds 2.50 are 1 / 2.50 = 40%"
+uses = "`lab/markets/families.py` turns each sportsbook's odds into it"
+
+[[trading]]
+group = "Betting and event contracts"
+name = "Vig, overround"
+means = "The bookmaker's margin: the implied probabilities of every outcome add to more than 100%"
+uses = "Each book's implied odds are divided by their sum before a comparison"
+
+[[trading]]
+group = "Betting and event contracts"
+name = "Devig"
+means = "Removing the margin to get fair probabilities"
+uses = "The median devigged book is the `gap` family's fair price"
+
+[[trading]]
+group = "Betting and event contracts"
+name = "Favorite-longshot bias"
+means = "Cheap longshots are overpriced and favourites slightly underpriced"
+uses = "The `longshot` family; docs/knowledge/prediction-markets.md"
+
+[[trading]]
+group = "Betting and event contracts"
+name = "Sharp and square"
+means = "Bettors who beat the closing line, and those who do not. Pinnacle's closing line is the usual sharp reference"
+uses = "docs/knowledge/prediction-markets.md"
+
 # What moved, for dashboards.md rule 13. The old name keeps working as an anchor or a redirect.
 [[retired]]
 old = "/leagues, Newest fills (20 rows per league)"

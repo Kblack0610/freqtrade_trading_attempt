@@ -46,3 +46,11 @@ def test_the_glossary_defines_every_scorecard_column():
         {"ret": "return", "marked_at": "marked"}.get(c, c) for c in leagues.COLUMNS]
     assert all(t["means"] for t in g["term"]) and {"Paper", "League", "Account", "Replay account", "Cohort"} <= {
         t["name"] for t in g["term"]}
+
+
+def test_the_glossary_holds_the_trading_terms_and_the_old_page_is_gone():
+    g = tomllib.loads(GLOSSARY.read_text())
+    names = {t["name"] for t in g["trading"]}
+    assert {"Lot size", "Kelly criterion", "Closing line value (CLV)"} <= names
+    assert all(t["group"] and t["means"] and t["uses"] for t in g["trading"])
+    assert not (GLOSSARY.parents[1] / "docs" / "knowledge" / "glossary.md").exists()
