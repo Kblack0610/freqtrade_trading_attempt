@@ -249,6 +249,13 @@ def test_overview_warns_when_a_bot_is_not_dry_run(conn, signed_in):
     assert "Not dry run: kraken-s001" in signed_in[1].get("/").text
 
 
+def test_kill_switch_lists_only_bots_the_watcher_still_reads(conn, signed_in):
+    conn.execute("INSERT INTO watch (bot, checked_at, seen_at, state) VALUES ('live-bot', now(), now(), 'running'), "
+                 "('retired-bot', now() - interval '3 days', now() - interval '3 days', 'running')")
+    page = signed_in[1].get("/accounts").text
+    assert "live-bot" in page and "retired-bot" not in page
+
+
 def test_each_cohort_gets_a_row_and_profit_stays_inside_its_lane(conn, signed_in):
     seed(conn)
     conn.execute("INSERT INTO overlays (id, grp, params) VALUES ('ab12cd34', 'slots', '{\"max_open_trades\": 5}')")
@@ -726,6 +733,33 @@ def test_fetch_kit_refuses_a_wrong_checksum(tmp_path):
     assert not (tmp_path / "a.css").exists()
 
 
+def test_fetch_kit_retries_a_transient_server_error(tmp_path):
+    import hashlib
+    import urllib.error
+
+    from web import fetch_kit
+
+    body = b"body"
+    lock = {"repo": "r", "commit": "c", "path": "p", "files": {"a.css": hashlib.sha256(body).hexdigest()}}
+    calls, waits = [], []
+
+    def flaky(url):
+        calls.append(url)
+        if len(calls) < 3:
+            raise urllib.error.HTTPError(url, 503, "Backend.max_conn reached", {}, None)
+        return body
+
+    fetch_kit.fetch(lock, tmp_path, get=flaky, sleep=waits.append)
+    assert len(calls) == 3 and len(waits) == 2
+    assert (tmp_path / "a.css").read_bytes() == body
+
+    def down(url):
+        raise urllib.error.HTTPError(url, 503, "x", {}, None)
+
+    with pytest.raises(urllib.error.HTTPError):
+        fetch_kit.fetch(lock, tmp_path, get=down, sleep=lambda s: None)
+
+
 def test_account_setup_catalog_uses_typed_refs_and_latest_observations(conn, signed_in):
     seed(conn)
     seed_markets(conn)
@@ -1041,13 +1075,16 @@ def test_today_counts_the_days_orders_fills_and_what_did_not_trade(conn, signed_
                      "settled_at, payout, profit) VALUES ('paper-longshot-aaaa1111', %s, 'no', 10, %s, %s, %s, 0.9, 0, %s, 1, %s)",
                      (market, day, day, contracts, day if profit is not None else None, profit))
     conn.execute("INSERT INTO paper_orders (account, market_id, side, stake, sent_at, quoted_at, contracts, price, fee) VALUES "
-                 "('paper-longshot-aaaa1111', 'OLD', 'no', 10, %s, %s, 5, 0.9, 0)", (day - dt.timedelta(days=3),) * 2)
+                 "('paper-longshot-aaaa1111', 'OLD', 'no', 10, %s, %s, 5, 0.9, 0), "
+                 "('paper-weather-bbbb2222', 'M0', 'no', 10, %s, %s, 5, 0.9, 0)",  # a market two families traded
+                 (day - dt.timedelta(days=3),) * 2 + (day,) * 2)
     _, client = signed_in
     page = client.get("/today?day=2026-01-05").text
-    assert "<strong>4</strong> orders" in page  # 3 paper orders (one unfilled) and 1 crypto fill; OLD is another day
-    assert "<strong>3</strong> fills" in page and "<strong>2</strong> venues" in page
-    assert "crypto (1 bots)" in page and "longshot" in page
-    assert "weather on kalshi, tt_totals on odds_api" in page and "longshot on kalshi" not in page
+    assert "<strong>5</strong> orders" in page  # 4 paper orders (one unfilled) and 1 crypto fill; OLD is another day
+    assert "<strong>4</strong> fills" in page and "<strong>2</strong> venues" in page
+    assert "<strong>3</strong> markets" in page  # M0 (two families), M1, ETH/USD: the per-row sum would be 4
+    assert "kraken (1 bots)" in page and "longshot" in page
+    assert "tt_totals on odds_api" in page and "weather on kalshi" not in page and "longshot on kalshi" not in page
     best = page[page.index("<h2>Best</h2>"):page.index("<h2>Worst</h2>")]
     assert best.index("M0") < best.index("ETH/USD") < best.index("M1") and "OLD" not in page  # by return: 22%, 5%, -11%
     assert "No dry run" in client.get("/today?day=2020-01-01").text and client.get("/today?day=nope").status_code == 404

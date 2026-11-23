@@ -61,7 +61,7 @@ Status is `scanned` (in `user_data/strategies/`, backtested nightly, a counted t
 | Candlestick and count patterns | scanned | PatternRecognition, TDSequential; `user_data/strategies/candles/`, 47 bullish TA-Lib patterns with a fixed exit |
 | Time based | scanned | HourBasedStrategy; `user_data/strategies/clock/` a set UTC hour (20:00, held 8 h) and the weekend (Saturday 00:00, held 48 h), each on the timeframes whose candles close then |
 | Volume flow | scanned | `user_data/strategies/flow/` a volume surge on an up close and on-balance volume at a new high before the close, on 4 timeframes |
-| FreqAI ML | scanned | `user_data/strategies/ml/` LightGBM, over the last `ML_DAYS` on the trader-ml image (a load failure on the plain one); no walk-forward or bias check yet (README, Generated families) |
+| FreqAI ML | scanned | `user_data/strategies/ml/` LightGBM, over the last `ML_DAYS` on the trader-ml image (a load failure on the plain one); a bounded lookahead check, no recursive check or walk-forward yet (README, Generated families and Bias) |
 
 | Pairs, market neutral | blocked | the short leg needs margin or futures; `lab/league.py` runs spot only |
 | Funding carry and basis | blocked | long spot, short perpetual: needs a futures short. Measured offline in [carry.md](carry.md): it paid in 2024 and not since |

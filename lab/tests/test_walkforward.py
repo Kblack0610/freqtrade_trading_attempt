@@ -1,5 +1,6 @@
 import datetime as dt
 import json
+import threading
 import types
 from pathlib import Path
 
@@ -292,6 +293,24 @@ def test_failures_retry_up_to_the_cap_and_a_month_with_no_candles_is_stored_once
     assert wf.main(last, TODAY) == 0 and last.calls == []
     errors = {e for (e,) in wlab.execute("SELECT error FROM walkforward")}
     assert errors == {"hyperopt exit 2: boom", f"base: {analyze.NO_DATA}"}
+
+
+def test_one_failed_fold_among_others_does_not_fail_the_run_and_its_error_is_logged(wlab, monkeypatch, capsys):
+    monkeypatch.setattr(wf, "ONLY", {"Live"})
+    runner = FakeRunner()
+    ok_fold, bad = runner.fold, FakeRunner(fail={"Live"})
+    lock, failed = threading.Lock(), []  # the pool runs folds on several threads: exactly one takes the failure
+
+    def fold(*a):
+        with lock:
+            fails = not failed
+            failed.append(1)
+        return bad.fold(*a) if fails else ok_fold(*a)
+
+    runner.fold = fold
+    assert wf.main(runner, TODAY) == 0
+    assert "fold failed: Live" in capsys.readouterr().out and wlab.execute(
+        "SELECT count(*) FROM walkforward WHERE NOT ok").fetchone()[0] == 1
 
 
 def test_a_fold_hyperopt_could_not_tune_is_ok_and_keeps_its_base(wlab, monkeypatch):

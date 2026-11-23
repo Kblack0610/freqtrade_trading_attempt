@@ -2,7 +2,7 @@
 
 The repo README is the reference for layout, the analysis and the site. These pages go deeper on one subject each.
 
-- Glossary: one vocabulary for the site (paper, league, account, replay account, cohort, lane, decision), in `web/glossary.toml` and rendered on `/guide#glossary`.
+- Glossary: one vocabulary for the site (paper, league, account, replay account, cohort, lane, decision) and the trading terms from lot size to closing line value, in `web/glossary.toml` and rendered on `/guide#glossary`.
 - [Overview](overview.md): features and implementation status.
 - [Architecture](architecture.md): components, data flow and storage boundaries.
 - [Standards](standards.md): contributor checks and their scope.
@@ -12,6 +12,11 @@ The repo README is the reference for layout, the analysis and the site. These pa
 - [Brand](brand.md): the site palette and why there is no logo.
 - [Support](support.md): where problems land when the only user is the operator.
 - [Anytime-valid gates](anytime-gates.md): proposed confidence-sequence replacements for the drift and dry run gates, option a chosen, build queued.
+
+## Scope and legal
+
+- [scope/trader/](scope/trader/prd.md): the PRD and TSD, with the acceptance criteria each test checks.
+- [legal/](legal/PRIVACY.md): privacy and terms for a one-operator tool.
 
 ## Knowledge
 
@@ -32,6 +37,7 @@ The repo README is the reference for layout, the analysis and the site. These pa
 ## Strategy coverage
 
 - [Avenues register](avenues.md): considered research and trading paths, verdicts, evidence and revisit triggers.
+- [Retune reviews](retune-reviews.md): one verdict per reviewed monthly retune fit, before anyone saves its params.
 - [carver-afts.md](carver-afts.md): the 30 strategies and four tactics of Carver's *Advanced Futures Trading Strategies*, each mapped to spot crypto, our version, when we can use it and its avenue.
 
 - [strategy-coverage.md](strategy-coverage.md): what a dry-run bot costs, why every strategy runs on binanceus only (the `strategies` cohort), the strategy family catalogue (scanned, staged, blocked), what diversity means (the archive axes, the cohort charter, the strategy card) and the control-set proposal.

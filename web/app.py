@@ -220,7 +220,10 @@ ORDER BY a.equity DESC NULLS LAST, a.account
 DEMO_ORDERS = "SELECT * FROM demo_orders ORDER BY placed_at DESC, id DESC LIMIT 20"
 BROKERS = "SELECT DISTINCT ON (broker) * FROM broker_balances ORDER BY broker, read_at DESC"
 WALLETS = "SELECT DISTINCT ON (account, coin) * FROM wallet_balances ORDER BY account, coin, read_at DESC"
-KILL_SWITCH = "SELECT * FROM watch ORDER BY stopped_at IS NULL, breached_at IS NULL, bot"
+# Only the newest pass: a bot the watcher no longer reads keeps its last row, with a checked_at that stopped advancing.
+KILL_SWITCH = """
+SELECT * FROM watch WHERE checked_at = (SELECT max(checked_at) FROM watch)
+ORDER BY stopped_at IS NULL, breached_at IS NULL, bot"""
 # Shadow paper accounts (lab/shadow.py): winners, then the rest active, then the newest retired, best return first.
 SHADOW = """
 SELECT a.account, a.strategy, a.exchange, a.cohort, a.state, a.promoted_on, a.retired_on, a.retired_why, a.capital,
@@ -555,6 +558,10 @@ LEFT JOIN markets m ON f.source = 'paper' AND m.venue = f.venue AND m.market_id 
 WHERE f.source = ANY(%s) AND f.close_date >= %s AND f.close_date < %s AND f.profit_ratio IS NOT NULL
 ORDER BY f.profit_ratio {order}, f.fill_id LIMIT 10
 """
+# Distinct markets the day's fills opened in: a market two families traded counts once.
+TODAY_MARKETS = """
+SELECT count(DISTINCT (venue, instrument)) AS n FROM fills WHERE source = ANY(%s) AND open_date >= %s AND open_date < %s
+"""
 TODAY_ACTIVE = """
 SELECT 'paper' AS source, venue, family FROM paper_accounts WHERE retired_at IS NULL GROUP BY 2, 3
 """
@@ -568,7 +575,7 @@ def today_board(fills: list[dict], orders: list[dict], active: list[dict]) -> di
         paper = f["source"] == "paper"
         n = placed.pop((f["venue"], f["family"]), 0) if paper else f["fills"]
         table.append({**f, "orders": max(n, f["fills"]), "label": f["venue"] if f["source"] != "freqtrade"
-                      else f"crypto ({f['accounts']} bots)", "family": f["family"] or f"{f['strategies']} strategies"})
+                      else f"{f['venue']} ({f['accounts']} bots)", "family": f["family"] or f"{f['strategies']} strategies"})
     for (venue, family), n in placed.items():  # orders that never filled: the family still traded today
         table.append({"source": "paper", "venue": venue, "family": family, "label": venue, "orders": n, "fills": 0,
                       "markets": 0, "pnl": None, "accounts": None})
@@ -576,7 +583,7 @@ def today_board(fills: list[dict], orders: list[dict], active: list[dict]) -> di
     table.sort(key=lambda r: (-r["orders"], r["label"], r["family"]))
     return {"table": table,
             "orders": sum(r["orders"] for r in table), "fills": sum(r["fills"] for r in table),
-            "markets": sum(r["markets"] for r in table), "venues": len({r["venue"] for r in table}),
+            "venues": len({r["venue"] for r in table}),
             "idle": sorted((a["source"], a["venue"], a["family"]) for a in active
                            if (a["source"], a["venue"], a["family"]) not in seen)}
 
@@ -595,6 +602,7 @@ def today(request: Request, day: str = ""):
                         rows(TODAY_ACTIVE))
     return page(request, "today.html", day=d, prev=d - dt.timedelta(days=1),
                 next=d + dt.timedelta(days=1) if b <= dt.datetime.now(dt.timezone.utc) else None, **board,
+                markets=rows(TODAY_MARKETS, (list(DRY_SOURCES), a, b))[0]["n"],
                 best=rows(TODAY_BEST.format(order="DESC"), (list(DRY_SOURCES), a, b)),
                 worst=rows(TODAY_BEST.format(order="ASC"), (list(DRY_SOURCES), a, b)))
 

@@ -6,14 +6,14 @@ lab/families.toml names outside lab/research (the futures research, which the ni
 one runs a strategy on:
 - backtest: its backtest chunks, on every analysis venue (ANALYZE_EXCHANGES). A class with no families.toml line
   fails here, as it shows untagged on /coverage.
-- bias: the lookahead and recursive checks, on BIAS_EXCHANGE.
+- bias: the lookahead and recursive checks (lookahead only for a FreqAI strategy), on BIAS_EXCHANGE.
 - walkforward: one fold (hyperopt, in-sample and out-of-sample backtests), on every walk-forward venue (WF_EXCHANGES).
 - reproduce: one cached chunk and the fold rerun through lab/reproduce.py's checks, on the walk-forward venues.
 - confidence: its readiness row, and whether the book took it, on the walk-forward venues.
 - paper: the league's guard and a strategy load under the bot's own config files, on the venues of the
   `strategies` cohort (lab/cohorts.toml), which runs every strategy in dry run.
 Each cell is ok, skip or fail, with its reason. A skip is a step the real flow leaves out on purpose (a family the
-cohort skips, a strategy too quiet for the lookahead check, a FreqAI strategy on the plain image).
+cohort skips, a bias check with nothing to judge, a FreqAI strategy on the plain image).
 
 It runs the real stage code, as lab/calibration.py does: lab/analyze.py and lab/walkforward.py as subprocesses
 against the scratch schema SCHEMA, with a temporary REPO holding the real strategies and a synthetic venue (seeded
@@ -22,11 +22,12 @@ and the coverage starts a year before, so each strategy backtests one chunk (las
 backtest process's startup, not its candles, is most of a chunk's time. Only the run's own `runs` row (kind 'flow_matrix', the cells in
 raw) reaches the production tables.
 
-`python -m lab.flow_matrix` runs the whole book. lab/tests/test_flow_matrix.py runs it with FLOW_MATRIX=gate on one
+`python -m lab.flow_matrix [--sample] [NAME ...]` runs the whole book, the gate's sample, or the names. lab/tests/test_flow_matrix.py runs it with FLOW_MATRIX=gate on one
 strategy per family (the flow_gate marker; CI's test-flow job, in shards) or FLOW_MATRIX=full on all of it.
 `python -m lab.flow_matrix probe <spec.json>` is the reproduce and paper step, run in the scratch environment.
 """
 
+import argparse
 import datetime as dt
 import json
 import os
@@ -65,7 +66,8 @@ MINUTE_VOL = 0.0015  # about 5.7% a day, crypto-like
 START = {"BTC": 30_000.0, "ETH": 2_000.0, "SOL": 100.0}
 RESEARCH_CLASS = re.compile(r"^class (\w+)\(", re.M)
 CLEAN = ": clean"  # a bias cell's reason marks each check that reached a clean verdict
-TOO_QUIET = "signals in"  # lab/analyze.py bias_one: "only N signals in D days", a strategy too quiet to check
+# a check with nothing to judge: too few signals (lab/analyze.py bias_one), or no startup_candle_count (the nightly records it)
+NOTHING_TO_JUDGE = re.compile(r"signals in \d+ days|invalid startup candle count")
 
 
 def synthetic_candles(start: dt.datetime, end: dt.datetime, freq: str, seed: int = 11, vol: float = 0.012,
@@ -297,22 +299,21 @@ def cells(sc, names: list[str], fams: dict[str, str], ex: dict[str, list[str]], 
                     else:
                         add(name, avenue, e, "ok", f"{len(rows)} chunks, {sum(t or 0 for *_, t in rows)} trades")
                 elif avenue == "bias":
-                    found_bias = [(k, *bias[name, k]) for k in ("lookahead", "recursive") if (name, k) in bias]
+                    kinds = ("lookahead",) if analyze.freqai_fragment(file) else ("lookahead", "recursive")
+                    found_bias = [(k, *bias[name, k]) for k in kinds if (name, k) in bias]
                     hit = [k for k, b, _ in found_bias if b]
                     errs = [f"{k}: {err}" for k, b, err in found_bias if b is None]
                     each = "; ".join(f"{k}: clean" if b is False else f"{k}: {err}" for k, b, err in found_bias)
-                    if analyze.freqai_fragment(file):
-                        add(name, avenue, e, "skip", "a FreqAI strategy gets no bias check yet (lab/analyze.py step 3)")
-                    elif hit:
+                    if hit:
                         add(name, avenue, e, "fail", f"biased: {', '.join(hit)}")
-                    elif len(found_bias) < 2:
+                    elif len(found_bias) < len(kinds):
                         add(name, avenue, e, "fail", "not checked")
-                    elif errs and all(TOO_QUIET in x for x in errs):
+                    elif errs and all(NOTHING_TO_JUDGE.search(x) for x in errs):
                         add(name, avenue, e, "skip", each[:300])
                     elif errs:
                         add(name, avenue, e, "fail", each[:300])
                     else:
-                        add(name, avenue, e, "ok", "lookahead and recursive clean")
+                        add(name, avenue, e, "ok", " and ".join(kinds) + " clean")
                 elif avenue == "walkforward":
                     fold = folds.get((name, e))
                     if fold:
@@ -453,4 +454,8 @@ if __name__ == "__main__":
     if sys.argv[1:2] == ["probe"]:
         print("FLOW_PROBE " + json.dumps(probe(json.loads(Path(sys.argv[2]).read_text()))), flush=True)
         sys.exit(0)
-    sys.exit(main())
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("--sample", action="store_true", help="one strategy per family, as the CI gate runs")
+    ap.add_argument("names", nargs="*")
+    a = ap.parse_args()
+    sys.exit(main(sample(cohorts.families()) if a.sample else a.names or None))
