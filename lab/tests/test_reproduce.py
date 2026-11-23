@@ -96,6 +96,13 @@ def test_cached_folds_run_again_identical_or_a_mismatch(folds):
     assert raw["mismatch"] == 2 and all(r["diff"][0].startswith("params:") for r in raw["results"])
 
 
+def test_a_fold_the_timeout_stopped_is_never_sampled(folds):
+    """Where WF_TIMEOUT cut a hyperopt differs run to run, so its rerun would be a false mismatch."""
+    assert len(reproduce.fold_sample(folds, random.Random(2), 10, "test")) > 0
+    folds.execute("UPDATE walkforward SET error = 'hyperopt stopped at WF_TIMEOUT (10800s) after 3 epochs'")
+    assert reproduce.fold_sample(folds, random.Random(2), 10, "test") == []
+
+
 def test_reproduction_detects_changed_robustness_returns():
     result = {'ok': True, 'params': {'buy': {'x': 10}},
               'robustness': {'delay:1': {'ok': True, 'returns': [0.01]}}}
