@@ -1068,13 +1068,16 @@ def test_today_counts_the_days_orders_fills_and_what_did_not_trade(conn, signed_
                      "settled_at, payout, profit) VALUES ('paper-longshot-aaaa1111', %s, 'no', 10, %s, %s, %s, 0.9, 0, %s, 1, %s)",
                      (market, day, day, contracts, day if profit is not None else None, profit))
     conn.execute("INSERT INTO paper_orders (account, market_id, side, stake, sent_at, quoted_at, contracts, price, fee) VALUES "
-                 "('paper-longshot-aaaa1111', 'OLD', 'no', 10, %s, %s, 5, 0.9, 0)", (day - dt.timedelta(days=3),) * 2)
+                 "('paper-longshot-aaaa1111', 'OLD', 'no', 10, %s, %s, 5, 0.9, 0), "
+                 "('paper-weather-bbbb2222', 'M0', 'no', 10, %s, %s, 5, 0.9, 0)",  # a market two families traded
+                 (day - dt.timedelta(days=3),) * 2 + (day,) * 2)
     _, client = signed_in
     page = client.get("/today?day=2026-01-05").text
-    assert "<strong>4</strong> orders" in page  # 3 paper orders (one unfilled) and 1 crypto fill; OLD is another day
-    assert "<strong>3</strong> fills" in page and "<strong>2</strong> venues" in page
-    assert "crypto (1 bots)" in page and "longshot" in page
-    assert "weather on kalshi, tt_totals on odds_api" in page and "longshot on kalshi" not in page
+    assert "<strong>5</strong> orders" in page  # 4 paper orders (one unfilled) and 1 crypto fill; OLD is another day
+    assert "<strong>4</strong> fills" in page and "<strong>2</strong> venues" in page
+    assert "<strong>3</strong> markets" in page  # M0 (two families), M1, ETH/USD: the per-row sum would be 4
+    assert "kraken (1 bots)" in page and "longshot" in page
+    assert "tt_totals on odds_api" in page and "weather on kalshi" not in page and "longshot on kalshi" not in page
     best = page[page.index("<h2>Best</h2>"):page.index("<h2>Worst</h2>")]
     assert best.index("M0") < best.index("ETH/USD") < best.index("M1") and "OLD" not in page  # by return: 22%, 5%, -11%
     assert "No dry run" in client.get("/today?day=2020-01-01").text and client.get("/today?day=nope").status_code == 404
