@@ -249,6 +249,13 @@ def test_overview_warns_when_a_bot_is_not_dry_run(conn, signed_in):
     assert "Not dry run: kraken-s001" in signed_in[1].get("/").text
 
 
+def test_kill_switch_lists_only_bots_the_watcher_still_reads(conn, signed_in):
+    conn.execute("INSERT INTO watch (bot, checked_at, seen_at, state) VALUES ('live-bot', now(), now(), 'running'), "
+                 "('retired-bot', now() - interval '3 days', now() - interval '3 days', 'running')")
+    page = signed_in[1].get("/accounts").text
+    assert "live-bot" in page and "retired-bot" not in page
+
+
 def test_each_cohort_gets_a_row_and_profit_stays_inside_its_lane(conn, signed_in):
     seed(conn)
     conn.execute("INSERT INTO overlays (id, grp, params) VALUES ('ab12cd34', 'slots', '{\"max_open_trades\": 5}')")
