@@ -6,8 +6,11 @@
 ARG FREQTRADE_IMAGE=freqtradeorg/freqtrade:2026.10@sha256:0cc4b6dc9b16e0516d27efae1765e925da7d6aea5c8f3c3825930ffe3098d7c7
 FROM ${FREQTRADE_IMAGE}
 
-COPY lab/requirements.txt /tmp/lab-requirements.txt
-RUN pip install --user --no-cache-dir -r /tmp/lab-requirements.txt
+# lab/requirements.lock pins every package added on top of the base, transitive ones too, by hash
+# (ci/lock_requirements.sh writes it). --no-deps installs exactly that set; pip check fails the build when the
+# set no longer fits the base, which means the lock needs a re-run.
+COPY lab/requirements.lock /tmp/lab-requirements.lock
+RUN pip install --user --no-cache-dir --require-hashes --no-deps -r /tmp/lab-requirements.lock && pip check
 
 COPY --chown=ftuser:ftuser . /repo
 WORKDIR /repo
