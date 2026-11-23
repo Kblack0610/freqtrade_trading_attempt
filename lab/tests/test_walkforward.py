@@ -1,5 +1,6 @@
 import datetime as dt
 import json
+import threading
 import types
 from pathlib import Path
 
@@ -297,13 +298,14 @@ def test_failures_retry_up_to_the_cap_and_a_month_with_no_candles_is_stored_once
 def test_one_failed_fold_among_others_does_not_fail_the_run_and_its_error_is_logged(wlab, monkeypatch, capsys):
     monkeypatch.setattr(wf, "ONLY", {"Live"})
     runner = FakeRunner()
-    ok_fold = runner.fold
-    bad = FakeRunner(fail={"Live"})
+    ok_fold, bad = runner.fold, FakeRunner(fail={"Live"})
+    lock, failed = threading.Lock(), []  # the pool runs folds on several threads: exactly one takes the failure
 
     def fold(*a):
-        first = not runner.calls
-        runner.calls.append(a)
-        return bad.fold(*a) if first else ok_fold(*a)
+        with lock:
+            fails = not failed
+            failed.append(1)
+        return bad.fold(*a) if fails else ok_fold(*a)
 
     runner.fold = fold
     assert wf.main(runner, TODAY) == 0
