@@ -22,7 +22,7 @@ This reference maps the code and data boundaries. The [README layout](../README.
 
 ## Runtime and data flow
 
-The [Dockerfile](../Dockerfile) layers this repo and `lab/requirements.txt` onto a digest-pinned Freqtrade image at `/repo`. It retains Freqtrade's entry point; callers override it for Python jobs or the web server. CI also builds a FreqAI variant for ML research.
+The [Dockerfile](../Dockerfile) layers this repo and `lab/requirements.lock` (hash-pinned, from `lab/requirements.txt` by `ci/lock_requirements.sh`) onto a digest-pinned Freqtrade image at `/repo`. It retains Freqtrade's entry point; callers override it for Python jobs or the web server. CI also builds a FreqAI variant for ML research.
 
 1. `lab/league.py` selects a roster row by ordinal, combines base, exchange and overlay configuration, applies its dry-run guard and starts Freqtrade. Strategies live in `user_data/strategies/`, the generated families among them (`lab/families/generate.py`). Bot state and candle files are runtime volume data.
 2. `lab/ingest.py` reads bot APIs into Postgres. `lab/backfill.py` collects candles and records coverage. Analysis and walk-forward jobs read those candles, run Freqtrade and store results through `lab/db.py`.
