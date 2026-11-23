@@ -165,11 +165,11 @@ def test_a_hyperopt_stopped_at_the_timeout_keeps_its_best_epoch_and_one_with_non
                                                       (1.0, True, best),
                                                       (3.0, False, {"roi": {"0": 0.9}, "stoploss": {"stoploss": -0.9}})]))
     res = cli.fold("Strategy001", "user_data/strategies/Strategy001.py", "binanceus", fold, 1)
-    assert res["ok"] and res["error"] is None and res["epochs_run"] == 3, res
+    assert res["ok"] and "stopped at WF_TIMEOUT" in res["error"] and res["epochs_run"] == 3, res
     assert res["params"] == best and res["tuned"]["trades"] == 1
     monkeypatch.setattr(wf.subprocess, "run", killed([(100000.0, False, best)]))  # no epoch reached MIN_TRADES
     res = cli.fold("Strategy001", "user_data/strategies/Strategy001.py", "binanceus", fold, 1)
-    assert res["ok"] is False and res["error"] == f"hyperopt timed out after {wf.TIMEOUT}s", res
+    assert res["ok"] is False and res["error"].startswith(f"hyperopt timed out after {wf.TIMEOUT}s, 1 epochs"), res
 
 
 def backfilled(conn, ex, first):

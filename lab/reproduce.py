@@ -66,12 +66,13 @@ def chunk_sample(conn, rng: random.Random, n: int, ft_version: str, today: dt.da
 
 
 def fold_sample(conn, rng: random.Random, n: int, ft_version: str) -> list[dict]:
-    """Up to n stored folds with tuned parameters whose cache key their inputs still give."""
+    """Up to n stored folds with tuned parameters whose cache key their inputs still give. A fold whose hyperopt
+    WF_TIMEOUT stopped (a note in its error) is left out: where the clock cut it differs run to run."""
     rows = conn.execute("""
         SELECT w.strategy, w.exchange, w.train_start, w.fold_start, w.test_end, w.cache_key, s.file, s.file_hash,
                s.timeframe, w.params, w.is_trades, w.base_trades, w.base_returns, w.tuned_trades, w.tuned_returns, w.robustness
         FROM walkforward w JOIN strategies s ON s.name = w.strategy
-        WHERE w.ok AND w.params IS NOT NULL AND s.load_error IS NULL ORDER BY 1, 2, 4""").fetchall()
+        WHERE w.ok AND w.params IS NOT NULL AND w.error IS NULL AND s.load_error IS NULL ORDER BY 1, 2, 4""").fetchall()
     rng.shuffle(rows)
     days: dict[tuple[str, str], dict] = {}
     out = []

@@ -14,7 +14,8 @@ at a span's end straddles the fold boundary, so `stats` purges it from every spa
 How a fold tunes (`tuning`): a strategy whose source declares no hyperopt parameter has only ROI and stoploss to
 tune, so it gets WF_EPOCHS_ROI epochs instead of WF_EPOCHS. Every fold stops after WF_EARLY_STOP epochs without a
 better loss. A hyperopt still running at WF_TIMEOUT is stopped there and keeps the best epoch it saved, as an early
-stop does (`best_so_far`); with none saved the fold fails. The optuna sampler is an A/B: each fold draws one of
+stop does (`best_so_far`), with a note in its row's error, which lab/reproduce.py skips: a cut by the clock does not
+rerun the same; with none saved the fold fails. The optuna sampler is an A/B: each fold draws one of
 WF_SAMPLERS from its seed, so every strategy has folds in each arm, and the run report's `arms` compares their
 hyperopt seconds and out-of-sample uplift. Each arm's tuned parameters enter the trial register like any other
 (lab/confidence.py). A fold row keeps its hyperopt and backtest seconds apart, so the cost of each step is measured,
@@ -221,10 +222,13 @@ class Cli:
                 p = None
             finally:
                 hyperopt_s = time.monotonic() - h0
+            note = None
             if p is None:
-                epochs_run = best_so_far(Path(d), strategy, params_file)
-                if not epochs_run:
-                    return took({"ok": False, "error": f"hyperopt timed out after {TIMEOUT}s"})
+                epochs_run, found = best_so_far(Path(d), strategy, params_file)
+                if not found:
+                    return took({"ok": False, "error": f"hyperopt timed out after {TIMEOUT}s, {epochs_run} epochs saved, "
+                                                       f"none reaching {MIN_TRADES} training trades"})
+                note = f"hyperopt stopped at WF_TIMEOUT ({TIMEOUT}s) after {epochs_run} epochs, tuned with the best so far"
             elif p.returncode:  # a training span with nothing to run is no data, as a backtest's is: no retry changes it
                 if why := analyze.nothing_to_run(p.stdout + p.stderr):
                     return took({"ok": False, "no_data": True, "error": f"hyperopt: {why}"})
@@ -232,7 +236,7 @@ class Cli:
             else:
                 stopped = EARLY_STOPPED.search(p.stdout + p.stderr)
                 epochs_run = int(stopped.group(1)) if stopped else tune["epochs"]
-            out = {"ok": True, "error": None, "base": stats(base), "params": None, "epochs_run": epochs_run}
+            out = {"ok": True, "error": note, "base": stats(base), "params": None, "epochs_run": epochs_run}
             if not params_file.exists() or params_file.stat().st_mtime_ns == before:
                 return took({**out, "error": f"no hyperopt epoch reached {MIN_TRADES} training trades"})
             out["params"] = json.loads(params_file.read_text())["params"]
@@ -246,10 +250,11 @@ class Cli:
         return took(out)
 
 
-def best_so_far(userdir: Path, strategy: str, params_file: Path) -> int:
+def best_so_far(userdir: Path, strategy: str, params_file: Path) -> tuple[int, bool]:
     """After a hyperopt killed at WF_TIMEOUT: export the best epoch it saved to params_file, as a finished hyperopt
-    does, and return how many epochs it ran; 0 when it saved no best epoch. freqtrade appends each epoch to its
-    results file as one JSON line, marking each new best (`is_best`); the line it was writing when killed is cut."""
+    does. Returns how many epochs it saved and whether one was best (none is when no epoch reached MIN_TRADES).
+    freqtrade appends each epoch to its results file as one JSON line, marking each new best (`is_best`); the line it
+    was writing when killed is cut."""
     import rapidjson
     from freqtrade.optimize.hyperopt_tools import HyperoptTools
 
@@ -264,9 +269,9 @@ def best_so_far(userdir: Path, strategy: str, params_file: Path) -> int:
             if epoch.get("is_best"):
                 best = epoch
     if best is None:
-        return 0
+        return epochs, False
     HyperoptTools.export_params(best, strategy, params_file)
-    return epochs
+    return epochs, True
 
 
 def candidates(conn) -> list[dict]:
