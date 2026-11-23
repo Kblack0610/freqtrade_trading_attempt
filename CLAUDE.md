@@ -24,7 +24,7 @@ Repo rules live in [docs/standards.md](docs/standards.md); the layout and comman
 ## Reading runs and dispatching
 
 - The walk-forward stops starting folds after `WF_BUDGET_S` and records `folds_left`; a backlog drains over several nights. Any change to a fold_key input reruns every stored fold once. Read a verdict only from a run with `folds_left` 0, after a night with no key change.
-- A phase that reads a run or another phase carries `after` at queue time, not an `at:` time.
+- A phase that reads a run or another phase carries `after` at queue time; an `at:` time starts it early.
 - A "check after the next nightly" line gets done only if a queue item owns it: queue it before wind-down with `--tags at:<time>`.
 - A dispatched item may already be landed or not yet runnable: check `git log origin/master`, the live digest and the latest job log first, then close it cancelled or move it to waiting.
 - Do not post an ask for work that can run paper-only; release the hold and keep going.
