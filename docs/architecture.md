@@ -2,6 +2,24 @@
 
 This reference maps the code and data boundaries. The [README layout](../README.md#layout) is the module inventory; [overview](overview.md) describes the product.
 
+## Layout
+
+| Path | What it is |
+|---|---|
+| `lab/` | Jobs, market adapters, metrics, migrations and tests; the job registry is `lab/jobs.toml` |
+| `web/` | The read-only site: app, templates, glossary and venue data |
+| `user_data/` | Freqtrade configs, exchange overlays and strategies |
+| `ci/` | Scripts the workflow runs: roster, research sync and digest bump |
+| `docs/` | These references; the index is [README](README.md) |
+| `Dockerfile` | The one image every pod runs |
+| `package.json` | The `typecheck`, `lint` and `test` command manifest CI and contributors share |
+| `pyproject.toml` | Ruff and mypy configuration |
+| `.githooks/` | The `pre-push` hook: Ruff on `lab`, `web`, `ci` and strategies, the same check CI runs |
+| `.github/` | The image workflow: checks, build and push |
+| `.gitignore`, `.dockerignore`, `.gitleaks.toml` | Keep runtime data and secrets out of the tree and the image |
+| `CHANGELOG.md` | Notable changes, newest first |
+| `README.md` | Layout, the analysis, the site and run-locally commands |
+
 ## Runtime and data flow
 
 The [Dockerfile](../Dockerfile) layers this repo and `lab/requirements.lock` (hash-pinned, from `lab/requirements.txt` by `ci/lock_requirements.sh`) onto a digest-pinned Freqtrade image at `/repo`. It retains Freqtrade's entry point; callers override it for Python jobs or the web server. CI also builds a FreqAI variant for ML research.
