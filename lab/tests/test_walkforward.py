@@ -267,7 +267,7 @@ def test_failures_retry_up_to_the_cap_and_a_month_with_no_candles_is_stored_once
 
 
 def test_a_hyperopt_timeout_is_retried_next_run_and_fails_the_run_only_on_its_last_attempt(wlab, monkeypatch):
-    monkeypatch.setattr(wf, "ONLY", {"Live", "Watched"})
+    monkeypatch.setattr(wf, "ONLY", {"Live", "Promising", "Watched"})
     runs = [wf.main(FakeRunner(slow={"Live"}), TODAY) for _ in range(analyze.MAX_ATTEMPTS)]
     assert runs == [0] * (analyze.MAX_ATTEMPTS - 1) + [1]
     raws = [r for (r,) in wlab.execute("SELECT raw FROM runs WHERE kind = 'walkforward' ORDER BY id")]
@@ -276,6 +276,11 @@ def test_a_hyperopt_timeout_is_retried_next_run_and_fails_the_run_only_on_its_la
     assert {a for (a,) in wlab.execute("SELECT attempts FROM walkforward WHERE strategy = 'Live'")} == {analyze.MAX_ATTEMPTS}
     last = FakeRunner(slow={"Live"})
     assert wf.main(last, TODAY) == 0 and last.calls == []
+
+
+def test_a_run_whose_folds_mostly_time_out_fails_on_the_first_attempt(wlab, monkeypatch):
+    monkeypatch.setattr(wf, "ONLY", {"Live", "Watched"})
+    assert wf.main(FakeRunner(slow={"Live", "Watched"}), TODAY) == 1
 
 
 def test_a_fold_hyperopt_could_not_tune_is_ok_and_keeps_its_base(wlab, monkeypatch):

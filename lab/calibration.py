@@ -392,10 +392,11 @@ def run(conn, cfg: dict, today: dt.date, report: dict) -> bool:
         wf = sc.execute("SELECT raw FROM runs WHERE kind = 'walkforward' ORDER BY id DESC LIMIT 1").fetchone()
         wf = wf[0] if wf else {}
         report.update(analysis_exit=analysed, walkforward_exit=walked,
-                      folds={k: wf.get(k) for k in ("candidates", "folds_run", "folds_cached", "folds_failed", "folds_left")})
+                      folds={k: wf.get(k) for k in ("candidates", "folds_run", "folds_cached", "folds_failed", "folds_timed_out",
+                                                         "folds_left")})
         report["folds"]["candidates"] = len(wf.get("candidates") or [])
         # the walk-forward's own post steps (suggest, book, ...) may fail on a venue with no bots; only its folds count
-        done = bool(wf.get("candidates")) and not wf.get("folds_left")
+        done = bool(wf.get("candidates")) and not wf.get("folds_left") and not wf.get("folds_timed_out")
         if done:
             scratch_trials = confidence.register(sc)
             facts = confidence.load(sc, cfg)

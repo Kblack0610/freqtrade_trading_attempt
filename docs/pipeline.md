@@ -196,6 +196,7 @@ for kind in ('analysis', 'walkforward'):
 | `stage_s` | Wall seconds per analysis step (plan, backtests, derive, then each step after it), so a slow night shows which step took the time |
 | `chunks_left` | Backtests the analysis budget left for the next night. It should fall night over night |
 | `folds_run`, `folds_left` | Walk-forward done and still queued. `folds_left` should fall night over night |
+| `folds_failed`, `folds_timed_out` | Folds that failed, and folds whose hyperopt hit `WF_TIMEOUT` with attempts left: stored, retried next run, and not in `folds_left` |
 | `skipped` | Strategies and venues left out, with the reason (usually "not fully backfilled") |
 | `trial_register` | Things tried so far. It only grows, and it raises the deflated Sharpe and minimum backtest length bars |
 | `confidence_ready` | Strategies ready for a capped experiment |
