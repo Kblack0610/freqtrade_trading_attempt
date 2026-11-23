@@ -10,7 +10,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from test_families import synthetic_candles
+from lab.flow_matrix import synthetic_candles
 
 LAB = Path(__file__).resolve().parents[1]
 REPO = LAB.parent
