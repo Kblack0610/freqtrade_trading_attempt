@@ -13,6 +13,11 @@ The repo README is the reference for layout, the analysis and the site. These pa
 - [Support](support.md): where problems land when the only user is the operator.
 - [Anytime-valid gates](anytime-gates.md): proposed confidence-sequence replacements for the drift and dry run gates, option a chosen, build queued.
 
+## Scope and legal
+
+- [scope/trader/](scope/trader/prd.md): the PRD and TSD, with the acceptance criteria each test checks.
+- [legal/](legal/PRIVACY.md): privacy and terms for a one-operator tool.
+
 ## Knowledge
 
 - [knowledge/](knowledge/README.md): trading terms, a ranked reading list, free resources and the evidence on edge in event contracts.
