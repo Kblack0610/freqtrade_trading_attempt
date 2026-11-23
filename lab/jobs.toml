@@ -1,6 +1,9 @@
 # Job name -> the commands a pod runs, so home-config names jobs and never module paths.
 # `python -m lab run <job>` runs each step in order as `python -m <step>` (cwd /repo), always all of them, and exits
-# with the first nonzero code. A step may name an env var ($WF_EXCHANGES); it is expanded before the step is split.
+# with the first nonzero code. The last step replaces the runner (exec) when every step before it passed, so a one-step
+# job is PID 1 in its pod and gets the pod's SIGTERM itself, as the module path command did (the league's freqtrade).
+# A job written { steps = [...], stop_on_failure = true } stops at its first failing step instead, like `a && b`.
+# A step may name an env var ($WF_EXCHANGES); it is expanded before the step is split.
 # Moving a module changes this file and nothing in home-config.
 
 [jobs]
@@ -10,7 +13,8 @@ league = ["lab.league"]
 backfill = ["lab.backfill"]
 ingest = ["lab.ingest"]
 analysis = ["lab.analyze"]
-walkforward = ["lab.snapshot fetch $WF_EXCHANGES", "lab.walkforward"]
+# A failed candle fetch must not start a walk-forward on an empty disk.
+walkforward = { steps = ["lab.snapshot fetch $WF_EXCHANGES", "lab.walkforward"], stop_on_failure = true }
 snapshot-publish = ["lab.snapshot publish"]
 futures = ["lab.futures"]
 calibration = ["lab.calibration"]
