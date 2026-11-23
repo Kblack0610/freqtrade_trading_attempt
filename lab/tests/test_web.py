@@ -726,6 +726,33 @@ def test_fetch_kit_refuses_a_wrong_checksum(tmp_path):
     assert not (tmp_path / "a.css").exists()
 
 
+def test_fetch_kit_retries_a_transient_server_error(tmp_path):
+    import hashlib
+    import urllib.error
+
+    from web import fetch_kit
+
+    body = b"body"
+    lock = {"repo": "r", "commit": "c", "path": "p", "files": {"a.css": hashlib.sha256(body).hexdigest()}}
+    calls, waits = [], []
+
+    def flaky(url):
+        calls.append(url)
+        if len(calls) < 3:
+            raise urllib.error.HTTPError(url, 503, "Backend.max_conn reached", {}, None)
+        return body
+
+    fetch_kit.fetch(lock, tmp_path, get=flaky, sleep=waits.append)
+    assert len(calls) == 3 and len(waits) == 2
+    assert (tmp_path / "a.css").read_bytes() == body
+
+    def down(url):
+        raise urllib.error.HTTPError(url, 503, "x", {}, None)
+
+    with pytest.raises(urllib.error.HTTPError):
+        fetch_kit.fetch(lock, tmp_path, get=down, sleep=lambda s: None)
+
+
 def test_account_setup_catalog_uses_typed_refs_and_latest_observations(conn, signed_in):
     seed(conn)
     seed_markets(conn)
