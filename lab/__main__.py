@@ -2,6 +2,8 @@
 
 Every step is its own `python -m <module> [args]` process in the current directory, as a CronJob ran it before, so a
 job's exit code, environment and imports are the module's own. Every step runs; the exit code is the first nonzero one.
+The last step replaces this process when every step before it passed, so a one-step job is PID 1 in its pod and gets
+SIGTERM itself (a Python PID 1 with no handler ignores it). A stop_on_failure job ends at its first failing step.
 An unknown job exits 2 and starts nothing.
 """
 
@@ -10,22 +12,44 @@ import shlex
 import subprocess
 import sys
 import tomllib
+from dataclasses import dataclass
 from pathlib import Path
 
 JOBS = Path(__file__).with_name("jobs.toml")
 
 
-def load(path: Path = JOBS) -> dict[str, list[str]]:
-    return tomllib.loads(path.read_text())["jobs"]
+@dataclass(frozen=True)
+class Job:
+    steps: list[str]
+    stop_on_failure: bool = False
 
 
-def run(name: str, jobs: dict[str, list[str]]) -> int:
+def load(path: Path = JOBS) -> dict[str, Job]:
+    jobs = {}
+    for name, spec in tomllib.loads(path.read_text())["jobs"].items():
+        jobs[name] = Job(spec) if isinstance(spec, list) else Job(spec["steps"], spec.get("stop_on_failure", False))
+    return jobs
+
+
+def argv_of(step: str) -> list[str]:
+    return [sys.executable, "-m", *shlex.split(os.path.expandvars(step))]
+
+
+def run(name: str, jobs: dict[str, Job]) -> int:
+    job = jobs[name]
+    *head, last = job.steps
     code = 0
-    for step in jobs[name]:
-        argv = [sys.executable, "-m", *shlex.split(os.path.expandvars(step))]
-        rc = subprocess.call(argv)
+    for step in head:
+        rc = subprocess.call(argv_of(step))
+        if rc and job.stop_on_failure:
+            return rc
         code = code or rc
-    return code
+    if code:
+        subprocess.call(argv_of(last))
+        return code
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os.execv(sys.executable, argv_of(last))
 
 
 def main(argv: list[str]) -> int:
