@@ -630,11 +630,11 @@ def test_a_freqai_strategy_runs_its_window_as_is_with_its_fragment_and_a_model_p
     ml = {**strat("ML"), "file": "user_data/strategies/ml/ML.py"}
     r = FakeRunner([ml])
     assert analyze.main(r, TODAY) == 0
-    # the last 365 days from the first of that month, 2025-11-01, cut at the year, then this year's months; no overlay, no bias check
+    # the last 365 days from the first of that month, 2025-11-01, cut at the year, then this year's months; no overlay, lookahead only
     months = [dt.date(2025, 11, 1), *(dt.date(2026, m, 1) for m in range(1, 12))]
     assert sorted((ex, start) for _, ex, start, _ in r.backtests) == [(ex, m) for ex in ("binanceus", "coinbase") for m in months]
     idents = {b[3]["freqai"]["identifier"] for b in r.backtests}
-    assert len(idents) == 24 and all(i.startswith("ML-") for i in idents) and r.checks == []
+    assert len(idents) == 24 and all(i.startswith("ML-") for i in idents) and r.checks == [("lookahead", "ML")]
     assert all(b[3]["freqaimodel"] == "LightGBMRegressor" for b in r.backtests)
     assert one(lab, "SELECT count(*) FROM overlay_windows WHERE strategy = 'ML'") == 0
     assert one(lab, "SELECT count(*) FROM trials WHERE strategy = 'ML' AND variant = 'as-is'") == 2

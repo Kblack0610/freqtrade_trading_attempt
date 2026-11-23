@@ -21,7 +21,14 @@
    only models trained for that chunk (user_data/models/<identifier>). On an image without lightgbm (the plain
    trader image) it is recorded with load_error NEEDS_ML and runs nothing. It skips a venue FreqAI refuses (ml_venue: Kraken).
 3. Bias: lookahead-analysis and recursive-analysis per strategy, rerun when its file hash changes. A FreqAI
-   strategy gets none yet: lookahead-analysis would retrain per signal, and which check stands in is open.
+   strategy gets lookahead-analysis only, with its freqai.json under its own model identifier and a target of
+   ML_BIAS_SIGNALS signals: each signal retrains its pair's models over the sliced range (measured 2026-11-23 on
+   binanceus, 120 days of 1h on 10 pairs: about 1 minute and 0.6 GB at 10 or 20 signals). FreqAI returns its outputs
+   (the & columns, do_predict, DI_values), not its features, so a feature that reads ahead shows as a prediction or a
+   signal that changes. FreqAI predicts nothing for a backtest's last candle, so those outputs are not compared on a
+   cut frame's last candle, and values equal to ML_BIAS_RTOL count as equal: the check catches a feature that reads
+   two or more candles ahead, not one that reads only the next. Recursive-analysis does not run for one: each
+   startup variant fits its models from a different first candle, so outputs differ by design.
 4. Derived, rebuilt in one transaction from the stored trades: daily returns, metrics over 30d, 90d,
    180d, 365d and all (with bootstrap intervals and the deflated Sharpe across every strategy x
    exchange), Monte Carlo estimates, BTC regimes, and correlation with the strategies the league runs.
@@ -63,6 +70,7 @@ import math
 import os
 import queue
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -118,6 +126,9 @@ NO_DATA = "no candles in this period"
 ML_DAYS = int(os.environ.get("ML_DAYS", "365"))  # a FreqAI strategy's window: every 7-day window fits a model per pair
 FREQAI = importlib.util.find_spec("lightgbm") is not None  # only the trader-ml image (freqtrade's _freqai base) has it
 NEEDS_ML = "needs the trader-ml image"
+ML_BIAS_SIGNALS = int(os.environ.get("ML_BIAS_SIGNALS", "10"))  # a FreqAI lookahead check's signal target (step 3)
+FREQAI_OUTPUTS = ("&", "do_predict", "DI_values", "enter_", "exit_")  # column prefixes FreqAI writes or a signal reads off
+ML_BIAS_RTOL = 1e-9  # a FreqAI output this close in both runs is float noise, not a later candle (seen: 1 ulp in DI_values)
 
 
 def sha256(data: bytes) -> str:
@@ -449,9 +460,41 @@ class Cli:
         return {"has_bias": None, "error": f"exit {p.returncode}: {_errors(p.stdout + p.stderr)}"}
 
 
+def freqai_lookahead():
+    """freqtrade's LookaheadAnalysis for a FreqAI strategy (module docstring, step 3). Before the compare, a cut
+    frame takes the full run's value where the two differ by float noise only (DI_values sums in a different order
+    from run to run), and its FREQAI_OUTPUTS on a last candle FreqAI left unpredicted (do_predict 0)."""
+    import copy
+
+    import numpy as np
+    from freqtrade.optimize.analysis.lookahead import LookaheadAnalysis
+
+    class FreqaiLookahead(LookaheadAnalysis):
+        def analyze_indicators(self, full_vars, cut_vars, current_pair):
+            cut = cut_vars.indicators[current_pair].copy()
+            full = full_vars.indicators[current_pair].loc[cut.index]
+            for c in cut.select_dtypes("number").columns.intersection(full.columns):
+                noise = np.isclose(full[c], cut[c], rtol=ML_BIAS_RTOL, atol=0)
+                cut.loc[noise, c] = full.loc[noise, c]
+            last = cut.index[-1]
+            if "do_predict" in cut and cut.at[last, "do_predict"] == 0:
+                outputs = [c for c in cut.columns if str(c).startswith(FREQAI_OUTPUTS)]
+                cut.loc[last, outputs] = full.loc[last, outputs]
+            cut_vars = copy.copy(cut_vars)
+            cut_vars.indicators = {**cut_vars.indicators, current_pair: cut}
+            super().analyze_indicators(full_vars, cut_vars, current_pair)
+
+    return FreqaiLookahead
+
+
 def bias_one(kind: str, strategy: str, strategy_path: str | None) -> dict:
     """One check in this process. Lookahead: does a signal change when later candles are hidden.
     Recursive: does an indicator still move at the strategy's own startup_candle_count."""
+    with tempfile.TemporaryDirectory(prefix="bias-") as d:
+        return _bias_one(kind, strategy, strategy_path, Path(d))
+
+
+def _bias_one(kind: str, strategy: str, strategy_path: str | None, scratch: Path) -> dict:
     from freqtrade.commands import Arguments
     from freqtrade.configuration import setup_utils_configuration
     from freqtrade.enums import RunMode
@@ -468,24 +511,38 @@ def bias_one(kind: str, strategy: str, strategy_path: str | None) -> dict:
             "--datadir", str(RESULTS / "data" / BIAS_EXCHANGE), "--strategy", strategy, "--timerange", since(days)]
     if strategy_path:
         argv += ["--strategy-path", strategy_path]
+    helper = Look if kind == "lookahead" else Rec
+    models = None
     try:
-        cfg = setup_utils_configuration(Arguments(argv).get_parsed_arg(), RunMode.UTIL_NO_EXCHANGE)
-        helper = Look if kind == "lookahead" else Rec
-        cfg = helper.calculate_config_overrides(cfg)
+        cfg = helper.calculate_config_overrides(setup_utils_configuration(Arguments(argv).get_parsed_arg(), RunMode.UTIL_NO_EXCHANGE))
         objs = [o for o in StrategyResolver.search_all_objects(cfg, enum_failed=False, recursive=True)
                 if o["name"] == strategy]
         if not objs:
             return {"has_bias": None, "error": "strategy not found"}
+        frag = freqai_fragment(str(objs[0]["location"]))
+        if frag and kind == "lookahead":  # its own identifier: freqtrade purges that model folder before each run
+            ident = f"{strategy}-lookahead"
+            (scratch / "freqai.json").write_text(json.dumps({**frag, "freqai": {**frag["freqai"], "identifier": ident}}))
+            argv += ["-c", str(scratch / "freqai.json"), "--minimum-trade-amount", str(ML_BIAS_SIGNALS),
+                     "--targeted-trade-amount", str(ML_BIAS_SIGNALS)]
+            cfg = helper.calculate_config_overrides(setup_utils_configuration(Arguments(argv).get_parsed_arg(), RunMode.UTIL_NO_EXCHANGE))
+            models = Path(cfg["user_data_dir"]) / "models" / ident
         if kind == "lookahead":  # the window is in candles once the strategy's timeframe is known
             days = lookahead_days(getattr(objs[0]["class"], "timeframe", None))
             cfg["timerange"] = since(days)
         with get_progress_tracker() as progress:
-            if kind == "lookahead":
+            if models:
+                inst = freqai_lookahead()(cfg, objs[0])
+                inst.start(progress)
+            elif kind == "lookahead":
                 inst = helper.initialize_single_lookahead_analysis(cfg, objs[0], progress)
             else:
                 inst = helper.initialize_single_recursive_analysis(cfg, objs[0], progress)
     except Exception as e:
         return {"has_bias": None, "error": f"{type(e).__name__}: {e}"[:800]}
+    finally:
+        if models:
+            shutil.rmtree(models, ignore_errors=True)
     if kind == "lookahead":
         a = inst.current_analysis
         detail = {"signals": a.total_signals, "false_entries": a.false_entry_signals, "false_exits": a.false_exit_signals}
@@ -638,16 +695,15 @@ def prune_ml(conn, found: list[dict], today: dt.date) -> None:
 
 
 def bias_todo(conn, found: list[dict], first: dict) -> list[tuple[str, str, str]]:
-    """The checks to run; none for a FreqAI strategy (module docstring, step 3)."""
+    """The checks to run; lookahead only for a FreqAI strategy (module docstring, step 3)."""
     have = {(s, k): (h, err, at) for s, k, h, err, at in conn.execute(
         "SELECT strategy, kind, file_hash, error, checked_at FROM bias_checks")}
     week_ago = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=7)
     out = []
     for s in found:
-        if s["load_error"] or (ONLY and s["name"] not in ONLY) or (BIAS_EXCHANGE, s["timeframe"]) not in first \
-                or freqai_fragment(s["file"]):
+        if s["load_error"] or (ONLY and s["name"] not in ONLY) or (BIAS_EXCHANGE, s["timeframe"]) not in first:
             continue
-        for kind in ("lookahead", "recursive"):
+        for kind in ("lookahead",) if freqai_fragment(s["file"]) else ("lookahead", "recursive"):
             prior = have.get((s["name"], kind))
             if prior and prior[0] == s["file_hash"] and (prior[1] is None or prior[2] > week_ago):
                 continue

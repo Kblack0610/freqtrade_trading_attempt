@@ -10,7 +10,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from test_families import synthetic_candles
+from test_families import bias_data, synthetic_candles  # noqa: F401 (bias_data is a fixture)
 
 LAB = Path(__file__).resolve().parents[1]
 REPO = LAB.parent
@@ -81,3 +81,27 @@ def test_a_real_chunk_trains_under_its_own_identifier_and_reuses_its_models(tmp_
     print(f"first {res['duration_s']:.0f}s, again {again['duration_s']:.0f}s")
     assert again["ok"] and again["duration_s"] < res["duration_s"]
     assert len(again["trades"]) == len(res["trades"])
+
+
+@pytest.mark.parametrize("leak", [False, True])
+def test_the_nightly_lookahead_check_clears_the_baseline_and_catches_a_feature_that_reads_ahead(bias_data, tmp_path, leak):
+    """The real strategy on the nightly's bounded check; the control adds one feature that reads two candles ahead,
+    the nearest the check sees (lab/analyze.py, step 3). FreqAI returns no features, so the leak shows in its outputs."""
+    pytest.importorskip("lightgbm")
+    folder = tmp_path / "ml"
+    folder.mkdir()
+    (folder / "freqai.json").write_text((ML / "freqai.json").read_text())
+    src = (ML / "MLLightGBMBaseline.py").read_text()
+    if leak:
+        anchor = '        dataframe["%-day_of_week"] = dataframe["date"].dt.dayofweek\n'
+        assert anchor in src
+        src = src.replace(anchor, anchor + '        dataframe["%-next_ret"] = dataframe["close"].shift(-2) / dataframe["close"] - 1\n')
+    (folder / "MLLightGBMBaseline.py").write_text(src)
+    bias_data.freqai_fragment.cache_clear()
+    res = bias_data.bias_one("lookahead", "MLLightGBMBaseline", str(folder))
+    assert res.get("error") is None, res
+    assert res["detail"]["signals"] == bias_data.ML_BIAS_SIGNALS, res
+    assert res["has_bias"] is leak, res
+    if leak:
+        assert "&-s_close" in res["biased_indicators"], res
+    assert not (bias_data.USER_DATA / "models" / "MLLightGBMBaseline-lookahead").exists()
