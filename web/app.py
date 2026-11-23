@@ -220,7 +220,10 @@ ORDER BY a.equity DESC NULLS LAST, a.account
 DEMO_ORDERS = "SELECT * FROM demo_orders ORDER BY placed_at DESC, id DESC LIMIT 20"
 BROKERS = "SELECT DISTINCT ON (broker) * FROM broker_balances ORDER BY broker, read_at DESC"
 WALLETS = "SELECT DISTINCT ON (account, coin) * FROM wallet_balances ORDER BY account, coin, read_at DESC"
-KILL_SWITCH = "SELECT * FROM watch ORDER BY stopped_at IS NULL, breached_at IS NULL, bot"
+# Only the newest pass: a bot the watcher no longer reads keeps its last row, with a checked_at that stopped advancing.
+KILL_SWITCH = """
+SELECT * FROM watch WHERE checked_at = (SELECT max(checked_at) FROM watch)
+ORDER BY stopped_at IS NULL, breached_at IS NULL, bot"""
 # Shadow paper accounts (lab/shadow.py): winners, then the rest active, then the newest retired, best return first.
 SHADOW = """
 SELECT a.account, a.strategy, a.exchange, a.cohort, a.state, a.promoted_on, a.retired_on, a.retired_why, a.capital,
