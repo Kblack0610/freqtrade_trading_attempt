@@ -142,6 +142,36 @@ def test_a_hyperopt_with_no_training_candles_is_no_data_and_a_crash_is_a_failure
         assert res["ok"] is False and res.get("no_data", False) is no_data, res
 
 
+def test_a_hyperopt_stopped_at_the_timeout_keeps_its_best_epoch_and_one_with_none_fails(monkeypatch):
+    """A hyperopt killed at WF_TIMEOUT tunes the fold with the best epoch freqtrade saved, as an early stop does,
+    so a slow fold is not retried for the same timeout every night; the line cut by the kill is skipped."""
+    monkeypatch.setattr(analyze, "USER_DATA", REPO / "user_data")
+    cli = wf.Cli.__new__(wf.Cli)
+    cli.bt = WindowSpy(monkeypatch)
+    fold = wf.folds(TODAY, n=1)[0]
+    best = {"roi": {"0": 0.05}, "stoploss": {"stoploss": -0.07}}
+
+    def killed(epochs):
+        def run(cmd, **kw):
+            out = Path(cmd[cmd.index("--userdir") + 1]) / "hyperopt_results"
+            out.mkdir()
+            lines = [json.dumps({"loss": loss, "is_best": is_best, "params_details": details, "params_not_optimized": {}})
+                     for loss, is_best, details in epochs]
+            (out / "strategy_Strategy001_test.fthypt").write_text("\n".join(lines) + '\n{"loss": 0.1, "is_be')
+            raise wf.subprocess.TimeoutExpired(cmd, wf.TIMEOUT)
+        return run
+
+    monkeypatch.setattr(wf.subprocess, "run", killed([(2.0, True, {"roi": {"0": 0.2}, "stoploss": {"stoploss": -0.3}}),
+                                                      (1.0, True, best),
+                                                      (3.0, False, {"roi": {"0": 0.9}, "stoploss": {"stoploss": -0.9}})]))
+    res = cli.fold("Strategy001", "user_data/strategies/Strategy001.py", "binanceus", fold, 1)
+    assert res["ok"] and res["error"] is None and res["epochs_run"] == 3, res
+    assert res["params"] == best and res["tuned"]["trades"] == 1
+    monkeypatch.setattr(wf.subprocess, "run", killed([(100000.0, False, best)]))  # no epoch reached MIN_TRADES
+    res = cli.fold("Strategy001", "user_data/strategies/Strategy001.py", "binanceus", fold, 1)
+    assert res["ok"] is False and res["error"] == f"hyperopt timed out after {wf.TIMEOUT}s", res
+
+
 def backfilled(conn, ex, first):
     for pair in analyze.whitelist(ex):
         conn.execute("INSERT INTO data_coverage (exchange, pair, timeframe, first_ts, last_ts, rows, oldest_reached) "

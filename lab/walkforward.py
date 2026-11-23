@@ -13,10 +13,12 @@ at a span's end straddles the fold boundary, so `stats` purges it from every spa
 - the month is backtested again with the tuned parameters, and so is the training span (in sample).
 How a fold tunes (`tuning`): a strategy whose source declares no hyperopt parameter has only ROI and stoploss to
 tune, so it gets WF_EPOCHS_ROI epochs instead of WF_EPOCHS. Every fold stops after WF_EARLY_STOP epochs without a
-better loss. The optuna sampler is an A/B: each fold draws one of WF_SAMPLERS from its seed, so every strategy has
-folds in each arm, and the run report's `arms` compares their hyperopt seconds and out-of-sample uplift. Each arm's
-tuned parameters enter the trial register like any other (lab/confidence.py). A fold row keeps its hyperopt and
-backtest seconds apart, so the cost of each step is measured, not guessed.
+better loss. A hyperopt still running at WF_TIMEOUT is stopped there and keeps the best epoch it saved, as an early
+stop does (`best_so_far`); with none saved the fold fails. The optuna sampler is an A/B: each fold draws one of
+WF_SAMPLERS from its seed, so every strategy has folds in each arm, and the run report's `arms` compares their
+hyperopt seconds and out-of-sample uplift. Each arm's tuned parameters enter the trial register like any other
+(lab/confidence.py). A fold row keeps its hyperopt and backtest seconds apart, so the cost of each step is measured,
+not guessed.
 
 A fold is cached by strategy file, configs, Freqtrade version, dates, hyperopt settings and a digest of the
 candles from its training start to its test end, so a weekly run adds the newest month and whatever a changed
@@ -215,17 +217,22 @@ class Cli:
             h0 = time.monotonic()
             try:
                 p = subprocess.run(cmd, capture_output=True, text=True, timeout=TIMEOUT)
-            except subprocess.TimeoutExpired:
-                return took({"ok": False, "error": f"hyperopt timed out after {TIMEOUT}s"})
+            except subprocess.TimeoutExpired:  # the same fold times out again on a retry: keep what it found
+                p = None
             finally:
                 hyperopt_s = time.monotonic() - h0
-            if p.returncode:  # a training span with nothing to run is no data, as a backtest's is: no retry changes it
+            if p is None:
+                epochs_run = best_so_far(Path(d), strategy, params_file)
+                if not epochs_run:
+                    return took({"ok": False, "error": f"hyperopt timed out after {TIMEOUT}s"})
+            elif p.returncode:  # a training span with nothing to run is no data, as a backtest's is: no retry changes it
                 if why := analyze.nothing_to_run(p.stdout + p.stderr):
                     return took({"ok": False, "no_data": True, "error": f"hyperopt: {why}"})
                 return took({"ok": False, "error": f"hyperopt exit {p.returncode}: {analyze._errors(p.stdout + p.stderr)}"})
-            stopped = EARLY_STOPPED.search(p.stdout + p.stderr)
-            out = {"ok": True, "error": None, "base": stats(base), "params": None,
-                   "epochs_run": int(stopped.group(1)) if stopped else tune["epochs"]}
+            else:
+                stopped = EARLY_STOPPED.search(p.stdout + p.stderr)
+                epochs_run = int(stopped.group(1)) if stopped else tune["epochs"]
+            out = {"ok": True, "error": None, "base": stats(base), "params": None, "epochs_run": epochs_run}
             if not params_file.exists() or params_file.stat().st_mtime_ns == before:
                 return took({**out, "error": f"no hyperopt epoch reached {MIN_TRADES} training trades"})
             out["params"] = json.loads(params_file.read_text())["params"]
@@ -237,6 +244,29 @@ class Cli:
             out["robustness"] = robustness.run(self.bt, strategy, strat, params_file, exchange,
                                                test_start, test_end, suggest.load_config()["confidence"], stats)
         return took(out)
+
+
+def best_so_far(userdir: Path, strategy: str, params_file: Path) -> int:
+    """After a hyperopt killed at WF_TIMEOUT: export the best epoch it saved to params_file, as a finished hyperopt
+    does, and return how many epochs it ran; 0 when it saved no best epoch. freqtrade appends each epoch to its
+    results file as one JSON line, marking each new best (`is_best`); the line it was writing when killed is cut."""
+    import rapidjson
+    from freqtrade.optimize.hyperopt_tools import HyperoptTools
+
+    best, epochs = None, 0
+    for f in sorted((userdir / "hyperopt_results").glob("*.fthypt")):
+        for line in f.read_text().splitlines():
+            try:
+                epoch = rapidjson.loads(line, number_mode=rapidjson.NM_NATIVE | rapidjson.NM_NAN)
+            except ValueError:
+                continue
+            epochs += 1
+            if epoch.get("is_best"):
+                best = epoch
+    if best is None:
+        return 0
+    HyperoptTools.export_params(best, strategy, params_file)
+    return epochs
 
 
 def candidates(conn) -> list[dict]:

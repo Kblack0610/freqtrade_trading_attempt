@@ -210,7 +210,7 @@ A backtest of a strategy as it is says nothing about tuning it, and hyperopt's b
 | `WF_MIN_TRADES` | `10` | Training trades an epoch needs to count |
 | `WF_LIMIT` | `16` | Candidates per run |
 | `WF_WORKERS` | `6` | Folds at once; each hyperopt runs on one core (`-j 1`) |
-| `WF_TIMEOUT` | `10800` | Seconds before one hyperopt is killed |
+| `WF_TIMEOUT` | `10800` | Seconds before one hyperopt is stopped; the fold keeps the best epoch it saved, and fails only with none |
 | `WF_BUDGET_S` | `0` | Seconds after which a run starts no more folds (0: no limit). Keep it under the job's deadline by `WF_TIMEOUT` plus the post steps; the run records `folds_left` and the next one carries on by cache key |
 | `WF_MEMORY_GB` | `10` | Estimated memory the folds running at once may hold |
 | `WF_STRATEGIES` | all | Space-separated names to limit a run to |
