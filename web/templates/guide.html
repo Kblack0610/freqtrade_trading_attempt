@@ -1,20 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Guide<h2 id="glossary">Glossary</h2>
-<p class="muted">One set of words for the whole site, from <code>web/glossary.toml</code>. Labels changed; database ids, roster names and the Freqtrade <code>dry_run</code> flag did not.</p>
-<dl>
-{% for t in glossary.term %}<dt><strong>{{ t.name }}</strong>{% if t.replaces %} <span class="muted">replaces {{ t.replaces }}</span>{% endif %}</dt><dd>{{ t.means }}</dd>
-{% endfor %}</dl>
-<h3>Scorecard columns</h3>
-<dl>
-{% for c in glossary.column %}<dt><strong>{{ c.name }}</strong></dt><dd>{{ c.means }}</dd>
-{% endfor %}</dl>
-<h3 id="retired">Moved and removed</h3>
-<div class="scroll"><table>
-<thead><tr><th>Old place</th><th>New home</th><th>Why</th></tr></thead>
-<tbody>{% for r in glossary.retired %}<tr><td>{{ r.old }}</td><td>{{ r.new }}</td><td>{{ r.why }}</td></tr>
-{% endfor %}</tbody>
-</table></div>
-{% endblock %}
+{% block title %}Guide{% endblock %}
 {% block body %}
 <h1>How to read this site</h1>
 <p class="muted">Read the pages in this order. Each one narrows what the one before it showed. Nothing here trades: every league is paper only.</p>
@@ -47,6 +32,13 @@
 <dl>
 {% for c in glossary.column %}<dt><strong>{{ c.name }}</strong></dt><dd>{{ c.means }}</dd>
 {% endfor %}</dl>
+<h3 id="trading-terms">Trading terms</h3>
+<p class="muted">The market words a person needs to read this repo, each with where the trader uses it.</p>
+{% for group, terms in glossary.trading|groupby("group") %}<h4>{{ group }}</h4>
+<dl>
+{% for t in terms %}<dt><strong>{{ t.name }}</strong></dt><dd>{{ t.means }} <span class="muted">In the trader: {{ t.uses }}</span></dd>
+{% endfor %}</dl>
+{% endfor %}
 <h3 id="retired">Moved and removed</h3>
 <div class="scroll"><table>
 <thead><tr><th>Old place</th><th>New home</th><th>Why</th></tr></thead>
