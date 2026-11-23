@@ -7,6 +7,8 @@ so an image build fails on a bad checksum. Local dev: `python web/fetch_kit.py` 
 import hashlib
 import json
 import sys
+import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -20,8 +22,23 @@ def sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def fetch(lock: dict, dest: Path = DEST, get=None) -> None:
-    get = get or (lambda url: urllib.request.urlopen(url, timeout=30).read())
+TRIES = 4
+BACKOFF_S = 5
+
+
+def fetch(lock: dict, dest: Path = DEST, get=None, sleep=time.sleep) -> None:
+    raw = get or (lambda url: urllib.request.urlopen(url, timeout=30).read())
+
+    def get(url):
+        # raw.githubusercontent.com answers 503 "max_conn reached" under load; that failed master's build once.
+        for attempt in range(1, TRIES + 1):
+            try:
+                return raw(url)
+            except (urllib.error.URLError, TimeoutError):
+                if attempt == TRIES:
+                    raise
+                sleep(BACKOFF_S * attempt)
+
     dest.mkdir(parents=True, exist_ok=True)
     for name, want in lock["files"].items():
         data = get(URL.format(name=name, **lock))
