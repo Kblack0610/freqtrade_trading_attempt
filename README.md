@@ -155,7 +155,7 @@ npm run lint
 
 `npm test` runs pytest using the active Python environment. The Docker commands under [Run locally](#run-locally) supply the runtime dependencies and disposable database for the full suite. An unset `DATABASE_URL` skips database tests.
 
-`secrets`, the migrate-and-test step, the calibration step and the ML test step each stop after 10 minutes (`timeout-minutes`), so a hung test fails the run instead of holding a runner for six hours. `test` builds the image, runs the migrations twice and the tests against a Postgres 17 service; the second run must report `0 new`, which proves a migration applies once and a rerun is a no-op:
+`secrets`, the migrate-and-test step, the calibration step and the ML test step each stop after 10 minutes (`timeout-minutes`), so a hung test fails the run instead of holding a runner for six hours. `test` is 4 parallel shards (`TEST_SHARD` and `TEST_SHARDS` in `lab/tests/conftest.py` keep every 4th collected test; the suite took 395 to 596s as one job against its 10-minute guard). Each shard builds the image, runs the migrations twice and its tests against its own Postgres 17 service; the second run must report `0 new`, which proves a migration applies once and a rerun is a no-op:
 
 ```sh
 python lab/migrate.py && python lab/migrate.py | grep -q "0 new" && python -m pytest -q -p no:cacheprovider lab/tests

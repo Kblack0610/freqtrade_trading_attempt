@@ -18,3 +18,24 @@ def conn():
     with db.connect(autocommit=True) as c:
         c.execute(f"TRUNCATE {TABLES} RESTART IDENTITY CASCADE")
         yield c
+
+
+def pytest_collection_modifyitems(config, items):
+    """CI runs the suite in TEST_SHARDS parallel jobs: this one keeps every TEST_SHARDS-th test from TEST_SHARD.
+
+    Round-robin over the collected order, so the shards stay even as tests are added with no weights file to drift.
+    Unset, every test runs. Each shard has its own database, so the schema truncation in `conn` cannot cross shards.
+    """
+    shards = int(os.environ.get("TEST_SHARDS", "1"))
+    if shards < 2:
+        return
+    try:
+        shard = int(os.environ["TEST_SHARD"])
+    except (KeyError, ValueError):
+        raise pytest.UsageError("TEST_SHARDS is set, so TEST_SHARD must be an integer")
+    if not 0 <= shard < shards:
+        raise pytest.UsageError(f"TEST_SHARD {shard} outside 0..{shards - 1}")
+    kept = items[shard::shards]
+    keep = set(kept)
+    config.hook.pytest_deselected(items=[i for i in items if i not in keep])
+    items[:] = kept
