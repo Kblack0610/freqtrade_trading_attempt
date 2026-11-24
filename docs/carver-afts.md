@@ -17,7 +17,6 @@ Sources: the table of contents on [Carver's book page](https://www.systematicmon
 | Level | Meaning |
 | now | Something we scan does this, a `Carver` class in the forecast family or an older one; read its strategy page |
 | port | Runs long-only on spot; not built yet |
-| port | Runs long-only on spot; still to build |
 | research | Measurable offline from recorded data; cannot be traded by the league |
 | needs shorts | The core of it is a short or a hedged leg: waits for a guarded short route (the US perps and CME rows in the register) |
 | needs data | Needs more history than the venues have |
@@ -25,6 +24,27 @@ Sources: the table of contents on [Carver's book page](https://www.systematicmon
 | n/a | Futures plumbing with no spot equivalent |
 
 The phases are in the trader plan for this work: P2 built the ports as the forecast family (`user_data/strategies/forecast/family.toml`, signals in `lab/forecasts.py`), P3 the carry study from recorded funding ([carry.md](carry.md)), P4 the long-short research.
+
+## Scorecard: covered, new long-only, or blocked
+
+One verdict and one score per strategy, read off the tables below. The class comes from the Use column: **covered** is `now`, **new long-only** is `port`, **blocked** is every other level. The score is how much of Carver's rule a long-only spot port keeps. It says nothing about how the port trades; that comes from the nightly analysis, never from this page.
+
+| Score | Meaning |
+|---|---|
+| 3 | Runs as the book writes it, or its long half is the whole idea |
+| 2 | The long half runs; a book element is lost (the short half, the buffer, daily resizing) |
+| 1 | Only measurable or approximated offline: research code that the league cannot trade |
+| 0 | No spot equivalent: needs shorts, history we lack, contracts or expiries |
+
+| Class | Strategies (score) |
+|---|---|
+| Covered, 14 of 30 | 1 (3), 2 (3), 5 (3), 7 (3), 9 (3), 13 (3), 14 (3), 21 (3), 8 (2), 19 (2), 23 (2), 24 (2), 26 (2), 27 (2) |
+| New long-only, 3 of 30 | 12 (3), 17 (3), 18 (2) |
+| Blocked, research only, 7 of 30 | 3 (1), 4 (1), 10 (1), 11 (1), 15 (1), 16 (1), 20 (1) |
+| Blocked, needs shorts, 3 of 30 | 6 (0), 28 (0), 29 (0) |
+| Blocked, needs data, scale or n/a, 3 of 30 | 22 (0), 25 (0), 30 (0) |
+
+The three to build next are 12, 17 and 18: all score 2 or 3 and need no new route. The seven research rows wait on carry paying again (see the end of this page).
 
 ## Part one: basic directional
 
@@ -46,7 +66,7 @@ The phases are in the trader plan for this work: P2 built the ports as the forec
 
 | # | Strategy | Rule | On spot crypto | Ours | Use | Avenue |
 |---|---|---|---|---|---|---|
-| 12 | Adjusted trend | Reshape forecasts where strength stops predicting: the fastest speed through a "double V" that falls to 0 beyond 20; two speeds scaled up and capped at 15. | A small effect per the notes; an option on 9 once 9 has results. | after P2 | port | Trend |
+| 12 | Adjusted trend | Reshape forecasts where strength stops predicting: the fastest speed through a "double V" that falls to 0 beyond 20; two speeds scaled up and capped at 15. | A small effect per the notes; an option on 9 once 9 has results. | none yet | port | Trend |
 | 13 | Trend following and carry in different risk regimes | Multiply forecasts by 2 down to 0.5 as volatility rises against its 10-year average (quantile, smoothed). | Portable, with the quantile over all history so far rather than 10 years. | `CarverRegimeMix` on the ladder: the AFTS 9 mix times the multiplier, against the last 1000 candles | now | Volatility-regime scaling |
 | 14 | Spot trend | Trend on the spot price rather than the back-adjusted futures price, which takes carry out of trend. Confirm. | Our prices are spot, so every trend strategy here is already a spot trend. | Every trend strategy | now | Trend |
 | 15 | Accurate carry | A better carry estimate than two nearby contracts give. Confirm. | Funding is observed every 8 hours; the estimate is the smoothed recorded rate. | Measured in [carry.md](carry.md), no edge | research | Funding carry and basis |
