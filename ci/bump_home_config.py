@@ -33,6 +33,8 @@ PREFIX = "trader-sha-"
 # polled at this cadence, bounded by MERGEABLE_TIMEOUT_S.
 MERGEABLE_POLL_S = 2
 MERGEABLE_TIMEOUT_S = 120
+# Merges after ours that could push it out of the commits list read back.
+BASE_COMMITS_CHECKED = 50
 DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 
@@ -140,7 +142,9 @@ def wait_mergeable(number):
 def merge(number):
     """Squash-merge the bump PR and delete its branch; exit non-zero if it did not merge.
 
-    Forgejo answers the merge call 200 even when nothing merged, so the PR is read back.
+    Forgejo answers the merge call 200 even when nothing merged, and a PR can read
+    merged=true with a merge commit that never reached BASE, so the PR is read back
+    and its merge_commit_sha is looked up on BASE.
     """
     pr = wait_mergeable(number)
     if not pr.get("merged"):
@@ -149,7 +153,18 @@ def merge(number):
         pr = call("GET", f"/repos/{REPO}/pulls/{number}")
     if not pr.get("merged"):
         raise SystemExit(f"PR #{number} did not merge (state {pr.get('state')}, mergeable {pr.get('mergeable')})")
-    print(f"merged #{number} as {pr.get('merge_commit_sha', '')[:7]}")
+    sha = pr.get("merge_commit_sha") or ""
+    if not on_base(sha):
+        raise SystemExit(f"PR #{number} reads merged but {sha[:7] or 'no merge commit'} is not on {BASE} (home-config #697 was lost that way)")
+    print(f"merged #{number} as {sha[:7]}")
+
+
+def on_base(sha):
+    """True when sha is among the newest BASE_COMMITS_CHECKED commits of home-config BASE."""
+    if not sha:
+        return False
+    commits = call("GET", f"/repos/{REPO}/commits?sha={BASE}&limit={BASE_COMMITS_CHECKED}&stat=false&verification=false&files=false")
+    return any(c.get("sha") == sha for c in commits)
 
 
 def close_superseded(open_prs, branch, number, tag):
