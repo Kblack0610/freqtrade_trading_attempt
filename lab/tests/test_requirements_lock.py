@@ -1,11 +1,14 @@
-"""lab/requirements.lock agrees with lab/requirements.txt: the image installs only the lock, so a pin edited in
-requirements.txt without re-running ci/lock_requirements.sh would never reach the image."""
+"""Each lab lock agrees with its requirements file: the image installs only requirements.lock and CI's quality job
+only requirements-dev.lock, so a pin edited without re-running ci/lock_requirements.sh would never be installed."""
 
 import re
 from pathlib import Path
 
+import pytest
+
 LAB = Path(__file__).resolve().parents[1]
 PIN = re.compile(r"^([A-Za-z0-9][A-Za-z0-9._-]*)(?:\[[^\]]*\])?==([^\s\\;]+)")
+PAIRS = [("requirements.txt", "requirements.lock"), ("requirements-dev.txt", "requirements-dev.lock")]
 
 
 def _pins(path: Path) -> dict[str, str]:
@@ -17,16 +20,18 @@ def _pins(path: Path) -> dict[str, str]:
     return pins
 
 
-def test_every_top_level_pin_is_in_the_lock():
-    wanted = _pins(LAB / "requirements.txt")
-    locked = _pins(LAB / "requirements.lock")
-    assert wanted, "requirements.txt has no pins"
+@pytest.mark.parametrize("source,lock", PAIRS)
+def test_every_top_level_pin_is_in_the_lock(source, lock):
+    wanted = _pins(LAB / source)
+    locked = _pins(LAB / lock)
+    assert wanted, f"{source} has no pins"
     stale = {name: (version, locked.get(name)) for name, version in wanted.items() if locked.get(name) != version}
-    assert not stale, f"re-run ci/lock_requirements.sh; requirements.txt vs lock: {stale}"
+    assert not stale, f"re-run ci/lock_requirements.sh; {source} vs {lock}: {stale}"
 
 
-def test_every_locked_package_carries_a_hash():
-    text = (LAB / "requirements.lock").read_text()
+@pytest.mark.parametrize("lock", [lock for _, lock in PAIRS])
+def test_every_locked_package_carries_a_hash(lock):
+    text = (LAB / lock).read_text()
     blocks = re.split(r"\n(?=[A-Za-z0-9])", text.split("\n# The following packages were excluded")[0])
     for block in blocks:
         if PIN.match(block):
