@@ -192,6 +192,7 @@ class Order:
     side: str  # yes or no
     stake: float  # dollars of contracts, before fees
     limit: float | None = None  # the most it pays per contract
+    edge: float | None = None  # fair price less the price paid, per contract; None when the rule has no fair price
 
 
 def _cents(x: float, mode: str) -> float:

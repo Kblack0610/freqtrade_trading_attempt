@@ -10,6 +10,7 @@ Notable changes to the trader strategy repo, newest first. The image is built on
 
 ### Fixed
 
+- Markets: `max_open` fills an account's entries best edge first, not oldest quote first, and keeps the best two it turned away per pass as `capped` decisions (tr-429).
 - Walk-forward: a hyperopt stopped at `WF_TIMEOUT` keeps its best epoch instead of failing the fold (#236).
 - Inputs: `nws_cli` freshness threshold sits above a healthy reader's daily peak (#234).
 - Markets: the S3 client waits out a stalled home disk (#233); bars history covers one year for Kalshi and Polymarket so the backfill drains (#232).

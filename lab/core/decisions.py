@@ -43,8 +43,8 @@ def funnel(conn, league: str, venue: str, now: dt.datetime, counts: dict) -> Non
 
 
 def prune(conn, league: str, venue: str, keep: dt.datetime) -> None:
-    """The trace_days cut: near-misses and funnel rows older than `keep`; entries and exits stay."""
-    conn.execute("DELETE FROM decisions WHERE league = %s AND venue = %s AND action = 'near_miss' "
+    """The trace_days cut: near-misses, capped entries and funnel rows older than `keep`; entries and exits stay."""
+    conn.execute("DELETE FROM decisions WHERE league = %s AND venue = %s AND action IN ('near_miss', 'capped') "
                  "AND decided_at < %s", (league, venue, keep))
     conn.execute("DELETE FROM decision_funnel WHERE league = %s AND venue = %s AND pass_at < %s",
                  (league, venue, keep))
