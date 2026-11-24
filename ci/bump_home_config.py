@@ -35,6 +35,7 @@ MERGEABLE_POLL_S = 2
 MERGEABLE_TIMEOUT_S = 120
 # Merges after ours that could push it out of the commits list read back.
 BASE_COMMITS_CHECKED = 50
+ON_BASE_TRIES = 3
 DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 
@@ -155,7 +156,7 @@ def merge(number):
         raise SystemExit(f"PR #{number} did not merge (state {pr.get('state')}, mergeable {pr.get('mergeable')})")
     sha = pr.get("merge_commit_sha") or ""
     if not on_base(sha):
-        raise SystemExit(f"PR #{number} reads merged but {sha[:7] or 'no merge commit'} is not on {BASE} (home-config #697 was lost that way)")
+        raise SystemExit(f"PR #{number} reads merged but {sha[:7] or 'no merge commit'} is not on {BASE}")
     print(f"merged #{number} as {sha[:7]}")
 
 
@@ -163,8 +164,15 @@ def on_base(sha):
     """True when sha is among the newest BASE_COMMITS_CHECKED commits of home-config BASE."""
     if not sha:
         return False
-    commits = call("GET", f"/repos/{REPO}/commits?sha={BASE}&limit={BASE_COMMITS_CHECKED}&stat=false&verification=false&files=false")
-    return any(c.get("sha") == sha for c in commits)
+    # Forgejo has no event for its commit list catching up with a merge, so the
+    # list is re-read at the merge-poll cadence, bounded by ON_BASE_TRIES.
+    for attempt in range(ON_BASE_TRIES):
+        commits = call("GET", f"/repos/{REPO}/commits?sha={BASE}&limit={BASE_COMMITS_CHECKED}&stat=false&verification=false&files=false")
+        if any(c.get("sha") == sha for c in commits):
+            return True
+        if attempt < ON_BASE_TRIES - 1:
+            time.sleep(MERGEABLE_POLL_S)
+    return False
 
 
 def close_superseded(open_prs, branch, number, tag):

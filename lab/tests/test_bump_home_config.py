@@ -131,6 +131,7 @@ def test_merge_fails_when_the_merge_commit_is_not_on_master(monkeypatch):
             return [{"sha": "1111111111"}]
         return {"merged": True, "merge_commit_sha": "abcdef0123", "state": "closed"}
     monkeypatch.setattr(bump_home_config, "call", fake)
+    monkeypatch.setattr(bump_home_config.time, "sleep", lambda s: None)
     with pytest.raises(SystemExit, match="not on master"):
         bump_home_config.merge(645)
 
@@ -139,3 +140,10 @@ def test_merge_fails_when_a_merged_pr_has_no_merge_commit(monkeypatch):
     monkeypatch.setattr(bump_home_config, "call", lambda *a, **k: {"merged": True, "state": "closed"})
     with pytest.raises(SystemExit, match="no merge commit"):
         bump_home_config.merge(645)
+
+
+def test_on_base_waits_for_the_commit_list_to_catch_up(monkeypatch):
+    answers = iter([[{"sha": "1"}], [{"sha": "abc"}]])
+    monkeypatch.setattr(bump_home_config, "call", lambda *a, **k: next(answers))
+    monkeypatch.setattr(bump_home_config.time, "sleep", lambda s: None)
+    assert bump_home_config.on_base("abc")
