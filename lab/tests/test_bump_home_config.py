@@ -72,6 +72,8 @@ def test_merge_squashes_and_checks_it_merged(monkeypatch):
     calls = []
     posted_merges = True
     def fake(method, path, body=None, ok_404=False):
+        if "/commits" in path:
+            return [{"sha": "abcdef0123"}]
         calls.append((method, path, body))
         merged = posted_merges and any(c[0] == "POST" for c in calls)
         return {"merged": merged, "mergeable": True, "merge_commit_sha": "abcdef0123", "state": "closed" if merged else "open"}
@@ -114,8 +116,34 @@ def test_wait_mergeable_fails_at_once_on_a_closed_pr(monkeypatch):
 def test_merge_skips_the_post_when_already_merged(monkeypatch):
     calls = []
     def fake(method, path, body=None, ok_404=False):
+        if "/commits" in path:
+            return [{"sha": "abcdef0123"}]
         calls.append(method)
         return {"merged": True, "merge_commit_sha": "abcdef0123", "state": "closed"}
     monkeypatch.setattr(bump_home_config, "call", fake)
     bump_home_config.merge(645)
     assert calls == ["GET"]
+
+
+def test_merge_fails_when_the_merge_commit_is_not_on_master(monkeypatch):
+    def fake(method, path, body=None, ok_404=False):
+        if "/commits" in path:
+            return [{"sha": "1111111111"}]
+        return {"merged": True, "merge_commit_sha": "abcdef0123", "state": "closed"}
+    monkeypatch.setattr(bump_home_config, "call", fake)
+    monkeypatch.setattr(bump_home_config.time, "sleep", lambda s: None)
+    with pytest.raises(SystemExit, match="not on master"):
+        bump_home_config.merge(645)
+
+
+def test_merge_fails_when_a_merged_pr_has_no_merge_commit(monkeypatch):
+    monkeypatch.setattr(bump_home_config, "call", lambda *a, **k: {"merged": True, "state": "closed"})
+    with pytest.raises(SystemExit, match="no merge commit"):
+        bump_home_config.merge(645)
+
+
+def test_on_base_waits_for_the_commit_list_to_catch_up(monkeypatch):
+    answers = iter([[{"sha": "1"}], [{"sha": "abc"}]])
+    monkeypatch.setattr(bump_home_config, "call", lambda *a, **k: next(answers))
+    monkeypatch.setattr(bump_home_config.time, "sleep", lambda s: None)
+    assert bump_home_config.on_base("abc")
