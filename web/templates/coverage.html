@@ -3,6 +3,19 @@
 {% block body %}
 <h1>Coverage</h1>
 {% include "_signal_filter.html" %}
+<h2>Lifecycle stages</h2>
+<p class="muted">Each market's adapter declares the module that does each stage in <code>lab/stages.toml</code>. A red dash is a stage nothing implements yet: a gap to build, not a pass.</p>
+<div class="scroll">
+<table>
+  <thead><tr><th>Market</th>{% for s in stage_matrix.stages %}<th>{{ s }}</th>{% endfor %}</tr></thead>
+  <tbody>
+  {% for m in stage_matrix.markets %}
+  <tr><td>{{ m.market }}</td>{% for c in m.cells %}<td{% if not c.module %} class="down"{% endif %}>{% if c.module %}<code>{{ c.module }}</code>{% if c.note %}<br><span class="muted">{{ c.note }}</span>{% endif %}{% else %}missing{% endif %}</td>{% endfor %}</tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+<h2>Families by venue</h2>
 <p class="muted">Which kinds of method have been tested where. Families and data inputs come from <code>lab/crypto/families.toml</code>. Each cell is how many of the family's strategies have a whole-history backtest on that venue, then the walk-forward test months that ran (summed over its strategies) and its rows in the trial register. A family that is thin here has not been tried, which is different from having failed.</p>
 <div class="scroll">
 <table>

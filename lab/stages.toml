@@ -1,0 +1,33 @@
+# What each market's adapter declares for each lifecycle stage, for /coverage (docs/architecture.md).
+# A stage is a module that does the work, or absent: absent shows red on /coverage and is a gap to build.
+# A "note" says how far the stage goes. test_coverage_matrix.py checks every module exists.
+
+stages = ["data", "backtest", "gate", "paper", "live"]
+
+[markets.crypto]
+data = { module = "lab.crypto.backfill" }
+backtest = { module = "lab.crypto.analyze" }
+gate = { module = "lab.crypto.confidence" }
+paper = { module = "lab.crypto.ingest", note = "freqtrade dry-run bots" }
+live = { module = "lab.crypto.live", note = "refuses: no real money" }
+
+[markets.events]
+data = { module = "lab.stages.recorder" }
+backtest = { module = "lab.events.backtest" }
+gate = { module = "lab.events.families" }
+paper = { module = "lab.events.paper" }
+live = { module = "lab.events.kalshi_trade", note = "demo drills only" }
+
+[markets.sports]
+data = { module = "lab.sports.odds" }
+backtest = { module = "lab.events.backtest", note = "the events engine" }
+gate = { module = "lab.events.families", note = "the events gate" }
+paper = { module = "lab.events.paper", note = "line book only" }
+
+[markets.stocks]
+data = { module = "lab.stocks.paper", note = "AlpacaStocks Venue and History" }
+paper = { module = "lab.stocks.paper" }
+
+[markets.futures]
+data = { module = "lab.futures.funding" }
+backtest = { module = "lab.futures.research.carry", note = "ad hoc research script" }

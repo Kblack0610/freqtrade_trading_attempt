@@ -20,7 +20,7 @@ Results go to the `trader` database in the cluster's shared Postgres, which the 
 |---|---|
 | `lab/core/` | What every market shares: `db.py`, `util.py`, `decisions.py` (the decision record), `readiness.py` (the one gate table and writer), `grid.py`, and `api.py` with `budget.py`, the one paced HTTP client |
 | `lab/market.py` | The contract every market adapter implements, with the cost and fill models |
-| `lab/stages/` | One driver per stage, each over any adapter: `recorder.py` (record), `paper.py` (the one paper pass), `live.py` (the one live door), `drill.py` (an order path proven on mock funds) |
+| `lab/stages/` | One driver per stage, each over any adapter: `recorder.py` (record), `paper.py` (the one paper pass), `live.py` (the one live door), `drill.py` (an order path proven on mock funds), `coverage.py` (the market x stage table `/coverage` shows, from the declarations in `lab/stages.toml`; a stage nothing implements shows red) |
 | `lab/money/` | The live guard, broker and wallet reads, the league scorecard (`leagues.py`) and the loss watcher |
 | `lab/inputs/` | Exogenous feeds any market's family can read: the registry (`__init__.py`, `inputs.toml`), NWS, and calls and call rules |
 | `lab/crypto/` | Crypto spot, the freqtrade adapter: league, backfill, ingest, the nightly analysis, walk-forward and the gates and tables built on them |

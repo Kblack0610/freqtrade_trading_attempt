@@ -1088,3 +1088,9 @@ def test_today_counts_the_days_orders_fills_and_what_did_not_trade(conn, signed_
     best = page[page.index("<h2>Best</h2>"):page.index("<h2>Worst</h2>")]
     assert best.index("M0") < best.index("ETH/USD") < best.index("M1") and "OLD" not in page  # by return: 22%, 5%, -11%
     assert "No dry run" in client.get("/today?day=2020-01-01").text and client.get("/today?day=nope").status_code == 404
+
+
+def test_coverage_shows_the_stage_gaps_red(conn, signed_in):
+    body = signed_in[1].get("/coverage").text
+    assert "Lifecycle stages" in body and '<td class="down">missing</td>' in body
+    assert "<code>lab.stocks.paper</code>" in body
