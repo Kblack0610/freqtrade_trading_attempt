@@ -5,6 +5,7 @@ import pandas as pd
 import pytest
 from psycopg.types.json import Jsonb
 
+from lab.market import Order
 from lab.money import watcher
 from lab.events import backtest, paper
 from lab.stages.recorder import load_config
@@ -171,6 +172,31 @@ def test_an_account_at_max_open_takes_no_entry_and_asks_again_once_one_settles(c
                  "VALUES ('kalshi', 'A', 'no', 0, %s)", (NOW,))
     out = paper.run_pass(conn, "kalshi", cfg(max_open=1), NOW + dt.timedelta(minutes=5))
     assert out["accounts"][ACCOUNT]["fills"] == 1 and [o[1] for o in orders(conn)] == ["A", "C"]
+
+
+def test_max_open_keeps_the_best_edge_not_the_oldest_quote_and_records_what_it_turned_away(conn, monkeypatch):
+    seed(conn)
+    conn.execute("UPDATE outcomes SET quoted_at = quoted_at - interval '1 hour' WHERE market_id = 'A'")
+    edges = {"A": 0.02, "C": 0.30}
+
+    class Fair:
+        CHECKS = ()
+        seen: set = set()
+        checks = inputs = None
+
+        def rule(self):
+            return "fake"
+
+        def on_book(self, row, m):
+            return [Order(row.market_id, "yes", 10, edge=edges[row.market_id])] if row.market_id in edges else []
+
+    monkeypatch.setattr(paper, "strategy_of", lambda *a, **k: Fair())
+    out = paper.run_pass(conn, "kalshi", cfg(max_open=1, capped_traces=1), NOW)
+    assert out["accounts"][ACCOUNT]["capped"] == 1 and [o[1] for o in orders(conn)] == ["C"]
+    [(mid, sizing)] = conn.execute("SELECT instrument, sizing FROM decisions WHERE action = 'capped'").fetchall()
+    assert mid == "A" and sizing["edge"] == 0.02 and sizing["rank"] == 2 and sizing["max_open"] == 1
+    [(won,)] = conn.execute("SELECT sizing->>'rank' FROM decisions WHERE action = 'enter'").fetchall()
+    assert won == "1"
 
 
 def check(conn):

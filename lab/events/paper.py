@@ -22,7 +22,8 @@ reported under "unrunnable". A pass:
 3. Fills each order with market.take against that row (crossing the spread, at most `[backtest] depth_share` of
    the side's size) and market.entry_fee, so a paper fill and a backtest fill of the same book cost the same. Every order
    is stored, filled or not, so an account enters a market once, as in a backtest. An order the account's cash
-   cannot pay for, or one past `[paper] max_open` open positions, is dropped unstored and asked again next pass.
+   cannot pay for, or one past `[paper] max_open` open positions, is dropped unstored and asked again next pass; orders fill best edge
+   first, so the cap keeps the best, and the best `[paper] capped_traces` turned away are kept as `capped` decisions.
    Each stored order gets a `decisions` row in the same transaction (the family's rule in words, every check it ran
    with its value and threshold, the inputs it read and the sizing), every book row is counted per account in
    `decision_funnel` by the first check it failed or what became of its order, and up to `[paper] near_misses` rows
@@ -54,7 +55,7 @@ from lab.core.db import connect
 from lab.core.decisions import decide, funnel
 from lab.core.grid import variants
 from lab.stages import paper as stage
-from lab.market import entry_fee, payout, settlement_fee, take
+from lab.market import entry_fee, Order, payout, settlement_fee, take
 from lab.events import backtest
 from lab.events.backtest import Market
 from lab.events.families import Forecasts, line_book, line_resolution, Longshot, meetings_of, Observed, TTTotals, Weather
@@ -116,7 +117,7 @@ def _f(x) -> float:
 
 
 def books(conn, venue: str, now: dt.datetime, horizon_h: float, unsized: float = math.nan) -> list[tuple[Row, Market]]:
-    """The latest recorded book of every unresolved open yes outcome closing within horizon_h, oldest quote first.
+    """The latest recorded book of every unresolved open yes outcome closing within horizon_h, oldest quote first (trade ranks them by edge).
     A side whose recorder stores no size (polymarket_us, predictit) shows `unsized` contracts, `[paper] unsized_depth`;
     NaN, the default, leaves it unfillable, as market.take reads it."""
     rows = conn.execute(
@@ -203,15 +204,18 @@ def traced(strategy, row: Row, m: Market, venue: str) -> tuple[list, list, list]
 
 
 def trade(conn, account: str, strategy, book: list[tuple[Row, Market]], capital: float, share: float,
-          fee_cfg: dict | None, now: dt.datetime, max_open: int, venue: str, near_misses: int) -> dict:
+          fee_cfg: dict | None, now: dt.datetime, max_open: int, venue: str, near_misses: int,
+          capped_traces: int = 0) -> dict:
     """One account's pass over the book. Each order stored gets its decision row; every book row is counted in the
-    funnel where it stopped; up to `near_misses` rows whose full trace failed one check are kept as near-misses."""
+    funnel where it stopped; up to `near_misses` rows whose full trace failed one check are kept as near-misses. Orders
+    are filled best edge first, so `max_open` keeps the best; the best `capped_traces` it turned away are kept as
+    `capped` decisions, with their edge and rank, to read a later cap against."""
     entered = [m for (m,) in conn.execute("SELECT market_id FROM paper_orders WHERE account = %s", (account,))]
     strategy.seen = set(entered) | {m.split("|")[0] for m in entered}  # a line's game, which tt_totals enters once
     left, sent, filled, broke, capped, open_ = cash(conn, account, capital), 0, 0, 0, 0, held(conn, account)
     taken: dict = {}
     counts: Counter = Counter()
-    near, rule = 0, strategy.rule()
+    near, rule, ranked = 0, strategy.rule(), []
     for row, m in book:
         orders, checks, inputs = traced(strategy, row, m, venue)
         if not orders:
@@ -221,36 +225,46 @@ def trade(conn, account: str, strategy, book: list[tuple[Row, Market]], capital:
                 decide(conn, LEAGUE, account, venue, row.market_id, now, "near_miss", rule, inputs, checks)
                 near += 1
             continue
-        for o in orders:
-            before = taken.get((o.market_id, o.side), 0)
-            got = take(o, row.bid, row.ask, row.depth_yes, row.depth_no, before, share)
-            n, price = got or (0, None)
-            fee = entry_fee(fee_cfg, n, price) if n else 0.0
-            if n and open_ >= max_open:
-                strategy.seen -= {o.market_id, m.event_id}
-                capped += 1
-                counts[(account, "max_open")] += 1
-                continue
-            if n and n * price + fee > left:
-                strategy.seen -= {o.market_id, m.event_id}
-                broke += 1
-                counts[(account, "no_cash")] += 1
-                continue
-            stored = stage.enter(conn, account, o.market_id, o.side, o.stake, o.limit, now, row.ts.to_pydatetime(),
-                                 None if math.isnan(row.bid) else row.bid, None if math.isnan(row.ask) else row.ask,
-                                 n, price, fee)
-            counts[(account, "ordered" if stored else "already entered")] += 1
-            if stored:
-                decide(conn, LEAGUE, account, venue, o.market_id, now, "enter", rule, inputs, checks,
-                       {"side": o.side, "stake": o.stake, "limit": o.limit, "share": share, "taken": before,
-                        "depth": row.depth_yes if o.side == "yes" else row.depth_no, "cash": left, "contracts": n,
-                        "price": price, "fee": fee, "fees": fee_cfg}, ("paper", stored))
-            sent += 1
-            if n:
-                filled += 1
-                open_ += 1
-                left -= n * price + fee
-                taken[(o.market_id, o.side)] = before + n
+        ranked += [(o, row, m, checks, inputs) for o in orders]
+    # Best edge first, so the cap keeps the best entries; an order with no edge (a rule with no fair price) goes
+    # last, and the sort is stable, so ties and edgeless orders keep the book's oldest-quote-first order.
+    ranked.sort(key=lambda r: -math.inf if r[0].edge is None else -r[0].edge)
+    kept = 0
+    for rank, (o, row, m, checks, inputs) in enumerate(ranked, 1):
+        before = taken.get((o.market_id, o.side), 0)
+        got = take(o, row.bid, row.ask, row.depth_yes, row.depth_no, before, share)
+        n, price = got or (0, None)
+        fee = entry_fee(fee_cfg, n, price) if n else 0.0
+        if n and open_ >= max_open:
+            strategy.seen -= {o.market_id, m.event_id}
+            capped += 1
+            counts[(account, "max_open")] += 1
+            if kept < capped_traces:
+                decide(conn, LEAGUE, account, venue, o.market_id, now, "capped", rule, inputs, checks,
+                       {"side": o.side, "stake": o.stake, "edge": o.edge, "rank": rank, "max_open": max_open,
+                        "contracts": n, "price": price, "fee": fee})
+                kept += 1
+            continue
+        if n and n * price + fee > left:
+            strategy.seen -= {o.market_id, m.event_id}
+            broke += 1
+            counts[(account, "no_cash")] += 1
+            continue
+        stored = stage.enter(conn, account, o.market_id, o.side, o.stake, o.limit, now, row.ts.to_pydatetime(),
+                             None if math.isnan(row.bid) else row.bid, None if math.isnan(row.ask) else row.ask,
+                             n, price, fee)
+        counts[(account, "ordered" if stored else "already entered")] += 1
+        if stored:
+            decide(conn, LEAGUE, account, venue, o.market_id, now, "enter", rule, inputs, checks,
+                   {"side": o.side, "stake": o.stake, "limit": o.limit, "edge": o.edge, "rank": rank, "share": share,
+                    "taken": before, "depth": row.depth_yes if o.side == "yes" else row.depth_no, "cash": left,
+                    "contracts": n, "price": price, "fee": fee, "fees": fee_cfg}, ("paper", stored))
+        sent += 1
+        if n:
+            filled += 1
+            open_ += 1
+            left -= n * price + fee
+            taken[(o.market_id, o.side)] = before + n
     funnel(conn, LEAGUE, venue, now, counts)
     return {"orders": sent, "fills": filled, "no_cash": broke, "capped": capped}
 
@@ -333,7 +347,7 @@ class Events:
         strategy = strategy_of(family, ctx["params"].get(account, params), ctx["meetings"], ctx["fairs"],
                                ctx["forecasts"], ctx["observations"])
         return trade(conn, account, strategy, ctx["book"], capital, self.bcfg["depth_share"], self.fee_cfg, now,
-                     self.pcfg["max_open"], self.venue, self.pcfg["near_misses"])
+                     self.pcfg["max_open"], self.venue, self.pcfg["near_misses"], self.pcfg["capped_traces"])
 
     def prices(self, conn, ctx, held):
         """A yes at the venue's bid, a no at one minus its ask, from the recorder's latest yes outcome; a market with

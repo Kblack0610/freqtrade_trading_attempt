@@ -370,6 +370,9 @@ max_book_age_min = 15
 # a pass (rows whose full trace failed one check), and near-misses and funnel counts older than trace_days go. At
 # 8 accounts on a 5-min pass that is at most 4.6k near-miss rows a day, 138k kept.
 near_misses = 2
+# Each account keeps at most this many of the best-edge orders `max_open` turned away a pass, as `capped` decisions
+# (edge, rank, price), cut at trace_days like near-misses: what a higher cap would have bought. 1.4k rows a day at most.
+capped_traces = 2
 trace_days = 30
 # Hours a paper venue may go without sending one order, filled or not, before the Sentinel watch trader-paper-volume
 # calls its league stopped (trader_paper_order_age_seconds against trader_paper_order_quiet_seconds). A venue whose
