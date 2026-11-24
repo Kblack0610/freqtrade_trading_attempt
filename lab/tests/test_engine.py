@@ -15,8 +15,8 @@ import pytest
 
 pytest.importorskip("freqtrade")
 
-from lab import analyze  # noqa: E402
-from test_analyze import REPO  # noqa: E402
+from lab.crypto import analyze  # noqa: E402
+from lab.tests.test_analyze import REPO  # noqa: E402
 
 EX = "binanceus"
 FEE = json.loads((REPO / "user_data" / "exchanges" / f"{EX}.json").read_text())["fee"]

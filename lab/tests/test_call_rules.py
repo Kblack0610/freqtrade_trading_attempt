@@ -8,7 +8,8 @@ import psycopg
 import pytest
 from psycopg.types.json import Jsonb
 
-from lab import call_rules, calls, confidence
+from lab.inputs import call_rules, calls
+from lab.crypto import confidence
 
 ET = calls.ET
 RULE = {"name": "filing-shock", "thesis": "8-K shock", "sources": ["edgar"], "event_types": ["management"],

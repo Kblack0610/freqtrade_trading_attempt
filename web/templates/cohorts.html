@@ -2,7 +2,7 @@
 {% block title %}Cohorts{% endblock %}
 {% block body %}
 <h1>Cohorts</h1>
-<p class="muted">Each roster row in home-config names the cohort its bot reports in and the setup overlay it runs under (an id from <code>lab/variants.toml</code>; base is the strategy's own settings). Every cohort is paper: this compares ways of picking and setting up bots on live prices, and a few weeks of them is too short to judge one by. A cohort groups crypto league bots only; the event-contract league is on <a href="/leagues#event-contracts">Leagues</a>.</p>
+<p class="muted">Each roster row in home-config names the cohort its bot reports in and the setup overlay it runs under (an id from <code>lab/crypto/variants.toml</code>; base is the strategy's own settings). Every cohort is paper: this compares ways of picking and setting up bots on live prices, and a few weeks of them is too short to judge one by. A cohort groups crypto league bots only; the event-contract league is on <a href="/leagues#event-contracts">Leagues</a>.</p>
 {% include "_cohorts.html" %}
 
 {% for c in cohorts %}

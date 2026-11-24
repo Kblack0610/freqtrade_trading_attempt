@@ -49,7 +49,7 @@
 <ul class="plain">
   <li>stake {{ z.stake | num(2) }} / ask {{ z.price | num(2) }} = {{ z.shares | num(4) }} shares</li>
   <li>cash {{ z.cash | num(2) }} before; {{ z.open }} of {{ z.max_open }} positions open</li>
-  <li>cost {{ z.cost | num(2) }} <span class="muted">{{ z.cost_bps }} bp of the notional (lab/calls.toml cost_bps)</span></li>
+  <li>cost {{ z.cost | num(2) }} <span class="muted">{{ z.cost_bps }} bp of the notional (lab/inputs/calls.toml cost_bps)</span></li>
 </ul>
 {% elif z and source == "freqtrade" %}
 <h3>Sizing and fees</h3>

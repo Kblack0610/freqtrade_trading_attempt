@@ -1,6 +1,6 @@
 # The trend family: a long-flat Donchian ensemble, every lookback voting long or flat, with the stake cut
 # to a volatility target. Long only, so it runs on spot; the long-short version is research on futures
-# candles only (lab/research/DonchianLongShort.py). Signals are lab/channels.py.
+# candles only (lab/futures/research/DonchianLongShort.py). Signals are lab/channels.py.
 # lab/families/generate.py writes the strategy files from this file: edit here, then rerun it.
 kind = "trend"
 prefix = "Trend"

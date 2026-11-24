@@ -1,6 +1,6 @@
 # Carry from recorded funding
 
-Research only, from `lab/research/carry.py`, first run on 2026-11-17. It measures Carver's carry strategies (AFTS 10, 11, 15, 16 and 20, [carver-afts.md](carver-afts.md)) on the funding we record, and asks two things: what long spot plus a short perpetual would have earned, and whether funding tells a long-only spot account anything. Nothing here trades. Each rule is a row in the trial register (migration 059).
+Research only, from `lab/futures/research/carry.py`, first run on 2026-11-17. It measures Carver's carry strategies (AFTS 10, 11, 15, 16 and 20, [carver-afts.md](carver-afts.md)) on the funding we record, and asks two things: what long spot plus a short perpetual would have earned, and whether funding tells a long-only spot account anything. Nothing here trades. Each rule is a row in the trial register (migration 059).
 
 ## Result
 
@@ -14,7 +14,7 @@ So the carry avenue stays blocked, and for two reasons now. The first is the mis
 
 ## The test
 
-Funding is kucoin's recorded series (`funding_rates`, collected by `lab/futures.py`), summed by UTC day, for the 18 coins on the kucoin whitelist; it starts 2024-01-01 (KCS 2025-01-26). okx's series starts 2026-08-03, inside the lockbox, so it is not used. Spot prices are kucoin's daily closes. The window ends at the lockbox start in `lab/suggest.toml` (2026-05-01), so those months stay unseen.
+Funding is kucoin's recorded series (`funding_rates`, collected by `lab/futures/funding.py`), summed by UTC day, for the 18 coins on the kucoin whitelist; it starts 2024-01-01 (KCS 2025-01-26). okx's series starts 2026-08-03, inside the lockbox, so it is not used. Spot prices are kucoin's daily closes. The window ends at the lockbox start in `lab/crypto/suggest.toml` (2026-05-01), so those months stay unseen.
 
 Each coin gets one equal slot of the sleeve, filled when the rule holds it and in cash when it does not, so one coin joining or leaving does not resize the others. Every position held on a day is decided from funding and closes through the day before. A harvest is long spot and short perpetual at equal notional and receives the rate when it is positive. Its capital is twice the notional, the spot plus the same again as 1x perpetual margin, so returns are on that. Fees are 0.1% per leg per side, kucoin's spot taker, which leaves room for slippage on the cheaper perpetual leg.
 
@@ -87,4 +87,4 @@ The report also prints the forward return by quintile.
 
 ## Run it
 
-`python lab/research/carry.py <userdir>` inside the image, with `DATABASE_URL` set for the funding (read-only is enough). It downloads kucoin daily candles into the userdir once, about a minute.
+`python lab/futures/research/carry.py <userdir>` inside the image, with `DATABASE_URL` set for the funding (read-only is enough). It downloads kucoin daily candles into the userdir once, about a minute.

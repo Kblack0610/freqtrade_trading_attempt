@@ -3,7 +3,7 @@
 {% block body %}
 <h1>Markets</h1>
 {% include "_markets_nav.html" %}
-<p class="muted">Event contracts across venues, read only. The recorder sweeps each venue's open markets on its own schedule and writes only the quotes that changed, to parquet in MinIO; this page is each venue's newest sweep. A venue whose last good sweep is over {{ max_age }} minutes old (a slower venue's own <code>stale_after_min</code> in <code>lab/markets.toml</code>) shows red: the paper league takes no entries there until it recovers, and the stale-recorder alert fires.</p>
+<p class="muted">Event contracts across venues, read only. The recorder sweeps each venue's open markets on its own schedule and writes only the quotes that changed, to parquet in MinIO; this page is each venue's newest sweep. A venue whose last good sweep is over {{ max_age }} minutes old (a slower venue's own <code>stale_after_min</code> in <code>lab/events/markets.toml</code>) shows red: the paper league takes no entries there until it recovers, and the stale-recorder alert fires.</p>
 
 <h2>Recorder</h2>
 {% if venues %}

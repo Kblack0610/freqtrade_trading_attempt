@@ -3,8 +3,8 @@ from pathlib import Path
 
 import pytest
 
-from lab import leagues
-from lab.markets import paper
+from lab.money import leagues
+from lab.events import paper
 
 GLOSSARY = Path(__file__).parents[2] / "web" / "glossary.toml"
 

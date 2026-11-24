@@ -1,7 +1,7 @@
 import datetime as dt
 
-from lab import futures
-from lab.util import utc
+from lab.futures import funding as futures
+from lab.core.util import utc
 
 UTC = dt.timezone.utc
 DAY = futures.DAY_MS

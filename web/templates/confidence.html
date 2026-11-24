@@ -2,7 +2,7 @@
 {% block title %}Confidence{% endblock %}
 {% block body %}
 <h1>Confidence</h1>
-<p class="muted">Whether a strategy has earned real money, rebuilt after every analysis and walk-forward from <code>lab/suggest.toml</code> [confidence]. The score is the chance its true net expectancy per trade is above zero, from its walk-forward months shrunk toward everything tried. Ready needs every gate and means worth a small capped experiment, not safe. Nothing here changes a bot.</p>
+<p class="muted">Whether a strategy has earned real money, rebuilt after every analysis and walk-forward from <code>lab/crypto/suggest.toml</code> [confidence]. The score is the chance its true net expectancy per trade is above zero, from its walk-forward months shrunk toward everything tried. Ready needs every gate and means worth a small capped experiment, not safe. Nothing here changes a bot.</p>
 <p>{{ board | selectattr("ready") | list | length }} of {{ board | length }} strategy and exchange pairs are ready for a small real-money test.</p>
 {% for c in board %}
 <details class="card">

@@ -5,8 +5,8 @@ import pytest
 
 freqtrade_strategy = pytest.importorskip("freqtrade.strategy")
 
-from lab.research import bust  # noqa: E402
-from lab.research.BustShort import signals  # noqa: E402
+from lab.futures.research import bust  # noqa: E402
+from lab.futures.research.BustShort import signals  # noqa: E402
 
 
 def series(values):
@@ -78,7 +78,7 @@ def test_freqtrades_own_funding_is_taken_out_before_the_measured_is_added():
 
 
 def test_the_long_short_trend_research_is_causal_and_trades_both_ways():
-    from lab.research.DonchianLongShort import signals as both
+    from lab.futures.research.DonchianLongShort import signals as both
 
     close = np.r_[np.linspace(100, 300, 300), np.linspace(300, 80, 300)]
     df = frame(close).assign(volume=1.0)
@@ -91,7 +91,7 @@ def test_the_long_short_trend_research_is_causal_and_trades_both_ways():
 @pytest.mark.parametrize("name", ["CarverLongShort64", "CarverLongShort16"])
 def test_carver_long_short_is_causal_trades_both_ways_and_mirrors_its_long_half(name):
     from lab import forecasts
-    from lab.research import CarverLongShort
+    from lab.futures.research import CarverLongShort
 
     rule = getattr(CarverLongShort, name)
     close = np.r_[np.linspace(100, 300, 600), np.linspace(300, 80, 600)]

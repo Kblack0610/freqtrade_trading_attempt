@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from lab import confidence, mixtures, scorecard, suggest
+from lab.crypto import confidence, mixtures, scorecard, suggest
 
 CFG = suggest.load_config()
 C = CFG["mixtures"]

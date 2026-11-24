@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from lab import analyze, cohorts, diversity, league, suggest, variants
+from lab.crypto import analyze, cohorts, diversity, league, suggest, variants
 
 _spec = importlib.util.spec_from_file_location(
     "cohort_roster", pathlib.Path(__file__).resolve().parents[2] / "ci" / "cohort_roster.py")

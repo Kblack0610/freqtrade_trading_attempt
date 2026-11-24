@@ -1,6 +1,6 @@
 import json
 
-from lab import universe
+from lab.crypto import universe
 
 LIST = ["BTC/USDT", "ETH/USDT"]
 

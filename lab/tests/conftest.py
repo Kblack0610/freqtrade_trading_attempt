@@ -11,7 +11,8 @@ def conn():
     """A migrated, empty trader schema. Needs DATABASE_URL pointing at a throwaway database."""
     if not os.environ.get("DATABASE_URL"):
         pytest.skip("DATABASE_URL not set")
-    from lab import db, migrate
+    from lab.core import db
+    from lab import migrate
 
     assert migrate.main() == 0
     with db.connect(autocommit=True) as c:

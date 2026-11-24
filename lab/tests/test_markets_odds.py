@@ -4,10 +4,10 @@ import datetime as dt
 
 import pytest
 import requests
-from markets_fakes import Resp, Session
+from lab.tests.markets_fakes import Resp, Session
 
-from lab.markets import odds
-from lab.markets.odds import OddsApi
+from lab.sports import odds
+from lab.sports.odds import OddsApi
 
 UTC = dt.timezone.utc
 

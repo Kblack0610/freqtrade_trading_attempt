@@ -1,5 +1,5 @@
 [tool.mypy]
-files = ["web/auth.py", "lab/db.py", "lab/healthcheck.py"]
+files = ["web/auth.py", "lab/core/db.py", "lab/healthcheck.py"]
 follow_imports = "skip"
 ignore_missing_imports = true
 

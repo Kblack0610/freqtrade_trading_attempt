@@ -11,7 +11,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from lab import analyze, metrics, variants
+from lab.crypto import analyze, variants
+from lab import metrics
 
 TODAY = dt.date(2026, 11, 4)
 REPO = Path(__file__).resolve().parents[2]

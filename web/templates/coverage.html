@@ -3,7 +3,7 @@
 {% block body %}
 <h1>Coverage</h1>
 {% include "_signal_filter.html" %}
-<p class="muted">Which kinds of method have been tested where. Families and data inputs come from <code>lab/families.toml</code>. Each cell is how many of the family's strategies have a whole-history backtest on that venue, then the walk-forward test months that ran (summed over its strategies) and its rows in the trial register. A family that is thin here has not been tried, which is different from having failed.</p>
+<p class="muted">Which kinds of method have been tested where. Families and data inputs come from <code>lab/crypto/families.toml</code>. Each cell is how many of the family's strategies have a whole-history backtest on that venue, then the walk-forward test months that ran (summed over its strategies) and its rows in the trial register. A family that is thin here has not been tried, which is different from having failed.</p>
 <div class="scroll">
 <table>
   <thead><tr><th>Family</th><th>Signal source</th><th>Instrument</th><th>Horizon</th><th class="n">Strategies</th>{% for e in exchanges %}<th class="n">{{ e }}</th>{% endfor %}<th class="n">All venues</th></tr></thead>
@@ -59,7 +59,7 @@
 {% if not clusters %}<p class="muted">No clusters yet: the nightly analysis fills them.</p>{% endif %}
 {% else %}<p class="muted">Clear the signal source filter to see residual clusters across all sources.</p>{% endif %}
 <h2>Strategies</h2>
-<p class="muted">Untagged means a strategy file under <code>user_data/strategies</code> with no line in <code>lab/families.toml</code>: add one. Gone means a name only the results still hold, such as a deleted strategy, whose trials still count. Best gates is the venue that passes the most confidence gates.</p>
+<p class="muted">Untagged means a strategy file under <code>user_data/strategies</code> with no line in <code>lab/crypto/families.toml</code>: add one. Gone means a name only the results still hold, such as a deleted strategy, whose trials still count. Best gates is the venue that passes the most confidence gates.</p>
 <div class="scroll">
 <table>
   <thead><tr><th>Strategy</th><th>Family</th><th>Signal source</th><th>Inputs</th><th>Backtested on</th><th class="n">Trades, all history</th><th class="n">Walk-forward months</th><th class="n">Trials</th><th class="n">Best gates</th><th class="n">Out-of-sample trades</th></tr></thead>

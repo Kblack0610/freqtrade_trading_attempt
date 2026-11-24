@@ -1,4 +1,4 @@
-"""lab/flow_matrix.py: every strategy of the book through the backtest, bias and book avenues on synthetic candles.
+"""lab/crypto/flow_matrix.py: every strategy of the book through the backtest, bias and book avenues on synthetic candles.
 The unit tests need no freqtrade. The matrix itself (the sample, the controls, the isolation check) runs real
 backtests and bias checks, about four minutes, so CI runs it in the test-calibration job with FLOW_E2E=1."""
 
@@ -9,8 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from lab import flow_matrix as fm
-from lab import suggest
+from lab.crypto import flow_matrix as fm
+from lab.crypto import suggest
 
 CFG = suggest.load_config()
 FIXTURES = Path(__file__).parent / "fixtures" / "strategies"
@@ -48,7 +48,7 @@ def test_the_sample_is_one_runnable_strategy_per_family():
 
 def test_every_family_of_the_book_has_a_strategy_the_sample_can_run():
     import tomllib
-    toml = tomllib.loads((fm.REPO / "lab" / "families.toml").read_text())
+    toml = tomllib.loads((fm.REPO / "lab" / "crypto" / "families.toml").read_text())
     runnable = {v["family"] for v in toml["strategies"].values()} - fm.OUT_OF_BOOK
     assert runnable and runnable <= set(toml["families"])
 

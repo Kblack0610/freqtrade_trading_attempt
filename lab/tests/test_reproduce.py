@@ -1,15 +1,15 @@
-"""lab/reproduce.py: a sample of cached chunks and folds run again and compared with what is stored."""
+"""lab/crypto/reproduce.py: a sample of cached chunks and folds run again and compared with what is stored."""
 
 import random
 
 import pytest
 
-from lab import analyze, reproduce
-from lab import walkforward as wf
-from test_analyze import TODAY, FakeRunner, lab, strat  # noqa: F401 - lab is a fixture
-from test_walkforward import TODAY as WF_TODAY
-from test_walkforward import FakeRunner as FakeFolds
-from test_walkforward import wlab  # noqa: F401 - a fixture
+from lab.crypto import analyze, reproduce
+from lab.crypto import walkforward as wf
+from lab.tests.test_analyze import TODAY, FakeRunner, lab, strat  # noqa: F401 - lab is a fixture
+from lab.tests.test_walkforward import TODAY as WF_TODAY
+from lab.tests.test_walkforward import FakeRunner as FakeFolds
+from lab.tests.test_walkforward import wlab  # noqa: F401 - a fixture
 
 
 def last_run(conn) -> tuple[bool, dict]:

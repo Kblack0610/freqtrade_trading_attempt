@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from lab.research import carry
+from lab.futures.research import carry
 
 
 def days(n):

@@ -3,9 +3,9 @@ import json
 import pytest
 from freqtrade.configuration import Configuration
 
-from lab import league, variants
-from lab.grid import variant_of
-from lab.league import Row
+from lab.crypto import league, variants
+from lab.core.grid import variant_of
+from lab.crypto.league import Row
 
 TOML = "[overlays.slots]\nmax_open_trades = [5]\n[overlays.majors]\npairs = [2]\n"
 SLOTS5 = variant_of({"max_open_trades": 5})[:8]

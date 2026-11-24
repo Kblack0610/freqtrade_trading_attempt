@@ -1,7 +1,7 @@
 import datetime as dt
 import json
 
-from lab import pairs, universe
+from lab.crypto import pairs, universe
 
 D = dt.date
 

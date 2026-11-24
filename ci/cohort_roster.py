@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Open the home-config PR that seeds a dry-run cohort's roster rows (lab/cohorts.toml, lab/cohorts.py).
+"""Open the home-config PR that seeds a dry-run cohort's roster rows (lab/crypto/cohorts.toml, lab/crypto/cohorts.py).
 
 Runs on the fleet machine, from this repo's origin/master. It asks the deployed image for the cohort's rows
-(`kubectl exec deploy/trader-web -- python -m lab.cohorts pick <cohort>`), appends them to
+(`kubectl exec deploy/trader-web -- python -m lab.crypto.cohorts pick <cohort>`), appends them to
 apps/freqtrade/roster.tsv with the StatefulSet's replicas raised to the row count, and opens the PR. It never merges:
 a roster row costs a PVC, so a person does. It seeds only an empty cohort: once the roster has any row of that cohort
 it does nothing, since resizing or replacing a cohort is a human edit (the roster is append-only, README, Cohorts).
@@ -72,7 +72,7 @@ def seed(roster: str, statefulset: str, cohort: str, lines: list[str]) -> tuple[
 
 def picks(cohort: str) -> list[str]:
     cmd = ["kubectl", "--context", os.environ.get("KUBE_CONTEXT", "home-k3s"), "-n", "freqtrade", "exec",
-           "deploy/trader-web", "-c", "web", "--", "python", "-m", "lab.cohorts", "pick", cohort]
+           "deploy/trader-web", "-c", "web", "--", "python", "-m", "lab.crypto.cohorts", "pick", cohort]
     return json.loads(subprocess.run(cmd, check=True, capture_output=True, text=True).stdout)
 
 
@@ -110,9 +110,9 @@ def main(argv: list[str]) -> int:
     pr = call("POST", f"/repos/{REPO}/pulls", {
         "base": BASE, "head": branch, "title": title,
         "body": (f"Appends {len(lines)} rows of the `{cohort}` cohort to `{ROSTER}` and raises replicas to the row "
-                 f"count. The rows are what `[{cohort}]` in lab/cohorts.toml picks from the analysis tables (README, "
+                 f"count. The rows are what `[{cohort}]` in lab/crypto/cohorts.toml picks from the analysis tables (README, "
                  "Cohorts); the promote gates are ignored, the backtests and mixtures behind them are counted "
-                 "trials. Dry run only: lab/league.py refuses anything else. Opened by "
+                 "trials. Dry run only: lab/crypto/league.py refuses anything else. Opened by "
                  "Kblack0610/freqtrade_trading_attempt ci/cohort_roster.py; a person merges it.\n\n"
                  + "\n".join(f"    {line}" for line in lines))})
     print(pr["html_url"])

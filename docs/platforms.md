@@ -1,6 +1,6 @@
 # Platforms: what can be automated, and how
 
-One record per broker, exchange, wallet and market we use or might use. Each record says what an agent can automate and how: first the official API, then the agent machine (the mac-mini), and last what stays with the person. Nothing here trades money. `lab/league.py` refuses any config that is not dry-run, and `lab/guard.py` keeps `GUARD_LIFTED = False`. Until real money is in, every platform is paper or read-only. Plan: `plan-mode-a-thorough-hashed-pike` (tr-72). Real-money gates, stages and caps belong to the calm-lagoon plan (tr-9, tr-21).
+One record per broker, exchange, wallet and market we use or might use. Each record says what an agent can automate and how: first the official API, then the agent machine (the mac-mini), and last what stays with the person. Nothing here trades money. `lab/crypto/league.py` refuses any config that is not dry-run, and `lab/money/guard.py` keeps `GUARD_LIFTED = False`. Until real money is in, every platform is paper or read-only. Plan: `plan-mode-a-thorough-hashed-pike` (tr-72). Real-money gates, stages and caps belong to the calm-lagoon plan (tr-9, tr-21).
 
 Checked 2026-11-06. Confidence follows [markets.md](markets.md): **doc** means read on the platform's own page, **secondary** means a vendor, review or community page, and **snippet** means a search summary only. Anything with no source says **Not verified**. Re-check a snippet or Not-verified claim before code or money relies on it.
 
@@ -24,7 +24,7 @@ Tier is the highest rung we can use: **API** (an official API covers the job), *
 | Fidelity | held | broker, no API | aggregator (SnapTrade, read connection) | person | SnapTrade sandbox for the read path | live 2026-11-12: four accounts read hourly through SnapTrade |
 | Robinhood | candidate | broker | API (crypto only) | API (crypto), person (rest) | none | code landed, needs a read-only key |
 | Kalshi | candidate (tr-50) | prediction market | API | API | demo exchange | demo drill live 2026-11-12 (home-config #832); live key held, not deployed; live tr-48 |
-| Polymarket US | held | prediction market | API | API | backtest engine only | read live 2026-11-12 (`PolymarketUSRead`); orders behind lab/live.py |
+| Polymarket US | held | prediction market | API | API | backtest engine only | read live 2026-11-12 (`PolymarketUSRead`); orders behind lab/crypto/live.py |
 | Polymarket global | data only | prediction market | API | never (US is close-only) | n/a | none |
 | PredictIt | data only | prediction market | API (one feed) | person | none | none |
 | Manifold | data, order drill live | play money | API | API, bots allowed | the venue is play money | key deployed 2026-11-12, daily drill (home-config #904) |
@@ -60,9 +60,9 @@ Pod keys live in SOPS in home-config, as in [live.md](live.md). The person creat
 - Legal attestations.
 - Every press on the Trezor.
 
-**Paper before money.** A platform reaches money only through `lab/live.py` and the calm-lagoon stages. Before that it is a dry-run bot, a demo or sandbox account, play money, or our own backtest (`lab/markets/backtest.py`).
+**Paper before money.** A platform reaches money only through `lab/crypto/live.py` and the calm-lagoon stages. Before that it is a dry-run bot, a demo or sandbox account, play money, or our own backtest (`lab/events/backtest.py`).
 
-**Kill switches.** Ours is `lab/watcher.py`: the daily-loss watch, which POSTs `/stopentry` to a Freqtrade bot. Live stages add the hard stop. Each platform's own switch, for the watcher to call once it trades there:
+**Kill switches.** Ours is `lab/money/watcher.py`: the daily-loss watch, which POSTs `/stopentry` to a Freqtrade bot. Live stages add the hard stop. Each platform's own switch, for the watcher to call once it trades there:
 
 | Platform | Native switch | Confidence |
 |---|---|---|
@@ -99,10 +99,10 @@ Freqtrade's official spot list includes Kraken, OKX, Kucoin and others. Binance.
 - Agent machine: Not needed for trading. ToS on bots and site automation: Not verified.
 - The person: supplied the full-permission key now deployed for reads (home-config #937, ask aPbc4G); funds the account. Trading remains behind the Stage 1 gate in [live.md](live.md).
 - Sign-in and 2FA: 2FA can also be set on an API key itself (snippet). Sign-in methods: Not verified.
-- Risk controls: IP allowlist (doc), `CancelAllOrdersAfter`, key expiry and subaccounts (snippet). Ours: the `lab/live.py` checks, including stoploss on exchange.
+- Risk controls: IP allowlist (doc), `CancelAllOrdersAfter`, key expiry and subaccounts (snippet). Ours: the `lab/crypto/live.py` checks, including stoploss on exchange.
 - Cost: no API fee found. Perps charge 0.25% of notional to open and to close (doc, product unclear). Spot fee tiers: Not verified here; calm-lagoon quotes a 0.8 to 1.6% round trip.
 - Paper: the dry-run league already runs Kraken bots.
-- Read path: `KrakenRead` in `lab/broker.py`. `python -m lab.broker read` writes one `broker_balances` row named `kraken`: cash is the ZUSD balance, equity is `TradeBalance` `eb` (Kraken's own USD value of the whole account), positions the other assets held. Every private call is a POST, so the client sends only to `/0/private/Balance` and `/0/private/TradeBalance` and refuses any other path before sending; `lab/tests/test_money.py` pins those two. The body is JSON, and the nonce is in nanoseconds because the `kraken-read` key had already seen nanosecond nonces and Kraken refuses any lower one (measured 2026-11-12). Keys: `KRAKEN_API_KEY`, `KRAKEN_API_SECRET` in the `trader-brokers` Secret hold the person's full-permission key, deployed via home-config #937 (ask aPbc4G). Read-only describes the client's allowed calls; the key itself can do more.
+- Read path: `KrakenRead` in `lab/money/broker.py`. `python -m lab.money.broker read` writes one `broker_balances` row named `kraken`: cash is the ZUSD balance, equity is `TradeBalance` `eb` (Kraken's own USD value of the whole account), positions the other assets held. Every private call is a POST, so the client sends only to `/0/private/Balance` and `/0/private/TradeBalance` and refuses any other path before sending; `lab/tests/test_money.py` pins those two. The body is JSON, and the nonce is in nanoseconds because the `kraken-read` key had already seen nanosecond nonces and Kraken refuses any lower one (measured 2026-11-12). Keys: `KRAKEN_API_KEY`, `KRAKEN_API_SECRET` in the `trader-brokers` Secret hold the person's full-permission key, deployed via home-config #937 (ask aPbc4G). Read-only describes the client's allowed calls; the key itself can do more.
 - Verified: 2026-11-06. Sources: https://docs.kraken.com/exchange/guides/rest/api-keys, https://docs.kraken.com/api/docs/guides/spot-rest-ratelimits, https://www.kraken.com/features/fee-schedule, https://blog.kraken.com/product/kraken-derivatives/announcing-cftc-regulated-us-perps.
 
 ### Binance.US
@@ -117,7 +117,7 @@ Freqtrade's official spot list includes Kraken, OKX, Kucoin and others. Binance.
 - Agent machine: no. The terms bar any "robot, spider, other automatic device" used on the website without written permission (snippet). The same terms acknowledge third-party apps and bots with account access, so API trading is the sanctioned route.
 - The person: KYC, keys, funding.
 - Sign-in and 2FA: Not verified.
-- Risk controls: IP binding recommended (doc). Cancel-all-after and subaccounts: Not verified. Ours: the `lab/live.py` checks.
+- Risk controls: IP binding recommended (doc). Cancel-all-after and subaccounts: Not verified. Ours: the `lab/crypto/live.py` checks.
 - Cost: fee schedule Not verified here; calm-lagoon quotes a 0 to 0.04% round trip. State exclusions per calm-lagoon: AK AS CT GA GU MP NY NC ND OH OR TX VI VT WA.
 - Paper: the dry-run league.
 - Verified: 2026-11-06. Sources: https://docs.binance.us/, https://www.binance.us/terms-of-use.
@@ -198,10 +198,10 @@ Other US venues worth a record later: Bitstamp, Crypto.com. Not researched.
 
 #### Watch-only read
 
-`python -m lab.wallet` writes one `wallet_balances` row per account per run: confirmed and unconfirmed satoshis and the count of used addresses. It needs only the account's public key, which cannot sign, so the job can never move coins. `/accounts` shows the newest read of each account.
+`python -m lab.money.wallet` writes one `wallet_balances` row per account per run: confirmed and unconfirmed satoshis and the count of used addresses. It needs only the account's public key, which cannot sign, so the job can never move coins. `/accounts` shows the newest read of each account.
 
 - Input: `WALLET_ACCOUNTS` (default `/etc/trader-wallet/accounts.tsv`), one `<name><TAB><key>` line per account. The key is the account public key Suite exports (its "Show public key" label is Not verified on a Trezor page): an xpub (legacy), ypub (SegWit), zpub (native SegWit), or a descriptor such as Suite's taproot `tr([fp/86'/0'/0']xpub.../<0;1>/*)`. Bitcoin mainnet only. The file is a Secret, because a public key reveals every address and balance of its account.
-- How: `embit` derives the receive and change chains, each until 20 unused addresses in a row (the BIP44 gap limit). Each address is read from the Esplora API in `lab/wallet.toml`. The tests check the derivation against the BIP44, 49, 84 and 86 test vectors.
+- How: `embit` derives the receive and change chains, each until 20 unused addresses in a row (the BIP44 gap limit). Each address is read from the Esplora API in `lab/money/wallet.toml`. The tests check the derivation against the BIP44, 49, 84 and 86 test vectors.
 - Privacy: the Esplora host (blockstream.info by default) sees every address we ask about, the same exposure Suite's default backend has. To avoid it, point `base_url` at our own Esplora or mempool instance. The database holds the account name and never the key, and log lines and errors carry the HTTP status, never an address.
 - Live check (2026-11-06): the public BIP84 test-vector zpub read its 40 used addresses from blockstream.info in 84 s at a 1 s gap. mempool.space returned 429 at 0.5 s.
 - To run it, the person exports each account's public key from Suite (the device asks for a confirmation) and adds it to a SOPS Secret in home-config. A CronJob in `apps/freqtrade/` then runs the module hourly. Neither exists yet.
@@ -211,13 +211,13 @@ Other US venues worth a record later: Bitstamp, Crypto.com. Not researched.
 1. The agent writes down the send: why, the amount, and the destination. A destination that is one of our exchange deposit addresses is read from that exchange's API with its read key, never copied from chat or a clipboard. The fee rate comes from Esplora `/fee-estimates`.
 2. On the mac-mini (`agent-machine`), the agent opens Trezor Suite, selects the account and fills in the Send form (address, amount, fee). It stops at the review step.
 3. The person plugs the Trezor into the mac-mini and enters the PIN, and the passphrase if there is one, on the device. They check the full address and the amount shown on the device against step 1, then confirm on the device. If anything differs, they reject it on the device.
-4. After the broadcast, the agent checks the next `lab.wallet` read (a negative unconfirmed balance, then lower confirmed sats) and the txid on Esplora.
+4. After the broadcast, the agent checks the next `lab.money.wallet` read (a negative unconfirmed balance, then lower confirmed sats) and the txid on Esplora.
 
 The agent never types the PIN, the passphrase or the seed, never opens the recovery screens, and never starts a send that the person did not ask for. Trezor Suite is not installed on the mac-mini yet. Installing it is step 2's first run.
 
 ## API brokers
 
-None of these places an order for a strategy. Freqtrade trades crypto only. The stock league (`lab/stocks.py`) paper-trades ETFs on Alpaca quotes with simulated fills; a broker would carry those strategies once they are walked forward.
+None of these places an order for a strategy. Freqtrade trades crypto only. The stock league (`lab/stocks/paper.py`) paper-trades ETFs on Alpaca quotes with simulated fills; a broker would carry those strategies once they are walked forward.
 
 Only Alpaca and the Tastytrade sandbox can be practised on without money: IBKR paper needs a funded account and Schwab has no paper API. Alpaca is the one connected. No broker here needs a mac-mini re-auth today: Alpaca keys and Tastytrade refresh tokens do not expire, and the IBKR and Schwab logins stay the person's until their terms are read.
 
@@ -241,10 +241,10 @@ Only Alpaca and the Tastytrade sandbox can be practised on without money: IBKR p
 
 #### Paper connection
 
-`lab/broker.py` is the path, and `AlpacaPaper` refuses any host but `paper-api.alpaca.markets`, so no config can reach a live account.
+`lab/money/broker.py` is the path, and `AlpacaPaper` refuses any host but `paper-api.alpaca.markets`, so no config can reach a live account.
 
-- `python -m lab.broker read` writes one `broker_balances` row: account status, equity, cash, buying power and the position count, or the error. Holdings themselves are not stored. `/accounts` shows the newest row and `trader_broker_equity` and `trader_broker_read_age_seconds` export it.
-- `python -m lab.broker drill` rests one SPY share at $1.00 (`lab/broker.toml`), reads it back, cancels it and reads it back, writing to `demo_orders`. Outside market hours the order sits in `accepted`, which counts as resting. Whether a limit that far from the market is accepted is Not verified; the first drill settles it.
+- `python -m lab.money.broker read` writes one `broker_balances` row: account status, equity, cash, buying power and the position count, or the error. Holdings themselves are not stored. `/accounts` shows the newest row and `trader_broker_equity` and `trader_broker_read_age_seconds` export it.
+- `python -m lab.money.broker drill` rests one SPY share at $1.00 (`lab/money/broker.toml`), reads it back, cancels it and reads it back, writing to `demo_orders`. Outside market hours the order sits in `accepted`, which counts as resting. Whether a limit that far from the market is accepted is Not verified; the first drill settles it.
 - Input: `ALPACA_PAPER_KEY_ID` and `ALPACA_PAPER_SECRET_KEY`. With none set, `read` exits 0 and writes nothing.
 - Live since 2026-11-12 (home-config #832): `trader-broker-read` runs `read` hourly at :17 and `trader-broker-drill` runs the drill weekdays at 14:40 UTC, keys from SOPS Secret `trader-brokers` (the person's copy is rbw `trading/alpaca-paper`). First run: equity 100000.0 USD, 0 positions, and the drill's SPY order was seen resting and then canceled.
 
@@ -286,7 +286,7 @@ Only Alpaca and the Tastytrade sandbox can be practised on without money: IBKR p
 ### Tastytrade
 
 - Status: held. Tastytrade approved the account on 2026-11-13; it holds two individual accounts. Options level: defined-risk spreads, no naked selling (human, 2026-11-12).
-- Read path: `TastytradeRead` in `lab/broker.py`. `python -m lab.broker read` trades the refresh token for a `read`-scoped access token, then writes one `broker_balances` row per account, `tastytrade_<last4>`: cash is `cash-balance`, equity `net-liquidating-value`, buying power `equity-buying-power`, positions the open positions. A refused token exchange is not retried, because repeated failed logins block the IP.
+- Read path: `TastytradeRead` in `lab/money/broker.py`. `python -m lab.money.broker read` trades the refresh token for a `read`-scoped access token, then writes one `broker_balances` row per account, `tastytrade_<last4>`: cash is `cash-balance`, equity `net-liquidating-value`, buying power `equity-buying-power`, positions the open positions. A refused token exchange is not retried, because repeated failed logins block the IP.
 - Credentials: a personal OAuth app (rbw `trading/tastytrade`: client id and secret) and its grant (rbw `trading/tastytrade_refresh`: the refresh token), in SOPS trader-brokers. The grant holds `read trade openid` (human, 2026-11-13); before any strategy trades here, a read-only grant for the reader and a trade grant for the trading service alone (tr-274). Regenerating the client secret revokes every grant.
 - Strategy fit: options and futures.
 - API:
@@ -325,9 +325,9 @@ Also seen, to record later: Tradier (personal tokens that never expire, 60 tradi
 
 #### Read connection
 
-`SnapTrade` in `lab/broker.py` is the path. It sends only GET, refuses any host but `api.snaptrade.com`, and has no order method.
+`SnapTrade` in `lab/money/broker.py` is the path. It sends only GET, refuses any host but `api.snaptrade.com`, and has no order method.
 
-- `python -m lab.broker read` writes one `broker_balances` row per connected account, named institution, account name and the last four of the number (`fidelity_individual_1234`), with `paper` from SnapTrade's `is_paper`. It stores the total value and status; holdings stay at SnapTrade. An account with no total is a row with an error.
+- `python -m lab.money.broker read` writes one `broker_balances` row per connected account, named institution, account name and the last four of the number (`fidelity_individual_1234`), with `paper` from SnapTrade's `is_paper`. It stores the total value and status; holdings stay at SnapTrade. An account with no total is a row with an error.
 - Input: `SNAPTRADE_CLIENT_ID` and `SNAPTRADE_CONSUMER_KEY`. With none set, the source is skipped.
 - Cadence: once a day is enough, since SnapTrade refreshes once a day.
 - Key deployed 2026-11-12 (home-config #832): the Personal key is in rbw `trading/snaptrade` and Secret `trader-brokers`, read hourly by `trader-broker-read`; `/api/v1/accounts` answers 200 with no accounts. It is live once the person connects the sandbox, then Fidelity with a read connection, and a Fidelity row appears on `/accounts`.
@@ -354,9 +354,9 @@ Also seen, to record later: Tradier (personal tokens that never expire, 60 tradi
 
 #### Read-only connection
 
-`RobinhoodCrypto` in `lab/broker.py` sends only GET, refuses any host but `trading.robinhood.com` (a holdings `next` page too), and has no order method, so even a key with trade actions could not trade from here.
+`RobinhoodCrypto` in `lab/money/broker.py` sends only GET, refuses any host but `trading.robinhood.com` (a holdings `next` page too), and has no order method, so even a key with trade actions could not trade from here.
 
-- `python -m lab.broker read` writes one `robinhood_crypto` row with `paper` false: status, buying power as cash, the count of non-zero holdings, and equity as cash plus each holding at its `<asset>-USD` midpoint. A holding with no price leaves equity empty and says which.
+- `python -m lab.money.broker read` writes one `robinhood_crypto` row with `paper` false: status, buying power as cash, the count of non-zero holdings, and equity as cash plus each holding at its `<asset>-USD` midpoint. A holding with no price leaves equity empty and says which.
 - Input: `ROBINHOOD_API_KEY` and `ROBINHOOD_PRIVATE_KEY` (the base64 32-byte Ed25519 seed). With none set, the source is skipped.
 - A real account's balance stays on `/accounts`, behind sign-in. The exporter sends only its read age, never its equity.
 - Not yet run against Robinhood: tested only against a fake API, with the signature checked against the docs' recipe. It is live once the person creates a read-only key, adds it to rbw as `trading/robinhood` and a SOPS Secret, a home-config CronJob runs `read`, and a Robinhood row appears on `/accounts`.
@@ -379,13 +379,13 @@ Data facts, fees as backtested, and adapter notes are in [markets.md](markets.md
 - Sign-in and 2FA: SMS or an authenticator app (TOTP), asked about every 30 days (snippet). TOTP fits rbw.
 - Risk controls: order groups with a 15 s fill cap; self-exclusion and funding caps that cannot be lifted early (doc).
 - Cost: no API fee found. Trading fees are in [markets.md](markets.md).
-- Paper: the demo exchange. The drill (`lab/markets/kalshi_trade.py`, [markets.md](markets.md), Demo orders) runs daily at 14:50 UTC as `trader-kalshi-demo-drill` since 2026-11-12 (home-config #832), with the key from Secret `trader-kalshi-demo` (rbw `trading/kalshi-demo`). First run: one contract seen resting and then canceled. The live key (rbw `trading/kalshi`) reads the real balance and is not deployed.
+- Paper: the demo exchange. The drill (`lab/events/kalshi_trade.py`, [markets.md](markets.md), Demo orders) runs daily at 14:50 UTC as `trader-kalshi-demo-drill` since 2026-11-12 (home-config #832), with the key from Secret `trader-kalshi-demo` (rbw `trading/kalshi-demo`). First run: one contract seen resting and then canceled. The live key (rbw `trading/kalshi`) reads the real balance and is not deployed.
 - Verified: 2026-11-06. Sources: https://kalshi-public-docs.s3.amazonaws.com/Kalshi-Developer-Agreement.pdf, https://docs.kalshi.com/getting_started/api_keys, https://docs.kalshi.com/getting_started/rate_limits, https://docs.kalshi.com/getting_started/demo_env, https://help.kalshi.com/en/articles/13823787-how-do-i-use-2fa-two-factor-authentication-verification-codes.
 
 ### Polymarket US
 
 - Status: held. The account was opened in the app on 2026-11-12 and is unfunded. API status checked 2026-11-06 (P6): the Retail API trades today.
-- Read path: `PolymarketUSRead` in `lab/markets/polymarket.py` (the venue module holds every Polymarket US call), turned into a row by `lab/broker.py` `polymarket_us`. `python -m lab.broker read` writes one `broker_balances` row named `polymarket_us`: cash is the USD `currentBalance`, equity adds `assetNotional`, buying power is `buyingPower`, positions counts markets with a nonzero `netPosition`. GET only, to `/v1/account/balances` and `/v1/portfolio/positions`. An account with no balance entry reads as zero; a balance in another currency is an error, not a zero. Keys: `POLYMARKET_US_KEY_ID`, `POLYMARKET_US_SECRET_KEY` in the `trader-brokers` Secret. The secret is base64 seed plus public key, and the client signs with the first 32 bytes.
+- Read path: `PolymarketUSRead` in `lab/events/polymarket.py` (the venue module holds every Polymarket US call), turned into a row by `lab/money/broker.py` `polymarket_us`. `python -m lab.money.broker read` writes one `broker_balances` row named `polymarket_us`: cash is the USD `currentBalance`, equity adds `assetNotional`, buying power is `buyingPower`, positions counts markets with a nonzero `netPosition`. GET only, to `/v1/account/balances` and `/v1/portfolio/positions`. An account with no balance entry reads as zero; a balance in another currency is an error, not a zero. Keys: `POLYMARKET_US_KEY_ID`, `POLYMARKET_US_SECRET_KEY` in the `trader-brokers` Secret. The secret is base64 seed plus public key, and the client signs with the first 32 bytes.
 - Strategy fit: a second regulated US prediction market for cross-venue links (`market_links` in [markets.md](markets.md)).
 - API:
   - A retail trading API exists: verify identity in the iOS app, then create a Key ID and Secret Key at polymarket.us/developer (doc). An invite code may be needed for the app (doc: "need an invite code ... email support@polymarket.us").
@@ -398,7 +398,7 @@ Data facts, fees as backtested, and adapter notes are in [markets.md](markets.md
 - Sign-in and 2FA: Apple, Google or email sign-in, with the same method each time or the API key can break (doc). 2FA belongs to the Apple or Google account; Polymarket sends verification codes (doc, learn/account/protect). No TOTP of its own found, so nothing for rbw but the key.
 - Risk controls: cancel-all (kill-switch map above), deposit limits and self-exclusion (snippet).
 - Cost: no API fee found. Trading fees are in [markets.md](markets.md).
-- Paper: none from the venue, and `preview` is not a paper fill. Our backtest engine and the paper league are the paper path. An order client waits until the person opens an account, and then it is real money, so it comes in behind `lab/live.py` (docs/live.md), never as a drill.
+- Paper: none from the venue, and `preview` is not a paper fill. Our backtest engine and the paper league are the paper path. An order client waits until the person opens an account, and then it is real money, so it comes in behind `lab/crypto/live.py` (docs/live.md), never as a drill.
 - Verified: 2026-11-06. Sources: https://docs.polymarket.us/api-reference/authentication, https://docs.polymarket.us/api-reference/orders/overview, https://docs.polymarket.us/api-reference/rate-limits, https://docs.polymarket.us/trader-guide/environments, https://docs.polymarket.us/learn/account/protect.
 
 ### Polymarket global
@@ -446,16 +446,16 @@ Data facts, fees as backtested, and adapter notes are in [markets.md](markets.md
 
 #### Order drill
 
-`lab/markets/manifold_trade.py` is the path, and `ManifoldBets` refuses any host but `api.manifold.markets`, so the key goes nowhere else.
+`lab/events/manifold_trade.py` is the path, and `ManifoldBets` refuses any host but `api.manifold.markets`, so the key goes nowhere else.
 
-- `python -m lab.markets.manifold_trade balance` prints the account's mana.
-- `python -m lab.markets.manifold_trade drill [--ticker MARKET_ID]` picks an open binary mana market priced at `min_prob` (10%) or more, rests a 1-mana YES limit bet at 1% with a 10-minute expiry (`[demo.manifold]` in `lab/markets.toml`), reads it back, cancels it and reads it back, writing each step to `demo_orders` as venue `manifold`. It exits 1 unless the bet was seen open with nothing filled and then canceled. `/markets/book` shows the row.
+- `python -m lab.events.manifold_trade balance` prints the account's mana.
+- `python -m lab.events.manifold_trade drill [--ticker MARKET_ID]` picks an open binary mana market priced at `min_prob` (10%) or more, rests a 1-mana YES limit bet at 1% with a 10-minute expiry (`[demo.manifold]` in `lab/events/markets.toml`), reads it back, cancels it and reads it back, writing each step to `demo_orders` as venue `manifold`. It exits 1 unless the bet was seen open with nothing filled and then canceled. `/markets/book` shows the row.
 - Input: `MANIFOLD_API_KEY`.
 - Not yet run against Manifold: tested only against a fake API, because no key exists. It is live once the person makes the key, adds it to rbw as `trading/manifold` and a SOPS Secret, the drill runs from home-config `apps/freqtrade/`, and a canceled `manifold` row appears on `/markets/book`.
 
 ## Sportsbooks
 
-We read sportsbook odds through The Odds API ([markets.md](markets.md), adapter `lab/markets/odds.py`). We never place a bet at a sportsbook by any automated means. Every bet is the person's, on their own device, inside a legal state.
+We read sportsbook odds through The Odds API ([markets.md](markets.md), adapter `lab/sports/odds.py`). We never place a bet at a sportsbook by any automated means. Every bet is the person's, on their own device, inside a legal state.
 
 ### DraftKings and FanDuel
 
@@ -477,7 +477,7 @@ We read sportsbook odds through The Odds API ([markets.md](markets.md), adapter 
   - FanDuel: deposit, loss, wager, per-slip and time limits, a timeout, and self-exclusion from one year or indefinite. A lowered limit applies at once, a raised one after a cooldown (snippet).
   - Ours: none needed, since no code bets. A person who bets should set a deposit limit first.
 - Cost: none to read beyond the Odds API tier.
-- Paper: none from the books. Our backtest engine (`lab/markets/backtest.py`) against recorded odds is the paper path.
+- Paper: none from the books. Our backtest engine (`lab/events/backtest.py`) against recorded odds is the paper path.
 - Event contracts: both now sell CFTC-route prediction products beside the sportsbook.
   - FanDuel Predicts, with CME Group, launched 2025-12-22 in AL, AK, SC, ND and SD, rolling out through 2026. Sports contracts are offered only where online sports betting is not legal (doc, Flutter press release). Public API: none found.
   - DraftKings Predictions launched 2025-12-19 in 38 states on CME markets, moving to Railbird, the CFTC exchange DraftKings bought in 2025-10 (snippet). Public API: none found.
@@ -486,7 +486,7 @@ We read sportsbook odds through The Odds API ([markets.md](markets.md), adapter 
 
 #### Odds read
 
-The read is live since 2026-11-12: home-config CronJob `trader-markets-recorder-odds-api` runs `python -m lab.markets.recorder odds_api` at :07 every 6 hours with `ODDS_API_KEY` from SOPS Secret `trader-odds-api` (rbw `trading/odds-api`). The first sweep recorded 154 quotes and used 3 credits.
+The read is live since 2026-11-12: home-config CronJob `trader-markets-recorder-odds-api` runs `python -m lab.stages.recorder odds_api` at :07 every 6 hours with `ODDS_API_KEY` from SOPS Secret `trader-odds-api` (rbw `trading/odds-api`). The first sweep recorded 154 quotes and used 3 credits.
 
 - Pricing (doc, https://the-odds-api.com, 2026-11-06): free for 500 credits/month ("most bookmakers"); $30 for 20K, $59 for 100K, $119 for 5M, $249 for 15M, all bookmakers.
 - Credits (doc, v4 guide): `/odds` costs 1 per market per region; `/scores` with `daysFrom` costs 2. One sweep of `[venues.odds_api]` as configured (one sport, h2h, region `us`) is 3 credits.

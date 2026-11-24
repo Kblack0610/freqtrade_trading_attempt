@@ -3,7 +3,7 @@ import datetime as dt
 import numpy as np
 import pandas as pd
 
-from lab import horizon, suggest
+from lab.crypto import horizon, suggest
 
 CFG = suggest.load_config()
 

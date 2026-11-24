@@ -81,7 +81,7 @@ def test_a_one_step_job_is_execd(steps_ran):
     calls, _ = steps_ran
     with pytest.raises(Exec):
         jobs_main.run("league", JOBS)
-    assert calls == [("exec", "lab.league")]
+    assert calls == [("exec", "lab.crypto.league")]
 
 
 def test_stop_on_failure_skips_the_rest(steps_ran):
@@ -97,14 +97,14 @@ def test_walkforward_stops_on_a_failed_fetch_and_expands_the_exchanges(steps_ran
     seen = []
     monkeypatch.setattr(jobs_main.subprocess, "call", lambda argv: seen.append(argv) or 1)
     assert jobs_main.run("walkforward", JOBS) == 1
-    assert [a[2:] for a in seen] == [["lab.snapshot", "fetch", "binanceus", "kraken"]]
+    assert [a[2:] for a in seen] == [["lab.crypto.snapshot", "fetch", "binanceus", "kraken"]]
 
 
 def test_a_recorder_failure_still_runs_paper_and_keeps_its_code(steps_ran):
     calls, codes = steps_ran
-    codes.update({"lab.markets.recorder": 5, "lab.markets.paper": 0})
+    codes.update({"lab.stages.recorder": 5, "lab.events.paper": 0})
     assert jobs_main.run("markets-recorder", JOBS) == 5
-    assert calls == ["lab.markets.recorder", "lab.markets.paper"]
+    assert calls == ["lab.stages.recorder", "lab.events.paper"]
 
 
 def test_a_one_step_job_keeps_the_runner_pid(tmp_path):

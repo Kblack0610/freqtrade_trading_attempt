@@ -6,7 +6,7 @@ import pandas as pd
 import pytest
 
 from lab import metrics
-from lab.util import utc
+from lab.core.util import utc
 
 
 FEE = 0.002  # round trip

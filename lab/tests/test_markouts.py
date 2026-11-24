@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from lab import markouts, suggest
+from lab.crypto import markouts, suggest
 
 CFG = suggest.load_config()["markouts"]
 FEE = 0.001

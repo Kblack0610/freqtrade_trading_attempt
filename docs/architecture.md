@@ -6,7 +6,14 @@ This reference maps the code and data boundaries. The [README layout](../README.
 
 | Path | What it is |
 |---|---|
-| `lab/` | Jobs, market adapters, metrics, migrations and tests; the job registry is `lab/jobs.toml` |
+| `lab/core/` | What every market shares: database, helpers, decision record, readiness table, the one paced HTTP client. It imports no market package |
+| `lab/market.py` | The adapter contract every market implements, with the cost and fill models |
+| `lab/stages/` | One driver per stage over any adapter: record, paper, live, drill |
+| `lab/money/` | The live guard, broker and wallet reads, league scorecard and loss watcher |
+| `lab/inputs/` | Exogenous feeds (NWS) and calls, readable by any market's family |
+| `lab/crypto/`, `lab/events/`, `lab/sports/`, `lab/stocks/`, `lab/futures/` | One adapter package per market |
+| `lab/` root | Job runner and registry (`jobs.toml`), migrations, healthcheck, and the strategy library strategies import (`metrics`, `channels`, `forecasts`, `patterns`, `entry_inputs`, `families/`) |
+| `lab/tests/` | pytest, the package `lab.tests` |
 | `web/` | The read-only site: app, templates, glossary and venue data |
 | `user_data/` | Freqtrade configs, exchange overlays and strategies |
 | `ci/` | Scripts the workflow runs: roster, research sync and digest bump |
@@ -24,19 +31,19 @@ This reference maps the code and data boundaries. The [README layout](../README.
 
 The [Dockerfile](../Dockerfile) layers this repo and `lab/requirements.lock` (hash-pinned, from `lab/requirements.txt` by `ci/lock_requirements.sh`) onto a digest-pinned Freqtrade image at `/repo`. It retains Freqtrade's entry point; callers override it for Python jobs or the web server. CI also builds a FreqAI variant for ML research.
 
-1. `lab/league.py` selects a roster row by ordinal, combines base, exchange and overlay configuration, applies its dry-run guard and starts Freqtrade. Strategies live in `user_data/strategies/`, the generated families among them (`lab/families/generate.py`). Bot state and candle files are runtime volume data.
-2. `lab/ingest.py` reads bot APIs into Postgres. `lab/backfill.py` collects candles and records coverage. Analysis and walk-forward jobs read those candles, run Freqtrade and store results through `lab/db.py`.
+1. `lab/crypto/league.py` selects a roster row by ordinal, combines base, exchange and overlay configuration, applies its dry-run guard and starts Freqtrade. Strategies live in `user_data/strategies/`, the generated families among them (`lab/families/generate.py`). Bot state and candle files are runtime volume data.
+2. `lab/crypto/ingest.py` reads bot APIs into Postgres. `lab/crypto/backfill.py` collects candles and records coverage. Analysis and walk-forward jobs read those candles, run Freqtrade and store results through `lab/core/db.py`.
 3. Confidence, book, mixture and research-loop modules derive decisions from stored trials and results. `ci/research_sync.py` files research events as agent-board rows; it opens no roster PR (a pod is a person's pick through `ci/cohort_roster.py`).
-4. `lab/markets/` records venue data, backfills history, links contracts and scores paper trades in separate market tables. Wallet and broker modules maintain their own balance and paper-execution records. Event-contract and stock paper trading share one pass and one ledger: `lab/stages/paper.py` runs the pass, `lab/markets/paper.py` and `lab/stocks.py` are its adapters, and `paper_accounts` with `paper_orders` hold both.
+4. `lab/stages/recorder.py` records venue data through each market's adapter (`lab/events/`, `lab/sports/`); `lab/events/` backfills history, links contracts and scores paper trades in separate market tables. Wallet and broker modules maintain their own balance and paper-execution records. Event-contract and stock paper trading share one pass and one ledger: `lab/stages/paper.py` runs the pass, `lab/events/paper.py` and `lab/stocks/paper.py` are its adapters, and `paper_accounts` with `paper_orders` hold both.
 5. `web/app.py` reads Postgres using a SELECT-only deployment role. FastAPI renders Jinja templates, HTMX refreshes fragments, and `web/auth.py` handles Forgejo OAuth and signed cookies. The site exposes no trade controls. Accounts keeps editable research preferences in browser storage; [the site guide](../README.md#the-site) describes their scope and usage.
 
 ## Storage and boundaries
 
-`DATABASE_URL` is the connection source for [lab/db.py](../lab/db.py). Numbered SQL files in [lab/migrations](../lab/migrations/) are applied once by [lab/migrate.py](../lab/migrate.py), which records applied migrations. Database tests use a disposable migrated database and truncate tables through `lab/tests/conftest.py`.
+`DATABASE_URL` is the connection source for [lab/core/db.py](../lab/core/db.py). Numbered SQL files in [lab/migrations](../lab/migrations/) are applied once by [lab/migrate.py](../lab/migrate.py), which records applied migrations. Database tests use a disposable migrated database and truncate tables through `lab/tests/conftest.py`.
 
 Postgres holds research, snapshots and market records; Freqtrade uses per-bot sqlite state and filesystem candles/results. Those stores have different recovery needs; [deployment](operations/deploy.md) links their operational home. Credentials are supplied at runtime, outside tracked exchange configuration.
 
-`lab/watcher.py` can stop bot entries; the read-only site cannot. Paper and live boundaries are enforced at their entry points, with the operating policy in [operating rules](operating-rules.md). `lab/healthcheck.py` accepts the bot API or site health endpoint for Docker; cluster probes are defined in home-config.
+`lab/money/watcher.py` can stop bot entries; the read-only site cannot. Paper and live boundaries are enforced at their entry points, with the operating policy in [operating rules](operating-rules.md). `lab/healthcheck.py` accepts the bot API or site health endpoint for Docker; cluster probes are defined in home-config.
 
 ## Delivery
 

@@ -3,7 +3,7 @@ import pathlib
 
 import pytest
 
-from lab import confidence, loop, suggest
+from lab.crypto import confidence, loop, suggest
 
 _spec = importlib.util.spec_from_file_location(
     "research_sync", pathlib.Path(__file__).resolve().parents[2] / "ci" / "research_sync.py")

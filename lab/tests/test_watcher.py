@@ -3,7 +3,7 @@ import datetime as dt
 import pytest
 from psycopg.rows import dict_row
 
-from lab import guard, watcher
+from lab.money import guard, watcher
 
 NOW = dt.datetime(2026, 11, 5, 12, tzinfo=dt.timezone.utc)
 LIMIT = 0.03

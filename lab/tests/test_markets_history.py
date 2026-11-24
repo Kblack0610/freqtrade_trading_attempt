@@ -2,13 +2,13 @@ import datetime as dt
 
 import pyarrow.parquet as pq
 import pytest
-from markets_fakes import Session
+from lab.tests.markets_fakes import Session
 from pyarrow import fs as pafs
 
-from lab.markets import history
-from lab.markets.kalshi import Kalshi
-from lab.markets.manifold import Manifold
-from lab.markets.polymarket import Polymarket, PolymarketUS
+from lab.events import history
+from lab.events.kalshi import Kalshi
+from lab.events.manifold import Manifold
+from lab.events.polymarket import Polymarket, PolymarketUS
 from lab.market import Bar, Quote, Resolution, Settled, Span, Trade
 
 UTC = dt.timezone.utc

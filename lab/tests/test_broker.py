@@ -10,11 +10,11 @@ import pytest
 import requests
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-from lab import broker
-from lab.broker import AlpacaPaper, KrakenRead, NotPaper, RobinhoodCrypto, SnapTrade, TastytradeRead
-from lab.markets import drill
-from lab.markets.api import WrongHost
-from lab.markets.polymarket import PolymarketUSRead
+from lab.money import broker
+from lab.money.broker import AlpacaPaper, KrakenRead, NotPaper, RobinhoodCrypto, SnapTrade, TastytradeRead
+from lab.stages import drill
+from lab.core.api import WrongHost
+from lab.events.polymarket import PolymarketUSRead
 
 PAPER = {"base_url": "https://paper-api.alpaca.markets", "timeout_s": 5, "page_gap_s": 0, "retries": 2}
 ACCOUNT = {"id": "a1", "status": "ACTIVE", "currency": "USD", "equity": "100012.50", "cash": "99000.00",

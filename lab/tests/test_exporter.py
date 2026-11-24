@@ -16,7 +16,7 @@ def scrape(collector) -> dict[str, float]:
 
 
 def test_metrics_read_the_newest_state(conn):
-    from lab import db
+    from lab.core import db
     from web.exporter import TraderCollector
 
     NOW = dt.datetime.now(dt.timezone.utc)  # at the test, not at import: the ages below are read against the clock
@@ -95,7 +95,7 @@ def test_an_unreadable_database_reports_down():
 
 
 def test_watch_metrics(conn):
-    from lab import db
+    from lab.core import db
     from web.exporter import TraderCollector
 
     now = dt.datetime.now(dt.timezone.utc)  # not the module's NOW: the age check is relative to the scrape
@@ -114,7 +114,7 @@ def test_watch_metrics(conn):
 def test_a_bot_the_newest_pass_did_not_write_is_not_exported_and_a_down_one_is(conn):
     """A renamed bot's old row is read by no pass, so it aged as unseen forever (TraderWatchBotBlind on the 2026-11-10
     renames, still firing five days later). The row stays, with its stop, for the kill switch."""
-    from lab import db
+    from lab.core import db
     from web.exporter import TraderCollector
 
     now = dt.datetime.now(dt.timezone.utc)
@@ -131,7 +131,7 @@ def test_a_bot_the_newest_pass_did_not_write_is_not_exported_and_a_down_one_is(c
 
 def test_a_paper_account_on_a_slow_venue_is_blind_only_past_its_venue_limit(conn):
     """odds_api is swept every 6 h, so its accounts are marked every 6 h: a 5-minute limit called them blind all day."""
-    from lab import db
+    from lab.core import db
     from web.exporter import TraderCollector
 
     now = dt.datetime.now(dt.timezone.utc)
@@ -142,7 +142,7 @@ def test_a_paper_account_on_a_slow_venue_is_blind_only_past_its_venue_limit(conn
                  (now, now - dt.timedelta(hours=1), now, now))
     conn.commit()
     m = scrape(TraderCollector(db.connect))
-    from lab.markets import sweep_ages
+    from lab.events import sweep_ages
     book, venues = sweep_ages()
     assert venues["odds_api"] > book  # the premise: odds_api is swept slower than the paper book age
     assert m['trader_watch_unseen_limit_seconds{bot="paper-tt"}'] == venues["odds_api"] * 60
@@ -153,7 +153,8 @@ def test_an_account_marked_by_a_5_minute_pass_is_not_blind_when_one_pass_ends_la
     """A kalshi or stock account is marked once a */5 pass, so a 300 s limit was one pass with no slack: half the gaps
     run 300 to 412 s, and TraderWatchBotBlind fired for a dozen accounts every hour (2026-11-18). A bot the watcher
     reads itself keeps [watcher] unseen_after_seconds."""
-    from lab import db, stocks
+    from lab.core import db
+    from lab.stocks import paper as stocks
     from web.exporter import TraderCollector
 
     now = dt.datetime.now(dt.timezone.utc)
@@ -174,7 +175,8 @@ def test_an_account_marked_by_a_5_minute_pass_is_not_blind_when_one_pass_ends_la
 
 
 def test_a_league_limit_under_the_watcher_default_keeps_the_default(conn, monkeypatch):
-    from lab import db, stocks
+    from lab.core import db
+    from lab.stocks import paper as stocks
     from web.exporter import TraderCollector
 
     now = dt.datetime.now(dt.timezone.utc)
@@ -187,7 +189,7 @@ def test_a_league_limit_under_the_watcher_default_keeps_the_default(conn, monkey
 
 
 def test_market_metrics(conn):
-    from lab import db
+    from lab.core import db
     from web.exporter import TraderCollector
 
     now = dt.datetime.now(dt.timezone.utc)
@@ -252,7 +254,7 @@ def test_market_metrics(conn):
 
 
 def test_calibration_metrics(conn):
-    from lab import db
+    from lab.core import db
     from web.exporter import TraderCollector
 
     conn.execute("INSERT INTO calibration (gate, edge, oos_months, runs, n, passed, rate) VALUES "
@@ -267,7 +269,7 @@ def test_calibration_metrics(conn):
 
 def test_decision_metrics(conn):
     """Decisions per action, the newest pass's funnel, and a fill after the first traced entry with no decision."""
-    from lab import db
+    from lab.core import db
     from web.exporter import TraderCollector
 
     now = dt.datetime.now(dt.timezone.utc)
@@ -303,7 +305,7 @@ def test_crypto_untraced_counts_filled_bot_trades_since_the_first_crypto_decisio
     before the first crypto decision, is not."""
     from psycopg.types.json import Jsonb
 
-    from lab import db
+    from lab.core import db
     from web.exporter import TraderCollector
 
     now = dt.datetime.now(dt.timezone.utc)
@@ -331,12 +333,12 @@ def test_recorder_freshness_uses_venue_config(venue, minutes):
 
 
 def test_recorder_freshness_changes_with_config_and_only_reports_active_venues(tmp_path, monkeypatch):
-    from lab import markets
+    from lab import events
     from web.exporter import market_metrics
 
     cfg = tmp_path / "markets.toml"
     cfg.write_text('[paper]\nmax_book_age_min = 23\n[venues.odds_api]\nstale_after_min = 401\n[venues.retired]\n')
-    monkeypatch.setattr(markets, "CONFIG", cfg)
+    monkeypatch.setattr(events, "CONFIG", cfg)
     sweeps = [{"venue": v, "last_ok": None} for v in ("odds_api", "kalshi")]
     metric = next(market_metrics(None, sweeps, [], []))
     assert [(s.labels["venue"], s.value) for s in metric.samples] == [("odds_api", 401 * 60), ("kalshi", 23 * 60)]
@@ -344,13 +346,13 @@ def test_recorder_freshness_changes_with_config_and_only_reports_active_venues(t
 
 
 def test_a_venue_quiet_limit_falls_back_to_the_paper_default_and_covers_only_paper_venues(tmp_path, monkeypatch):
-    from lab import markets
+    from lab import events
     from web.exporter import paper_metrics
 
     cfg = tmp_path / "markets.toml"
     cfg.write_text('[paper]\nvenues = ["kalshi", "predictit"]\nquiet_after_h = 24\n'
                    '[venues.kalshi]\n[venues.predictit]\nquiet_after_h = 168\n[venues.odds_api]\nquiet_after_h = 1\n')
-    monkeypatch.setattr(markets, "CONFIG", cfg)
+    monkeypatch.setattr(events, "CONFIG", cfg)
     now = dt.datetime(2026, 11, 21, 17, tzinfo=dt.timezone.utc)
     orders = {"predictit": now - dt.timedelta(hours=26), "odds_api": now - dt.timedelta(days=9)}
     age, quiet = list(paper_metrics(now, [], orders))[:2]

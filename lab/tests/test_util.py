@@ -4,8 +4,8 @@ import math
 import numpy as np
 import pandas as pd
 
-from lab import util
-from lab.util import S3_CONNECT_TIMEOUT, S3_REQUEST_TIMEOUT, finite, s3_from_env, utc
+from lab.core import util
+from lab.core.util import finite, S3_CONNECT_TIMEOUT, s3_from_env, S3_REQUEST_TIMEOUT, utc
 
 T = pd.Timestamp("2026-11-04 12:00", tz="UTC")
 

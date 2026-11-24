@@ -31,4 +31,4 @@ Repo rules live in [docs/standards.md](docs/standards.md); the layout and comman
 
 ## Money
 
-- No real money, ever; `lab/league.py` refuses a non-dry-run or keyed config. A hub or routing line names, per leg, API or person-only (Fidelity has no money-moving API).
+- No real money, ever; `lab/crypto/league.py` refuses a non-dry-run or keyed config. A hub or routing line names, per leg, API or person-only (Fidelity has no money-moving API).

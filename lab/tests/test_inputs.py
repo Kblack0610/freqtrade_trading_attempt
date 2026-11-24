@@ -3,9 +3,11 @@ import datetime as dt
 import pytest
 import requests
 
-from lab import inputs, nws, taxonomy
-from lab.markets import families
-from lab.markets.api import Api
+from lab import inputs
+from lab.inputs import nws
+from lab.crypto import taxonomy
+from lab.events import families
+from lab.core.api import Api
 from lab.tests.markets_fakes import Resp, Session
 
 UTC = dt.timezone.utc
@@ -46,7 +48,7 @@ def test_an_input_is_stale_past_its_limit_or_never_read():
 
 
 def test_a_healthy_climate_report_reader_is_never_stale():
-    """A report's as_of is its day's end and it is read FINAL_H later, at the next hourly run (lab.nws.run_cli), so the
+    """A report's as_of is its day's end and it is read FINAL_H later, at the next hourly run (lab.inputs.nws.run_cli), so the
     newest one gets older than the longest gap between two stations' day ends; fresh_min must stay above that peak."""
     reg = inputs.load()
     stations = reg[nws.NAME]["stations"].values()

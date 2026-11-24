@@ -1,6 +1,6 @@
 """Docker HEALTHCHECK for the trader image: exit 0 when the bot API or the site answers.
 
-A bot (lab/league.py) serves freqtrade's API on 8080, the site (web/app.py) serves /healthz on 8000.
+A bot (lab/crypto/league.py) serves freqtrade's API on 8080, the site (web/app.py) serves /healthz on 8000.
 Every workload runs the same image, so the check accepts either.
 """
 

@@ -18,11 +18,11 @@ Freqtrade runs one strategy per process, so many strategies per bot means one pr
 
 - Several freqtrade processes in one pod: each still needs its own roughly 300 MiB (Python, ccxt, pandas), so the only saving is the PVC, which local-path does not really reserve. It breaks the one-pod-one-row roster that ingest, the watcher and the metrics read.
 - Producer and consumer mode: a consumer gets the producer's analysed dataframe, which holds one strategy's indicators, so the other strategies would not run their own logic.
-- One strategy that ORs every signal: that is a new strategy, and it forward-tests none of the originals. Running strategies together is what `lab/mixtures.py` scores.
+- One strategy that ORs every signal: that is a new strategy, and it forward-tests none of the originals. Running strategies together is what `lab/crypto/mixtures.py` scores.
 
 ### What every strategy on one venue costs
 
-61 strategy classes are on disk. Leaving out templates, exit examples, the lookahead-biased controls and the futures research (the `skip_families` of `[strategies]` in `lab/cohorts.toml`), 52 can trade: 23 on 5m, 12 on 1h, 6 on 1m, 5 on 4h, 3 on 15m, 3 on 1d.
+61 strategy classes are on disk. Leaving out templates, exit examples, the lookahead-biased controls and the futures research (the `skip_families` of `[strategies]` in `lab/crypto/cohorts.toml`), 52 can trade: 23 on 5m, 12 on 1h, 6 on 1m, 5 on 4h, 3 on 15m, 3 on 1d.
 
 | Venue | Calls a minute for 52 bots | Venue public limit | Fits |
 |---|---|---|---|
@@ -40,13 +40,13 @@ Dry run adds no trial: a strategy file in the repo is a trial whether or not a b
 
 Run every tradable strategy on binanceus only, one bot each, under its own settings: the `strategies` cohort.
 
-- `python -m lab.cohorts pick strategies` prints the rows: every loadable, lookahead-clean strategy from the newest discovery outside the skipped families, overlay `base`, refused when the venue's candle calls pass its budget.
+- `python -m lab.crypto.cohorts pick strategies` prints the rows: every loadable, lookahead-clean strategy from the newest discovery outside the skipped families, overlay `base`, refused when the venue's candle calls pass its budget.
 - `ci/cohort_roster.py strategies` opens the home-config PR that appends them. It now skips a row that would run a strategy, exchange and overlay a bot already runs, so the league's Bandtastic, Strategy001 and Supertrend on binanceus are not doubled: 49 new bots.
 - Seeding waits for the image with this change to deploy; a person merges the roster PR, as with every cohort.
 
 ## Strategy families
 
-Status is `scanned` (in `user_data/strategies/`, backtested nightly, a counted trial), `staged` (in `lab/families/`, loads and is checked but adds no trials; none today) or `blocked`. The generated families run each strategy on a timeframe ladder (15m, 1h, 4h, 1d) for the holding-period axis below; the candlestick family stays on 1h, as it is already the largest. The family of each scanned class is in `lab/families.toml`.
+Status is `scanned` (in `user_data/strategies/`, backtested nightly, a counted trial), `staged` (in `lab/families/`, loads and is checked but adds no trials; none today) or `blocked`. The generated families run each strategy on a timeframe ladder (15m, 1h, 4h, 1d) for the holding-period axis below; the candlestick family stays on 1h, as it is already the largest. The family of each scanned class is in `lab/crypto/families.toml`.
 
 | Family | Status | In the repo |
 |---|---|---|
@@ -63,10 +63,10 @@ Status is `scanned` (in `user_data/strategies/`, backtested nightly, a counted t
 | Volume flow | scanned | `user_data/strategies/flow/` a volume surge on an up close and on-balance volume at a new high before the close, on 4 timeframes |
 | FreqAI ML | scanned | `user_data/strategies/ml/` LightGBM, over the last `ML_DAYS` on the trader-ml image (a load failure on the plain one); a bounded lookahead check, no recursive check or walk-forward yet (README, Generated families and Bias) |
 
-| Pairs, market neutral | blocked | the short leg needs margin or futures; `lab/league.py` runs spot only |
+| Pairs, market neutral | blocked | the short leg needs margin or futures; `lab/crypto/league.py` runs spot only |
 | Funding carry and basis | blocked | long spot, short perpetual: needs a futures short. Measured offline in [carry.md](carry.md): it paid in 2024 and not since |
-| Shorts on a trend or a bust | blocked | futures; research only in `lab/research/` (BustShort, DonchianLongShort, CarverLongShort64 and 16, docs/short-bust.md) |
-| Cross-venue spread | blocked | needs inventory on two exchanges and two legs at once; a freqtrade bot trades one exchange. The event-contract version is `lab/markets/` cross-venue gaps |
+| Shorts on a trend or a bust | blocked | futures; research only in `lab/futures/research/` (BustShort, DonchianLongShort, CarverLongShort64 and 16, docs/short-bust.md) |
+| Cross-venue spread | blocked | needs inventory on two exchanges and two legs at once; a freqtrade bot trades one exchange. The event-contract version is `lab/events/` cross-venue gaps |
 | Market making | blocked by the backtester | freqtrade fills a limit order when price touches it, with no queue position, so a maker's edge cannot be measured; it would read as free money |
 
 The 30 strategies of Carver's *Advanced Futures Trading Strategies* map onto these families, with what each needs before we can use it, in [carver-afts.md](carver-afts.md).
@@ -81,22 +81,22 @@ The catalogue above says which mechanisms exist. A strategy's label does not pro
 
 | Axis | Buckets | Read from |
 |---|---|---|
-| Mechanism | the family in `lab/families.toml` | the family tag, checked against returns (below) |
+| Mechanism | the family in `lab/crypto/families.toml` | the family tag, checked against returns (below) |
 | Holding period | median trade under 1 h, 1 h to 1 day, 1 to 7 days, over 7 days | trade durations |
-| Climate it earns in | each BTC trend bucket (up, down, flat) by volatility tercile where the interval's low end is above 0 | `lab/scorecard.py`, /book "By market climate" |
+| Climate it earns in | each BTC trend bucket (up, down, flat) by volatility tercile where the interval's low end is above 0 | `lab/crypto/scorecard.py`, /book "By market climate" |
 | Venue | binanceus, coinbase, kraken, okx, kucoin | the backtest's exchange |
 | Trade frequency | trades a month, in terciles across the scanned strategies | trade counts |
 
-- **A cell's elite** is the strategy x venue with the highest low end of the 365-day Sharpe interval among those in the cell, the same score `aggressive` ranks by. `lab/diversity.py` builds the cells from `[diversity]` in `lab/suggest.toml`; /coverage shows them folded onto family x holding period and family x climate, a dash for each gap.
-- **Two strategies are one** when their daily returns correlate at |rho| over 0.5 (the correlation matrix behind the `max_rho` promote gate), whatever cells they sit in. A family tag that disagrees with that, such as a "trend" strategy at rho 0.9 with a mean-reversion one, is fixed in `lab/families.toml`.
-- **A diverse pick** is greedy: the best elite first, then each next elite whose edge before fees is above 0 on its own venue and on okx or kucoin, and whose BTC-residual daily returns have |rho| 0.5 or under to every one already picked (`kind = "archive"` in `lab/cohorts.toml`, `lab/cohorts.py` `pick_archive`). BTC is taken out first because it is the one source most strategies share: on 2026-11-09 the first principal component of the binanceus 365-day matrix was 28% of the variance at rho 0.84 with BTC, and the effective count was 10.9 raw, 27.6 with BTC removed (tr-211). The pick prints the picks' residual effective count beside that of the same number of best elites with no cut; it is a report, not a gate.
-- **Residual clusters** are the bets the returns say there are, shown on /coverage beside the family labels, which are weak (within-family rho 0.28, across families 0.19, tr-211). The nightly analysis (`lab/analyze.py` `cluster_rows`, `lab/diversity.py` `clusters`) takes BTC out of each series' last 365 days per venue, then clusters on 1 - |rho| with average linkage cut at the same 0.5, into `residual_clusters`; `residual_venues` keeps each venue's cluster count and residual effective count. A cluster holding several families is one bet under several names.
+- **A cell's elite** is the strategy x venue with the highest low end of the 365-day Sharpe interval among those in the cell, the same score `aggressive` ranks by. `lab/crypto/diversity.py` builds the cells from `[diversity]` in `lab/crypto/suggest.toml`; /coverage shows them folded onto family x holding period and family x climate, a dash for each gap.
+- **Two strategies are one** when their daily returns correlate at |rho| over 0.5 (the correlation matrix behind the `max_rho` promote gate), whatever cells they sit in. A family tag that disagrees with that, such as a "trend" strategy at rho 0.9 with a mean-reversion one, is fixed in `lab/crypto/families.toml`.
+- **A diverse pick** is greedy: the best elite first, then each next elite whose edge before fees is above 0 on its own venue and on okx or kucoin, and whose BTC-residual daily returns have |rho| 0.5 or under to every one already picked (`kind = "archive"` in `lab/crypto/cohorts.toml`, `lab/crypto/cohorts.py` `pick_archive`). BTC is taken out first because it is the one source most strategies share: on 2026-11-09 the first principal component of the binanceus 365-day matrix was 28% of the variance at rho 0.84 with BTC, and the effective count was 10.9 raw, 27.6 with BTC removed (tr-211). The pick prints the picks' residual effective count beside that of the same number of best elites with no cut; it is a report, not a gate.
+- **Residual clusters** are the bets the returns say there are, shown on /coverage beside the family labels, which are weak (within-family rho 0.28, across families 0.19, tr-211). The nightly analysis (`lab/crypto/analyze.py` `cluster_rows`, `lab/crypto/diversity.py` `clusters`) takes BTC out of each series' last 365 days per venue, then clusters on 1 - |rho| with average linkage cut at the same 0.5, into `residual_clusters`; `residual_venues` keeps each venue's cluster count and residual effective count. A cluster holding several families is one bet under several names.
 
 ### Search wide, forward-test few
 
 New variants go into the backtest, where they are counted trials. Bots are the scarce part: one roster row each, about 320 MiB, a PVC, and a share of the venue's candle budget. So "more of everything" means more strategies, timeframes and venues backtested to fill empty cells, and "more cohorts" means a few cohorts, each answering one question.
 
-Every cohort in `lab/cohorts.toml` states its question, pick rule, bot count and candle budget:
+Every cohort in `lab/crypto/cohorts.toml` states its question, pick rule, bot count and candle budget:
 
 | Cohort | Question it answers | Pick rule | Bots |
 |---|---|---|---|
@@ -106,7 +106,7 @@ Every cohort in `lab/cohorts.toml` states its question, pick rule, bot count and
 | `strategies` | what does every strategy leave out of its backtest (fills, fees, live candles) | every tradable strategy on binanceus | 49 |
 | `diverse` | does each different way of making money hold up live | `kind = "archive"`: one diverse pick per filled cell on binanceus, 1 h or slower, at most 16 | up to 16 |
 
-Each cohort's roster names start with its first three letters, so `lab/cohorts.py` refuses two cohorts that share them.
+Each cohort's roster names start with its first three letters, so `lab/crypto/cohorts.py` refuses two cohorts that share them.
 
 ### The strategy card
 

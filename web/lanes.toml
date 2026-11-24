@@ -1,37 +1,37 @@
 # The overview's lane cards (web/lanes.py), in this order before the state sort puts red and amber first. One card per
 # lane: what the lane is and the tab that is its home. A card counts only what its tab's rows already hold, under the
-# tab's own stale rule (web/app.py STALE, web/venues.toml, lab/markets.toml), so the two cannot disagree; only research,
+# tab's own stale rule (web/app.py STALE, web/venues.toml, lab/events/markets.toml), so the two cannot disagree; only research,
 # which no tab marks stale, sets max_age_h here.
 
 [[lane]]
 id = "crypto"
 title = "Crypto league"
 href = "/leagues#crypto"
-what = "Freqtrade spot bots on live prices, paper only (lab/league.py)"
+what = "Freqtrade spot bots on live prices, paper only (lab/crypto/league.py)"
 
 [[lane]]
 id = "betting"
 title = "Event-contract league"
 href = "/leagues#event-contracts"
-what = "One paper account per family variant, filled against the recorded books (lab/markets/paper.py)"
+what = "One paper account per family variant, filled against the recorded books (lab/events/paper.py)"
 
 [[lane]]
 id = "stocks"
 title = "Stock league"
 href = "/leagues#stocks"
-what = "One paper account per family variant on an ETF universe, filled at Alpaca quotes (lab/stocks.py)"
+what = "One paper account per family variant on an ETF universe, filled at Alpaca quotes (lab/stocks/paper.py)"
 
 [[lane]]
 id = "shadow"
 title = "Replay accounts"
 href = "/accounts#shadow"
-what = "Paper capital on walk-forward passes, marked nightly from backtests (lab/shadow.py)"
+what = "Paper capital on walk-forward passes, marked nightly from backtests (lab/crypto/shadow.py)"
 
 [[lane]]
 id = "calls"
 title = "Calls"
 href = "/calls"
-what = "Trade ideas recorded before their entry close, scored on Alpaca daily closes (lab/calls.py)"
+what = "Trade ideas recorded before their entry close, scored on Alpaca daily closes (lab/inputs/calls.py)"
 
 [[lane]]
 id = "venues"
@@ -43,13 +43,13 @@ what = "Broker and wallet reads and the order drills, one row per venue (web/ven
 id = "recorder"
 title = "Market recorder"
 href = "/markets"
-what = "Event-contract venues swept for quotes and resolutions (lab/markets/recorder.py)"
+what = "Event-contract venues swept for quotes and resolutions (lab/stages/recorder.py)"
 
 [[lane]]
 id = "prices"
 title = "Price data"
 href = "/data"
-what = "Candles per exchange that analysis and the bots read (lab/backfill.py)"
+what = "Candles per exchange that analysis and the bots read (lab/crypto/backfill.py)"
 
 [[lane]]
 id = "research"
@@ -62,4 +62,4 @@ max_age_h = 30  # nightly, with slack for a long run
 id = "money"
 title = "Money and guard"
 href = "/accounts"
-what = "The live guard, the one bankroll across venues and the loss watcher (lab/guard.py, lab/watcher.py)"
+what = "The live guard, the one bankroll across venues and the loss watcher (lab/money/guard.py, lab/money/watcher.py)"

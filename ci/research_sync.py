@@ -2,12 +2,12 @@
 """Carry the nightly research loop's changes to the agent board.
 
 Runs on the fleet machine after the nightly analysis (the agentctl runner `trader-research-sync`), from this repo's
-origin/master, never from a checkout. It reads the events lab/loop.py wrote that are not yet reported, through
-the deployed image (`kubectl exec deploy/trader-web -- python -m lab.loop pending`, the site's read-only role), then:
+origin/master, never from a checkout. It reads the events lab/crypto/loop.py wrote that are not yet reported, through
+the deployed image (`kubectl exec deploy/trader-web -- python -m lab.crypto.loop pending`, the site's read-only role), then:
 
 - climate changes: one agent-board row per night listing each strategy or mixture that entered or left a market
   climate's passing set (`notes ptask trader --agent add`);
-- a promotion that enters or leaves: a board row. Forward testing is lab/shadow.py's shadow accounts, database rows
+- a promotion that enters or leaves: a board row. Forward testing is lab/crypto/shadow.py's shadow accounts, database rows
   with no pod; a pod is a person's pick through ci/cohort_roster.py, so this sync opens no roster PR;
 - a monthly retune fit entering or leaving qualification: a review row with its parameter artifact. Parameters
   are never saved to a strategy or applied to a bot by this sync;
@@ -15,7 +15,7 @@ the deployed image (`kubectl exec deploy/trader-web -- python -m lab.loop pendin
   ready set (the paper league follows that set), and one for the paper accounts whose forward check drifted from
   their backtest or came back in line. Paper money only; a live stage stays a person's pick.
 
-Each event is acked (`python -m lab.loop ack`, in deploy/freqtrade-watcher: the site's role cannot write) once its
+Each event is acked (`python -m lab.crypto.loop ack`, in deploy/freqtrade-watcher: the site's role cannot write) once its
 row is filed, so a failed night retries the rest.
 
 Env: KUBE_CONTEXT (default home-k3s), DRY_RUN=1 to print only.
@@ -82,12 +82,12 @@ WRITER = ("deploy/freqtrade-watcher", "watcher")  # DATABASE_URL is the writer r
 def kubectl_research(*args: str) -> str:
     target, container = WRITER if args[:1] == ("ack",) else READER
     cmd = ["kubectl", "--context", os.environ.get("KUBE_CONTEXT", "home-k3s"), "-n", "freqtrade", "exec",
-           target, "-c", container, "--", "python", "-m", "lab.loop", *args]
+           target, "-c", container, "--", "python", "-m", "lab.crypto.loop", *args]
     run = subprocess.run(cmd, capture_output=True, text=True)
     if run.returncode:
         sys.stderr.write(run.stderr)  # the whole error for the runner's log; the exit line is its outcome
         why = (run.stderr.strip().splitlines() or ["no stderr"])[-1]
-        raise SystemExit(f"lab.loop {args[0]} on {target} exited {run.returncode}: {why}")
+        raise SystemExit(f"lab.crypto.loop {args[0]} on {target} exited {run.returncode}: {why}")
     return run.stdout
 
 

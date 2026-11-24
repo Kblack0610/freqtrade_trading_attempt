@@ -1,5 +1,5 @@
 # The range family: buy a close far under its own mean, only while BTC's trend is flat (lab/metrics.trend_buckets,
-# band from lab/suggest.toml [confidence] trend_band, read by the generator), and sell back at the mean.
+# band from lab/crypto/suggest.toml [confidence] trend_band, read by the generator), and sell back at the mean.
 # Long only, spot. lab/families/generate.py writes the strategy files from this file: edit here, then rerun it.
 kind = "range"
 prefix = "Range"

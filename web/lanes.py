@@ -11,7 +11,7 @@ import tomllib
 from collections.abc import Callable
 from pathlib import Path
 
-from lab import calls as calls_lab
+from lab.inputs import calls as calls_lab
 from lab import inputs as inputs_lab
 
 CONFIG = Path(__file__).resolve().parent / "lanes.toml"
@@ -180,8 +180,8 @@ def recorder(read: dict, now: dt.datetime, cfg: dict) -> dict:
                   "/markets", i["newest"]) for i in stale]
     level = "amber" if late or failing or stale else "green" if swept else "nodata"
     return card(len(swept) - len(late), f"of {len(found)} venues fresh", level,
-                f"each venue's newest good sweep; stale past {max_min} min or its stale_after_min (lab/markets.toml); "
-                "each input's newest reading, stale past its fresh_min (lab/inputs.toml)", parts, first)
+                f"each venue's newest good sweep; stale past {max_min} min or its stale_after_min (lab/events/markets.toml); "
+                "each input's newest reading, stale past its fresh_min (lab/inputs/inputs.toml)", parts, first)
 
 
 def prices(read: dict, now: dt.datetime, cfg: dict) -> dict:
@@ -241,7 +241,7 @@ def money(read: dict, now: dt.datetime, cfg: dict) -> dict:
         big, unit = f"{bank['equity']:,.0f}", f"USD equity of a {bank['cap']:,.0f} USD cap"
     else:
         big, unit = ("Dry run", "no real money can trade") if not read["guard_lifted"] else ("-", "bankroll not checked")
-    return card(big, unit, level, "lab/guard.py GUARD_LIFTED, the bankroll row and every watch row", parts, first)
+    return card(big, unit, level, "lab/money/guard.py GUARD_LIFTED, the bankroll row and every watch row", parts, first)
 
 
 READERS: dict[str, Callable[[dict, dt.datetime, dict], dict]] = {

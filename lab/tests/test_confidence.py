@@ -5,7 +5,8 @@ import pandas as pd
 import pytest
 from psycopg.types.json import Jsonb
 
-from lab import confidence, metrics, robustness, suggest
+from lab.crypto import confidence, robustness, suggest
+from lab import metrics
 
 CFG = suggest.load_config()
 C = CFG["confidence"]
@@ -392,7 +393,7 @@ def test_evidence_and_scores_are_unchanged_by_the_returns_input():
 
 def test_no_reader_takes_a_stored_fold_whose_test_month_is_in_the_lockbox(conn):
     # Rows stored before the box existed (binanceus held 36): walk-forward no longer makes them, so every reader drops them.
-    from lab import book, scorecard
+    from lab.crypto import book, scorecard
 
     cfg = {**suggest.load_config(), "lockbox": {"start": dt.date(2026, 5, 1)}}
     box = (cfg["lockbox"]["start"],)
@@ -448,8 +449,8 @@ def test_slippage_sweep_reports_each_cost_and_uses_the_worst():
 
 def test_robustness_and_trials_survive_database_roundtrip(conn):
     conn.execute("TRUNCATE trials")
-    from lab import analyze, walkforward
-    from test_analyze import REPO
+    from lab.crypto import analyze, walkforward
+    from lab.tests.test_analyze import REPO
     from unittest.mock import patch
 
     conn.execute("INSERT INTO strategies (name, file, file_hash) VALUES ('S', 'x', 'h')")
@@ -501,7 +502,7 @@ def test_betting_trials_do_not_raise_the_crypto_bar(conn):
 
 def test_live_reads_the_fills_view_on_this_lanes_venues_only(conn):
     """A league bot's trades count; a betting paper fill (a market venue) and a drill's fill do not."""
-    from lab.markets import venues as market_venues
+    from lab.events import venues as market_venues
 
     at = dt.datetime(2026, 11, 1, tzinfo=dt.timezone.utc)
     conn.execute("INSERT INTO bots (name, strategy, exchange) VALUES ('bot-s', 'S', 'binanceus')")

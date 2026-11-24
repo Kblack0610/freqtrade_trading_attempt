@@ -7,9 +7,10 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from lab import analyze, metrics
-from lab import walkforward as wf
-from test_analyze import REPO
+from lab.crypto import analyze
+from lab import metrics
+from lab.crypto import walkforward as wf
+from lab.tests.test_analyze import REPO
 
 TODAY = dt.date(2026, 11, 4)
 TUNE = {"spaces": "default", "epochs": 150, "early_stop": 40, "sampler": "NSGAIIISampler"}
@@ -322,7 +323,7 @@ def test_a_fold_hyperopt_could_not_tune_is_ok_and_keeps_its_base(wlab, monkeypat
 
 
 def test_retune_rows_come_from_stored_folds(wlab, monkeypatch):
-    from lab import suggest
+    from lab.crypto import suggest
 
     monkeypatch.setattr(wf, "ONLY", {"Live"})
     wf.main(FakeRunner(), TODAY)
@@ -362,7 +363,7 @@ def test_the_embargo_is_part_of_the_cache_key(monkeypatch):
 
 
 def test_a_changed_candle_reruns_only_the_folds_whose_span_holds_it(wlab, monkeypatch, tmp_path):
-    from test_families import synthetic_candles
+    from lab.tests.test_families import synthetic_candles
 
     monkeypatch.setattr(analyze, "RESULTS", tmp_path)
     feather = tmp_path / "data" / "binanceus" / "BTC_USD-5m.feather"

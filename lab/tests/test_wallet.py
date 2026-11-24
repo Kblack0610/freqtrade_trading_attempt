@@ -5,9 +5,9 @@ import datetime as dt
 
 import pytest
 import requests
-from markets_fakes import Resp, Session
+from lab.tests.markets_fakes import Resp, Session
 
-from lab import wallet
+from lab.money import wallet
 
 # Account 0 public keys of the BIP44, BIP49 and BIP84 test vectors.
 XPUB = "xpub6BosfCnifzxcFwrSzQiqu2DBVTshkCXacvNsWGYJVVhhawA7d4R5WSWGFNbi8Aw6ZRc1brxMyWMzG3DSSSSoekkudhUd9yLb6qx39T9nMdj"

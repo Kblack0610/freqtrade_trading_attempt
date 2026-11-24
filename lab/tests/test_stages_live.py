@@ -1,8 +1,9 @@
-"""The one live door: any Orders adapter places only when lab/guard.py refusals() names no reason."""
+"""The one live door: any Orders adapter places only when lab/money/guard.py refusals() names no reason."""
 
 import pytest
 
-from lab import guard, league, suggest
+from lab.money import guard
+from lab.crypto import league, suggest
 from lab.market import Position
 from lab.stages import live
 

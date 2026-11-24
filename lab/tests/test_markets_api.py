@@ -6,9 +6,9 @@ import time
 import pytest
 import requests
 
-from lab.markets.api import IDEMPOTENT, Api, retry_after
-from lab.markets.budget import Budget
-from lab.markets.recorder import load_config
+from lab.core.api import Api, IDEMPOTENT, retry_after
+from lab.core.budget import Budget
+from lab.stages.recorder import load_config
 from lab.tests.markets_fakes import Resp, Session
 
 

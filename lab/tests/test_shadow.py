@@ -4,7 +4,8 @@ import numpy as np
 import pandas as pd
 from psycopg.types.json import Jsonb
 
-from lab import metrics, shadow, suggest
+from lab import metrics
+from lab.crypto import shadow, suggest
 
 CFG = suggest.load_config()["shadow"]
 DAY = dt.date(2026, 11, 1)

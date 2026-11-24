@@ -55,7 +55,7 @@ def test_the_skipped_candle_patterns_are_bearish_only():
 def test_every_family_strategy_loads_by_name():
     """freqtrade finds a strategy by name only in a file containing `class <Name>(`; this is the load
     a backtest does, which list-strategies alone does not prove."""
-    from lab import analyze
+    from lab.crypto import analyze
     from freqtrade.configuration import Configuration
     from freqtrade.resolvers import StrategyResolver
 
@@ -71,9 +71,13 @@ def test_every_family_strategy_loads_by_name():
 
 
 def test_no_lab_module_shadows_an_installed_one():
-    """The jobs run `python /repo/lab/<job>.py`, which puts lab/ first on sys.path, and the image's
-    PYTHONPATH=/repo puts the lab and web packages ahead of site-packages."""
-    lab = {p.stem for p in LAB.glob("*.py")} | {p.name for p in LAB.iterdir() if p.is_dir() and not p.name.startswith(("_", "."))}
+    """A module run as a script (`python /repo/lab/crypto/<module>.py`) puts its own directory first on sys.path, and
+    the image's PYTHONPATH=/repo puts the lab and web packages ahead of site-packages, so no name in lab/ or in any of
+    its package directories may be an installed one."""
+    dirs = [LAB, *(p for p in LAB.iterdir() if (p / "__init__.py").is_file() and p.name != "tests")]
+    lab = {p.stem for d in dirs for p in d.glob("*.py")} | {p.name for d in dirs for p in d.iterdir()
+                                                             if p.is_dir() and not p.name.startswith(("_", "."))}
+    lab -= {"__init__", "__main__"}
     repo = {"lab", "web"}
     installed = {m.name for m in pkgutil.iter_modules([p for p in sys.path if p and Path(p).resolve() not in (LAB, LAB.parent)])}
     assert (lab | repo) & (installed | set(sys.stdlib_module_names)) == set()
@@ -92,7 +96,7 @@ def synthetic_candles(start: dt.datetime, end: dt.datetime, freq: str, seed: int
 
 @pytest.fixture
 def bias_data(tmp_path, monkeypatch):
-    from lab import analyze
+    from lab.crypto import analyze
 
     now = dt.datetime.now(dt.timezone.utc).replace(minute=0, second=0, microsecond=0)
     data = tmp_path / "data" / analyze.BIAS_EXCHANGE
@@ -128,14 +132,14 @@ def test_the_nightly_lookahead_check_on_synthetic_prices(bias_data, strategy, fo
 
 
 def test_a_slow_timeframe_gets_a_lookahead_window_of_enough_candles():
-    from lab import analyze
+    from lab.crypto import analyze
 
     assert [analyze.lookahead_days(tf) for tf in ("5m", "1h", "4h", "1d")] == [120, 120, 150, 900]
 
 
 def test_active_candles_cover_every_bullish_talib_pattern():
     import talib
-    from lab import analyze
+    from lab.crypto import analyze
 
     cfg = tomllib.loads((CANDLES / "family.toml").read_text())
     expected = {cfg["prefix"] + p.removeprefix("CDL") for p in talib.get_function_groups()["Pattern Recognition"]
@@ -152,7 +156,7 @@ ACTIVE_FAMILIES = [f for f in generate.families() if f.parent == ACTIVE]
 
 def test_every_active_family_member_is_discovered():
     """Switched on means scanned: the nightly analysis finds every rung of every family under user_data/strategies."""
-    from lab import analyze
+    from lab.crypto import analyze
 
     assert {f.name for f in ACTIVE_FAMILIES} >= {"candles", "chart", "trend", "range", "breakout", "clock", "flow", "forecast"}
     discovered = {s["name"]: s for s in analyze.Cli().discover()}
@@ -165,7 +169,7 @@ def test_every_active_family_member_is_discovered():
 
 @pytest.mark.parametrize("family", ACTIVE_FAMILIES, ids=lambda p: p.name)
 def test_each_active_family_member_is_a_trial_even_with_no_trades(conn, monkeypatch, family):
-    from lab import analyze, confidence
+    from lab.crypto import analyze, confidence
 
     names = {p.stem for p in family.glob("*.py")}
     assert names

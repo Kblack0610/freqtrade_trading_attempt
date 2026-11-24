@@ -4,7 +4,7 @@ recorder-links-vivid-stream, P4).
 `EntryInputs` is a strategy mixin (`class BinHV27(EntryInputs, IStrategy)`). When a trade's first entry order
 fills in dry run or live, it writes the analyzed candle the entry signal came from into Freqtrade's per-trade custom
 data under `KEY`: the candle's open time, the timeframe and every column with a scalar value (OHLCV, indicators,
-the enter tag). `lab/ingest.py` reads it back over `/trades/.../custom-data` and writes the trade's `decisions` row.
+the enter tag). `lab/crypto/ingest.py` reads it back over `/trades/.../custom-data` and writes the trade's `decisions` row.
 Backtests and hyperopt skip it, so their results are unchanged.
 """
 

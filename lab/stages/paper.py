@@ -22,8 +22,8 @@ from typing import Any, Protocol
 
 from psycopg.types.json import Jsonb
 
-from lab.decisions import funnel, prune
-from lab.grid import variant_of
+from lab.core.decisions import funnel, prune
+from lab.core.grid import variant_of
 
 
 class Adapter(Protocol):
@@ -63,7 +63,7 @@ def open_accounts(conn, venue: str, league: list[tuple[str, str, dict]], capital
 
 
 def stopped(conn) -> set[str]:
-    """Accounts the watcher's drill stopped (lab/watcher.py): they take no entries."""
+    """Accounts the watcher's drill stopped (lab/money/watcher.py): they take no entries."""
     return {b for (b,) in conn.execute("SELECT bot FROM watch WHERE stopped_at IS NOT NULL")}
 
 

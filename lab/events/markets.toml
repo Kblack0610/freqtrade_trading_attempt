@@ -1,0 +1,425 @@
+# Tuning for lab/events/. Facts behind each number: docs/markets.md.
+
+[recorder]
+# Bucket and prefix of the change-only quote parquet; the endpoint and keys come from the environment
+# (S3_ENDPOINT, S3_ACCESS_KEY, S3_SECRET_KEY). Objects: <prefix>/venue=<v>/date=<YYYY-MM-DD>/<HHMMSSZ>.parquet
+bucket = "trader-markets"
+prefix = "quotes"
+# The first run with no earlier sweep reads resolutions this far back; later runs overlap the last one by this.
+resolutions_lookback_h = 1
+# Seconds a sweep walks resolutions before it stops at a page and leaves the rest to the next sweep; it only ever
+# shortens a walk, which had no bound before. Sized for the Polymarket US Job: a 600 s deadline holds its open walk,
+# this and the paper pass, and a page 100k deep took 4.2 s (measured 2026-11-19 01:30 UTC).
+resolutions_budget_s = 240
+# What a run with no venue named sweeps. The 5-min CronJob runs it bare, so a venue joins here only once its sweep
+# fits that cadence alongside Kalshi's 3 to 4.5 min; the others run by name (python -m lab.stages.recorder manifold).
+default_venues = ["kalshi"]
+
+[compact]
+# python -m lab.events.compact (lab/events/compact.py) folds a venue-day's parts into <prefix>/venue=<v>/date=<d>/day.parquet
+# once the day ended this long ago; a sweep runs under 15 min (the CronJob's deadline), so 1 h leaves no writer behind.
+grace_h = 1
+
+[history]
+# python -m lab.events.history (lab/events/history.py). Objects: <recorder bucket>/<prefix>/<job>/venue=<v>/date=<d>.parquet
+prefix = "history"
+# A run's minutes, split over its venues: each gets an equal share of what is left when it starts. A venue stops
+# between pages (settled) or markets (bars, trades) once past its share; the next run resumes there.
+budget_min = 50
+# What a job with no venue named runs. PredictIt states no results and the Odds API sells history only on paid
+# plans, so neither is here (docs/markets.md).
+settled_venues = ["kalshi", "polymarket_us", "polymarket", "manifold"]
+bars_venues = ["kalshi", "polymarket_us", "polymarket"]
+trades_venues = ["kalshi"]
+
+[history.kalshi]
+# One call a market, so each job's own gap is shorter than the recorder's 0.5 s; what every Kalshi caller together
+# may send is [venues.kalshi] budget_rps, so jobs that overlap share it instead of adding up.
+page_gap_s = 0.15
+# Kalshi settles about 70k markets a day and 80% trade under 100 contracts: those never reach bars or trades.
+settled_min_volume = 100
+bars_period_min = 60
+# Contracts traded over the market's life. Below 100 there is no real quote to backtest against.
+bars_min_volume = 100
+# One year: at 1095 the 50 min runs fetched 0 to 2 dates each with about 1069 left (2026-11-21, tr-181).
+bars_since_days = 365
+# Trades are what the fill model is fitted on, and Kalshi prints millions a day: the liquid markets of the last 90 days.
+trades_min_volume = 10000
+trades_since_days = 90
+# Markets fetched per part. A run keeps every finished part and resumes the date there, so one Kalshi date (35k
+# markets on 2026-11-08) spans runs; a run that stops mid-chunk keeps the short part.
+chunk_markets = 500
+
+[history.polymarket_us]
+# The venue keeps 45 days, and its list carries no volume, so every settled market in that window.
+bars_period_min = 60
+bars_min_volume = 0
+bars_since_days = 45
+
+[history.polymarket]
+# volumeNum is dollars traded. The settled walk asks Gamma for markets over this floor (volume_num_min), the same
+# floor bars uses. Changing it changes the query the saved cursor hashes: run the job with --restart once.
+settled_min_volume = 1000
+bars_period_min = 60
+bars_min_volume = 1000
+# One year: at 1095 a run fetched about 480 markets, about one date a day, with 1050 left (2026-11-21, tr-181).
+bars_since_days = 365
+
+[venues.kalshi]
+title = "Kalshi"
+kind = "exchange"
+url = "https://kalshi.com"
+base_url = "https://api.elections.kalshi.com/trade-api/v2"
+page_limit = 1000
+# An unpaced count of /markets drew 429s; 0.5 s between pages was clean (docs/markets.md, Rate limits).
+page_gap_s = 0.5
+# Requests a second across every process on our IP. Basic tier publishes 20 (200 read tokens/s, 10 a request; read
+# 2026-11-11, https://docs.kalshi.com/getting_started/rate_limits), but at 12 the history jobs sent about 7 req/s
+# beside the recorder's 2 and still drew 8-58 429s a run, while the recorder alone (2 req/s) drew none (2026-11-13).
+# So the clean rate is under 9 combined; 6 keeps every caller together under it. The budget is the only pacing:
+# a 429 holds it, it never widens a process's gap.
+budget_rps = 6
+retries = 6
+timeout_s = 30
+
+[venues.polymarket_us]
+title = "Polymarket US"
+kind = "exchange"
+url = "https://polymarket.us"
+base_url = "https://gateway.polymarket.us"
+# The list caps a page at 500. The public gateway allows 20 requests/s per IP (docs/markets.md, Polymarket US).
+page_limit = 500
+page_gap_s = 0.1
+# Across every process, 60% of the gateway's 20 a second.
+budget_rps = 12
+retries = 6
+timeout_s = 30
+
+[venues.polymarket]
+# Swept every 15 min (home-config markets-venue-recorders), so /markets and the overview call it stale after two missed
+# ticks, as TraderMarketsRecorderStale does. A venue without stale_after_min uses [paper] max_book_age_min.
+stale_after_min = 45
+# Global prices, read-only: a US resident may not trade this book.
+title = "Polymarket (global)"
+kind = "exchange"
+url = "https://polymarket.com"
+base_url = "https://gamma-api.polymarket.com"
+# /markets/keyset caps a page at 100; Gamma /markets allows 300 requests per 10 s.
+page_limit = 100
+page_gap_s = 0.1
+# Across every process, Gamma and the data API together: half of Gamma's 30 a second.
+budget_rps = 15
+# The recorder lists only markets with at least this many dollars traded (Gamma volume_num_min). On 2026-11-13 Gamma
+# listed 200k active markets, 19.7k at or above 1000 and 35k past their close_time; the full walk took 815-886 s of the
+# 900 s deadline. The paper league has no Polymarket book ([paper] venues) and bars_min_volume below is the same 1000, so
+# nothing reads a quote under it.
+open_min_volume = 1000
+retries = 6
+timeout_s = 30
+
+[venues.predictit]
+title = "PredictIt"
+kind = "exchange"
+url = "https://www.predictit.org"
+base_url = "https://www.predictit.org/api"
+# One request a sweep; the snapshot refreshes about once a minute, so poll no faster. No published limit.
+page_gap_s = 1
+budget_rps = 1
+retries = 4
+timeout_s = 30
+# PredictIt gives a close date only to its weekly poll markets (Trump approval on a day); the rest say NA and never
+# reach the league. A new batch opens with spreads of 0.30 to 0.98, so no row passes the spread check until it nears
+# close: no order from 2026-11-20 15:35 UTC, after the last batch closed, while 18 of 559 contracts had a date and all
+# 18 were that wide on the live API (ar-2791). A week without one order is a whole batch missed.
+quiet_after_h = 168
+
+[venues.manifold]
+title = "Manifold"
+kind = "play-money"
+url = "https://manifold.markets"
+base_url = "https://api.manifold.markets"
+# search-markets caps a page at 1000; "a rate limit of 500 requests per minute per IP" (read 2026-11-11,
+# https://docs.manifold.markets/api).
+page_limit = 1000
+page_gap_s = 0.2
+# Across every process, 60% of 500 a minute. lab/events/manifold_trade.py's drill takes its turns from this budget too.
+budget_rps = 5
+retries = 6
+timeout_s = 60
+
+[venues.odds_api]
+# Swept every 6 h (home-config markets-venue-recorders, "7 */6 * * *"): stale after one missed run and 30 min of slack.
+stale_after_min = 390
+# Sportsbook implied odds, read-only; the key comes from ODDS_API_KEY. The free tier's limit is 500 credits a month
+# (read 2026-11-17, https://the-odds-api.com/): the one sport below already uses 480, so there is no room to add a sport,
+# a market or a faster cadence until a paid plan; each run prints the credits it spent (lab/sports/odds.py). Credits a run: per sport, 1 per region per
+# market for the odds plus 2 for /scores. One sport with h2h and totals is 4 a run, 480 a month every 6 h, inside the
+# free tier's 500 (read 2026-11-14); adding spreads makes it 600, so spreads, the cadence and the sports list wait on
+# the plan the human buys (docs/markets.md, The Odds API). /v4/sports?all=true lists no table tennis (2026-11-14).
+title = "The Odds API"
+kind = "sportsbook"
+url = "https://the-odds-api.com"
+base_url = "https://api.the-odds-api.com"
+sports = ["basketball_nba"]
+regions = "us"
+# Odds API market keys, all in one call; the adapter also reads "spreads".
+markets = ["h2h", "totals"]
+page_gap_s = 1
+# The plan limits credits, not rate; one request a second across every process.
+budget_rps = 1
+retries = 4
+timeout_s = 30
+
+[links.rules.kalshi_game]
+# The odds_api sport key and the Kalshi game-winner series it links to.
+series = { basketball_nba = "KXNBAGAME", americanfootball_nfl = "KXNFLGAME", icehockey_nhl = "KXNHLGAME", baseball_mlb = "KXMLBGAME" }
+
+[links.llm]
+# Proposals only, through the LiteLLM gateway with a scoped key (LITELLM_API_KEY) that may call this one route.
+# The route is llama-server on the workstation's RTX 4060 Ti: free, and the market titles never leave the house.
+# It has no fallback edge, so with the workstation off each ask logs an error and nothing is proposed that run.
+base_url = "https://llm.kblab.me"
+model = "local (qwen3.5-9b)"
+timeout_s = 120
+# Each [a, b]: open markets of a that are not yet linked or asked about, each asked against b's candidates.
+pairs = [["odds_api", "kalshi"], ["polymarket_us", "kalshi"]]
+# Markets asked about per run, across all pairs, soonest closing first, and only those closing within horizon_d.
+max_asks = 50
+# Failed asks do not count in max_asks, so the pass stops after this many in a row (route down, workstation off).
+max_failures = 3
+horizon_d = 14
+# A candidate closes within window_h of the market and shares a title word; the best `candidates` by shared words go.
+window_h = 96
+candidates = 15
+stopwords = ["will", "the", "win", "wins", "winner", "at", "vs", "and", "or", "of", "in", "on", "to", "a", "by", "be", "game", "match", "yes", "no", "2026", "2027"]
+
+[backtest]
+# lab/events/backtest.py. Results are scored with suggest.toml [confidence], the crypto lab's own bar.
+# Daily returns chain on this wallet, as the crypto backtests' 1000 USD.
+wallet = 1000
+# An order meets the book as it stood this long after the row that prompted it. The recorder sweeps every 5 min
+# and bars are hourly, so on today's data this rarely moves a fill; it matters once the websocket feeds (tr-50).
+latency_s = 2
+# An order takes at most this share of the top-of-book size on its side; the rest is cancelled, never walked
+# up the book, because only the top is recorded.
+depth_share = 0.5
+# Bars carry no sizes: each side's depth is this share of the contracts the period traded.
+bar_volume_share = 0.1
+# Sportsbooks quote no size either: each side of a line (families.line_book) shows this many contracts. Books limit
+# a winning account long before it, so a fill here is no claim a stake would be taken.
+sportsbook_depth = 1000
+
+# Fees per venue (lab/market.py entry_fee and settlement_fee; facts in docs/markets.md, Fees). A venue with no table costs nothing.
+[backtest.fees.kalshi]
+# ceil(0.07 * C * P * (1 - P)) up to the cent per order. The maker rate is not modelled: every fill here is a taker.
+kind = "pq"
+rate = 0.07
+rounding = "ceil"
+
+[backtest.fees.polymarket_us]
+kind = "pq"
+rate = 0.0695
+rounding = "half_even"
+
+[backtest.fees.polymarket]
+# The rate is by category and the markets table holds none, so the highest (crypto 0.07). Read-only: no US trading.
+kind = "pq"
+rate = 0.07
+rounding = "none"
+
+[backtest.fees.predictit]
+# 10% of the profit on a winning position, nothing on entry.
+kind = "profit"
+share = 0.10
+rounding = "none"
+
+[categories]
+# Contract category by series_id prefix, case-blind; no match is "other". Kalshi series, then Polymarket slugs and
+# Odds API sport keys. A guess at the venue's own category, which the markets table does not hold; extend as series appear.
+sports = ["KXNFL", "KXNBA", "KXNHL", "KXMLB", "KXNCAA", "KXMLS", "KXUFC", "KXATP", "KXWTA", "KXEPL", "KXPGA", "KXF1", "KXSOCCER", "basketball_", "americanfootball_", "icehockey_", "baseball_", "soccer_", "mma_", "tennis_"]
+politics = ["KXPRES", "KXSEN", "KXHOUSE", "KXGOV", "KXTRUMP", "KXELECT", "KXPOL", "KXMAYOR", "KXVOTE"]
+economics = ["KXFED", "KXCPI", "KXGDP", "KXPAYROLL", "KXJOBS", "KXUNRATE", "KXINFL", "KXRATE", "KXRECSS", "KXU3"]
+
+[families]
+# python -m lab.events.families (lab/events/families.py). Each family below is a grid: a list is an axis, a
+# list of tables merges each table into the variant, anything else is fixed. Every variant is a trial, and the
+# deflated Sharpe counts them all, so an axis is added only when its answer would change what trades.
+# Walk-forward (lab/events/families.py docstring): every whole backfilled month is a test window and a trial. The
+# newest this-many of them are the lockbox, read only by a variant that passes every other gate.
+lockbox_months = 1
+# PBO splits the family's daily returns into this many blocks, as the mixtures do (suggest.toml [mixtures]).
+pbo_blocks = 8
+# A run starts no window after this long; the next run resumes. The CronJob's deadline leaves room for the window
+# in hand and the gate.
+budget_min = 150
+
+[families.longshot]
+# Favourite-longshot bias: longshots are bought too dear and favourites too cheap. Buy one side of every market
+# whose yes mid sits in the band, within `hours` of close.
+stake = 10
+max_spread = 0.05
+hours = [24, 168]
+bands = [{ buy = "no", lo = 0.01, hi = 0.10 }, { buy = "no", lo = 0.10, hi = 0.20 },
+         { buy = "yes", lo = 0.80, hi = 0.90 }, { buy = "yes", lo = 0.90, hi = 0.99 }]
+
+[families.calibration]
+# Base rates: how often markets entered this way resolved yes over the `train_days` before the window, per price
+# bucket of `width`, across the venue (all) or per series; `prior` markets shrink a thin bucket toward its own
+# price, and a bucket under `min_n` markets is not traded. Trade when the rate beats the price by `edge`; the
+# edge has to cover the fee, about 1.75c a contract at 50c on Kalshi.
+stake = 10
+max_spread = 0.05
+hours = 168
+width = 0.05
+prior = 10
+min_n = 30
+train_days = 30
+key = ["all", "series"]
+edge = [0.03, 0.06]
+
+[families.gap]
+# Cross-venue gaps against a reference venue's fair price, over the links one rule made (market_links). One
+# source a variant, so results are read per link source; LLM links are refused (lab/events/families.py).
+stake = 10
+max_spread = 0.05
+ref_venue = "odds_api"
+source = ["rule:kalshi_game"]
+edge = [0.03, 0.06]
+
+[families.tt_totals]
+# Head-to-head totals on a sportsbook venue's line book (families.line_book), run with --venue odds_api. Within
+# `hours` of the start, once per game: the pair's over-rate at the line, over the `min_h2h` or more meetings that
+# settled before the row, shrunk by `prior` games toward the no-vig fair; buy the over or the under when that beats
+# the best book's price by `edge` and the last five meetings (`last5` of them on that side) and the mean total agree.
+# A -110/-110 line is a 0.048 spread. hours stays inside families.LEAD (2 days) of quotes before each window.
+stake = 10
+max_spread = 0.08
+hours = 24
+prior = 10
+last5 = 0.6
+min_h2h = [5, 10]
+edge = [0.03, 0.06]
+
+[families.weather]
+# A Kalshi daily high market against the NWS forecast high of its station (lab/inputs/inputs.toml nws_high), run on the bars
+# like the others but only on whole months with a forecast read every day. sd is how far off a same-day NWS high
+# runs, in degrees F; 2 to 3 is a guess until `python -m lab.inputs.nws sd` has enough days of forecast against the CLI high
+# to replace it with the measured spread. Kalshi closes a day's market
+# about 1 am local the next day, so 24 h is the day itself.
+stake = 10
+max_spread = 0.05
+hours = 24
+sd = [2.0, 3.0]
+edge = [0.05, 0.10]
+
+[families.observed]
+# A Kalshi daily high, low or rain market the station's own readings of the day have already decided (lab/inputs/inputs.toml
+# nws_obs; lab/events/families.py settled_by): a high above a range's top, a low below its bottom, or measured rain.
+# Buys the settled side while the price still lags it by `edge`; the stake is paid for a payoff of 1, so a lagging price
+# is the whole edge. margin is degrees F of slack for a reading that rounds the other way than the climate report.
+# Run on the bars like the others, but only on whole months with an observation every day (the IEM ASOS backfill).
+stake = 10
+max_spread = 0.05
+hours = 24
+margin = 1
+edge = [0.03, 0.06]
+
+[families.llm]
+# The forecaster is forward only: backtest.replay refuses any book that starts before this, the model's training
+# cutoff. The model's own cutoff is not published, so this is the day forward scoring starts, which is no earlier.
+cutoff = 2026-11-06T00:00:00Z
+stake = 10
+max_spread = 0.05
+hours = 168
+edge = 0.06
+
+[paper]
+# python -m lab.events.paper (lab/events/paper.py): each variant the readiness gate passed (readiness, market events, ready) is
+# one paper account, if its family needs no fit and no key (lab/events/paper.py docstring); the rest are retired.
+# Kalshi's books and the quotes polymarket_us and predictit record every 5 min. Manifold stays data only: its recorder
+# stores a probability and no bid or ask, so there is no price to fill at. Polymarket global stays data only too: a US
+# resident may not trade it. odds_api is out until it records a sport a family can trade: it records basketball_nba
+# only, and tt_totals (its one family) needs min_h2h 5 or 10 meetings of a pair, which NBA teams reach only in the
+# playoffs, so its four accounts placed 0 orders and failed "head to head" on every row (ar-2743). A table-tennis
+# source (the OddsPapi adapter, tr-303) brings tt_totals back on its own venue.
+venues = ["kalshi", "polymarket_us", "predictit"]
+# Families that join a venue's league with every variant of their grid, without the readiness gate, as a forward
+# test. Paper costs nothing, so every family that can run here trades on paper from day one and the gate decides only
+# promotion (candidate, live). Gating paper left the league at 0 orders from 2026-11-15: the gate needs six whole test
+# months and had none (plan see-keen-goose). tt_totals has no backtest window until a source sells table tennis history.
+forward = { kalshi = ["longshot", "weather", "observed"], polymarket_us = ["longshot"], predictit = ["longshot"] }
+# Contracts each side of a quote shows on a venue whose recorder stores no sizes (polymarket_us, predictit), so a fill is
+# limited by `stake` and depth_share and not by a size nobody recorded; the same figure as [backtest] sportsbook_depth.
+unsized_depth = { polymarket_us = 1000, predictit = 1000 }
+# A forward test runs this many days from its first fill and to this many settled bets, whichever is later
+# (paper.report; plan see-my-cousing-betegin-scalable-floyd, phase 5).
+forward_days = 28
+forward_bets = 300
+capital = 1000
+# Open positions an account may hold. At [families.longshot] stake 10 this keeps at most half of capital in open
+# fills; before the cap (2026-11-13) the eight longshot accounts held 77 to 206 each and most were out of cash.
+max_open = 50
+# The forward check (paper.forward) reads an account's paper against its backtest once this many fills settled.
+drift_min_trades = 30
+# Only markets closing within this many hours are shown to the league: the longest `hours` any family trades.
+horizon_h = 168
+# No entries when the venue's last good sweep is older than this: three missed 5-min sweeps. A venue swept every
+# 6 h (odds_api) whose pass runs right after its sweep is under the same limit.
+max_book_age_min = 15
+# The decision record (lab/events/paper.py trade, migration 055): each account keeps at most this many near-misses
+# a pass (rows whose full trace failed one check), and near-misses and funnel counts older than trace_days go. At
+# 8 accounts on a 5-min pass that is at most 4.6k near-miss rows a day, 138k kept.
+near_misses = 2
+trace_days = 30
+# Hours a paper venue may go without sending one order, filled or not, before the Sentinel watch trader-paper-volume
+# calls its league stopped (trader_paper_order_age_seconds against trader_paper_order_quiet_seconds). A venue whose
+# tradable books come in batches sets its own [venues.<v>] quiet_after_h.
+quiet_after_h = 24
+
+[demo.kalshi]
+# lab/events/kalshi_trade.py, mock funds only: the client refuses any host but the demo's (docs/markets.md, Kalshi).
+# Keys are the demo account's, apart from production: KALSHI_DEMO_KEY_ID and KALSHI_DEMO_KEY_FILE (a PEM).
+base_url = "https://external-api.demo.kalshi.co/trade-api/v2"
+timeout_s = 30
+# Basic tier: 200 read and 100 write tokens a second, 10 tokens a request, so 20 reads or 10 writes a second (read
+# 2026-11-11, https://docs.kalshi.com/getting_started/rate_limits); the page does not say the demo differs. One budget
+# for the demo key, apart from production's: half the write rate. A place is never retried after a 5xx (api.py).
+page_gap_s = 0.2
+budget_rps = 5
+retries = 4
+# Kalshi splits markets across exchange indexes (shards); an order on one where the account holds no funds is refused
+# with insufficient_shard_balance (2026-11-13, a basketball market on index 3). The demo's mock funds sit on index 0
+# (https://docs.kalshi.com/getting_started/exchange_sharding), so the drill picks only markets there.
+drill_exchange_index = 0
+# The drill rests one contract this far below the ask, post only, so it cannot fill before it is cancelled.
+drill_price = 0.01
+# Most demo markets have an empty book, a 1.00 ask (2026-11-12: 199 of the first 200), so the drill pages on to
+# find one it can rest under: 10 pages of 200 is 2,000 markets and 10 reads, 2 s at the budget.
+market_pages = 10
+# Reads lag writes (2026-11-09: a 404 right after a place, still resting 0.04 s after a cancel, canceled by 0.29 s),
+# and an order state read has no event short of the websocket, so reads wait up to 5 s.
+read_polls = 20
+read_poll_s = 0.25
+
+[demo.manifold]
+# lab/events/manifold_trade.py, play money: the client refuses any host but api.manifold.markets. Key: MANIFOLD_API_KEY.
+base_url = "https://api.manifold.markets"
+timeout_s = 30
+# The limit is per IP, so the drill takes its turns from [venues.manifold] budget_rps, the reader's budget.
+page_gap_s = 0.2
+retries = 4
+# The drill rests a 1-mana YES limit bet (the minimum bet) at 1%, the lowest limit, on a market priced at min_prob or
+# more, so it cannot fill before it is cancelled. Manifold cancels it on its own after expires_s if the drill dies.
+drill_price = 0.01
+drill_mana = 1
+min_prob = 0.10
+expires_s = 600
+
+[research.kalshi_calibration]
+# lab/events/research/kalshi_calibration.py, run by hand from a workstation: its own IP, so it takes no turns from
+# [venues.kalshi] budget_rps (that budget lives in the cluster's database). Kalshi documents 20 reads a second for the
+# Basic tier (read 2026-11-11, https://docs.kalshi.com/getting_started/rate_limits), but the batch candle call drew
+# 429s at 8 a second, so 5.
+page_gap_s = 0.2
+retries = 7
+timeout_s = 30

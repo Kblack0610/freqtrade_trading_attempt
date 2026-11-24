@@ -2,7 +2,7 @@
 {% block title %}Accounts{% endblock %}
 {% block body %}
 <h1>Accounts</h1>
-<p>Read only. Real-money guard: {% if guard_lifted %}<span class="down">lifted</span>{% else %}<span class="up">on</span>{% endif %} (<code>lab/live.py</code>). Nothing on this site can place an order or move money: each table is the newest read a job wrote with a read-only key, a public key or a paper account.</p>
+<p>Read only. Real-money guard: {% if guard_lifted %}<span class="down">lifted</span>{% else %}<span class="up">on</span>{% endif %} (<code>lab/crypto/live.py</code>). Nothing on this site can place an order or move money: each table is the newest read a job wrote with a read-only key, a public key or a paper account.</p>
 
 {% include "_venues.html" %}
 
@@ -49,7 +49,7 @@
 {% else %}<p class="muted">No crypto league bots have been ingested yet.</p>{% endif %}
 
 <h2 id="shadow">Replay accounts</h2>
-<p class="muted">Not a league: database rows with paper capital, no pod and no fills (<code>lab/shadow.py</code>). A strategy and venue that clears the walk-forward and backtest entry gates opens one, and each night adds the backtest's days after its promotion, replayed on candles, not filled on a book. It wins when it is up with the interval's low end above zero after its cohort's minimum days; it retires past the drawdown limit, below zero, or at the day limit (<code>lab/suggest.toml [shadow]</code>). Short: median trade under a day; long: a day or more.</p>
+<p class="muted">Not a league: database rows with paper capital, no pod and no fills (<code>lab/crypto/shadow.py</code>). A strategy and venue that clears the walk-forward and backtest entry gates opens one, and each night adds the backtest's days after its promotion, replayed on candles, not filled on a book. It wins when it is up with the interval's low end above zero after its cohort's minimum days; it retires past the drawdown limit, below zero, or at the day limit (<code>lab/crypto/suggest.toml [shadow]</code>). Short: median trade under a day; long: a day or more.</p>
 <p>Active short {{ shadow.active.short }}, active long {{ shadow.active.long }}, winning {{ shadow.winning }}, retired {{ shadow.retired }}.</p>
 {% if shadow.rows %}
 <div class="scroll"><table><thead><tr><th>Account</th><th>Hold</th><th>State</th><th class="n">Days</th><th class="n">Return</th><th class="n">Drawdown</th><th>Promoted</th><th>Retired</th></tr></thead><tbody>
@@ -84,7 +84,7 @@
 {% else %}<p class="muted">No broker read yet.</p>{% endif %}
 
 <h2>Wallets</h2>
-<p class="muted">The newest watch-only read of each self-custody account, from its public key (<code>lab/wallet.py</code>). The key cannot sign, so nothing here can spend.</p>
+<p class="muted">The newest watch-only read of each self-custody account, from its public key (<code>lab/money/wallet.py</code>). The key cannot sign, so nothing here can spend.</p>
 {% if wallets %}
 <div class="scroll"><table>
   <thead><tr><th>Account</th><th>Coin</th><th>Read</th><th class="n">Confirmed</th><th class="n">Unconfirmed</th><th class="n">Addresses used</th><th>Error</th></tr></thead>
@@ -100,7 +100,7 @@
 {% else %}<p class="muted">No wallet read yet.</p>{% endif %}
 
 <h2>Kill switch</h2>
-<p class="muted">The watcher's state for each crypto league bot and event-contract account (<code>lab/watcher.py</code>): a bot that hits its daily loss limit, or is drilled, stops entries for the rest of the UTC day. Stopped and breached rows come first.</p>
+<p class="muted">The watcher's state for each crypto league bot and event-contract account (<code>lab/money/watcher.py</code>): a bot that hits its daily loss limit, or is drilled, stops entries for the rest of the UTC day. Stopped and breached rows come first.</p>
 {% if watch %}
 <div class="scroll"><table>
   <thead><tr><th>Bot</th><th>Paper</th><th>State</th><th class="n">Equity</th><th class="n">Day open</th><th>Day limit hit</th><th>Stopped</th><th>Last read</th><th>Error</th></tr></thead>
