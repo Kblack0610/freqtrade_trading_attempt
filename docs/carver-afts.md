@@ -33,7 +33,7 @@ One verdict and one score per strategy, read off the tables below. The class com
 |---|---|
 | 3 | Runs as the book writes it, or its long half is the whole idea |
 | 2 | The long half runs; a book element is lost (the short half, the buffer, daily resizing) |
-| 1 | Only measurable or approximated offline: research code, not a league trade |
+| 1 | Only measurable or approximated offline: research code that the league cannot trade |
 | 0 | No spot equivalent: needs shorts, history we lack, contracts or expiries |
 
 | Class | Strategies (score) |
