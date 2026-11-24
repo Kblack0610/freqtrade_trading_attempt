@@ -125,3 +125,10 @@ def test_set_pbo_ranks_the_long_mixtures_and_not_the_one_month_they_all_share():
     rets = [pd.Series(rng.normal(0, 0.01, 300), index=days) for _ in range(4)] + [pd.Series(rng.normal(0, 0.01, 30), index=days[-30:])]
     assert mixtures.set_pbo(rets, C["pbo_blocks"]) is not None
     assert mixtures.set_pbo([r[-30:] for r in rets], C["pbo_blocks"]) is None
+
+
+def test_two_sleeves_swapping_pool_rank_keep_every_mixture_id():
+    a, b, c = ("A", "x"), ("B", "x"), ("C", "x")
+    cfg = {**C, "budget": 10_000}
+    ids = lambda pool: {mixtures.variant_of(s) for s in mixtures.specs(pool, cfg)}
+    assert ids([a, b, c]) == ids([b, a, c]) == ids([c, b, a])
