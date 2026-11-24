@@ -77,7 +77,7 @@ jobs:
         timeout-minutes: 10
         run: |
           test_command=$(node -p 'require("./package.json").scripts.test')
-          docker run --rm --network host --entrypoint bash -e TEST_SHARD=${{ matrix.shard }} -e TEST_SHARDS=4 \
+          docker run --rm --network host --entrypoint bash -e TEST_SHARD=${{ matrix.shard }} -e TEST_SHARDS=${{ strategy.job-total }} \
             -e DATABASE_URL=postgresql://postgres:test@localhost:5432/trader trader:ci \
             -c "python lab/migrate.py && python lab/migrate.py | grep -q '0 new' && $test_command"
       - name: Every strategy loads

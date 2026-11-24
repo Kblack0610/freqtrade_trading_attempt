@@ -29,8 +29,12 @@ def pytest_collection_modifyitems(config, items):
     shards = int(os.environ.get("TEST_SHARDS", "1"))
     if shards < 2:
         return
-    shard = int(os.environ["TEST_SHARD"])
-    assert 0 <= shard < shards, f"TEST_SHARD {shard} outside 0..{shards - 1}"
+    try:
+        shard = int(os.environ["TEST_SHARD"])
+    except (KeyError, ValueError):
+        raise pytest.UsageError("TEST_SHARDS is set, so TEST_SHARD must be an integer")
+    if not 0 <= shard < shards:
+        raise pytest.UsageError(f"TEST_SHARD {shard} outside 0..{shards - 1}")
     kept = items[shard::shards]
     keep = set(kept)
     config.hook.pytest_deselected(items=[i for i in items if i not in keep])
