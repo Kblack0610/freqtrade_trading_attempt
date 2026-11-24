@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from lab import scorecard, suggest, vol_target, volatility
+from lab.crypto import scorecard, suggest, vol_target, volatility
 
 CFG = suggest.load_config()
 

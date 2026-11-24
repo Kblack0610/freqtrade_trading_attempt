@@ -1,5 +1,5 @@
 
-from lab.markets.research import kalshi_calibration as kc
+from lab.events.research import kalshi_calibration as kc
 
 EXP = "2026-10-01T20:00:00Z"
 T = kc.ts(EXP)

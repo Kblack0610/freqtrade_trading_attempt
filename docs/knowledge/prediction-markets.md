@@ -40,7 +40,7 @@ Tier: primary means the paper or page was read; snippet means a search summary o
 | `calibration` | On Polymarket the sign of the longshot result depends on grouping by contract or by event | Candidate: score by event as well as by contract |
 | `gap` against sportsbooks | The bias is weak in sports, so a sports gap has to come from the devigged sharp price | Fair price is the median devigged book |
 | Skill measurement | CLV needs far fewer bets than settled profit to show skill, if the close is efficient (Buchdahl gives no time in weeks) | `close_mid` is recorded per fill; reading CLV per account is a candidate report |
-| Sizing | Fractional Kelly at most, and only after a verified edge | Fixed $10 stakes per bet (`lab/markets.toml`) |
+| Sizing | Fractional Kelly at most, and only after a verified edge | Fixed $10 stakes per bet (`lab/events/markets.toml`) |
 
 ## Not checked
 

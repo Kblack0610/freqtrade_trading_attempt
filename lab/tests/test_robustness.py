@@ -4,7 +4,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from lab import robustness
+from lab.crypto import robustness
 
 CFG = {"entry_delay_candles": 1, "parameter_nudge_fraction": 0.1, "detail_timeframe": "1m"}
 

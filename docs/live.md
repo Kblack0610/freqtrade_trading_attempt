@@ -1,12 +1,12 @@
 # Live bots
 
-Nothing here trades money. `lab/live.py` always refuses, and no manifest starts it. This page says what it would check, what a human changes to lift the guard, and how a live bot would be reconciled and backed up.
+Nothing here trades money. `lab/crypto/live.py` always refuses, and no manifest starts it. This page says what it would check, what a human changes to lift the guard, and how a live bot would be reconciled and backed up.
 
-## What `lab/live.py` checks
+## What `lab/crypto/live.py` checks
 
-The guard has two layers. `lab/guard.py` `refusals()` is the one door every real-money start runs, whatever the engine: `GUARD_LIFTED`, the stage caps, the venue list, ready (`lab/readiness.py`) and the bankroll kill switch. `lab/live.py` adds the Freqtrade config checks on top. `lab/stages/live.py` `place()` is the door for any `Orders` adapter (Kalshi, Alpaca, Manifold): it reads the stake (price x count), the open positions, ready and the bankroll, and the client is never asked to place while `refusals()` names a reason. A Kalshi or broker live path goes through it and adds only its own engine checks. `lab/league.py` names the same reasons when it refuses a config that could trade money, and refuses it whatever they say.
+The guard has two layers. `lab/money/guard.py` `refusals()` is the one door every real-money start runs, whatever the engine: `GUARD_LIFTED`, the stage caps, the venue list, ready (`lab/core/readiness.py`) and the bankroll kill switch. `lab/crypto/live.py` adds the Freqtrade config checks on top. `lab/stages/live.py` `place()` is the door for any `Orders` adapter (Kalshi, Alpaca, Manifold): it reads the stake (price x count), the open positions, ready and the bankroll, and the client is never asked to place while `refusals()` names a reason. A Kalshi or broker live path goes through it and adds only its own engine checks. `lab/crypto/league.py` names the same reasons when it refuses a config that could trade money, and refuses it whatever they say.
 
-`GUARD_LIFTED` is False, so `main()` exits 2 before it reads a config, a key or the database. With the guard lifted, it builds the config from the stage named in `[live]` of `lab/suggest.toml` and exits 2 unless all of these hold on the merged config:
+`GUARD_LIFTED` is False, so `main()` exits 2 before it reads a config, a key or the database. With the guard lifted, it builds the config from the stage named in `[live]` of `lab/crypto/suggest.toml` and exits 2 unless all of these hold on the merged config:
 
 - Real orders, spot, no margin.
 - Stake and open trades are numbers within the stage. `unlimited`, -1 and infinity are refused.
@@ -22,16 +22,16 @@ The guard has two layers. `lab/guard.py` `refusals()` is the one door every real
 
 A bot with open trades also refuses to start when its strategy, params, venue, pairs or caps differ from its last start. The rules behind these checks are in `docs/operating-rules.md`.
 
-Stake, open trades and the bankroll have one home, `[[book.stages]]`, which `/book` reads too: the `[live]` stage's `capital` caps the summed capital of every money account across venues, and `lab/watcher.py` enforces it with `[book] hard_stop`. The keys file loads last, and the checks run after it, so it cannot raise a cap.
+Stake, open trades and the bankroll have one home, `[[book.stages]]`, which `/book` reads too: the `[live]` stage's `capital` caps the summed capital of every money account across venues, and `lab/money/watcher.py` enforces it with `[book] hard_stop`. The keys file loads last, and the checks run after it, so it cannot raise a cap.
 
 ## Lifting the guard
 
 This is a human decision, made in one PR, and only after a strategy reaches ready and the Accounts and keys phase passes:
 
-1. Set `GUARD_LIFTED = True` in `lab/guard.py` and change `test_the_guard_is_on` and `test_the_shipped_guard_refuses_whatever_else_holds`.
+1. Set `GUARD_LIFTED = True` in `lab/money/guard.py` and change `test_the_guard_is_on` and `test_the_shipped_guard_refuses_whatever_else_holds`.
 2. Change the docs that state the rule: `docs/idea.md` in the lab project, the anchor, the running plan and the guard section of the README.
-3. Give `lab/ingest.py` and the not-dry-run alert their exception for the live namespace. Both refuse a live bot today.
-4. Add `apps/freqtrade-live/` in home-config. `lab/league.py` stays as it is, and it refuses this config.
+3. Give `lab/crypto/ingest.py` and the not-dry-run alert their exception for the live namespace. Both refuse a live bot today.
+4. Add `apps/freqtrade-live/` in home-config. `lab/crypto/league.py` stays as it is, and it refuses this config.
 
 ## What these checks do not cover
 

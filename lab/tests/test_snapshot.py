@@ -1,7 +1,7 @@
 import pytest
 from pyarrow import fs as pafs
 
-from lab import snapshot
+from lab.crypto import snapshot
 
 
 @pytest.fixture

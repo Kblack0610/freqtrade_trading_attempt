@@ -1,6 +1,6 @@
 import datetime as dt
 
-from lab import suggest
+from lab.crypto import suggest
 
 CFG = suggest.load_config()
 

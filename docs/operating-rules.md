@@ -16,19 +16,19 @@ Three actions, nothing else:
 
 - **No manual trade.** No forced entry, no forced exit, no order placed or closed by hand in the exchange UI, and no position added to. A bot that is wrong is paused, not overruled.
 - **No parameter edit on a bot with open trades.** The strategy file, its params file, the pair list, the timeframe, the stoploss and the caps stay as they were at the last start until the bot is flat. Change them while it is flat, through a PR, and the change takes effect at the next start.
-- **No edit during a drawdown.** A bad week is not evidence. Retiring a strategy needs the stated decay test (the "not decayed" gate and `retire` suggestion of `lab/confidence.py`, README "Decay test"), not one drawdown.
+- **No edit during a drawdown.** A bad week is not evidence. Retiring a strategy needs the stated decay test (the "not decayed" gate and `retire` suggestion of `lab/crypto/confidence.py`, README "Decay test"), not one drawdown.
 - **No promotion off the news.** A strategy goes to a bot through the trial register and `confidence.ready` only. A coin in the headlines or a hot week is not a reason.
-- **News makes calls, never trades.** An event rule (`lab/call_rules.py`) may turn a feed item into a scored paper call; it never places an order and never promotes a bot.
+- **News makes calls, never trades.** An event rule (`lab/inputs/call_rules.py`) may turn a feed item into a scored paper call; it never places an order and never promotes a bot.
 
 ## Cadence
 
 - Read P&L once a week, on a fixed day. The daily loss watcher acts on its own and is not a prompt to decide anything.
 - Judge a decision by whether these rules were followed over a full sample, not by last week's result.
-- Record every override, including a kill switch pull, and every trade idea of your own as a call before it plays out: `python -m lab.calls add` with the thesis as the reason (README, Calls). The server stamps it and the row cannot be edited, so the record is the one the nightly analysis scores. An override with no call did not happen under the rules.
+- Record every override, including a kill switch pull, and every trade idea of your own as a call before it plays out: `python -m lab.inputs.calls add` with the thesis as the reason (README, Calls). The server stamps it and the row cannot be edited, so the record is the one the nightly analysis scores. An override with no call did not happen under the rules.
 
 ## What the code enforces
 
-`lab/live.py` is the one entry point of a live bot, and it already refuses to start (`GUARD_LIFTED` in `lab/guard.py`). Once a human lifts the guard, it still exits 2 unless all of these hold:
+`lab/crypto/live.py` is the one entry point of a live bot, and it already refuses to start (`GUARD_LIFTED` in `lab/money/guard.py`). Once a human lifts the guard, it still exits 2 unless all of these hold:
 
 | Rule | Enforcement | Test |
 |---|---|---|
@@ -43,4 +43,4 @@ Three actions, nothing else:
 - **A trade placed in the exchange UI.** The exchange allows it, and the bot cannot tell. The reconciliation in `docs/live.md` catches it as a mismatch, and an unexplained mismatch demotes the strategy to Stage 0.
 - **A bot API call with a valid login.** `/forceexit` is an API route that Freqtrade serves whenever the API is on. The watcher and a human hold the same credentials. The rule is the control here, and the override log is how it is checked.
 - **An edit made while the bot is stopped but holding open trades.** The start check sees it at the next start and refuses, so the bot stays down until the edit is reverted or the trades are closed by their own exits.
-- **The paper league.** `lab/league.py` has `force_entry_enable` false but does not check the rest, since paper trades cost nothing.
+- **The paper league.** `lab/crypto/league.py` has `force_entry_enable` false but does not check the rest, since paper trades cost nothing.

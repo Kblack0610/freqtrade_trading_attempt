@@ -1,0 +1,300 @@
+# Which method family each strategy belongs to, and what data it reads. /coverage (web/app.py) joins this to the
+# results tables to show which families have been tested where. Keyed by strategy class name, not file name.
+# Classified from each file's entry rule. A `note` marks a call that could reasonably go another way.
+# A new strategy file shows on /coverage as untagged until it gets a line here; lab/tests/test_web.py checks
+# that every class under user_data/strategies has one.
+
+# Family order on /coverage, with what puts a strategy in it.
+[families]
+trend = "Enters with the trend: a moving-average cross, MA ordering, Supertrend or ADX direction."
+mean-reversion = "Buys a dip: oversold RSI, MFI, CCI or stochastics, or a close under a lower Bollinger band."
+momentum = "Buys strength: MACD above its signal or zero, rising closes, positive momentum."
+breakout = "Buys a price pushing through a level."
+flow = "Buys volume leading price: a surge on an up close, or on-balance volume at a new high before the close."
+candlestick-pattern = "Enters on a candle or count pattern."
+chart-pattern = "Enters on numeric chart patterns: confirmed swing pivots or a flag breakout."
+time-based = "Enters by the clock."
+ml = "A FreqAI model, retrained on a rolling window, predicts the move; it enters on a confident prediction."
+grid = "Buys layers on a ladder under a range and sells each one a step higher."
+dca = "Averages down: a base order, then larger safety orders lower, one take profit on the average."
+relative-value = "Buys a coin cheap against another (its ratio to BTC), the long leg of a pair trade."
+exit-example = "A Freqtrade example of an exit or stoploss hook; the entry is a placeholder."
+template = "A sample or no-op strategy, kept as a reference, not a method."
+biased-control = "Known lookahead bias; kept so the bias check has something to catch. Its results are void."
+short = "Shorts on futures; research only, outside user_data/strategies."
+
+[strategies]
+# user_data/strategies/
+Bandtastic = { family = "mean-reversion", inputs = ["ohlcv"] }
+BreakEven = { family = "exit-example", inputs = ["ohlcv"] }
+CustomStoplossWithPSAR = { family = "exit-example", inputs = ["ohlcv"] }
+Diamond = { family = "breakout", inputs = ["ohlcv"], note = "Hyperopt picks which raw columns cross; the default, a shifted high over the close times a push, reads as a breakout." }
+hlhb = { family = "trend", inputs = ["ohlcv"] }
+HourBasedStrategy = { family = "time-based", inputs = ["ohlcv"] }
+InformativeSample = { family = "trend", inputs = ["ohlcv"], note = "Also reads a 15m informative timeframe." }
+mabStra = { family = "trend", inputs = ["ohlcv"], note = "Ratios between three moving averages inside tuned bands; could be read as momentum." }
+MultiMa = { family = "trend", inputs = ["ohlcv"] }
+multi_tf = { family = "mean-reversion", inputs = ["ohlcv"], note = "RSI across 5m, 30m and 1h plus BTC and ETH/BTC informative pairs." }
+PatternRecognition = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+PowerTower = { family = "momentum", inputs = ["ohlcv"] }
+SampleStrategy = { family = "template", inputs = ["ohlcv"] }
+Strategy001 = { family = "trend", inputs = ["ohlcv"] }
+Strategy001_custom_exit = { family = "exit-example", inputs = ["ohlcv"] }
+Strategy002 = { family = "mean-reversion", inputs = ["ohlcv"], note = "Oversold under the lower band, filtered by a hammer candle." }
+Strategy003 = { family = "mean-reversion", inputs = ["ohlcv"] }
+Strategy004 = { family = "mean-reversion", inputs = ["ohlcv"] }
+Strategy005 = { family = "mean-reversion", inputs = ["ohlcv"], note = "Needs a 4x volume spike as well as a close under the SMA." }
+Supertrend = { family = "trend", inputs = ["ohlcv"] }
+SwingHighToSky = { family = "mean-reversion", inputs = ["ohlcv"] }
+UniversalMACD = { family = "momentum", inputs = ["ohlcv"], note = "Fast over slow EMA ratio inside a tuned band; could be read as trend." }
+
+# user_data/strategies/berlinguyinca/
+ADXMomentum = { family = "momentum", inputs = ["ohlcv"] }
+AdxSmas = { family = "trend", inputs = ["ohlcv"] }
+ASDTSRockwellTrading = { family = "momentum", inputs = ["ohlcv"] }
+AverageStrategy = { family = "trend", inputs = ["ohlcv"] }
+AwesomeMacd = { family = "momentum", inputs = ["ohlcv"] }
+BbandRsi = { family = "mean-reversion", inputs = ["ohlcv"] }
+BinHV27 = { family = "mean-reversion", inputs = ["ohlcv"], note = "Several ADX and DI branches, all gated on a low EMA of RSI and a close under its SMAs." }
+BinHV45 = { family = "mean-reversion", inputs = ["ohlcv"] }
+CCIStrategy = { family = "mean-reversion", inputs = ["ohlcv"] }
+ClucMay72018 = { family = "mean-reversion", inputs = ["ohlcv"] }
+CMCWinner = { family = "mean-reversion", inputs = ["ohlcv"] }
+CofiBitStrategy = { family = "mean-reversion", inputs = ["ohlcv"] }
+CombinedBinHAndCluc = { family = "mean-reversion", inputs = ["ohlcv"] }
+DoesNothingStrategy = { family = "template", inputs = ["ohlcv"] }
+EMASkipPump = { family = "mean-reversion", inputs = ["ohlcv"] }
+Freqtrade_backtest_validation_freqtrade1 = { family = "trend", inputs = ["ohlcv"] }
+Low_BB = { family = "mean-reversion", inputs = ["ohlcv"] }
+MACDStrategy = { family = "momentum", inputs = ["ohlcv"], note = "MACD over its signal while CCI is low: half momentum, half dip." }
+MACDStrategy_crossed = { family = "momentum", inputs = ["ohlcv"], note = "MACD crossing its signal while CCI is low: half momentum, half dip." }
+MLLightGBMBaseline = { family = "ml", inputs = ["ohlcv"], note = "LightGBM predicts the mean close of the next 24 hourly candles; long above 1%. Runs only on the trader-ml image." }
+MultiRSI = { family = "mean-reversion", inputs = ["ohlcv"] }
+Quickie = { family = "mean-reversion", inputs = ["ohlcv"] }
+ReinforcedAverageStrategy = { family = "trend", inputs = ["ohlcv"] }
+ReinforcedQuickie = { family = "mean-reversion", inputs = ["ohlcv"] }
+ReinforcedSmoothScalp = { family = "mean-reversion", inputs = ["ohlcv"] }
+Scalp = { family = "mean-reversion", inputs = ["ohlcv"] }
+Simple = { family = "momentum", inputs = ["ohlcv"], note = "MACD over zero, RSI over 70 and a rising upper band; close to a breakout." }
+SmoothOperator = { family = "mean-reversion", inputs = ["ohlcv"] }
+SmoothScalp = { family = "mean-reversion", inputs = ["ohlcv"] }
+TDSequentialStrategy = { family = "candlestick-pattern", inputs = ["ohlcv"], note = "A TD Sequential close count, an exhaustion signal; could be read as mean-reversion." }
+TechnicalExampleStrategy = { family = "template", inputs = ["ohlcv"], note = "An example of the technical library: buys whenever CMF is below zero." }
+
+# user_data/strategies/catalogue/: the families the catalogue found missing (docs/strategy-coverage.md)
+DCASafetyOrders = { family = "dca", inputs = ["ohlcv"] }
+GridLadder = { family = "grid", inputs = ["ohlcv"] }
+RatioRevert = { family = "relative-value", inputs = ["ohlcv"], note = "Reads BTC/USD as the other leg; spot cannot hedge it, so it also carries the market." }
+SqueezeBreakout = { family = "breakout", inputs = ["ohlcv"] }
+TSMomentum = { family = "momentum", inputs = ["ohlcv"], note = "Time-series momentum on its own past return; could be read as trend." }
+XSMomentumRotation = { family = "momentum", inputs = ["ohlcv"], note = "Cross-sectional: ranks the whole whitelist, so it reads every pair's candles." }
+
+# user_data/strategies/lookahead_bias/
+DevilStra = { family = "biased-control", inputs = ["ohlcv"] }
+GodStraNew = { family = "biased-control", inputs = ["ohlcv"] }
+wtc = { family = "biased-control", inputs = ["ohlcv"] }
+
+# lab/futures/research/
+BustShort = { family = "short", inputs = ["ohlcv", "funding"], note = "Funding is measured (funding_rates); trades before its history are counted apart (docs/short-bust.md)." }
+DonchianLongShort = { family = "trend", inputs = ["ohlcv", "funding"], note = "The staged trend family's Donchian ensemble both ways, on futures candles; research only (docs/short-bust.md)." }
+CarverLongShort64 = { family = "trend", inputs = ["ohlcv", "funding"], note = "AFTS 6: CarverEwmac64 both ways, on futures candles; research only (docs/short-bust.md)." }
+CarverLongShort16 = { family = "trend", inputs = ["ohlcv", "funding"], note = "AFTS 8 without its buffer: CarverTrendStrength16 both ways, on futures candles; research only (docs/short-bust.md)." }
+
+# user_data/strategies/candles/: fixed-exit bullish TA-Lib patterns
+Candle3INSIDE = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+Candle3LINESTRIKE = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+Candle3OUTSIDE = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+Candle3STARSINSOUTH = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+Candle3WHITESOLDIERS = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+CandleABANDONEDBABY = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+CandleBELTHOLD = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+CandleBREAKAWAY = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+CandleCLOSINGMARUBOZU = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+CandleCONCEALBABYSWALL = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+CandleCOUNTERATTACK = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+CandleDOJI = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+CandleDOJISTAR = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+CandleDRAGONFLYDOJI = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+CandleENGULFING = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+CandleGAPSIDESIDEWHITE = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+CandleGRAVESTONEDOJI = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+CandleHAMMER = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+CandleHARAMI = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+CandleHARAMICROSS = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+CandleHIGHWAVE = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+CandleHIKKAKE = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+CandleHIKKAKEMOD = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+CandleHOMINGPIGEON = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+CandleINVERTEDHAMMER = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+CandleKICKING = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+CandleKICKINGBYLENGTH = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+CandleLADDERBOTTOM = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+CandleLONGLEGGEDDOJI = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+CandleLONGLINE = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+CandleMARUBOZU = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+CandleMATCHINGLOW = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+CandleMATHOLD = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+CandleMORNINGDOJISTAR = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+CandleMORNINGSTAR = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+CandlePIERCING = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+CandleRICKSHAWMAN = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+CandleRISEFALL3METHODS = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+CandleSEPARATINGLINES = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+CandleSHORTLINE = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+CandleSPINNINGTOP = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+CandleSTICKSANDWICH = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+CandleTAKURI = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+CandleTASUKIGAP = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+CandleTRISTAR = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+CandleUNIQUE3RIVER = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+CandleXSIDEGAP3METHODS = { family = "candlestick-pattern", inputs = ["ohlcv"] }
+
+# user_data/strategies/chart/: fixed-exit long chart-pattern signals, each on the 15m, 1h, 4h and 1d rungs
+ChartAscendingTriangle = { family = "chart-pattern", inputs = ["ohlcv"] }
+ChartBullFlag = { family = "chart-pattern", inputs = ["ohlcv"] }
+ChartDoubleBottom = { family = "chart-pattern", inputs = ["ohlcv"] }
+ChartResistanceBreak = { family = "chart-pattern", inputs = ["ohlcv"] }
+ChartSymmetricTriangle = { family = "chart-pattern", inputs = ["ohlcv"] }
+ChartAscendingTriangle_15m = { family = "chart-pattern", inputs = ["ohlcv"] }
+ChartAscendingTriangle_1d = { family = "chart-pattern", inputs = ["ohlcv"] }
+ChartAscendingTriangle_4h = { family = "chart-pattern", inputs = ["ohlcv"] }
+ChartBullFlag_15m = { family = "chart-pattern", inputs = ["ohlcv"] }
+ChartBullFlag_1d = { family = "chart-pattern", inputs = ["ohlcv"] }
+ChartBullFlag_4h = { family = "chart-pattern", inputs = ["ohlcv"] }
+ChartDoubleBottom_15m = { family = "chart-pattern", inputs = ["ohlcv"] }
+ChartDoubleBottom_1d = { family = "chart-pattern", inputs = ["ohlcv"] }
+ChartDoubleBottom_4h = { family = "chart-pattern", inputs = ["ohlcv"] }
+ChartResistanceBreak_15m = { family = "chart-pattern", inputs = ["ohlcv"] }
+ChartResistanceBreak_1d = { family = "chart-pattern", inputs = ["ohlcv"] }
+ChartResistanceBreak_4h = { family = "chart-pattern", inputs = ["ohlcv"] }
+ChartSymmetricTriangle_15m = { family = "chart-pattern", inputs = ["ohlcv"] }
+ChartSymmetricTriangle_1d = { family = "chart-pattern", inputs = ["ohlcv"] }
+ChartSymmetricTriangle_4h = { family = "chart-pattern", inputs = ["ohlcv"] }
+
+# user_data/strategies/trend/: the long-flat Donchian ensemble, one per rung
+TrendDonchian = { family = "trend", inputs = ["ohlcv"] }
+TrendDonchianFast = { family = "trend", inputs = ["ohlcv"] }
+TrendDonchianFast_15m = { family = "trend", inputs = ["ohlcv"] }
+TrendDonchianFast_1h = { family = "trend", inputs = ["ohlcv"] }
+TrendDonchianFast_4h = { family = "trend", inputs = ["ohlcv"] }
+TrendDonchian_15m = { family = "trend", inputs = ["ohlcv"] }
+TrendDonchian_1h = { family = "trend", inputs = ["ohlcv"] }
+TrendDonchian_4h = { family = "trend", inputs = ["ohlcv"] }
+
+# user_data/strategies/range/: buy a z-score dip while BTC is flat, one per rung
+RangeZ24 = { family = "mean-reversion", inputs = ["ohlcv"] }
+RangeZ24_15m = { family = "mean-reversion", inputs = ["ohlcv"] }
+RangeZ24_1d = { family = "mean-reversion", inputs = ["ohlcv"] }
+RangeZ24_4h = { family = "mean-reversion", inputs = ["ohlcv"] }
+RangeZ72 = { family = "mean-reversion", inputs = ["ohlcv"] }
+RangeZ72_15m = { family = "mean-reversion", inputs = ["ohlcv"] }
+RangeZ72_1d = { family = "mean-reversion", inputs = ["ohlcv"] }
+RangeZ72_4h = { family = "mean-reversion", inputs = ["ohlcv"] }
+
+# user_data/strategies/breakout/: volatility breakouts with a fixed exit, one per rung
+BreakoutAtr = { family = "breakout", inputs = ["ohlcv"] }
+BreakoutAtr_15m = { family = "breakout", inputs = ["ohlcv"] }
+BreakoutAtr_1d = { family = "breakout", inputs = ["ohlcv"] }
+BreakoutAtr_4h = { family = "breakout", inputs = ["ohlcv"] }
+BreakoutKeltner = { family = "breakout", inputs = ["ohlcv"] }
+BreakoutKeltner_15m = { family = "breakout", inputs = ["ohlcv"] }
+BreakoutKeltner_1d = { family = "breakout", inputs = ["ohlcv"] }
+BreakoutKeltner_4h = { family = "breakout", inputs = ["ohlcv"] }
+BreakoutSqueeze_15m = { family = "breakout", inputs = ["ohlcv"] }
+BreakoutSqueeze_1d = { family = "breakout", inputs = ["ohlcv"] }
+BreakoutSqueeze_4h = { family = "breakout", inputs = ["ohlcv"] }
+
+# user_data/strategies/clock/: enter at a set UTC time, leave on a time stop
+ClockEvening = { family = "time-based", inputs = ["ohlcv"] }
+ClockEvening_15m = { family = "time-based", inputs = ["ohlcv"] }
+ClockEvening_4h = { family = "time-based", inputs = ["ohlcv"] }
+ClockWeekend = { family = "time-based", inputs = ["ohlcv"] }
+ClockWeekend_1d = { family = "time-based", inputs = ["ohlcv"] }
+ClockWeekend_4h = { family = "time-based", inputs = ["ohlcv"] }
+
+# user_data/strategies/flow/: volume leading price with a fixed exit, one per rung
+FlowObv = { family = "flow", inputs = ["ohlcv"] }
+FlowObv_15m = { family = "flow", inputs = ["ohlcv"] }
+FlowObv_1d = { family = "flow", inputs = ["ohlcv"] }
+FlowObv_4h = { family = "flow", inputs = ["ohlcv"] }
+FlowSurge = { family = "flow", inputs = ["ohlcv"] }
+FlowSurge_15m = { family = "flow", inputs = ["ohlcv"] }
+FlowSurge_1d = { family = "flow", inputs = ["ohlcv"] }
+FlowSurge_4h = { family = "flow", inputs = ["ohlcv"] }
+
+# user_data/strategies/forecast/: Carver's AFTS forecasts, long only, one per rung (docs/carver-afts.md)
+CarverAccel16 = { family = "momentum", inputs = ["ohlcv"], note = "Buys a trend speeding up; nearest family is momentum." }
+CarverAccel16_15m = { family = "momentum", inputs = ["ohlcv"], note = "Buys a trend speeding up; nearest family is momentum." }
+CarverAccel16_1h = { family = "momentum", inputs = ["ohlcv"], note = "Buys a trend speeding up; nearest family is momentum." }
+CarverAccel16_4h = { family = "momentum", inputs = ["ohlcv"], note = "Buys a trend speeding up; nearest family is momentum." }
+CarverDipFast_15m = { family = "mean-reversion", inputs = ["ohlcv"] }
+CarverDipFast_1h = { family = "mean-reversion", inputs = ["ohlcv"] }
+CarverDipSafe_15m = { family = "mean-reversion", inputs = ["ohlcv"] }
+CarverDipSafe_1h = { family = "mean-reversion", inputs = ["ohlcv"] }
+CarverEwmac64 = { family = "trend", inputs = ["ohlcv"] }
+CarverEwmac64_15m = { family = "trend", inputs = ["ohlcv"] }
+CarverEwmac64_1h = { family = "trend", inputs = ["ohlcv"] }
+CarverEwmac64_4h = { family = "trend", inputs = ["ohlcv"] }
+CarverNegSkew = { family = "mean-reversion", inputs = ["ohlcv"], note = "Buys after negative return skew; the nearest family is a dip buy." }
+CarverNegSkew_15m = { family = "mean-reversion", inputs = ["ohlcv"], note = "Buys after negative return skew; the nearest family is a dip buy." }
+CarverNegSkew_1h = { family = "mean-reversion", inputs = ["ohlcv"], note = "Buys after negative return skew; the nearest family is a dip buy." }
+CarverNegSkew_4h = { family = "mean-reversion", inputs = ["ohlcv"], note = "Buys after negative return skew; the nearest family is a dip buy." }
+CarverRange80 = { family = "breakout", inputs = ["ohlcv"] }
+CarverRange80_15m = { family = "breakout", inputs = ["ohlcv"] }
+CarverRange80_1h = { family = "breakout", inputs = ["ohlcv"] }
+CarverRange80_4h = { family = "breakout", inputs = ["ohlcv"] }
+CarverRegimeMix = { family = "trend", inputs = ["ohlcv"] }
+CarverRegimeMix_15m = { family = "trend", inputs = ["ohlcv"] }
+CarverRegimeMix_1h = { family = "trend", inputs = ["ohlcv"] }
+CarverRegimeMix_4h = { family = "trend", inputs = ["ohlcv"] }
+CarverTrendMix = { family = "trend", inputs = ["ohlcv"] }
+CarverTrendMix_15m = { family = "trend", inputs = ["ohlcv"] }
+CarverTrendMix_1h = { family = "trend", inputs = ["ohlcv"] }
+CarverTrendMix_4h = { family = "trend", inputs = ["ohlcv"] }
+CarverTrendStrength16 = { family = "trend", inputs = ["ohlcv"] }
+CarverTrendStrength16_15m = { family = "trend", inputs = ["ohlcv"] }
+CarverTrendStrength16_1h = { family = "trend", inputs = ["ohlcv"] }
+CarverTrendStrength16_4h = { family = "trend", inputs = ["ohlcv"] }
+CarverTrendStrength64 = { family = "trend", inputs = ["ohlcv"] }
+CarverTrendStrength64_15m = { family = "trend", inputs = ["ohlcv"] }
+CarverTrendStrength64_1h = { family = "trend", inputs = ["ohlcv"] }
+CarverTrendStrength64_4h = { family = "trend", inputs = ["ohlcv"] }
+CarverVolHold = { family = "trend", inputs = ["ohlcv"], note = "Always long; only the volatility scale sizes it, so it is a risk-scaled hold, not a signal." }
+
+# Signal origin is separate from inputs (the data dependency). Horizons describe the exit rule;
+# measured holding-time cohorts stay in the diversity archive rather than being guessed here.
+[signal_sources]
+price = "Price or volume behaviour."
+structural = "Calendar, contract mechanics or historical resolution base rates."
+cross-venue = "A price discrepancy between venues."
+event = "A filing, news item or other discrete catalyst."
+sentiment = "Expressed opinion or attention."
+forecast = "An outside forecast of the quantity a market settles on, such as the NWS forecast high."
+observation = "What an official station has already measured of the quantity a market settles on, such as the high so far today."
+
+[family_categories]
+trend = { signal_source = "price", instrument = "crypto", horizon = "strategy-exit" }
+mean-reversion = { signal_source = "price", instrument = "crypto", horizon = "strategy-exit" }
+momentum = { signal_source = "price", instrument = "crypto", horizon = "strategy-exit" }
+breakout = { signal_source = "price", instrument = "crypto", horizon = "strategy-exit" }
+flow = { signal_source = "price", instrument = "crypto", horizon = "strategy-exit" }
+candlestick-pattern = { signal_source = "price", instrument = "crypto", horizon = "strategy-exit" }
+chart-pattern = { signal_source = "price", instrument = "crypto", horizon = "strategy-exit" }
+time-based = { signal_source = "structural", instrument = "crypto", horizon = "strategy-exit" }
+ml = { signal_source = "price", instrument = "crypto", horizon = "strategy-exit" }
+grid = { signal_source = "price", instrument = "crypto", horizon = "strategy-exit" }
+dca = { signal_source = "price", instrument = "crypto", horizon = "strategy-exit" }
+relative-value = { signal_source = "price", instrument = "crypto", horizon = "strategy-exit" }
+exit-example = { signal_source = "price", instrument = "crypto", horizon = "strategy-exit" }
+template = { signal_source = "price", instrument = "crypto", horizon = "strategy-exit" }
+biased-control = { signal_source = "price", instrument = "crypto", horizon = "strategy-exit" }
+short = { signal_source = "price", instrument = "crypto-futures", horizon = "strategy-exit" }
+
+[market_categories]
+longshot = { signal_source = "structural", instrument = "event-contract", horizon = "resolution" }
+calibration = { signal_source = "structural", instrument = "event-contract", horizon = "resolution" }
+gap = { signal_source = "cross-venue", instrument = "event-contract", horizon = "resolution" }
+llm = { signal_source = "event", instrument = "event-contract", horizon = "resolution" }
+tt_totals = { signal_source = "structural", instrument = "sportsbook-line", horizon = "resolution" }
+weather = { signal_source = "forecast", instrument = "event-contract", horizon = "resolution" }
+observed = { signal_source = "observation", instrument = "event-contract", horizon = "resolution" }

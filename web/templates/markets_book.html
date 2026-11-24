@@ -27,7 +27,7 @@
 {% else %}<p class="muted">No markets backtest has run yet.</p>{% endif %}
 
 <h3>Readiness gate</h3>
-<p class="muted">Each variant's windows before the lockbox, pooled and held to the <code>lab/suggest.toml</code> [confidence] gates with the betting lane's own trial count; the lockbox months are read only for a variant that passes every other gate. The event-contract league trades exactly the ready variants. A variant entering or leaving this set, or a paper account drifting from its backtest, is filed on the agent board by the nightly research loop.</p>
+<p class="muted">Each variant's windows before the lockbox, pooled and held to the <code>lab/crypto/suggest.toml</code> [confidence] gates with the betting lane's own trial count; the lockbox months are read only for a variant that passes every other gate. The event-contract league trades exactly the ready variants. A variant entering or leaving this set, or a paper account drifting from its backtest, is filed on the agent board by the nightly research loop.</p>
 <p>{{ readiness | selectattr("ready") | list | length }} of {{ readiness | length }} variants are ready for paper.</p>
 {% for r in readiness %}
 <details class="card">
@@ -37,7 +37,7 @@
 {% else %}<p class="muted">No variant has been judged yet: the gate needs whole backfilled months.</p>{% endfor %}
 
 <h3>By contract category</h3>
-<p class="muted">The same backtests split by the category of each trade's series (<code>lab/markets.toml</code> [categories]; series that match none are "other"), since the longshot bias differs by category. Net return per trade with its block-bootstrap interval; a thin category has no interval.</p>
+<p class="muted">The same backtests split by the category of each trade's series (<code>lab/events/markets.toml</code> [categories]; series that match none are "other"), since the longshot bias differs by category. Net return per trade with its block-bootstrap interval; a thin category has no interval.</p>
 {% if categories %}
 <div class="scroll">
 <table>

@@ -27,15 +27,17 @@ from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 from starlette.concurrency import run_in_threadpool
 
-from lab import book as book_lab
-from lab import guard as guard_lab
+from lab.crypto import book as book_lab
+from lab.money import guard as guard_lab
 from lab import inputs as inputs_lab
-from lab import call_rules
-from lab import calls as calls_lab
-from lab import db, diversity, metrics, readiness, suggest, universe, taxonomy
-from lab import leagues as league_rows
-from lab import stocks as stocks_lab
-from lab.markets import paper as paper_lab, paper_venues, sweep_ages as market_sweep_ages
+from lab.inputs import call_rules
+from lab.inputs import calls as calls_lab
+from lab.core import db, readiness
+from lab.crypto import diversity, suggest, taxonomy, universe
+from lab import metrics
+from lab.money import leagues as league_rows
+from lab.stocks import paper as stocks_lab
+from lab.events import paper as paper_lab, paper_venues, sweep_ages as market_sweep_ages
 from web import auth, charts, exporter, glossary, lanes, nav
 from web import venues as venue_roster
 
@@ -48,14 +50,14 @@ POOL_MAX = 4  # connections per pod; a request holds one for its whole life, the
 CACHE_TTL = 60.0
 CACHE_MAX = 512  # entries; the oldest goes first
 TF_ORDER = ["1m", "5m", "15m", "30m", "1h", "4h", "1d"]
-FAMILIES = HERE.parent / "lab" / "families.toml"
-MARKETS = HERE.parent / "lab" / "markets.toml"
+FAMILIES = HERE.parent / "lab" / "crypto" / "families.toml"
+MARKETS = HERE.parent / "lab" / "events" / "markets.toml"
 STRATEGY_DIR = HERE.parent / "user_data" / "strategies"
 # Direct IStrategy subclasses, read from source so the toml check needs neither freqtrade nor a database.
 STRATEGY_CLASS = re.compile(r"^class (\w+)\((?:\w+, )*IStrategy\)", re.M)  # mixins first, e.g. (EntryInputs, IStrategy)
-UNTAGGED = "untagged"  # on disk, no line in lab/families.toml
+UNTAGGED = "untagged"  # on disk, no line in lab/crypto/families.toml
 GONE = "gone"  # in the results only: a deleted strategy, or the trial register's "(dropped)" hyperopts
-# What /coverage joins to lab/families.toml, each one row per strategy x exchange.
+# What /coverage joins to lab/crypto/families.toml, each one row per strategy x exchange.
 COVER = {
     "trades": "SELECT strategy, exchange, trades AS n FROM strategy_windows WHERE win = 'all'",
     "months": "SELECT strategy, exchange, count(DISTINCT date_trunc('month', fold_start)) FILTER (WHERE ok) AS n "
@@ -173,7 +175,7 @@ WHERE d.strategy = %s AND d.exchange = %s AND r.trend IS NOT NULL
 GROUP BY GROUPING SETS ((r.trend), (r.vol_bucket)) ORDER BY 1, array_position(ARRAY['low', 'mid', 'high', 'any'], coalesce(r.vol_bucket, 'any'))
 """
 
-# Event-contract markets (lab/markets): the recorder's health per venue, the history backfill, cross-venue links,
+# Event-contract markets (lab/events): the recorder's health per venue, the history backfill, cross-venue links,
 # backtests and the paper league. Counts come from the sweeps, never count(*) over markets: the archive is millions.
 MARKET_VENUES = """
 SELECT v.venue, v.title, v.kind, s.started_at, s.ok, s.error, ok.finished_at AS last_ok, ok.seen, ok.changes,
@@ -224,7 +226,7 @@ WALLETS = "SELECT DISTINCT ON (account, coin) * FROM wallet_balances ORDER BY ac
 KILL_SWITCH = """
 SELECT * FROM watch WHERE checked_at = (SELECT max(checked_at) FROM watch)
 ORDER BY stopped_at IS NULL, breached_at IS NULL, bot"""
-# Shadow paper accounts (lab/shadow.py): winners, then the rest active, then the newest retired, best return first.
+# Shadow paper accounts (lab/crypto/shadow.py): winners, then the rest active, then the newest retired, best return first.
 SHADOW = """
 SELECT a.account, a.strategy, a.exchange, a.cohort, a.state, a.promoted_on, a.retired_on, a.retired_why, a.capital,
        m.days, coalesce(m.equity, a.capital) AS equity, greatest(coalesce(m.peak, a.capital), a.capital) AS peak
@@ -443,7 +445,7 @@ def logout():
 
 
 def cohorts(bots: list[dict]) -> list[dict]:
-    """One row per cohort (lab/league.py), league first then by name: its bots, the ones with a snapshot, and their
+    """One row per cohort (lab/crypto/league.py), league first then by name: its bots, the ones with a snapshot, and their
     summed profit, balance and trades, mean profit percent, and best and worst bot. Profit percents are each bot's own
     starting balance, so the mean weighs every bot alike."""
     out: dict[str, dict] = {}
@@ -630,14 +632,14 @@ def leagues(request: Request):
                                     stocks_lab.rule_of)
     return page(request, "leagues.html", glossary=glossary.load(),
                 tabs=[{"id": "crypto", "title": "Crypto", "rows": crypto, "fills": fills_today("freqtrade"),
-                       "about": "Freqtrade spot bots on live prices (lab/league.py), grouped into cohorts."},
+                       "about": "Freqtrade spot bots on live prices (lab/crypto/league.py), grouped into cohorts."},
                       {"id": "event-contracts", "title": "Event contracts", "rows": events,
                        "fills": fills_today("paper", paper_venues()),
                        "forward": [a for a in accounts if a["drifted"] is not None],
-                       "about": "One account per family variant, filled against the recorded books (lab/markets/paper.py)."},
+                       "about": "One account per family variant, filled against the recorded books (lab/events/paper.py)."},
                       {"id": "stocks", "title": "Stocks", "rows": stocks, "fills": fills_today("paper", [stocks_lab.VENUE]),
                        "about": "One account per family variant on a small ETF universe, filled at Alpaca's latest "
-                                "quote with no order sent (lab/stocks.py)."}],
+                                "quote with no order sent (lab/stocks/paper.py)."}],
                 hard_stop=suggest.load_config()["book"]["hard_stop"])
 
 
@@ -671,7 +673,7 @@ def bot(request: Request, name: str):
 # `fills` view row is the key; a freqtrade trade id is per bot, so its URL carries ?bot=.
 TRADE_SOURCES = ("paper", "freqtrade", "drill", "call")
 FILL = "SELECT * FROM fills WHERE source = %s AND fill_id = %s AND (%s = '' OR account = %s) ORDER BY open_date DESC LIMIT 1"
-# A crypto decision is the bot trade's (lab/ingest.py, migration 057): same bot and open_date.
+# A crypto decision is the bot trade's (lab/crypto/ingest.py, migration 057): same bot and open_date.
 DECISION = """SELECT * FROM decisions WHERE fill_source = %s AND fill_id = %s AND account = %s
 AND (fill_source <> 'freqtrade' OR decided_at = %s)"""
 NEAR_MISSES = """SELECT d.instrument, d.checks, m.title FROM decisions d
@@ -962,7 +964,7 @@ def strategy_classes() -> set[str]:
 
 
 def coverage_board(tags: dict, families: list[str], on_disk: set[str], found: dict[str, list[dict]]) -> dict:
-    """The family x exchange matrix and one row per strategy, from lab/families.toml and the COVER results.
+    """The family x exchange matrix and one row per strategy, from lab/crypto/families.toml and the COVER results.
 
     A strategy on disk but not in the toml is untagged, so drift shows; one only in the results is gone."""
     cells: dict[str, dict[str, dict]] = {}
@@ -1018,7 +1020,7 @@ def coverage(request: Request, signal_source: str = ""):
     archive = diversity.build(found, rows(diversity.CLIMATE_ROWS), family, dcfg)
     return page(request, "coverage.html", signal_source=signal_source, signal_sources=toml["signal_sources"],
                 family_categories=toml["family_categories"], untagged=UNTAGGED, **board, archive=archive, clusters=clusters, families={
-        **toml["families"], UNTAGGED: "On disk, no line in lab/families.toml.", GONE: "In the results only, not on disk."})
+        **toml["families"], UNTAGGED: "On disk, no line in lab/crypto/families.toml.", GONE: "In the results only, not on disk."})
 
 
 @app.get("/runs", response_class=HTMLResponse)
@@ -1074,7 +1076,7 @@ def markets_book(request: Request, signal_source: str = ""):
                 family_categories=tax["market_categories"], demo=rows(DEMO_ORDERS))
 
 
-# Every call newest first with its scores by horizon (lab/calls.py), and the scored rows groups() summarizes.
+# Every call newest first with its scores by horizon (lab/inputs/calls.py), and the scored rows groups() summarizes.
 CALLS = """
 SELECT c.*, coalesce(jsonb_object_agg(s.horizon, jsonb_build_object('exit', s.exit_session, 'pnl', s.pnl,
        'excess', s.excess)) FILTER (WHERE s.call_id IS NOT NULL), '{}') AS scores

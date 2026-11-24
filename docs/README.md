@@ -24,7 +24,7 @@ The repo README is the reference for layout, the analysis and the site. These pa
 
 ## Live
 
-- [live.md](live.md): why nothing trades money, what `lab/live.py` would check, how a human lifts the guard, reconciliation and backups.
+- [live.md](live.md): why nothing trades money, what `lab/crypto/live.py` would check, how a human lifts the guard, reconciliation and backups.
 
 ## Platforms
 
@@ -32,7 +32,7 @@ The repo README is the reference for layout, the analysis and the site. These pa
 
 ## Markets
 
-- [markets.md](markets.md): the venue reference behind `lab/markets/` (Kalshi, Polymarket, PredictIt, Manifold, The Odds API), the recorder, links, backtest, paper league, the inputs registry and demo orders.
+- [markets.md](markets.md): the venue reference behind `lab/events/` (Kalshi, Polymarket, PredictIt, Manifold, The Odds API), the recorder, links, backtest, paper league, the inputs registry and demo orders.
 
 ## Strategy coverage
 
@@ -44,8 +44,8 @@ The repo README is the reference for layout, the analysis and the site. These pa
 
 ## Short a bust
 
-- [carry.md](carry.md): the carry research from `lab/research/carry.py` (Carver AFTS 10, 11, 15, 16, 20) on recorded funding: what a spot-long, perp-short harvest earned and whether funding forecasts spot.
-- [short-bust.md](short-bust.md): the research result on shorting a bust from `lab/research/bust.py`, its limits and which route, if any, is worth taking.
+- [carry.md](carry.md): the carry research from `lab/futures/research/carry.py` (Carver AFTS 10, 11, 15, 16, 20) on recorded funding: what a spot-long, perp-short harvest earned and whether funding forecasts spot.
+- [short-bust.md](short-bust.md): the research result on shorting a bust from `lab/futures/research/bust.py`, its limits and which route, if any, is worth taking.
 
 ## Operations
 

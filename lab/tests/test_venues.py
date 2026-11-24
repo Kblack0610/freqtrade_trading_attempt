@@ -2,7 +2,7 @@
 
 import datetime as dt
 
-from test_web import seed_markets, signed_in, site  # noqa: F401 - fixtures
+from lab.tests.test_web import seed_markets, signed_in, site  # noqa: F401 - fixtures
 
 from web import venues
 

@@ -2,13 +2,13 @@
 
 Status: built 2026-11-11 (task tr-180) as option a. Ask K21YCW was answered "a" by the fleet judge the same day, and the human can override it. This is phase 8 of the plan `magical-stargazing-owl`.
 
-What differs from the design below: both sequences use the betting confidence sequence (`metrics.confidence_sequence`), not the empirical-Bernstein boundary for drift, so there is one method to test; the alpha split is Bonferroni over the bots live now; drift gaps are now stored per trade (`drift.gaps`, migration 040), so the "no recompute" line holds only for returns. Bounds (`drift_bound`, `live_return_bounds`) and alpha are in `[confidence]` of `lab/suggest.toml`; removed keys: `min_drift_trades`, `min_live_trades`.
+What differs from the design below: both sequences use the betting confidence sequence (`metrics.confidence_sequence`), not the empirical-Bernstein boundary for drift, so there is one method to test; the alpha split is Bonferroni over the bots live now; drift gaps are now stored per trade (`drift.gaps`, migration 040), so the "no recompute" line holds only for returns. Bounds (`drift_bound`, `live_return_bounds`) and alpha are in `[confidence]` of `lab/crypto/suggest.toml`; removed keys: `min_drift_trades`, `min_live_trades`.
 
 ## What it would replace
 
-Two gates in `lab/confidence.py` judge a candidate by its paper (dry-run) bot:
+Two gates in `lab/crypto/confidence.py` judge a candidate by its paper (dry-run) bot:
 
-| Gate | Today (`[confidence]` in `lab/suggest.toml`) | What it costs |
+| Gate | Today (`[confidence]` in `lab/crypto/suggest.toml`) | What it costs |
 |---|---|---|
 | drift | at least `min_drift_trades` = 20 matched trades, and the mean paper-minus-backtest gap inside the half width of the out-of-sample expectancy interval | about 20 trades, then a pass or fail on one fixed-sample comparison |
 | dry run | `min_live_days` = 90, `min_live_trades` = 60, BTC down `min_live_btc_drop` = 10% during the run, `min_live_stopouts` = 1 | at least 90 days for every candidate, strong or broken |
@@ -60,7 +60,7 @@ The BTC fall and the real stop-out test behaviour rather than edge: has the bot 
 
 ## The stop rule
 
-The thresholds are fixed before any paper result is read, and no result moves them afterwards. That is why this page writes the design and changes nothing: alpha, the floors and the bands are the human's to set once, now, and the code then reads them from `lab/suggest.toml` like every other gate.
+The thresholds are fixed before any paper result is read, and no result moves them afterwards. That is why this page writes the design and changes nothing: alpha, the floors and the bands are the human's to set once, now, and the code then reads them from `lab/crypto/suggest.toml` like every other gate.
 
 ## The ask
 
@@ -75,15 +75,15 @@ Filed as K21YCW on 2026-11-11 (task tr-176); answered a.
 One PR in this repo:
 
 - `lab/metrics.py`: the two confidence sequences, numpy, each with a coverage test that simulates optional stopping (the negative control: a fixed-sample t test read every night breaks its alpha; the sequence keeps it).
-- `lab/suggest.toml` `[confidence]`: the alpha and the floors the answer names; removed keys go in the same PR.
-- `lab/confidence.py`: the drift and dry run gates read the sequences.
+- `lab/crypto/suggest.toml` `[confidence]`: the alpha and the floors the answer names; removed keys go in the same PR.
+- `lab/crypto/confidence.py`: the drift and dry run gates read the sequences.
 - `docs/pipeline.md`: the gate table rows for drift and dry run.
 
 No cache key changes and no recompute: the sequences read paper trades and drift rows that ingest already stores.
 
 ## Shadow judge
 
-Built 2026-11-14 (task tr-266). `lab/shadow.judge` re-checked a fixed 90% block-bootstrap interval of the mean daily return every night between `min_days` and `max_days`. That is optional stopping, and with 30 days at block 10 the interval resamples 3 blocks. It now reads `metrics.confidence_sequence` on the daily returns (clipped to +-`ret_bound`), at level `alpha / family`, every night with no floor: it retires a loser the night its upper bound is below zero, names a winner the night its lower bound is above zero and equity is above capital, and still retires past the drawdown or at `max_days`. The old `min_days`, `block` and `level` keys are gone.
+Built 2026-11-14 (task tr-266). `lab/crypto/shadow.judge` re-checked a fixed 90% block-bootstrap interval of the mean daily return every night between `min_days` and `max_days`. That is optional stopping, and with 30 days at block 10 the interval resamples 3 blocks. It now reads `metrics.confidence_sequence` on the daily returns (clipped to +-`ret_bound`), at level `alpha / family`, every night with no floor: it retires a loser the night its upper bound is below zero, names a winner the night its lower bound is above zero and equity is above capital, and still retires past the drawdown or at `max_days`. The old `min_days`, `block` and `level` keys are gone.
 
 Tests in `lab/tests/test_shadow.py`: zero-mean accounts read every day to `max_days` win at most alpha (family 1) and at most alpha / family (Bonferroni, family = `max_active`); the retired rule read the same way wins far more than 10% of them; a strong edge wins before day 30.
 

@@ -7,12 +7,13 @@ import pyarrow.parquet as pq
 import pytest
 from pyarrow import fs as pafs
 
-from lab import grid, inputs
-from lab.markets import backtest, families
-from lab.markets.backtest import Lookahead, Market
-from lab.markets.families import Calibration, Forecaster, Gap, Longshot, RefBook, day
-from lab.markets.history import SCHEMAS
-from lab.markets.recorder import load_config
+from lab.core import grid
+from lab import inputs
+from lab.events import backtest, families
+from lab.events.backtest import Lookahead, Market
+from lab.events.families import Calibration, day, Forecaster, Gap, Longshot, RefBook
+from lab.events.history import SCHEMAS
+from lab.stages.recorder import load_config
 from lab.market import Resolution
 
 UTC = dt.timezone.utc
@@ -504,7 +505,7 @@ def test_a_traced_family_makes_the_same_orders_as_an_untraced_one_and_names_each
     assert [i["name"] for i in s.inputs] == ["head_to_head", "no_vig_fair"]
 
 
-# weather: a Kalshi daily high against the NWS forecast high (lab/inputs.toml nws_high)
+# weather: a Kalshi daily high against the NWS forecast high (lab/inputs/inputs.toml nws_high)
 
 WX = {**BASE, "hours": 24, "sd": 2.0, "edge": 0.05}
 
@@ -575,7 +576,7 @@ def test_a_weather_window_runs_only_when_every_day_of_it_has_a_forecast(conn, tm
     assert s.forecasts.at("KNYC", pd.Timestamp("2026-11-01", tz="UTC"))[0]["highs"] == {"2026-11-01": 50}
 
 
-# observed: a station's own readings of the day decide a market before the day ends (lab/inputs.toml nws_obs)
+# observed: a station's own readings of the day decide a market before the day ends (lab/inputs/inputs.toml nws_obs)
 
 OB = {**BASE, "hours": 24, "margin": 1, "edge": 0.03}
 

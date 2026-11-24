@@ -1,16 +1,18 @@
 """The one live door for an order client: any Orders adapter (lab/market.py), whatever its market, places a real-money
-order only through place() here, and only when lab/guard.py refusals() names no reason. GUARD_LIFTED is False, so
-every place() is refused before the client or the database is read. lab/live.py is the Freqtrade engine's door onto
-the same refusals(), and lab/league.py names them when it refuses a config. Nothing deploys a live order path. See
+order only through place() here, and only when lab/money/guard.py refusals() names no reason. GUARD_LIFTED is False, so
+every place() is refused before the client or the database is read. lab/crypto/live.py is the Freqtrade engine's door onto
+the same refusals(), and lab/crypto/league.py names them when it refuses a config. Nothing deploys a live order path. See
 docs/live.md.
 
 The guard reads, per order: the stake (price x count, before fees) against the [live] stage's cap, the held positions
 plus this one (unless its ticker is already held) against its max_open, the client's venue against [live] venues, the
-strategy at ready on that venue (lab/readiness.py) and the bankroll kill switch (lab/watcher.py). An order counts
+strategy at ready on that venue (lab/core/readiness.py) and the bankroll kill switch (lab/money/watcher.py). An order counts
 toward max_open once it fills, since Orders lists no resting orders: a caller places one order at a time.
 """
 
-from lab import guard, readiness, suggest
+from lab.money import guard
+from lab.core import readiness
+from lab.crypto import suggest
 from lab.market import Orders
 
 

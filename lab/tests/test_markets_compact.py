@@ -3,7 +3,8 @@ import datetime as dt
 import pyarrow.parquet as pq
 from pyarrow import fs as pafs
 
-from lab.markets import backtest, compact, recorder
+from lab.events import backtest, compact
+from lab.stages import recorder
 from lab.market import Quote
 
 UTC = dt.timezone.utc

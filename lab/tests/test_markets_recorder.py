@@ -4,7 +4,7 @@ import datetime as dt
 import pyarrow.parquet as pq
 from pyarrow import fs as pafs
 
-from lab.markets import recorder
+from lab.stages import recorder
 from lab.market import Quote, Resolution
 
 UTC = dt.timezone.utc

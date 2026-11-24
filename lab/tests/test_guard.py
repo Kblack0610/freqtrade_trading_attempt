@@ -1,9 +1,10 @@
 import pytest
 
-from lab import guard, suggest
-from lab.broker import AlpacaPaper
-from lab.markets.kalshi_trade import KalshiDemo
-from lab.markets.manifold_trade import ManifoldBets
+from lab.money import guard
+from lab.crypto import suggest
+from lab.money.broker import AlpacaPaper
+from lab.events.kalshi_trade import KalshiDemo
+from lab.events.manifold_trade import ManifoldBets
 from lab.market import Orders
 
 LIVE = {"venues": ["kraken"]}

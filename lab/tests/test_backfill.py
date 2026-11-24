@@ -7,7 +7,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from lab import archive, backfill
+from lab.crypto import archive, backfill
 
 UTC = dt.timezone.utc
 LISTED = dt.datetime(2026, 1, 1, tzinfo=UTC)

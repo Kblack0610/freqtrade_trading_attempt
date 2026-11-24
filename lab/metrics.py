@@ -14,7 +14,7 @@ import numpy as np
 import pandas as pd
 from scipy.stats import norm
 
-from lab.util import utc
+from lab.core.util import utc
 
 YEAR = 365
 EULER_GAMMA = 0.5772156649015329

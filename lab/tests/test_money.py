@@ -4,7 +4,7 @@
    and charges its fee once, a second settle pass changes nothing, and an order the cash cannot cover is refused.
 2. Egress: every outbound client in lab/ and web/ is on MONEY_MAP, and sends only where its row says. A client that
    can write sends only to a paper, demo or play-money host; a client on a real account sends GET only.
-3. Refusals: the shipped configs and the league entry point refuse real money. lab/live.py's guard and check() are
+3. Refusals: the shipped configs and the league entry point refuse real money. lab/crypto/live.py's guard and check() are
    proved in test_live.py.
 
 A new money path (the money bank of tr-148, a live exchange client) joins here: the egress scan fails until it has
@@ -22,17 +22,18 @@ from urllib.parse import urlparse
 
 import pandas as pd
 import pytest
-from test_broker import KR_SECRET, PM_SECRET, RH, SEED, ST, Kraken, Paper, Polymarket, Robinhood, Snap, Tasty
-from test_markets_kalshi_trade import RSA, Demo, pem
-from test_markets_manifold_trade import Manifold
+from lab.tests.test_broker import KR_SECRET, PM_SECRET, RH, SEED, ST, Kraken, Paper, Polymarket, Robinhood, Snap, Tasty
+from lab.tests.test_markets_kalshi_trade import RSA, Demo, pem
+from lab.tests.test_markets_manifold_trade import Manifold
 
-from lab import broker, league
+from lab.money import broker
+from lab.crypto import league
 from lab.market import Order, entry_fee, settlement_fee
-from lab.markets import backtest, kalshi_trade, manifold_trade, paper
-from lab.markets.backtest import Market
-from lab.markets.families import Family
-from lab.markets.polymarket import PolymarketUSRead
-from lab.markets.recorder import load_config
+from lab.events import backtest, kalshi_trade, manifold_trade, paper
+from lab.events.backtest import Market
+from lab.events.families import Family
+from lab.events.polymarket import PolymarketUSRead
+from lab.stages.recorder import load_config
 
 REPO = Path(__file__).resolve().parents[2]
 UTC = dt.timezone.utc
@@ -78,7 +79,7 @@ class Venue:
     equity_settled: float      # after Y, N and V settle; U stays open
 
 
-# Each number by hand from the fee schedule in lab/markets.toml, so a change to lab/market.py or paper.py cannot move both
+# Each number by hand from the fee schedule in lab/events/markets.toml, so a change to lab/market.py or paper.py cannot move both
 # sides of an assertion. Kalshi: ceil(0.07 C P (1 - P)) to the cent on entry. PredictIt: 10% of a win, at settlement.
 VENUES = [
     Venue("kalshi", {"Y": 0.42, "N": 0.30, "V": 0.18, "U": 0.12}, {"Y": 14.58, "N": -6.30, "V": -0.18},
@@ -229,60 +230,60 @@ def _broker(name):
 # Every place lab/ and web/ open a connection, keyed (file, owning class or function). The egress scan below finds
 # them; a row without a site, or a site without a row, fails.
 MONEY_MAP = {
-    ("lab/broker.py", "AlpacaPaper"): Client(
+    ("lab/money/broker.py", "AlpacaPaper"): Client(
         "paper", frozenset({"paper-api.alpaca.markets"}), lambda: {broker.PAPER_HOST}, _broker("alpaca"),
         lambda cfg, s: broker.AlpacaPaper(cfg, "k", "s", s, sleep=lambda _: None),
         lambda c, conn: (broker.read(c), broker.rest_and_cancel(conn, c, "SPY", 1.0)), Paper),
-    ("lab/markets/kalshi_trade.py", "KalshiDemo"): Client(
+    ("lab/events/kalshi_trade.py", "KalshiDemo"): Client(
         "paper", frozenset({"external-api.demo.kalshi.co", "demo-api.kalshi.co"}), lambda: kalshi_trade.DEMO_HOSTS,
         _demo("kalshi"), lambda cfg, s: kalshi_trade.KalshiDemo(cfg, "k", pem(RSA), s, sleep=lambda _: None),
         lambda c, conn: kalshi_trade.drill(conn, c, 0.01, 0), Demo),
-    ("lab/markets/manifold_trade.py", "ManifoldBets"): Client(
+    ("lab/events/manifold_trade.py", "ManifoldBets"): Client(
         "paper", frozenset({"api.manifold.markets"}), lambda: manifold_trade.MANIFOLD_HOSTS, _demo("manifold"),
         lambda cfg, s: manifold_trade.ManifoldBets(cfg, "k", s, sleep=lambda _: None),
         lambda c, conn: (c.balance(), manifold_trade.drill(conn, c, 0.01, 0.10)), Manifold),
-    ("lab/broker.py", "RobinhoodCrypto"): Client(
+    ("lab/money/broker.py", "RobinhoodCrypto"): Client(
         "read", frozenset({"trading.robinhood.com"}), lambda: {broker.RobinhoodCrypto.host}, _broker("robinhood"),
         lambda cfg, s: broker.RobinhoodCrypto(cfg, "k", base64.b64encode(SEED).decode(), s, sleep=lambda _: None),
         lambda c, conn: c.read(),
         Robinhood),
-    ("lab/broker.py", "SnapTrade"): Client(
+    ("lab/money/broker.py", "SnapTrade"): Client(
         "read", frozenset({"api.snaptrade.com"}), lambda: {broker.SnapTrade.host}, _broker("snaptrade"),
         lambda cfg, s: broker.SnapTrade(cfg, "c", "k", s, sleep=lambda _: None), lambda c, conn: c.read(), Snap),
-    ("lab/broker.py", "KrakenRead"): Client(
+    ("lab/money/broker.py", "KrakenRead"): Client(
         "read", frozenset({"api.kraken.com"}), lambda: {broker.KrakenRead.host}, _broker("kraken"),
         lambda cfg, s: broker.KrakenRead(cfg, "k", KR_SECRET, s, sleep=lambda _: None), lambda c, conn: c.read(),
         Kraken, reads=frozenset({"/0/private/Balance", "/0/private/TradeBalance"}),
         declared_reads=lambda: broker.KrakenRead.READS),
-    ("lab/markets/polymarket.py", "PolymarketUSRead"): Client(
+    ("lab/events/polymarket.py", "PolymarketUSRead"): Client(
         "read", frozenset({"api.polymarket.us"}), lambda: {PolymarketUSRead.host}, _broker("polymarket_us"),
         lambda cfg, s: PolymarketUSRead(cfg, "k", PM_SECRET, s, sleep=lambda _: None),
         lambda c, conn: broker.polymarket_us(c),
         Polymarket),
-    ("lab/broker.py", "TastytradeRead"): Client(
+    ("lab/money/broker.py", "TastytradeRead"): Client(
         "read", frozenset({"api.tastyworks.com"}), lambda: {broker.TastytradeRead.host}, _broker("tastytrade"),
         lambda cfg, s: broker.TastytradeRead(cfg, "c", "s", "r", s, sleep=lambda _: None), lambda c, conn: c.read(),
         Tasty, reads=frozenset({"/oauth/token"}), declared_reads=lambda: broker.TastytradeRead.READS),
-    ("lab/broker.py", "AlpacaData"): Client(
+    ("lab/money/broker.py", "AlpacaData"): Client(
         "none", why="Alpaca market data on the paper key: GET only, data.alpaca.markets only, no order path"),
-    ("lab/markets/api.py", "Api"): Client("none", why="the one paced client: every client built on it has its own row"),
-    ("lab/markets/kalshi.py", "Kalshi"): Client("none", why="Kalshi public market data, GET only, no key"),
-    ("lab/markets/polymarket.py", "PolymarketUS"): Client("none", why="Polymarket US public market data, GET only, no key"),
-    ("lab/markets/polymarket.py", "Polymarket"): Client("none", why="Polymarket public market data, GET only, no key"),
-    ("lab/markets/predictit.py", "PredictIt"): Client("none", why="PredictIt public market data, GET only, no key"),
-    ("lab/markets/manifold.py", "Manifold"): Client("none", why="Manifold public market data, GET only, no key"),
-    ("lab/markets/odds.py", "OddsApi"): Client("none", why="sportsbook odds, GET only; its key is a data plan's, no account"),
-    ("lab/nws.py", "client"): Client("none", why="NWS forecasts from api.weather.gov, GET only, no key"),
-    ("lab/wallet.py", "Esplora"): Client("none", why="the Trezor watch: public addresses on a block explorer, GET only"),
-    ("lab/markets/links.py", "Llm"): Client("none", why="our LiteLLM gateway: market text in, no account"),
-    ("lab/markets/research/kalshi_calibration.py", "<module>"): Client("none", why="Kalshi public market data"),
-    ("lab/ingest.py", "http_fetch"): Client("none", why="our dry-run bots' API; its one POST is stopentry"),
+    ("lab/core/api.py", "Api"): Client("none", why="the one paced client: every client built on it has its own row"),
+    ("lab/events/kalshi.py", "Kalshi"): Client("none", why="Kalshi public market data, GET only, no key"),
+    ("lab/events/polymarket.py", "PolymarketUS"): Client("none", why="Polymarket US public market data, GET only, no key"),
+    ("lab/events/polymarket.py", "Polymarket"): Client("none", why="Polymarket public market data, GET only, no key"),
+    ("lab/events/predictit.py", "PredictIt"): Client("none", why="PredictIt public market data, GET only, no key"),
+    ("lab/events/manifold.py", "Manifold"): Client("none", why="Manifold public market data, GET only, no key"),
+    ("lab/sports/odds.py", "OddsApi"): Client("none", why="sportsbook odds, GET only; its key is a data plan's, no account"),
+    ("lab/inputs/nws.py", "client"): Client("none", why="NWS forecasts from api.weather.gov, GET only, no key"),
+    ("lab/money/wallet.py", "Esplora"): Client("none", why="the Trezor watch: public addresses on a block explorer, GET only"),
+    ("lab/events/links.py", "Llm"): Client("none", why="our LiteLLM gateway: market text in, no account"),
+    ("lab/events/research/kalshi_calibration.py", "<module>"): Client("none", why="Kalshi public market data"),
+    ("lab/crypto/ingest.py", "http_fetch"): Client("none", why="our dry-run bots' API; its one POST is stopentry"),
     ("lab/healthcheck.py", "healthy"): Client("none", why="our own pod's health endpoint"),
-    ("lab/archive.py", "<module>"): Client("none", why="public candle archives (Kraken zips, the OKX listing and files)"),
-    ("lab/futures.py", "Ccxt"): Client("none", why="public funding and open interest through ccxt, no key"),
+    ("lab/crypto/archive.py", "<module>"): Client("none", why="public candle archives (Kraken zips, the OKX listing and files)"),
+    ("lab/futures/funding.py", "Ccxt"): Client("none", why="public funding and open interest through ccxt, no key"),
     ("web/fetch_kit.py", "fetch"): Client("none", why="build-time download of the pinned web-kit files from GitHub, checked against web/kit.lock"),
-    ("lab/backfill.py", "Cli"): Client("none", why="public candles through ccxt, no key"),
-    ("lab/pairs.py", "main"): Client("none", why="public tickers through ccxt, no key"),
+    ("lab/crypto/backfill.py", "Cli"): Client("none", why="public candles through ccxt, no key"),
+    ("lab/crypto/pairs.py", "main"): Client("none", why="public tickers through ccxt, no key"),
     ("web/auth.py", "login_for_code"): Client("none", why="Forgejo sign-in for the read-only site"),
 }
 TRADERS = {k: c for k, c in MONEY_MAP.items() if c.kind != "none"}
@@ -295,7 +296,7 @@ def dotted(node) -> str:
 
 
 def net_calls(path: Path):
-    """(owner, call node) for each call in the file that opens a connection: lab/markets/api.py Api, requests, urllib,
+    """(owner, call node) for each call in the file that opens a connection: lab/core/api.py Api, requests, urllib,
     httpx or a ccxt client."""
     tree = ast.parse(path.read_text())
     owners: dict[int, str] = {}
@@ -400,7 +401,7 @@ def test_each_client_on_an_account_sends_only_where_its_kind_allows(conn, key):
 
 def test_a_kalshi_demo_order_is_a_post_only_bid():
     d = Demo()
-    MONEY_MAP[("lab/markets/kalshi_trade.py", "KalshiDemo")].build(d).place("T-OK", 0.01, 1, "cid")
+    MONEY_MAP[("lab/events/kalshi_trade.py", "KalshiDemo")].build(d).place("T-OK", 0.01, 1, "cid")
     [(method, path, _, body, _)] = d.calls
     assert (method, path) == ("POST", "/portfolio/events/orders")
     assert (body["side"], body["post_only"], body["count"], body["price"]) == ("bid", True, "1.00", "0.0100")
@@ -408,7 +409,7 @@ def test_a_kalshi_demo_order_is_a_post_only_bid():
 
 def test_a_manifold_bet_is_a_limit_that_expires_on_its_own():
     m = Manifold()
-    MONEY_MAP[("lab/markets/manifold_trade.py", "ManifoldBets")].build(m).place("OK", 0.01, 1, "cid")
+    MONEY_MAP[("lab/events/manifold_trade.py", "ManifoldBets")].build(m).place("OK", 0.01, 1, "cid")
     [(method, path, _, body, _)] = m.calls
     assert (method, path) == ("POST", "/v0/bet")
     assert (body["limitProb"], body["amount"], body["expiresMillisAfter"]) == (0.01, 1.0, 600_000)

@@ -7,8 +7,9 @@ import datetime as dt
 import psycopg
 import pytest
 
-from lab import broker, calls
-from lab.markets.api import WrongHost
+from lab.money import broker
+from lab.inputs import calls
+from lab.core.api import WrongHost
 
 CFG = {"cost_bps": 2, "borrow_apr": 0.003, "settle_hours": 2, "slack_days": 4, "alpha": 0.05, "bound": 1.0}
 DATA = {"base_url": "https://data.alpaca.markets", "feed": "sip", "timeout_s": 5, "page_gap_s": 0, "retries": 2}

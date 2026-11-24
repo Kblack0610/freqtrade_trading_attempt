@@ -3,13 +3,13 @@
 import datetime as dt
 
 import pytest
-from markets_fakes import Session, fixture
+from lab.tests.markets_fakes import Session, fixture
 
-from lab.markets import predictit
-from lab.markets.manifold import Manifold
-from lab.markets.polymarket import Polymarket, PolymarketUS
-from lab.markets.predictit import PredictIt
-from lab.markets.recorder import ADAPTERS, load_config
+from lab.events import predictit
+from lab.events.manifold import Manifold
+from lab.events.polymarket import Polymarket, PolymarketUS
+from lab.events.predictit import PredictIt
+from lab.stages.recorder import ADAPTERS, load_config
 
 UTC = dt.timezone.utc
 
@@ -167,6 +167,6 @@ def test_predictit_reads_the_prose_end_date_and_drops_an_unreadable_one():
 
 
 def test_an_out_of_range_epoch_is_no_time():
-    from lab.markets.api import when
+    from lab.core.api import when
     assert when(253402300800000) is None  # year 10000, a real Manifold closeTime
     assert when(1700000000000) == dt.datetime(2023, 11, 14, 22, 13, 20, tzinfo=UTC)

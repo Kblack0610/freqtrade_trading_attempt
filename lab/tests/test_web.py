@@ -313,7 +313,7 @@ def test_pages_render_on_an_empty_database(conn, signed_in):
 
 
 def test_suggestions_show_each_kind_with_its_gates(conn, signed_in):
-    from lab import suggest
+    from lab.crypto import suggest
 
     seed(conn)
     assert suggest.run(conn)["suggestions"] == {"retire": 2, "fix": 1}
@@ -530,8 +530,8 @@ def test_every_strategy_class_has_a_family():
 
     toml, on_disk = families(), app_mod.strategy_classes()
     assert {"Strategy001", "ADXMomentum", "DevilStra"} <= on_disk and "StrategyHelper" not in on_disk
-    research = {c for f in (app_mod.HERE.parent / "lab/research").glob("*.py") for c in app_mod.STRATEGY_CLASS.findall(f.read_text())}
-    assert set(toml["strategies"]) == on_disk | set(research), "add the class to lab/families.toml, or drop a stale line"
+    research = {c for f in (app_mod.HERE.parent / "lab/futures/research").glob("*.py") for c in app_mod.STRATEGY_CLASS.findall(f.read_text())}
+    assert set(toml["strategies"]) == on_disk | set(research), "add the class to lab/crypto/families.toml, or drop a stale line"
     assert {t["family"] for t in toml["strategies"].values()} <= set(toml["families"])
     assert all(t["inputs"] for t in toml["strategies"].values())
 
@@ -1035,7 +1035,7 @@ def test_a_drill_and_a_call_open_their_page(conn, signed_in):
 
 
 def test_a_stock_fill_shows_its_rule_its_checks_and_its_exit(conn, signed_in):
-    from lab import stocks
+    from lab.stocks import paper as stocks
     from lab.tests import test_stocks as ts
     ts.run(conn)
     fell = {**ts.CLOSES, "SPY": ts.CLOSES["SPY"][:-1] + [100]}

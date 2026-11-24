@@ -4,13 +4,15 @@ import tomllib
 import psycopg
 import pytest
 
-from lab import calls, taxonomy
-from lab.markets import families
+from lab import events
+from lab.inputs import calls
+from lab.crypto import taxonomy
+from lab.events import families
 
 
 def test_every_family_has_a_category_separate_from_its_inputs():
     cfg = taxonomy.load()
-    market_cfg = tomllib.loads(taxonomy.CONFIG.with_name("markets.toml").read_text())
+    market_cfg = tomllib.loads(events.CONFIG.read_text())
     assert set(families.categories()) == {k for k, v in market_cfg["families"].items() if isinstance(v, dict)}
     for tag in cfg["strategies"].values():
         taxonomy.validate(cfg["family_categories"][tag["family"]], cfg)

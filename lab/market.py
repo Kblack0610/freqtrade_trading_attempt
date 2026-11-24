@@ -2,30 +2,30 @@
 and fill models every stage shares, so a backtest fill and a paper fill of the same order cost the same.
 
 A Venue is read-only: it lists its open markets with their top of book, and the markets that resolved since a time.
-A venue with history also serves it (the History methods), which lab/markets/history.py backfills. Prices are
+A venue with history also serves it (the History methods), which lab/events/history.py backfills. Prices are
 dollars per unit: per contract (0 to 1) on an event contract, per share on a stock; sizes are contracts or shares.
 An adapter returns plain records and never touches the database or object store; its stage does that
-(lab/markets/recorder.py for event contracts). Adapters: lab/markets/ for event contracts and sportsbooks (ADAPTERS
-in lab/markets/recorder.py), lab/stocks.py AlpacaStocks for stocks.
+(lab/stages/recorder.py for event contracts). Adapters: lab/events/ for event contracts and sportsbooks (ADAPTERS
+in lab/stages/recorder.py), lab/stocks/paper.py AlpacaStocks for stocks.
 
-An order client (Orders) is the one order path, whatever the venue or asset: lab/broker.py AlpacaPaper,
-lab/markets/kalshi_trade.py KalshiDemo and lab/markets/manifold_trade.py ManifoldBets implement it, lab/markets/drill.py
+An order client (Orders) is the one order path, whatever the venue or asset: lab/money/broker.py AlpacaPaper,
+lab/events/kalshi_trade.py KalshiDemo and lab/events/manifold_trade.py ManifoldBets implement it, lab/stages/drill.py
 drives it, and each one refuses every host but its mock-funds one.
 
 Cost model (docs/markets.md, each venue's Fees). An event-contract venue's fee table is `[backtest.fees.<venue>]` in
-lab/markets.toml, one of two kinds:
+lab/events/markets.toml, one of two kinds:
 - `pq`: a taker fee per order of `rate * C * P * (1 - P)` dollars, rounded per order as the venue states it:
   `ceil` up to the cent (Kalshi), `half_even` to the cent (Polymarket US), or `none`. Polymarket global's rate
   depends on the market's category, and the markets table holds none, so its rate is the highest category's.
 - `profit`: a share of the profit on a winning settlement and nothing on entry (PredictIt).
-A venue with no table (Manifold, play money) costs nothing. A stock pays lab/calls.toml `cost_bps` of its notional on
+A venue with no table (Manifold, play money) costs nothing. A stock pays lab/inputs/calls.toml `cost_bps` of its notional on
 each side (bps_fee): Alpaca charges no commission, so it stands for the half spread plus slippage.
 
 Fill model (take, payout). A taker order crosses the spread: YES at the ask, NO at one minus the bid. It takes whole
 contracts, at most its stake and its limit price allow, and at most `share` of that side's depth less what earlier
 orders took from the same book row; the rest is cancelled. A fill is held to resolution: YES pays the resolution's
 value, NO pays one minus it, and a void market refunds the price but not the fee. A stock buys at the ask and sells
-at the bid, in fractional shares, with no depth limit (lab/stocks.py).
+at the bid, in fractional shares, with no depth limit (lab/stocks/paper.py).
 """
 
 import datetime as dt
@@ -174,7 +174,7 @@ class Orders(Protocol):
         ...
 
     def cancel(self, order_id: str, ticker: str) -> object:
-        """Returns once the order reads terminal, or after the client's bound (lab/markets/drill.py await_terminal)."""
+        """Returns once the order reads terminal, or after the client's bound (lab/stages/drill.py await_terminal)."""
         ...
 
     def positions(self) -> list[Position]:

@@ -3,7 +3,7 @@ import datetime as dt
 import numpy as np
 import pandas as pd
 
-from lab import analyze, suggest, volatility
+from lab.crypto import analyze, suggest, volatility
 
 CFG = suggest.load_config()
 LOCKBOX = CFG["lockbox"]["start"]

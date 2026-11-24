@@ -1,0 +1,78 @@
+# Broker accounts read by lab/money/broker.py: Alpaca paper, and Robinhood Crypto, SnapTrade (Fidelity), Kraken, Polymarket US and
+# Tastytrade read only.
+# Keys are not here: they come from env, named in lab/money/broker.py. Every request goes through lab/core/api.py Api:
+# page_gap_s between one process's requests, retries on a 429 (and a 5xx for a GET or DELETE), and budget_rps, the
+# requests a second every process on the same key may send together (lab/core/budget.py), about 60% of the limit.
+
+[alpaca]
+base_url = "https://paper-api.alpaca.markets"   # the client refuses any other host
+# Published limit: "200 requests per minute, per account", each paper account counted on its own (read 2026-11-11,
+# https://alpaca.markets/support/usage-limit-api-calls). 60% of 3.3 a second.
+page_gap_s = 0.5
+budget_rps = 2
+retries = 4
+timeout_s = 30
+# The drill rests one share of this at this price, far under the market, so it cannot fill before it is cancelled.
+drill_symbol = "SPY"
+drill_price = 1.00
+
+[robinhood]
+base_url = "https://trading.robinhood.com"   # the client refuses any other host and sends only GET
+# Published limit: 100 requests per minute per account, bursts to 300, a token bucket per endpoint whose values
+# "will fluctuate" (read 2026-11-11, https://docs.robinhood.com/crypto/trading/). 60% of 1.7 a second.
+page_gap_s = 1
+budget_rps = 1
+retries = 4
+timeout_s = 30
+quote = "USD"   # holdings are valued at the <asset>-USD best bid/ask midpoint
+
+[snaptrade]
+base_url = "https://api.snaptrade.com"   # the client refuses any other host and sends only GET
+# Published limit: 250 requests per minute per clientId, and for a Personal key 10 a minute per account on the
+# endpoints that name an account; a 429 carries no Retry-After (read 2026-11-11,
+# https://docs.snaptrade.com/docs/ratelimiting). We call only /accounts, once a run. 60% of 4.2 a second.
+page_gap_s = 1
+budget_rps = 2.5
+retries = 3
+timeout_s = 30
+
+[kraken]
+base_url = "https://api.kraken.com"   # the client refuses any other host and any path but its two balance reads
+# Published limit: a counter per key, +1 a call, max 15 decaying 0.33 a second on the Starter tier (read 2026-11-12,
+# https://docs.kraken.com/api/docs/guides/spot-rest-ratelimits). Two calls a run. 60% of 0.33 a second.
+page_gap_s = 1
+budget_rps = 0.2
+retries = 3
+timeout_s = 30
+
+[polymarket_us]
+base_url = "https://api.polymarket.us"   # the client refuses any other host, and sends only GET
+currency = "USD"
+# Published limit: 25 requests a second per IP across the API (read 2026-11-06, https://docs.polymarket.us/api-reference/rate-limits).
+# Two calls a run. Well under it; the lab's public Polymarket US reads share the IP.
+page_gap_s = 0.5
+budget_rps = 2
+retries = 3
+timeout_s = 30
+
+[tastytrade]
+base_url = "https://api.tastyworks.com"   # the client refuses any other host; GET only, past its one token POST
+# Published limit: none for REST, "reasonable thresholds", and a 429 carries no rate-limit headers; too many failed
+# logins block the IP for about 8 hours (read 2026-11-13, https://developer.tastytrade.com/docs/guides/rate-limits-and-backoff).
+# One token call and two reads per account a run, so a slow pace and few retries.
+page_gap_s = 1
+budget_rps = 1
+retries = 2
+timeout_s = 30
+
+[alpaca_data]
+base_url = "https://data.alpaca.markets"   # the client refuses any other host and sends only GET
+# The free (Basic) plan serves SIP bars older than 15 minutes, so a daily close read after the session is the
+# consolidated one; IEX alone is about 2% of volume and its close can differ by a cent (read 2026-11-13).
+feed = "sip"
+# Published limit: 200 requests per minute on the Basic plan, sent as X-RateLimit-Limit (read 2026-11-13,
+# https://docs.alpaca.markets/docs/about-market-data-api). One request a night for every call's symbols. 60% of 3.3 a second.
+page_gap_s = 0.5
+budget_rps = 2
+retries = 4
+timeout_s = 30

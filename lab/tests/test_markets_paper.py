@@ -5,9 +5,9 @@ import pandas as pd
 import pytest
 from psycopg.types.json import Jsonb
 
-from lab import watcher
-from lab.markets import backtest, paper
-from lab.markets.recorder import load_config
+from lab.money import watcher
+from lab.events import backtest, paper
+from lab.stages.recorder import load_config
 
 NOW = dt.datetime(2026, 11, 6, 12, tzinfo=dt.timezone.utc)
 BANK = {"stage": "Stage 1", "cap": 500.0, "hard_stop": 0.15}
@@ -29,7 +29,7 @@ ACCOUNT = paper.account_of("longshot", VARIANT, "kalshi")
 
 
 def ready(conn, family="longshot", params=PARAMS, ok=True):
-    """The readiness gate's row for one variant (lab/markets/families.py gate())."""
+    """The readiness gate's row for one variant (lab/events/families.py gate())."""
     conn.execute("DELETE FROM readiness WHERE market = 'events' AND family = %s AND variant = %s",
                  (family, backtest.variant_of(params)))
     conn.execute("INSERT INTO readiness (market, strategy, family, venue, variant, params, windows, trades, trials, ready, passed, "

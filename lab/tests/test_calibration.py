@@ -1,4 +1,4 @@
-"""lab/calibration.py: the synthetic candles carry the planted signal and nothing else, the generated strategies read
+"""lab/crypto/calibration.py: the synthetic candles carry the planted signal and nothing else, the generated strategies read
 it at the configured edge, and one universe runs end to end through the real analysis, walk-forward and confidence."""
 
 import datetime as dt
@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from lab import calibration, suggest
+from lab.crypto import calibration, suggest
 
 C = {**suggest.load_config()["calibration"], "pairs": ["BTC/USD"]}
 START, END = dt.date(2024, 1, 1), dt.date(2025, 1, 1)
@@ -97,7 +97,7 @@ def test_a_resumed_universe_is_migrated_to_the_code(conn, tmp_path, monkeypatch)
     readiness, and its resumed run of 2026-11-21 failed on a missing readiness. Resuming migrates the scratch schema,
     as opening does."""
     migrations = sorted((calibration.REPO / "lab" / "migrations").glob("[0-9][0-9][0-9]_*.sql"))
-    # the code as it was when the universe opened: every migration but the newest (migrate.py imports lab.db from
+    # the code as it was when the universe opened: every migration but the newest (migrate.py imports lab.core.db from
     # the real package, so only it and the migrations are copied)
     behind = tmp_path / "lab"
     (behind / "migrations").mkdir(parents=True)

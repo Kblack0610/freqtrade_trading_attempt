@@ -1,8 +1,8 @@
 import datetime as dt
 import pytest
 
-from lab import ingest
-from lab.league import Row
+from lab.crypto import ingest
+from lab.crypto.league import Row
 
 T0 = dt.datetime(2026, 11, 4, 12, tzinfo=dt.timezone.utc)
 

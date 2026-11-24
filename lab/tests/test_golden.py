@@ -1,4 +1,4 @@
-"""The determinism proof under lab/reproduce.py: one strategy backtested twice on fixed candles gives the same
+"""The determinism proof under lab/crypto/reproduce.py: one strategy backtested twice on fixed candles gives the same
 trades byte for byte, and one changed candle changes both its candle digest and the trades, which the
 reproduce check reports as a mismatch. Runs real freqtrade backtests, so it needs the trader image."""
 
@@ -8,9 +8,9 @@ import pytest
 
 pytest.importorskip("freqtrade")
 
-from lab import analyze, reproduce, walkforward  # noqa: E402
-from test_analyze import REPO  # noqa: E402
-from lab.flow_matrix import synthetic_candles  # noqa: E402
+from lab.crypto import analyze, reproduce, walkforward  # noqa: E402
+from lab.tests.test_analyze import REPO  # noqa: E402
+from lab.crypto.flow_matrix import synthetic_candles  # noqa: E402
 
 EX = "binanceus"
 START, END = dt.date(2026, 1, 10), dt.date(2026, 2, 25)
@@ -190,7 +190,7 @@ def test_a_strategy_draws_the_same_parameter_space_in_every_process():
     the global random state, so each run tuned a different space and its cached fold could not reproduce."""
     import random
 
-    from test_families import ACTIVE
+    from lab.tests.test_families import ACTIVE
 
     drawn = [p for p in sorted(ACTIVE.rglob("*.py")) if "random" in p.read_text(encoding="utf-8")]
     assert any(p.stem == "DevilStra" for p in drawn)

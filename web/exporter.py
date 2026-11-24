@@ -12,10 +12,11 @@ from prometheus_client import CollectorRegistry, start_http_server
 from prometheus_client.core import GaugeMetricFamily
 from psycopg.rows import dict_row
 
-from lab import inputs, stocks
-from lab.db import connect
-from lab.markets import paper_venues, quiet_limits, sweep_ages
-from lab.suggest import load_config
+from lab import inputs
+from lab.stocks import paper as stocks
+from lab.core.db import connect
+from lab.events import paper_venues, quiet_limits, sweep_ages
+from lab.crypto.suggest import load_config
 
 RUN_KINDS = ("analysis", "walkforward", "reproduce", "calibration")
 
@@ -47,12 +48,12 @@ FUTURES = """
 SELECT 'funding' AS kind, exchange, max(ts) AS newest FROM funding_rates GROUP BY exchange
 UNION ALL SELECT 'open_interest', exchange, max(ts) FROM open_interest GROUP BY exchange
 """
-# lab/reproduce.py: the newest finished reproduce run's counts.
+# lab/crypto/reproduce.py: the newest finished reproduce run's counts.
 REPRO = ("SELECT (raw->>'checked')::int AS checked, (raw->>'mismatch')::int AS mismatch FROM runs "
          "WHERE kind = 'reproduce' AND finished_at IS NOT NULL ORDER BY finished_at DESC LIMIT 1")
 SUGGESTIONS = "SELECT kind, count(*) AS n FROM suggestions GROUP BY kind"
 CLIMATE = "SELECT cell, kind, count(*) FILTER (WHERE lo > 0) AS n FROM climate_scorecard WHERE kind <> 'benchmark' GROUP BY 1, 2"
-# Event-contract markets (lab/markets). A venue counts while it has a recorder sweep in the last week, so a venue
+# Event-contract markets (lab/events). A venue counts while it has a recorder sweep in the last week, so a venue
 # whose CronJob is removed stops reporting instead of alerting stale forever.
 SWEEPS = """
 SELECT DISTINCT ON (venue) venue, ok,
@@ -67,10 +68,10 @@ LAST_SWEEP = """
 SELECT DISTINCT ON (venue) venue, seen, changes, extract(epoch FROM finished_at - started_at) AS took
 FROM market_sweeps WHERE ok AND started_at > now() - interval '7 days' ORDER BY venue, started_at DESC
 """
-# lab/calibration.py: each gate's pass rate on the synthetic nulls (edge 0) and planted edges.
+# lab/crypto/calibration.py: each gate's pass rate on the synthetic nulls (edge 0) and planted edges.
 CALIBRATION = "SELECT gate, edge, oos_months, rate FROM calibration"
 LINKS = "SELECT split_part(source, ':', 1) AS source, status, count(*) AS n FROM market_links GROUP BY 1, 2"
-# lab/markouts.py and metrics.reconcile: per bot, the mean markout against its random-entry null, and the shortfall.
+# lab/crypto/markouts.py and metrics.reconcile: per bot, the mean markout against its random-entry null, and the shortfall.
 MARKOUTS = ("SELECT bot, horizon_min, count(net) AS n, avg(net) AS net, avg(null_net) AS null_net, avg(fill_slip) AS slip "
             "FROM markouts GROUP BY 1, 2")
 RECONCILE = ("SELECT bot, kind, count(*) AS n, avg(delay_s) AS delay_s, avg(price_gap) AS price, avg(fee_gap) AS fee, "
@@ -82,9 +83,9 @@ PAPER_ORDERS = ("SELECT a.venue, max(o.sent_at) AS newest FROM paper_orders o JO
 # Only [paper] venues' accounts, as PAPER_ORDERS: a venue taken out of [paper] has no pass to mark its accounts again.
 PAPER = ("SELECT account, capital, equity, open_positions, marked_at FROM paper_accounts "
          "WHERE marked_at IS NOT NULL AND venue = ANY(%s)")
-# The decision record (lab/decisions.py, migration 055): decisions per action, each account's newest pass
+# The decision record (lab/core/decisions.py, migration 055): decisions per action, each account's newest pass
 # through the funnel, and the fills since a league's first traced entry that have no decision (a bot trade counts
-# once an entry order filled; lab/ingest.py writes crypto decisions).
+# once an entry order filled; lab/crypto/ingest.py writes crypto decisions).
 DECISIONS = "SELECT league, account, action, count(*) AS n FROM decisions GROUP BY 1, 2, 3"
 FUNNEL = """
 SELECT f.league, f.account, f.reason, f.n FROM decision_funnel f
@@ -105,7 +106,7 @@ UNION ALL
 SELECT 'stocks', count(*) FROM paper_orders p JOIN paper_accounts a USING (account) WHERE a.venue = 'alpaca'
   AND NOT EXISTS (SELECT 1 FROM decisions d WHERE d.fill_source = 'paper' AND d.fill_id = p.id)
 """
-# lab/shadow.py: accounts per cohort and state, and the newest day marked (a day's mark lands after it ends).
+# lab/crypto/shadow.py: accounts per cohort and state, and the newest day marked (a day's mark lands after it ends).
 SHADOW = "SELECT cohort, state, count(*) AS n FROM shadow_accounts GROUP BY 1, 2"
 SHADOW_MARKED = "SELECT max(day) + 1 AS newest FROM shadow_marks"
 BROKERS = "SELECT DISTINCT ON (broker) broker, paper, equity, read_at FROM broker_balances WHERE error IS NULL ORDER BY broker, read_at DESC"
@@ -300,12 +301,12 @@ def market_metrics(now, sweeps, last_sweep, links):
 
 
 def input_metrics(now, newest):
-    """Each input with a reader (lab/inputs.toml): the age of its newest reading, and its limit, so a rule can compare
+    """Each input with a reader (lab/inputs/inputs.toml): the age of its newest reading, and its limit, so a rule can compare
     the two; an input never read has no age, which absent() catches."""
     fed = inputs.freshness(newest, now)
     yield family("trader_input_age_seconds", "Seconds since the input's newest reading (input_readings)", ["input"],
                  (([i["input"]], age(now, i["newest"])) for i in fed))
-    yield family("trader_input_fresh_seconds", "The input's fresh_min in lab/inputs.toml, in seconds", ["input"],
+    yield family("trader_input_fresh_seconds", "The input's fresh_min in lab/inputs/inputs.toml, in seconds", ["input"],
                  (([i["input"]], i["fresh_min"] * 60) for i in fed))
 
 
@@ -324,7 +325,7 @@ def paper_metrics(now, paper, orders):
     yield family("trader_paper_order_age_seconds", "Seconds since the venue's newest paper order, filled or not, for "
                  "each venue in [paper] venues (+Inf when it never sent one)", ["venue"],
                  (([v], math.inf if orders.get(v) is None else age(now, orders[v])) for v in quiet))
-    yield family("trader_paper_order_quiet_seconds", "The venue's quiet_after_h in lab/markets.toml, in seconds: "
+    yield family("trader_paper_order_quiet_seconds", "The venue's quiet_after_h in lab/events/markets.toml, in seconds: "
                  "longer without an order is a stopped league", ["venue"], (([v], h * 3600) for v, h in quiet.items()))
     yield family("trader_paper_equity", "A paper account's equity at its last mark: capital, realized, open marked",
                  ["account"], (([p["account"]], p["equity"]) for p in paper))

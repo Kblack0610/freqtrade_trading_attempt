@@ -1,12 +1,12 @@
 # Shorting a bust
 
-Research only, from `lab/research/bust.py`, first run on 2026-11-05 with funding assumed, rerun on 2026-11-07 with measured funding. Nothing here trades, and `BustShort`, `DonchianLongShort` and `CarverLongShort` stay out of `user_data/strategies`, so no job or bot finds them. Every basket counts in the trial register (migrations 017, 032 and 060). Carver's long-short trend, AFTS 6 and 8 (`CarverLongShort64` and `CarverLongShort16`), was added on 2026-11-17.
+Research only, from `lab/futures/research/bust.py`, first run on 2026-11-05 with funding assumed, rerun on 2026-11-07 with measured funding. Nothing here trades, and `BustShort`, `DonchianLongShort` and `CarverLongShort` stay out of `user_data/strategies`, so no job or bot finds them. Every basket counts in the trial register (migrations 017, 032 and 060). Carver's long-short trend, AFTS 6 and 8 (`CarverLongShort64` and `CarverLongShort16`), was added on 2026-11-17.
 
 ## Result
 
 A rule that shorts trend breaks does not pay. Over the whole history it lost 39% of the wallet on BTC, ETH and SOL, and 26% on five AI tokens. It made money in some falls, but never much: +13% in the 60% BTC fall of 2022. False alarms outside any fall cost 23% and 27%.
 
-Funding does not change that. Measured funding (`funding_rates`, collected by `lab/futures.py`) starts 2024-01-01 on kucoin for BTC, ETH, SOL and NEAR, and 2026-08-03 on okx; GRT, RENDER, TAO and WLD have none. On average the rate was positive, so longs paid shorts. Over the trades it covers (11 of 31 majors, 10 of 61 ai), funding moved the result by under half a point: majors +5.6% to +5.7%, ai -18.8% to -19.2%. The constant "shorts pay 0.03% every 8 hours" bound of the first run, which turned -39% into -59%, was far too harsh, and it is gone.
+Funding does not change that. Measured funding (`funding_rates`, collected by `lab/futures/funding.py`) starts 2024-01-01 on kucoin for BTC, ETH, SOL and NEAR, and 2026-08-03 on okx; GRT, RENDER, TAO and WLD have none. On average the rate was positive, so longs paid shorts. Over the trades it covers (11 of 31 majors, 10 of 61 ai), funding moved the result by under half a point: majors +5.6% to +5.7%, ai -18.8% to -19.2%. The constant "shorts pay 0.03% every 8 hours" bound of the first run, which turned -39% into -59%, was far too harsh, and it is gone.
 
 So the recommendation stands: do not build an automated short. If the human wants protection against an AI bust, the plain route is a small long put position at a broker, where the most it can lose is what it cost.
 
@@ -103,4 +103,4 @@ Equity puts and inverse ETFs need data this lab does not hold, so they stay unte
 
 ## Run it
 
-`python lab/research/bust.py <userdir> [BustShort|DonchianLongShort|CarverLongShort64|CarverLongShort16]` inside the image, with `DATABASE_URL` set for the funding. It downloads into the userdir once, about 20 minutes.
+`python lab/futures/research/bust.py <userdir> [BustShort|DonchianLongShort|CarverLongShort64|CarverLongShort16]` inside the image, with `DATABASE_URL` set for the funding. It downloads into the userdir once, about 20 minutes.

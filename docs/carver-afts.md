@@ -7,8 +7,8 @@ Sources: the table of contents on [Carver's book page](https://www.systematicmon
 ## Why the book's results do not transfer
 
 - **One asset class.** The book's return per unit of risk comes largely from diversifying across bonds, equities, commodities and currencies. Coins move together: BTC takes out most of the shared variance (the residual clusters on /coverage), so the diversification multipliers that lift a futures portfolio are small here.
-- **Long only.** The league runs spot only (`lab/league.py`). The book's directional strategies are long and short. A long-only port is a different strategy, an adaptation, and its results say nothing about Carver's.
-- **Sized once.** Carver resizes every day as the forecast and volatility move. A port sizes its stake at entry, as the trend family does. Resizing an open trade needs position adjustment, which runs in backtest and paper but which `lab/live.py` refuses for live.
+- **Long only.** The league runs spot only (`lab/crypto/league.py`). The book's directional strategies are long and short. A long-only port is a different strategy, an adaptation, and its results say nothing about Carver's.
+- **Sized once.** Carver resizes every day as the forecast and volatility move. A port sizes its stake at entry, as the trend family does. Resizing an open trade needs position adjustment, which runs in backtest and paper but which `lab/crypto/live.py` refuses for live.
 - **Short history.** Most coins have five to seven years of candles on our venues, against the book's 50.
 - **Every port is a trial.** Each new class raises the deflated-Sharpe bar for all of them ([strategy coverage](strategy-coverage.md#every-added-strategy-raises-the-bar)).
 
@@ -21,7 +21,7 @@ Sources: the table of contents on [Carver's book page](https://www.systematicmon
 | research | Measurable offline from recorded data; cannot be traded by the league |
 | needs shorts | The core of it is a short or a hedged leg: waits for a guarded short route (the US perps and CME rows in the register) |
 | needs data | Needs more history than the venues have |
-| needs scale | Only matters with real contracts, more coins or more capital than Stage 1 ($500, a $50 stake, three open trades: `[[book.stages]]` in `lab/suggest.toml`) |
+| needs scale | Only matters with real contracts, more coins or more capital than Stage 1 ($500, a $50 stake, three open trades: `[[book.stages]]` in `lab/crypto/suggest.toml`) |
 | n/a | Futures plumbing with no spot equivalent |
 
 The phases are in the trader plan for this work: P2 built the ports as the forecast family (`user_data/strategies/forecast/family.toml`, signals in `lab/forecasts.py`), P3 the carry study from recorded funding ([carry.md](carry.md)), P4 the long-short research.
@@ -32,8 +32,8 @@ The phases are in the trader plan for this work: P2 built the ports as the forec
 |---|---|---|---|---|---|---|
 | 1 | Buy and hold, single contract | Hold one contract. | Hold BTC. | The hold benchmark every strategy is scored against on /book | now | Core holding plus a capped active sleeve |
 | 2 | Buy and hold with risk scaling | Size the holding so its annual risk matches a target, from a fixed volatility. | Spot can only size down: at crypto's volatility a 20 to 40% target keeps part in cash. It changes risk; it adds no edge. | `CarverVolHold` (1d only): a risk-scaled hold, beside plain holding | now | Volatility targeting |
-| 3 | Buy and hold with variable risk scaling | As 2, with volatility from a recent EWMA blended 70/30 with its long-run average, so the size moves with it. | Resizing needs position adjustment (backtest and paper only). `lab/vol_target.py` already rescales walk-forward trades by forecast volatility. | `lab/vol_target.py` | research | Volatility targeting |
-| 4 | Buy and hold portfolio with variable risk position sizing | 3 across many instruments, by weight, times an instrument diversification multiplier. | The multiplier is small for correlated coins, and Stage 1's three open trades limit the count. | `lab/mixtures.py` 1/N mixtures | research | Diversity archive and mixtures |
+| 3 | Buy and hold with variable risk scaling | As 2, with volatility from a recent EWMA blended 70/30 with its long-run average, so the size moves with it. | Resizing needs position adjustment (backtest and paper only). `lab/crypto/vol_target.py` already rescales walk-forward trades by forecast volatility. | `lab/crypto/vol_target.py` | research | Volatility targeting |
+| 4 | Buy and hold portfolio with variable risk position sizing | 3 across many instruments, by weight, times an instrument diversification multiplier. | The multiplier is small for correlated coins, and Stage 1's three open trades limit the count. | `lab/crypto/mixtures.py` 1/N mixtures | research | Diversity archive and mixtures |
 | 5 | Slow trend following, long only | Long while EWMAC(64,256) is above 0, sized as 4. | Runs as written. Nearest today: the Donchian ensemble and the MA crosses. | `CarverEwmac64` on the ladder, stake flat | now | Long-term trend filter |
 | 6 | Slow trend following, long and short | As 5, short below 0. | The long half is 5; the short half needs a futures short. | `CarverLongShort64` research on okx swap candles, NO-GO ([short-bust.md](short-bust.md#carver-long-short)) | needs shorts | Trend long-short on perpetuals |
 | 7 | Slow trend following with trend strength | Forecast = EWMAC(64,256) over price volatility, scaled to an average absolute value of 10, capped at 20; position in proportion. | Long when above 0, stake by the forecast at entry. | `CarverTrendStrength64` on the ladder | now | Trend |
@@ -86,8 +86,8 @@ The phases are in the trader plan for this work: P2 built the ports as the forec
 | Tactic | On spot crypto | Ours |
 |---|---|---|
 | One: contract selection and rolling | Spot does not roll; perpetuals have no expiry. | n/a |
-| Two: execution | Paper fills, slippage and the decision record. | [live.md](live.md), `lab/decisions.py` |
-| Three: cash and compounding | Stake sizing and the stage ladder. | `[[book.stages]]` in `lab/suggest.toml`, [operating rules](operating-rules.md) |
+| Two: execution | Paper fills, slippage and the decision record. | [live.md](live.md), `lab/core/decisions.py` |
+| Three: cash and compounding | Stake sizing and the stage ladder. | `[[book.stages]]` in `lab/crypto/suggest.toml`, [operating rules](operating-rules.md) |
 | Four: risk management | The kill switch, the daily-loss watch and the live stages' hard stop; a retirement needs a decay test (Carver's own view, cited in the lab `research.md`). | [operating rules](operating-rules.md) |
 
 ## What would move a strategy up a level

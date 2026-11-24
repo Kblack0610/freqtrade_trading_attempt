@@ -1,4 +1,4 @@
-"""A deliberately broken strategy: it buys on the next candle's close. lab/analyze.py must flag it."""
+"""A deliberately broken strategy: it buys on the next candle's close. lab/crypto/analyze.py must flag it."""
 
 from pandas import DataFrame
 

@@ -1,4 +1,4 @@
-"""The stock league (lab/stocks.py) on a fake Alpaca data client: every entry and exit is a traced decision."""
+"""The stock league (lab/stocks/paper.py) on a fake Alpaca data client: every entry and exit is a traced decision."""
 
 import copy
 import datetime as dt
@@ -6,7 +6,9 @@ from datetime import date as D
 
 import pytest
 
-from lab import broker, calls, stocks, watcher
+from lab.money import broker, watcher
+from lab.inputs import calls
+from lab.stocks import paper as stocks
 from lab.market import Span, bps_fee
 
 ET = dt.timezone(dt.timedelta(hours=-5))

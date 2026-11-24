@@ -1,10 +1,10 @@
 # Every venue the person holds or paper-trades, one /accounts row each (web/venues.py). A venue is connected when each
 # of its checks found a row newer than max_age_h with no error. A check reads the newest row per key of one source:
-#   broker  broker_balances, keyed by broker (lab/broker.py read, hourly)
-#   drill   demo_orders, keyed by venue (the order drills: lab/broker.py, lab/markets/kalshi_trade.py, manifold_trade.py)
-#   paper   paper_accounts, keyed by venue, newest mark (lab/markets/paper.py, after each recorder sweep)
-#   sweep   market_sweeps, keyed by venue, newest sweep and its error (lab/markets/recorder.py)
-#   wallet  wallet_balances, keyed by account (lab/wallet.py)
+#   broker  broker_balances, keyed by broker (lab/money/broker.py read, hourly)
+#   drill   demo_orders, keyed by venue (the order drills: lab/money/broker.py, lab/events/kalshi_trade.py, manifold_trade.py)
+#   paper   paper_accounts, keyed by venue, newest mark (lab/events/paper.py, after each recorder sweep)
+#   sweep   market_sweeps, keyed by venue, newest sweep and its error (lab/stages/recorder.py)
+#   wallet  wallet_balances, keyed by account (lab/money/wallet.py)
 # match is the key, or a prefix ending in "*". human is what the person does while a check finds nothing; a venue
 # with no checks is not connected from here yet and shows only its human step.
 

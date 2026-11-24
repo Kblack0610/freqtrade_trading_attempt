@@ -1,6 +1,7 @@
 import pytest
 
-from lab import grid, variants
+from lab.core import grid
+from lab.crypto import variants
 
 TOY = """
 [sweep]

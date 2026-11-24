@@ -1,7 +1,7 @@
 # The forecast family: Carver's Advanced Futures Trading Strategies, the ones that run long-only on spot (docs/carver-afts.md).
 # Each strategy is a forecast from lab/forecasts.py: long while it is above 0, flat at or under it, stake cut to a
 # volatility target and, unless `size = "flat"`, scaled by the forecast over its average of 10 (full stake at 10 or more).
-# There is no buffering and no position adjustment: lab/live.py forbids both live. Long-only adaptations of long/short rules.
+# There is no buffering and no position adjustment: lab/crypto/live.py forbids both live. Long-only adaptations of long/short rules.
 # EWMAC scalars are the book's published values; scalars and multipliers marked approximate are to be confirmed against the book.
 # lab/families/generate.py writes the strategy files from this file: edit here, then rerun it.
 kind = "forecast"

@@ -2,7 +2,7 @@
 {% block title %}Calls{% endblock %}
 {% block body %}
 <h1>Calls</h1>
-<p class="muted">Every trade idea, recorded before its entry close and scored after it: return net of borrow and costs, and the return beyond the benchmark over the same sessions. Rows are never edited. Record one with <code>python -m lab.calls add</code>.</p>
+<p class="muted">Every trade idea, recorded before its entry close and scored after it: return net of borrow and costs, and the return beyond the benchmark over the same sessions. Rows are never edited. Record one with <code>python -m lab.inputs.calls add</code>.</p>
 <h2>Record</h2>
 {% if groups %}
 <div class="scroll">
@@ -19,7 +19,7 @@
 </div>
 {% else %}<p class="muted">Nothing scored yet: a call's first score lands the night after its first horizon's close.</p>{% endif %}
 <h2>Event rules</h2>
-<p class="muted">Calls a rule in <code>lab/call_rules.toml</code> made from feed-ingest events. Each rule and each edit of one is a trial; the deflated Sharpe counts all {{ rule_trials }} of them. A rule shows an edge only with enough scored calls and a deflated Sharpe over the bar, and an edge is still a paper call, never a bot.</p>
+<p class="muted">Calls a rule in <code>lab/inputs/call_rules.toml</code> made from feed-ingest events. Each rule and each edit of one is a trial; the deflated Sharpe counts all {{ rule_trials }} of them. A rule shows an edge only with enough scored calls and a deflated Sharpe over the bar, and an edge is still a paper call, never a bot.</p>
 {% if rules %}
 <div class="scroll">
 <table>

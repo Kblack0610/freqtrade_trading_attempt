@@ -1,4 +1,4 @@
-"""Every strategy in the book through every avenue of the trader flow (lab/flow_matrix.py).
+"""Every strategy in the book through every avenue of the trader flow (lab/crypto/flow_matrix.py).
 
 FLOW_MATRIX=gate runs the flow_gate sample, one strategy per family, plus the negative controls; CI's test-flow
 job runs it with `-m flow_gate` in FLOW_SHARDS parallel jobs, shard FLOW_SHARD taking every FLOW_SHARDS-th strategy of
@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from lab import cohorts, flow_matrix
+from lab.crypto import cohorts, flow_matrix
 
 MODE = os.environ.get("FLOW_MATRIX", "")
 SHARD, SHARDS = int(os.environ.get("FLOW_SHARD", "0")), int(os.environ.get("FLOW_SHARDS", "1"))
@@ -91,7 +91,8 @@ def matrix(tmp_path_factory):
         pytest.skip("FLOW_MATRIX not set to gate or full")
     if not os.environ.get("DATABASE_URL"):
         pytest.skip("DATABASE_URL not set")
-    from lab import db, migrate
+    from lab.core import db
+    from lab import migrate
 
     assert migrate.main() == 0
     names = SAMPLE[SHARD::SHARDS] + ([UNTAGGED, *EXTRA] if SHARD == SHARDS - 1 else []) if MODE == "gate" else None
@@ -132,7 +133,7 @@ def test_the_run_is_recorded_and_isolated(matrix):
 @pytest.mark.flow_gate
 def test_every_cell_is_there_with_a_reason(matrix):
     """Every strategy on every avenue's exchanges has exactly one cell, ok, skip or fail, each with a reason."""
-    from lab import analyze
+    from lab.crypto import analyze
 
     report = matrix["report"]
     names = matrix["names"] or flow_matrix.book(analyze.Cli().discover(), FAMS) + list(EXTRA)

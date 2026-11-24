@@ -1,1 +1,1 @@
-"""The trader lab: jobs, metrics and the markets adapters. Import as `from lab import metrics`."""
+"""The trader lab: one core and one adapter package per market (README, Layout). Import as `from lab.core import db`."""

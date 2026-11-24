@@ -19,7 +19,7 @@ replaces = "a bare id such as paper-longshot-97664530"
 
 [[term]]
 name = "Replay account"
-means = "A backtest's daily returns replayed forward on paper capital, with no fills and no order book (lab/shadow.py)."
+means = "A backtest's daily returns replayed forward on paper capital, with no fills and no order book (lab/crypto/shadow.py)."
 replaces = "Shadow account"
 
 [[term]]
@@ -37,7 +37,7 @@ name = "Decision"
 means = "One recorded choice by an account: an entry, an exit or a near-miss, with the rule, every check against its threshold, every input with its source, and the sizing. Every fill opens a page showing its decision."
 replaces = ""
 
-# Each league's scorecard has these columns and no others (lab/leagues.py COLUMNS).
+# Each league's scorecard has these columns and no others (lab/money/leagues.py COLUMNS).
 [[column]]
 name = "Account"
 means = "The account or bot."
@@ -70,7 +70,7 @@ name = "Max drawdown"
 means = "Largest fall from a peak. Crypto: Freqtrade's own figure. Event contracts: the settled-profit curve over capital."
 [[column]]
 name = "Watch"
-means = "The kill-switch state (lab/watcher.py): running, day limit hit, stopped or retired."
+means = "The kill-switch state (lab/money/watcher.py): running, day limit hit, stopped or retired."
 [[column]]
 name = "Marked"
 means = "When the account was last marked."
@@ -82,7 +82,7 @@ means = "When the account was last marked."
 group = "Sizing"
 name = "Lot size"
 means = "The unit a venue makes you trade in: a step every quantity must be a multiple of, and a minimum order. An order between steps is rounded down; an order under the minimum is refused, so rounding leaves part of a small stake unused. Forex: standard lot 100,000 units of the base currency, mini 10,000, micro 1,000. Stocks: 1 share, or fractions at some brokers. Crypto: per pair, an amount step and a minimum amount and cost. Event contracts: 1 contract, which pays $1 if it resolves your way (at 40c, $10 buys 25)."
-uses = "Crypto league: Freqtrade rounds every order to the pair's step and refuses a stake under the pair's minimum (it adds amount_reserve_percent, default 5%, and the stoploss); the repo has no lot-size code of its own. Stakes are fixed per stage, $50, $100 and $200 (lab/suggest.toml [[book.stages]]), well above the usual minimums. Event contracts: lab/markets/backtest.py take buys floor(stake / price) whole contracts, capped by book depth; the paper league fills through the same function. Alpaca paper (lab/broker.py): whole shares, qty an integer."
+uses = "Crypto league: Freqtrade rounds every order to the pair's step and refuses a stake under the pair's minimum (it adds amount_reserve_percent, default 5%, and the stoploss); the repo has no lot-size code of its own. Stakes are fixed per stage, $50, $100 and $200 (lab/crypto/suggest.toml [[book.stages]]), well above the usual minimums. Event contracts: lab/events/backtest.py take buys floor(stake / price) whole contracts, capped by book depth; the paper league fills through the same function. Alpaca paper (lab/money/broker.py): whole shares, qty an integer."
 
 [[trading]]
 group = "Sizing"
@@ -118,7 +118,7 @@ uses = "Why fixed steps from the edge's lower bound win over Kelly while the edg
 group = "Sizing"
 name = "Volatility targeting"
 means = "Sizing each position so it carries the same expected risk, smaller in wild markets and larger in calm ones (Carver)"
-uses = "Research only: `lab/vol_target.py`"
+uses = "Research only: `lab/crypto/vol_target.py`"
 
 [[trading]]
 group = "Sizing"
@@ -160,7 +160,7 @@ uses = "docs/markets.md Fees"
 group = "Costs and fills"
 name = "Liquidity and depth"
 means = "How much can trade near the current price before the price moves"
-uses = "`depth_share` (0.5, `lab/markets.toml`) caps how much of the top of the book a fill may take"
+uses = "`depth_share` (0.5, `lab/events/markets.toml`) caps how much of the top of the book a fill may take"
 
 [[trading]]
 group = "Costs and fills"
@@ -184,7 +184,7 @@ uses = "`expectancy_level` interval in the confidence gate"
 group = "Measuring results"
 name = "Win rate and payoff"
 means = "How often you win, and the average win over the average loss. Neither means anything without the other"
-uses = "Freqtrade's `winrate`, read by `lab/ingest.py`"
+uses = "Freqtrade's `winrate`, read by `lab/crypto/ingest.py`"
 
 [[trading]]
 group = "Measuring results"
@@ -280,7 +280,7 @@ uses = "docs/markets.md"
 group = "Betting and event contracts"
 name = "Implied probability"
 means = "The probability a price or odds stand for: 40c is 40%; decimal odds 2.50 are 1 / 2.50 = 40%"
-uses = "`lab/markets/families.py` turns each sportsbook's odds into it"
+uses = "`lab/events/families.py` turns each sportsbook's odds into it"
 
 [[trading]]
 group = "Betting and event contracts"

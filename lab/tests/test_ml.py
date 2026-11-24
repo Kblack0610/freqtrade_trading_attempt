@@ -10,8 +10,8 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from lab.flow_matrix import synthetic_candles
-from test_families import bias_data  # noqa: F401 (a fixture)
+from lab.crypto.flow_matrix import synthetic_candles
+from lab.tests.test_families import bias_data  # noqa: F401 (a fixture)
 
 LAB = Path(__file__).resolve().parents[1]
 REPO = LAB.parent
@@ -19,7 +19,7 @@ ML = REPO / "user_data" / "strategies" / "ml"
 
 
 def test_the_nightly_analysis_scans_the_ml_family_and_needs_the_ml_image_for_it():
-    from lab import analyze
+    from lab.crypto import analyze
 
     ml = {s["name"]: s for s in analyze.Cli().discover()}["MLLightGBMBaseline"]
     assert ml["timeframe"] == "1h" and analyze.freqai_fragment(ml["file"])["freqai"]["enabled"]
@@ -57,7 +57,7 @@ def test_a_real_chunk_trains_under_its_own_identifier_and_reuses_its_models(tmp_
     pytest.importorskip("lightgbm")
     import shutil
 
-    from lab import analyze
+    from lab.crypto import analyze
 
     ud = tmp_path / "ud"
     shutil.copytree(REPO / "user_data" / "exchanges", ud / "exchanges")
@@ -87,7 +87,7 @@ def test_a_real_chunk_trains_under_its_own_identifier_and_reuses_its_models(tmp_
 @pytest.mark.parametrize("leak", [False, True])
 def test_the_nightly_lookahead_check_clears_the_baseline_and_catches_a_feature_that_reads_ahead(bias_data, tmp_path, leak):
     """The real strategy on the nightly's bounded check; the control adds one feature that reads two candles ahead,
-    the nearest the check sees (lab/analyze.py, step 3). FreqAI returns no features, so the leak shows in its outputs."""
+    the nearest the check sees (lab/crypto/analyze.py, step 3). FreqAI returns no features, so the leak shows in its outputs."""
     pytest.importorskip("lightgbm")
     folder = tmp_path / "ml"
     folder.mkdir()
