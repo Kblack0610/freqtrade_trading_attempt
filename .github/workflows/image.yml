@@ -43,7 +43,7 @@ jobs:
         with:
           node-version: '22'
       - name: Install static check tools
-        run: python -m pip install -r lab/requirements-dev.txt
+        run: python -m pip install --require-hashes -r lab/requirements-dev.lock
       - name: Typecheck
         run: npm run typecheck
       - name: Lint

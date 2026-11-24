@@ -143,12 +143,12 @@ Backfill knobs (env): `BACKFILL_EXCHANGES` (`binanceus coinbase kraken`), `TIMEF
 docker run --rm -v "$PWD:/repo:ro" zricethezav/gitleaks:v8.28.0 git /repo --redact --no-banner
 ```
 
-`quality` installs the pinned tools from `lab/requirements-dev.txt`, then runs `npm run typecheck` and `npm run lint`. [package.json](package.json) is a private command manifest with no Node dependencies; Python remains the runtime. [pyproject.toml](pyproject.toml) owns the initial mypy module scope and Ruff rule selection; [standards](docs/standards.md) explains their limits. The image test job reads `scripts.test` from the same manifest and executes it inside the Python image, after migrations.
+`quality` installs the hash-pinned tools from `lab/requirements-dev.lock` (generated from `lab/requirements-dev.txt` by `ci/lock_requirements.sh`), then runs `npm run typecheck` and `npm run lint`. [package.json](package.json) is a private command manifest with no Node dependencies; Python remains the runtime. [pyproject.toml](pyproject.toml) owns the initial mypy module scope and Ruff rule selection; [standards](docs/standards.md) explains their limits. The image test job reads `scripts.test` from the same manifest and executes it inside the Python image, after migrations.
 
 For static checks in a local Python environment:
 
 ```sh
-python -m pip install -r lab/requirements-dev.txt
+python -m pip install --require-hashes -r lab/requirements-dev.lock
 npm run typecheck
 npm run lint
 ```

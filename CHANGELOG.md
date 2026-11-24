@@ -10,6 +10,7 @@ Notable changes to the trader strategy repo, newest first. The image is built on
 
 ### Fixed
 
+- CI: the quality job installs its static-check tools from the hash-pinned `lab/requirements-dev.lock`, so mypy and ruff's dependencies no longer float between runs (tr-321).
 - Markets: `max_open` fills an account's entries best edge first, not oldest quote first, and keeps the best two it turned away per pass as `capped` decisions (tr-429).
 - Walk-forward: a hyperopt stopped at `WF_TIMEOUT` keeps its best epoch instead of failing the fold (#236).
 - Inputs: `nws_cli` freshness threshold sits above a healthy reader's daily peak (#234).

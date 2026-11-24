@@ -27,7 +27,7 @@ An image rollback does not undo SQL migrations, restore Postgres or reset per-bo
 | Symptom | Check and action |
 |---|---|
 | Image built, deployment unchanged | Check `bump-home-config` for a superseded commit, missing token or failed Forgejo merge; inspect the home-config digest and Flux reconciliation. |
-| Static checks fail locally | Install `lab/requirements-dev.txt` into the active Python environment and run the matching `package.json` command from the repo root. |
+| Static checks fail locally | Install `lab/requirements-dev.lock` (`pip install --require-hashes -r`) into the active Python environment and run the matching `package.json` command from the repo root. |
 | Image build fails at `pip install` (hash mismatch or missing package) or `pip check` | `lab/requirements.lock` no longer matches `lab/requirements.txt` or the base image: run `ci/lock_requirements.sh` and commit the lock. |
 | Database tests skip or fail | Use disposable Postgres and set `DATABASE_URL`; apply migrations before running tests. Never point the suite at the deployed database. |
 | Pod ready, results stale | Inspect ingestion and analysis job completion and the data freshness views; HTTP health alone does not cover the research pipeline. |
