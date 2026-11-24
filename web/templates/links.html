@@ -5,7 +5,7 @@
 {% include "_markets_nav.html" %}
 <p class="muted">A link says one outcome on one venue pays exactly when an outcome on another pays. Rules confirm the links they make; the LLM only proposes. Once both markets resolve, an agreeing link is confirmed and a disagreeing one rejected, a rule's included, so a broken rule shows up as rejections. Strategies use confirmed links only.</p>
 
-<h2>By source</h2>
+<h2 class="sec">By source</h2>
 {% if summary %}
 <div class="scroll"><table>
   <thead><tr><th>Source</th><th>Status</th><th class="n">Links</th><th class="n">Resolved apart</th></tr></thead>
@@ -16,7 +16,7 @@
 {% else %}<p class="muted">No links yet: the linker needs a recorded venue pair, such as odds_api against Kalshi.</p>{% endif %}
 
 {% if asks %}
-<h2>LLM asks</h2>
+<h2 class="sec">LLM asks</h2>
 <div class="scroll"><table>
   <thead><tr><th>Model</th><th>Against</th><th class="n">Markets asked</th><th class="n">Links proposed</th><th>Last ask</th></tr></thead>
   <tbody>
@@ -25,7 +25,7 @@
 </table></div>
 {% endif %}
 
-<h2>Newest links</h2>
+<h2 class="sec">Newest links</h2>
 <p>{% for s in [""] + statuses|list %}{% if not loop.first %} - {% endif %}{% if s == status %}<strong>{{ s or "all" }}</strong>{% else %}<a href="/links{{ '?status=' ~ s if s }}">{{ s or "all" }}</a>{% endif %}{% endfor %}</p>
 {% if links %}
 <div class="scroll">

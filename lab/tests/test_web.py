@@ -272,8 +272,8 @@ def test_each_cohort_gets_a_row_and_profit_stays_inside_its_lane(conn, signed_in
     assert top.index('href="/cohorts#league"') < top.index('href="/cohorts#aggressive"')
     assert "2 of 3" in top and "1.50%" in top and "30.00" in top
     page = client.get("/cohorts").text
-    assert '<h2 id="aggressive">' in page and 'ab12cd34 <span class="muted">max_open_trades 5</span>' in page
-    assert page.rindex("kraken-agg") > page.index('<h2 id="aggressive">') > page.rindex("kraken-s001")
+    assert '<h2 class="sec" id="aggressive">' in page and 'ab12cd34 <span class="muted">max_open_trades 5</span>' in page
+    assert page.rindex("kraken-agg") > page.index('<h2 class="sec" id="aggressive">') > page.rindex("kraken-s001")
     assert ">Backtest match</th>" in page and "<td class=\"n\">3 of 4</td>" in page and "<td class=\"n\">66%</td>" in page  # moved off /
 
 
@@ -293,16 +293,16 @@ def test_the_event_contract_league_is_not_a_cohort_and_scores_beside_the_crypto_
     assert 'href="/cohorts#markets"' not in top and 'href="/cohorts#league"' in top
     assert "35.00 USD" not in top  # no total across lanes
     cohorts = client.get("/cohorts").text
-    assert '<h2 id="markets">' not in cohorts and "paper-longshot" not in cohorts
+    assert '<h2 class="sec" id="markets">' not in cohorts and "paper-longshot" not in cohorts
     page = client.get("/leagues").text
-    crypto = page[page.index('<h2 id="crypto">'):page.index('<h2 id="event-contracts">')]
-    events = page[page.index('<h2 id="event-contracts">'):page.index('<h2 id="stocks">')]
+    crypto = page[page.index('<h2 class="sec" id="crypto">'):page.index('<h2 class="sec" id="event-contracts">')]
+    events = page[page.index('<h2 class="sec" id="event-contracts">'):page.index('<h2 class="sec" id="stocks">')]
     assert "kraken-s001" in crypto and "Strategy001" in crypto
     assert "longshot: buy yes when the yes mid is 0.90-0.99, within 24 h of close" in events
     assert "2.00%" in events and "3.0%" in events and "paper-longshot-cccc3333" in events
     head = lambda t: re.findall(r"<th[^>]*>([^<]+)</th>", t[t.index("<thead>"):t.index("</thead>")])  # noqa: E731
     assert head(crypto) == head(events) and "Max drawdown" in head(events)  # one scorecard, the same columns
-    stocks = page[page.index('<h2 id="stocks">'):]
+    stocks = page[page.index('<h2 class="sec" id="stocks">'):]
     assert "No accounts in this league yet" in stocks  # no stock pass has run
 
 
@@ -693,6 +693,7 @@ def test_nav_groups_render_in_order(signed_in):
     heads = re.findall(r'<div class="kb-group">(\w+)</div>', html)
     assert heads == ["Now", "Evidence", "Pipeline"]
     assert 'class="kb-nav"' in html and '<kb-shell>' in html and "/static/kit/kb-shell.js" in html
+    assert "/static/kit/ui.css" in html and "/static/kit/kb-ui.js" in html
 
 
 @pytest.mark.parametrize("path,tab", [("/", "Overview"), ("/bots/kraken-s001", "Overview"), ("/strategies/Strategy001", "Strategies"),
@@ -850,7 +851,7 @@ def test_account_balances_preserve_reported_stake_units(conn, signed_in):
     conn.execute("UPDATE bot_snapshots SET raw = %s", (Jsonb({'balance': {'stake': 'USDT'}}),))
     body = signed_in[1].get('/accounts').text
     assert 'USDT' in body
-    assert 'Equity (USD)' not in body.split('<h2>Prediction-market paper accounts</h2>')[0]
+    assert 'Equity (USD)' not in body.split('<h2 class="sec">Prediction-market paper accounts</h2>')[0]
 
 
 def test_account_evidence_distinguishes_recursive_instability(conn, signed_in):
@@ -898,7 +899,7 @@ def test_signal_filter_keeps_coverage_categories_separate(conn, signed_in):
     assert ">Strategy001</a>" in price and ">HourBasedStrategy</a>" not in price
     assert ">HourBasedStrategy</a>" in structural and ">Strategy001</a>" not in structural
     assert "Signal source" in structural and "strategy-exit" in structural
-    assert "<h2>Residual clusters</h2>" not in structural
+    assert '<h2 class="sec">Residual clusters</h2>' not in structural
     assert "Clear the signal source filter" in structural
     for path in ("/coverage", "/markets/book"):
         assert client.get(path + "?signal_source=unknown").status_code == 404
@@ -1043,7 +1044,7 @@ def test_a_stock_fill_shows_its_rule_its_checks_and_its_exit(conn, signed_in):
     pid = conn.execute("SELECT id FROM paper_orders WHERE account = %s", (ts.TREND,)).fetchone()[0]
     _, client = signed_in
     page = client.get("/leagues").text
-    tab = page[page.index('<h2 id="stocks">'):]
+    tab = page[page.index('<h2 class="sec" id="stocks">'):]
     assert ts.TREND in tab and "fills opened today" in tab
     assert stocks.rule_of("trend", {"sma": 3}) in tab and "No accounts in this league yet" not in tab
     body = client.get(f"/trades/paper/{pid}").text
@@ -1085,7 +1086,7 @@ def test_today_counts_the_days_orders_fills_and_what_did_not_trade(conn, signed_
     assert "<strong>3</strong> markets" in page  # M0 (two families), M1, ETH/USD: the per-row sum would be 4
     assert "kraken (1 bots)" in page and "longshot" in page
     assert "tt_totals on odds_api" in page and "weather on kalshi" not in page and "longshot on kalshi" not in page
-    best = page[page.index("<h2>Best</h2>"):page.index("<h2>Worst</h2>")]
+    best = page[page.index('<h2 class="sec">Best</h2>'):page.index('<h2 class="sec">Worst</h2>')]
     assert best.index("M0") < best.index("ETH/USD") < best.index("M1") and "OLD" not in page  # by return: 22%, 5%, -11%
     assert "No dry run" in client.get("/today?day=2020-01-01").text and client.get("/today?day=nope").status_code == 404
 

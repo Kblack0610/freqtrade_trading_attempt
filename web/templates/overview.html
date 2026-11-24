@@ -7,11 +7,11 @@
 
 {% include "_lanes.html" %}
 
-<h2>Cohorts</h2>
+<h2 class="sec">Cohorts</h2>
 {% include "_cohorts.html" %}
 <p><a href="/cohorts">Each cohort's bots and overlays</a></p>
 
-<h2>Best strategies, last 365 days</h2>
+<h2 class="sec">Best strategies, last 365 days</h2>
 {% if top %}
 {% set board = top %}{% include "_board.html" %}
 <p><a href="/strategies">Every strategy</a></p>

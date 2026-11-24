@@ -6,6 +6,8 @@ Trader is internal: one operator, no users, no store listing, no marketing. Ther
 
 The shell (fonts, type scale, ink, muted, line, accent, sidebar) comes from the pinned dotfiles web-kit (`web/kit.lock`, fetched into `web/static/kit/`). Trader adds only the colours below, in `web/static/style.css`.
 
+The shared parts come from the kit too: `kit/ui.css` styles the section head (`h2 class="sec"`, its count a `span.n`), the error line (`.err`), the fold (`details class="cfold"`), the clamped cell (`.c1`, `.c2`, `.c12`) and the record list (`table.rec`), and `kit/kb-ui.js` gives a page script the `kbUi` renderers that draw them. A template writes those classes, and `style.css` gives them no other meaning.
+
 | Token | Light | Dark | Use |
 | --- | --- | --- | --- |
 | `--up` | `#1a7f4b` | `#4cc38a` | Profit, passing gates |

@@ -21,9 +21,9 @@
   <li><a href="/accounts">Accounts</a>: every account we hold or paper-trade, read only: broker balances, watch-only wallets, and the watcher's kill-switch state per bot. The real-money guard is shown at the top.</li>
   <li><a href="/runs">Runs</a>: when each analysis ran and what failed.</li>
 </ol>
-<h2>What no page can tell you</h2>
+<h2 class="sec">What no page can tell you</h2>
 <p>No test proves a strategy will keep working. The most this lab can show is that one made money on months it was never tuned on, on more than one venue, after fees and slippage, and that it still did on the locked-away months from <code>[lockbox] start</code>. Every strategy, venue and parameter set ever tried is counted in the trial register, and the more there are, the higher the bar each one must clear, because some of a large number of tries will look good by chance.</p>
-<h2 id="glossary">Glossary</h2>
+<h2 class="sec" id="glossary">Glossary</h2>
 <p class="muted">One set of words for the whole site, from <code>web/glossary.toml</code>. Labels changed; database ids, roster names and the Freqtrade <code>dry_run</code> flag did not.</p>
 <dl>
 {% for t in glossary.term %}<dt><strong>{{ t.name }}</strong>{% if t.replaces %} <span class="muted">replaces {{ t.replaces }}</span>{% endif %}</dt><dd>{{ t.means }}</dd>

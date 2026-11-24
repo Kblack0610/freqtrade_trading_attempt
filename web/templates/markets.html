@@ -5,7 +5,7 @@
 {% include "_markets_nav.html" %}
 <p class="muted">Event contracts across venues, read only. The recorder sweeps each venue's open markets on its own schedule and writes only the quotes that changed, to parquet in MinIO; this page is each venue's newest sweep. A venue whose last good sweep is over {{ max_age }} minutes old (a slower venue's own <code>stale_after_min</code> in <code>lab/events/markets.toml</code>) shows red: the paper league takes no entries there until it recovers, and the stale-recorder alert fires.</p>
 
-<h2>Recorder</h2>
+<h2 class="sec">Recorder</h2>
 {% if venues %}
 <div class="scroll">
 <table>
@@ -26,7 +26,7 @@
 {% else %}<p class="muted">No venue recorded yet: the recorder CronJob writes a row per venue on its first sweep.</p>{% endif %}
 
 {% if errors %}
-<h2>Failed sweeps, last 7 days</h2>
+<h2 class="sec">Failed sweeps, last 7 days</h2>
 <div class="scroll"><table>
   <thead><tr><th>Venue</th><th>Started</th><th>Error</th></tr></thead>
   <tbody>
@@ -35,7 +35,7 @@
 </table></div>
 {% endif %}
 
-<h2>History backfill</h2>
+<h2 class="sec">History backfill</h2>
 <p class="muted">Settled markets, hourly price bars and large Kalshi trades from before the recorder started. Each job walks one unit at a time (a settle date, or the settled walk as one unit) and resumes where it stopped.</p>
 {% if backfill %}
 <div class="scroll"><table>

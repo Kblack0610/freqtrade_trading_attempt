@@ -1,6 +1,6 @@
 """Download the pinned web-kit files into web/static/kit/ and check each against web/kit.lock.
 
-The kit (design tokens, fonts, <kb-shell>) lives in the dotfiles repo; kit.lock pins one commit and a
+The kit (design tokens, fonts, <kb-shell>, ui.css and kb-ui.js) lives in the dotfiles repo; kit.lock pins one commit and a
 sha256 per file, so a kit change reaches this site only when the lock is bumped. The Dockerfile runs this,
 so an image build fails on a bad checksum. Local dev: `python web/fetch_kit.py` once.
 """

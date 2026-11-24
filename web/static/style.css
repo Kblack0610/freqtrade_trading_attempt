@@ -1,5 +1,6 @@
-/* Palette, fonts, type scale and the shell come from the pinned web-kit (static/kit, web/kit.lock).
-   This file keeps trader's own colours and its page and component rules. */
+/* Palette, fonts, type scale, the shell and the shared parts (section head, error block, fold, clamped
+   cell, record list: kit/ui.css) come from the pinned web-kit (static/kit, web/kit.lock). This file
+   keeps trader's own colours and its page and component rules, loaded after the kit. */
 :root {
   --up: #1a7f4b;
   --down: #c0392b;
@@ -18,8 +19,6 @@ button { font: inherit; padding: 0.2rem 0.6rem; background: transparent; color: 
 main { max-width: 1100px; margin: 0 auto; padding: 1rem; }
 footer { max-width: 1100px; margin: 0 auto; padding: 1rem; font-size: 0.85rem; }
 h1 { font-size: 1.4rem; margin: 0.5rem 0; }
-h2 { font-size: 1.05rem; margin: 1.75rem 0 0.5rem; }
-.muted { color: var(--muted); }
 .up { color: var(--up); }
 .down { color: var(--down); }
 .alert { background: var(--alert-bg); color: var(--down); padding: 0.75rem 1rem; border-radius: 8px; font-weight: 600; }

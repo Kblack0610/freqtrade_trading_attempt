@@ -7,7 +7,7 @@
 {% include "_venues.html" %}
 
 <section id="research-setups" aria-labelledby="research-heading">
-<h2 id="research-heading">Research setups</h2>
+<h2 class="sec" id="research-heading">Research setups</h2>
 <p>Choose a strategy and a hypothetical budget to compare with its historical results. Saved setups do not change running accounts, orders, or kill switches.</p>
 <noscript><p class="alert">Enable JavaScript to edit browser-local research setups. Account observations below remain available.</p></noscript>
 {% if not research.strategies %}<p class="muted">No strategies have been analyzed yet. The editor can save a setup once analysis records a strategy and venue.</p>{% endif %}
@@ -27,7 +27,7 @@
 <label for="setup-budget">Hypothetical budget (USD)<input id="setup-budget" name="budget" type="number" min="0" step="any" required inputmode="decimal"></label>
 <label for="setup-drawdown">Maximum acceptable drawdown (%)<input id="setup-drawdown" name="drawdown" type="number" min="0" max="100" step="any" required inputmode="decimal"></label>
 </div>
-<p id="setup-errors" class="down" role="alert"></p>
+<p id="setup-errors" class="err" role="alert"></p>
 <button id="save-setup" type="submit">Save setup</button>
 <p class="muted">Saved in this browser. Does not change running accounts. The budget is a research preference; it does not run a backtest.</p>
 </form>
@@ -38,7 +38,7 @@
 <script src="/static/account-setups.js" defer></script>
 </section>
 
-<h2>Crypto league bots</h2>
+<h2 class="sec">Crypto league bots</h2>
 <p class="muted">Current strategy assignments and the newest observed balances. Research setups above never change these assignments.</p>
 {% if bots %}
 <div class="scroll"><table><thead><tr><th>Bot</th><th>Strategy</th><th>Venue</th><th>Mode</th><th>Last observation</th><th class="n">Equity</th><th>Currency</th><th>Status</th></tr></thead><tbody>
@@ -48,7 +48,7 @@
 </tbody></table></div>
 {% else %}<p class="muted">No crypto league bots have been ingested yet.</p>{% endif %}
 
-<h2 id="shadow">Replay accounts</h2>
+<h2 class="sec" id="shadow">Replay accounts</h2>
 <p class="muted">Not a league: database rows with paper capital, no pod and no fills (<code>lab/crypto/shadow.py</code>). A strategy and venue that clears the walk-forward and backtest entry gates opens one, and each night adds the backtest's days after its promotion, replayed on candles, not filled on a book. It wins when it is up with the interval's low end above zero after its cohort's minimum days; it retires past the drawdown limit, below zero, or at the day limit (<code>lab/crypto/suggest.toml [shadow]</code>). Short: median trade under a day; long: a day or more.</p>
 <p>Active short {{ shadow.active.short }}, active long {{ shadow.active.long }}, winning {{ shadow.winning }}, retired {{ shadow.retired }}.</p>
 {% if shadow.rows %}
@@ -59,7 +59,7 @@
 </tbody></table></div>
 {% else %}<p class="muted">No replay account yet: the nightly analysis opens them once a strategy clears the entry gates on /confidence.</p>{% endif %}
 
-<h2>Event-contract league accounts</h2>
+<h2 class="sec">Event-contract league accounts</h2>
 <p class="muted">The scorecard and fills are on <a href="/leagues#event-contracts">Leagues</a>.</p>
 {% if paper_accounts %}
 <div class="scroll"><table><thead><tr><th>Account</th><th>Strategy family</th><th>Venue</th><th>Mode</th><th>Last observation</th><th class="n">Equity (USD)</th><th>Status</th></tr></thead><tbody>
@@ -69,7 +69,7 @@
 </tbody></table></div>
 {% else %}<p class="muted">No event-contract league accounts have been recorded yet.</p>{% endif %}
 
-<h2>Broker accounts</h2>
+<h2 class="sec">Broker accounts</h2>
 <p class="muted">The newest read of each broker account: Alpaca paper money, and read-only reads of real accounts (Robinhood Crypto, Fidelity through SnapTrade). Nothing here can place a real order.</p>
 {% if brokers %}
 <div class="scroll"><table>
@@ -83,7 +83,7 @@
 </table></div>
 {% else %}<p class="muted">No broker read yet.</p>{% endif %}
 
-<h2>Wallets</h2>
+<h2 class="sec">Wallets</h2>
 <p class="muted">The newest watch-only read of each self-custody account, from its public key (<code>lab/money/wallet.py</code>). The key cannot sign, so nothing here can spend.</p>
 {% if wallets %}
 <div class="scroll"><table>
@@ -99,7 +99,7 @@
 </table></div>
 {% else %}<p class="muted">No wallet read yet.</p>{% endif %}
 
-<h2>Kill switch</h2>
+<h2 class="sec">Kill switch</h2>
 <p class="muted">The watcher's state for each crypto league bot and event-contract account (<code>lab/money/watcher.py</code>): a bot that hits its daily loss limit, or is drilled, stops entries for the rest of the UTC day. Stopped and breached rows come first.</p>
 {% if watch %}
 <div class="scroll"><table>
