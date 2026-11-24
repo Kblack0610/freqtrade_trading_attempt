@@ -36,6 +36,7 @@ from lab.core import db, readiness
 from lab.crypto import diversity, suggest, taxonomy, universe
 from lab import metrics
 from lab.money import leagues as league_rows
+from lab.stages import coverage as stage_coverage
 from lab.stocks import paper as stocks_lab
 from lab.events import paper as paper_lab, paper_venues, sweep_ages as market_sweep_ages
 from web import auth, charts, exporter, glossary, lanes, nav
@@ -1018,7 +1019,7 @@ def coverage(request: Request, signal_source: str = ""):
     clusters = [] if signal_source else diversity.cluster_table(rows("SELECT * FROM residual_clusters"), rows("SELECT * FROM residual_venues"),
                                        family, {(r["strategy"], r["exchange"]): r["sharpe_lo"] for r in found})
     archive = diversity.build(found, rows(diversity.CLIMATE_ROWS), family, dcfg)
-    return page(request, "coverage.html", signal_source=signal_source, signal_sources=toml["signal_sources"],
+    return page(request, "coverage.html", signal_source=signal_source, stage_matrix=stage_coverage.matrix(), signal_sources=toml["signal_sources"],
                 family_categories=toml["family_categories"], untagged=UNTAGGED, **board, archive=archive, clusters=clusters, families={
         **toml["families"], UNTAGGED: "On disk, no line in lab/crypto/families.toml.", GONE: "In the results only, not on disk."})
 
