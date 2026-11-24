@@ -26,6 +26,7 @@ This reference maps the code and data boundaries. The [README layout](../README.
 | `.gitignore`, `.dockerignore`, `.gitleaks.toml` | Keep runtime data and secrets out of the tree and the image |
 | `CHANGELOG.md` | Notable changes, newest first |
 | `README.md` | Layout, the analysis, the site and run-locally commands |
+| `CLAUDE.md` | The traps a session keeps hitting; rules live in [standards](standards.md) |
 
 ## Runtime and data flow
 
