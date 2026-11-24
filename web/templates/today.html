@@ -18,12 +18,12 @@
 </div>
 {% else %}<p class="muted">No dry run placed or closed a fill on this day.</p>{% endif %}
 {% if idle %}
-<h2>Not trading</h2>
+<h2 class="sec">Not trading</h2>
 <p class="muted">Active accounts whose family placed nothing on this day.</p>
 <p>{% for source, venue, family in idle %}{{ family }} on {{ venue }}{% if not loop.last %}, {% endif %}{% endfor %}</p>
 {% endif %}
 {% for title, list in (("Best", best), ("Worst", worst)) %}
-<h2>{{ title }}</h2>
+<h2 class="sec">{{ title }}</h2>
 {% if list %}
 <div class="scroll">
 <table>

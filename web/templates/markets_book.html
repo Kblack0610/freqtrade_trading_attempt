@@ -6,7 +6,7 @@
 {% include "_signal_filter.html" %}
 <p class="muted">The event-contract strategy families: every backtested variant and the gate that lets one into the event-contract league, then the demo orders. Paper money only: nothing here can reach a venue's order API.</p>
 
-<h2>Backtests</h2>
+<h2 class="sec">Backtests</h2>
 <p class="muted">One row per family, venue, variant and walk-forward window (a settled month), newest first. Each window is a trial in the register before its result is read, so the deflated Sharpe counts every window tried. The interval resamples whole events of the net return per trade, after fees.</p>
 {% if backtests %}
 <div class="scroll">
@@ -52,10 +52,10 @@
 </div>
 {% else %}<p class="muted">No split yet: it fills when a backtest next runs.</p>{% endif %}
 
-<h2 id="paper">Paper league</h2>
+<h2 class="sec" id="paper">Paper league</h2>
 <p class="muted">The paper league moved to <a href="/leagues#event-contracts">Leagues</a>, beside the other leagues, with the same scorecard.</p>
 
-<h2>Demo orders</h2>
+<h2 class="sec">Demo orders</h2>
 <p class="muted">Each order path on mock funds, the Kalshi demo exchange, Manifold play money and the Alpaca paper API: the drill rests one order far from the market and cancels it.</p>
 {% if demo %}
 <div class="scroll"><table>

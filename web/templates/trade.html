@@ -20,7 +20,7 @@
 </table>
 </div>
 
-<h2>Decision</h2>
+<h2 class="sec">Decision</h2>
 {% if decision %}
 <p><strong>Rule</strong> {{ decision.rule }} <span class="muted">decided {{ decision.decided_at | local("%b %d %H:%M:%S") }}</span></p>
 <h3>Checks</h3>
@@ -71,7 +71,7 @@
 {% if funnel %}<p>Where each {{ "ticker" if position else "book row" }} stopped for this account: {% for f in funnel %}{{ f.reason }} {{ "{:,}".format(f.n) }}{{ ", " if not loop.last }}{% endfor %}.</p>{% endif %}
 {% if near %}
 <p>{{ near | length }} near-miss{{ "es" if near | length != 1 }}: {% for name, n in near_reasons %}{{ name }} ({{ n }}){{ ", " if not loop.last }}{% endfor %}</p>
-<details><summary>Show near-misses</summary>
+<details class="cfold"><summary>Show near-misses</summary>
 <div class="scroll">
 <table>
   <thead><tr><th>Market</th><th>Failed check</th><th class="n">Value</th><th class="n">Threshold</th></tr></thead>
@@ -87,7 +87,7 @@
 <p class="muted">Recorded before decisions were traced: this fill has no decision row, so its checks, inputs and sizing were not saved.</p>
 {% endif %}
 
-<h2>Outcome</h2>
+<h2 class="sec">Outcome</h2>
 {% if order %}
 <ul class="plain">
   <li>cost {{ cost | num(2) }} ({{ "%g" | format(order.contracts) }} x {{ order.price | num(2) }} + fee {{ order.fee | num(2) }}), quoted {{ order.bid | num(2) }} / {{ order.ask | num(2) }} at {{ order.quoted_at | local("%H:%M:%S") }}</li>

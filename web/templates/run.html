@@ -14,7 +14,7 @@
 </section>
 <p class="muted">Freqtrade {{ run.raw.freqtrade or "-" }} on {{ (run.raw.exchanges or []) | join(", ") }}{% if run.raw.only %}, only {{ run.raw.only | join(", ") }}{% endif %}. {{ run.raw.load_failed or 0 }} strategies failed to load; {{ run.raw.bias_failed or 0 }} bias checks could not run.</p>
 
-<h2>Failed backtest years</h2>
+<h2 class="sec">Failed backtest years</h2>
 {% if failed %}
 <div class="scroll">
 <table>
@@ -29,7 +29,7 @@
 {% else %}<p class="muted">No backtest year failed in this run.</p>{% endif %}
 
 {% if run.raw.skipped %}
-<h2>Skipped</h2>
+<h2 class="sec">Skipped</h2>
 <ul class="plain">{% for why, names in run.raw.skipped | skip_groups %}<li>{{ why }}{% if names | length > 3 %}: <span title="{{ names | join(', ') }}">{{ names | length }} strategies</span>{% elif names %}: {{ names | join(', ') }}{% endif %}</li>{% endfor %}</ul>
 {% endif %}
 {% endblock %}

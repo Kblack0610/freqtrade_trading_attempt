@@ -51,7 +51,7 @@ def test_a_venue_is_connected_only_when_every_check_is_fresh_and_clean():
 def test_accounts_page_shows_the_venue_table(conn, signed_in):  # noqa: F811
     seed_markets(conn)  # an Alpaca paper read and a Fidelity read, among others
     body = signed_in[1].get("/accounts").text
-    table = body.split("<h2>Venues</h2>")[1].split("<h2>Broker accounts</h2>")[0]
+    table = body.split('<h2 class="sec">Venues</h2>')[1].split('<h2 class="sec">Broker accounts</h2>')[0]
     for name in (v["name"] for v in venues.load()):
         assert name in table, name
     assert "split the read and trade grants" in table and "Kraken" in table

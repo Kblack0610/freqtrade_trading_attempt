@@ -23,7 +23,7 @@ ENV PYTHONPATH=/repo
 # per exchange, the analysis one per worker) and the loser exits with FileExistsError.
 # lab/tests/test_backfill.py checks the image has them all.
 RUN freqtrade create-userdir --userdir user_data
-# The site's shell (tokens, fonts, <kb-shell>) is the pinned web-kit: fetch_kit.py downloads it and checks every
+# The site's shell and shared parts (tokens, fonts, <kb-shell>, ui.css, kb-ui.js) are the pinned web-kit: fetch_kit.py downloads it and checks every
 # file against web/kit.lock, so a bad checksum fails the build. Needs no pip package.
 RUN python web/fetch_kit.py
 # The entrypoint stays freqtrade's: every workload in home-config sets its own command.

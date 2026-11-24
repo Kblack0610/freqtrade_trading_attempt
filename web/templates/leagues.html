@@ -5,7 +5,7 @@
 <p class="muted">How are the paper accounts doing? Each league is paper accounts trading one asset class against live prices with simulated fills; every league shows the same columns (<a href="/guide#glossary">what each means</a>). Paper money only: nothing here can reach a real order API. Each lane keeps its own profit, never a total across leagues. The watcher holds each account to the daily loss limit; the drawdown alert fires {{ hard_stop | pct(0) }} of capital below an account's peak.</p>
 <p>{% for t in tabs %}<a href="#{{ t.id }}">{{ t.title }}</a>{% if not loop.last %} - {% endif %}{% endfor %}</p>
 {% for t in tabs %}
-<h2 id="{{ t.id }}">{{ t.title }}</h2>
+<h2 class="sec" id="{{ t.id }}">{{ t.title }}</h2>
 <p class="muted">{{ t.about }}</p>
 {% if t.rows %}
 <div class="scroll">

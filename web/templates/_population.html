@@ -1,4 +1,4 @@
-<h2>How close the score is</h2>
+<h2 class="sec">How close the score is</h2>
 <p><strong>{{ pop.have }} of {{ pop.need }}</strong> strategies have at least {{ pop.member_trades }} out-of-sample trades. The score needs {{ pop.need }}: it judges each strategy against the spread of all of them, and with fewer that spread is guessed, so nearly everything scores high. The bar is not lowered to get a number sooner (<code>lab/crypto/suggest.toml</code> [confidence]). More walk-forward months and venues fill it.</p>
 {% if pop.rows %}
 <p class="muted">Unscored: each strategy's raw average net return per trade on months tuning never saw, before shrinking toward the rest. A high one with few trades is usually luck. These are not projections.</p>

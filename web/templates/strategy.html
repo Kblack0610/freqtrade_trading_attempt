@@ -3,7 +3,7 @@
 {% block body %}
 <h1>{{ s.name }}</h1>
 <section class="card" aria-label="Strategy method">
-  <h2>Method: {{ method.family }}</h2>
+  <h2 class="sec">Method: {{ method.family }}</h2>
   <p>{{ method.description }}</p>
   <p class="muted">Family-level description. Inputs: {{ method.inputs | join(", ") or "Not classified" }}.</p>
   {% if method.note %}<p>{{ method.note }}</p>{% endif %}
@@ -13,7 +13,7 @@
 
 {% if exchanges %}<nav class="tabs">{% for e in exchanges %}<a href="/strategies/{{ s.name }}?exchange={{ e }}" {% if e == exchange %}aria-current="page"{% endif %}>{{ e }}</a>{% endfor %}</nav>{% endif %}
 
-<h2>At a glance on {{ exchange or "-" }}</h2>
+<h2 class="sec">At a glance on {{ exchange or "-" }}</h2>
 {% if card.window %}
 <dl class="card">
   <dt>Return a year, {{ card.window }}</dt><dd class="{{ card.cagr | tone }}">{{ card.cagr | pct }} <span class="muted">Sharpe 90% interval {{ card.sharpe_lo | num(2) }} to {{ card.sharpe_hi | num(2) }}; per trade {{ card.expectancy | pct(2) }} ({{ card.expectancy_lo | pct(2) }} to {{ card.expectancy_hi | pct(2) }})</span></dd>
@@ -30,11 +30,11 @@
 {% else %}<p class="muted">No recent-year result on this venue yet.</p>{% endif %}
 
 {% if suggestions %}
-<h2>Suggestions</h2>
+<h2 class="sec">Suggestions</h2>
 {% for sg in suggestions %}{% include "_suggestion.html" %}{% endfor %}
 {% endif %}
 
-<h2>Bias checks</h2>
+<h2 class="sec">Bias checks</h2>
 {% if bias %}
 <div class="scroll">
 <table>
@@ -51,11 +51,11 @@
 <p class="muted">Lookahead: a signal changes when later candles are hidden, so the backtest saw the future. Recursive: an indicator still moves at the strategy's own startup candle count, so live values differ from the backtest.</p>
 {% else %}<p class="muted">Not checked yet: the nightly analysis runs the lookahead and recursive checks on new and changed files.</p>{% endif %}
 
-<h2>Cumulative return on {{ exchange or "-" }}</h2>
+<h2 class="sec">Cumulative return on {{ exchange or "-" }}</h2>
 {{ chart | safe }}
 <p class="muted">Realized on trade close. Each calendar year is its own backtest from the same starting wallet, chained by daily return.</p>
 
-<h2>Results by window</h2>
+<h2 class="sec">Results by window</h2>
 {% if windows %}
 <div class="scroll">
 <table>
@@ -82,7 +82,7 @@
 </div>
 {% else %}<p class="muted">No results on {{ exchange or "any exchange" }} yet: the nightly analysis adds them after its first backtest here.</p>{% endif %}
 
-<h2>Estimates</h2>
+<h2 class="sec">Estimates</h2>
 {% if estimates %}
 <div class="scroll">
 <table>
@@ -98,7 +98,7 @@
 <p class="muted">A seeded block bootstrap of the last year's daily returns (10-day blocks), so the same data gives the same bands.</p>
 {% else %}<p class="muted">No estimates yet: they need 180 days of backtest results.</p>{% endif %}
 
-<h2 id="walk-forward">Walk-forward</h2>
+<h2 class="sec" id="walk-forward">Walk-forward</h2>
 {% if wf %}
 {% for r, folds in wf %}
 <p>Tuned parameters on {{ r.exchange }} beat as is in {{ r.beat }} of {{ r.tuned_folds }} months: {{ r.tuned_mean | pct(2) }} per trade tuned ({{ r.tuned_lo | pct(2) }} to {{ r.tuned_hi | pct(2) }}) against {{ r.base_mean | pct(2) }} as is ({{ r.base_lo | pct(2) }} to {{ r.base_hi | pct(2) }}) over {{ r.tuned_trades }} trades, walk-forward efficiency {{ r.wfe | num(2) }}.</p>
@@ -106,7 +106,7 @@
 {% endfor %}
 {% else %}<p class="muted">Not a walk-forward candidate yet: the weekly run takes the league's strategies and the promote and watch suggestions.</p>{% endif %}
 
-<h2>By market regime</h2>
+<h2 class="sec">By market regime</h2>
 {% if regimes %}
 <div class="scroll">
 <table>
@@ -121,13 +121,13 @@
 <p class="muted">Trend: BTC/USD above or below its 200-day mean. Volatility: 30-day realized volatility in thirds of its own history.</p>
 {% else %}<p class="muted">No regime days overlap this strategy's results yet.</p>{% endif %}
 
-<h2>Correlation with the league</h2>
+<h2 class="sec">Correlation with the league</h2>
 {% if correlations %}
 <ul class="plain">{% for c in correlations %}<li>{{ c.other }}: {{ c.rho | num(2) }} over {{ c.days }} days</li>{% endfor %}</ul>
 <p class="muted">Daily backtest returns on {{ exchange }}. Near 1 means it mostly duplicates a strategy the league already runs.</p>
 {% else %}<p class="muted">Nothing to compare yet: no league strategy on {{ exchange or "this exchange" }} shares backtest days with this one.</p>{% endif %}
 
-<h2>Backtests by year</h2>
+<h2 class="sec">Backtests by year</h2>
 {% if chunks %}
 <div class="scroll">
 <table>
@@ -144,7 +144,7 @@
 </div>
 {% else %}<p class="muted">Not backtested yet: the nightly analysis backtests every year of history.</p>{% endif %}
 
-<h2>Latest backtest trades</h2>
+<h2 class="sec">Latest backtest trades</h2>
 {% if trades %}
 <div class="scroll">
 <table>
