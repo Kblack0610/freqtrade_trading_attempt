@@ -225,7 +225,7 @@ def ingest_bot(conn, fetch: Fetch, i: int, row: Row, now: dt.datetime) -> dict:
             snap["raw"].obj["trace_error"] = f"{type(e).__name__}: {e}"
     snap.update(bot=name, ts=now, source="ingest")
     with conn.transaction():
-        conn.execute(UPSERT_BOT, (*row, now, now))
+        conn.execute(UPSERT_BOT, (row.name, row.exchange, row.strategy, row.cohort, row.overlay, now, now))
         conn.cursor().executemany(UPSERT_TRADE, [{**t, "bot": name} for t in trades])
         conn.cursor().executemany(INSERT_DECISION, decisions)
         if snap["error"] in (None, "NOT DRY RUN"):  # the fetch completed, so the trade list is whole
