@@ -67,10 +67,11 @@ def test_trade_row_uses_utc_timestamps():
     assert r["enter_tag"] is None
 
 
-def test_rerun_adds_no_duplicates_and_tracks_closes(conn, monkeypatch):
+@pytest.mark.parametrize("ws_off", [False, True])
+def test_rerun_adds_no_duplicates_and_tracks_closes(conn, monkeypatch, ws_off):
     monkeypatch.setattr(ingest, "PAGE", 2)  # force paging through /trades
     bots = FakeBots({"closed": [trade(1, False), trade(2, False), trade(3, False)], "open": [trade(4, True)]})
-    ingest.ingest_bot(conn, bots, 0, Row("k-s", "kraken", "S"), T0)
+    ingest.ingest_bot(conn, bots, 0, Row("k-s", "kraken", "S", ws_off=ws_off), T0)
     ingest.ingest_bot(conn, bots, 0, Row("k-s", "kraken", "S"), T0 + dt.timedelta(hours=1))
     assert count(conn, "SELECT count(*) FROM bot_trades") == 4
     assert count(conn, "SELECT count(*) FROM bot_snapshots WHERE bot = 'k-s'") == 2
@@ -116,7 +117,7 @@ NOW = dt.datetime(2026, 11, 6, 12, 30, tzinfo=dt.timezone.utc)
 
 def snapshots(conn, stamps: list[dt.datetime], bot: str = "k-s", profit: float | None = 1.0, dry_run: bool | None = True,
               error: str | None = None) -> None:
-    conn.execute(ingest.UPSERT_BOT, (*Row(bot, "kraken", "S"), NOW, NOW))
+    conn.execute(ingest.UPSERT_BOT, (bot, "kraken", "S", "league", "", NOW, NOW))
     conn.cursor().executemany("INSERT INTO bot_snapshots (bot, ts, profit_all_pct, dry_run, error) VALUES (%s, %s, %s, %s, %s)",
                               [(bot, ts, profit, dry_run, error) for ts in stamps])
 
