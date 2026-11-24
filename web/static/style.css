@@ -31,7 +31,7 @@ table { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
 th, td { padding: 0.45rem 0.75rem; text-align: left; white-space: nowrap; border-bottom: 1px solid var(--line); }
 th { color: var(--muted); font-weight: 500; font-size: 0.8rem; }
 tbody tr:last-child td { border-bottom: none; }
-.n { text-align: right; font-variant-numeric: tabular-nums; }
+td.n, th.n { text-align: right; font-variant-numeric: tabular-nums; }
 ul.plain { padding-left: 1.2rem; }
 .chart { width: 100%; height: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
 .chart .zero { stroke: var(--line); stroke-width: 1; }
