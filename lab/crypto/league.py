@@ -2,9 +2,10 @@
 """Run one dry-run league bot.
 
 A StatefulSet pod named <set>-<N> runs roster row N (blank lines and # comments skipped). A row is
-`name exchange strategy [cohort overlay]`: the cohort is the league it reports in (the site and the exporter group
+`name exchange strategy [cohort overlay] [ws=off]`: the cohort is the league it reports in (the site and the exporter group
 by it), and the overlay is a setup overlay id from lab/crypto/variants.toml, layered over the venue's config the way the
 backtest runs it. A 3-column row is cohort `league`, overlay `base` (the strategy's own settings).
+The optional trailing `ws=off` disables exchange market-data WebSockets for that bot.
 Before handing over to freqtrade it refuses anything that could trade real money:
 the effective config (files plus FREQTRADE__ env overrides) must be dry run, spot, and carry
 no exchange key or secret, and no FREQTRADE__ env var may be set at all.
@@ -30,6 +31,7 @@ class Row(NamedTuple):
     strategy: str
     cohort: str = "league"
     overlay: str = ""  # a lab/crypto/variants.toml overlay id, '' for none
+    ws_off: bool = False
 
 
 def die(msg: str) -> None:
@@ -44,11 +46,14 @@ def roster_rows(path: Path) -> list[Row]:
         if not line or line.startswith("#"):
             continue
         parts = line.split()
+        ws_off = parts[-1] == "ws=off"
+        if ws_off:
+            parts.pop()
         if len(parts) not in (3, 5):
-            die(f"{path}:{n}: want 'name exchange strategy [cohort overlay]', got {raw!r}")
+            die(f"{path}:{n}: want 'name exchange strategy [cohort overlay] [ws=off]', got {raw!r}")
         if len(parts) == 5 and parts[4] == BASE:
             parts[4] = ""
-        rows.append(Row(*parts))
+        rows.append(Row(*parts, ws_off=ws_off))
     return rows
 
 
@@ -114,7 +119,7 @@ def main() -> None:
     i = ordinal()
     if i >= len(rows):
         die(f"pod ordinal {i} has no roster row ({len(rows)} rows): set replicas to the row count")
-    name, exchange, strategy, cohort, overlay = rows[i]
+    name, exchange, strategy, cohort, overlay, ws_off = rows[i]
 
     exchange_cfg = USER_DATA / "exchanges" / f"{exchange}.json"
     if not exchange_cfg.is_file():
@@ -127,7 +132,7 @@ def main() -> None:
 
     STATE.mkdir(parents=True, exist_ok=True)
     api_cfg = STATE / "api.json"
-    api_cfg.write_text(json.dumps({
+    runtime_config = {
         "bot_name": name,
         "api_server": {
             "enabled": True,
@@ -141,7 +146,10 @@ def main() -> None:
             "jwt_secret_key": secrets["FT_API_JWT_SECRET"],
             "ws_token": secrets["FT_API_WS_TOKEN"],
         },
-    }, indent=2))
+    }
+    if ws_off:
+        runtime_config["exchange"] = {"enable_ws": False}
+    api_cfg.write_text(json.dumps(runtime_config, indent=2))
     api_cfg.chmod(0o600)
 
     configs = [USER_DATA / "config.base.json", exchange_cfg]

@@ -40,12 +40,39 @@ def test_a_three_column_row_is_the_league_on_its_own_settings(tmp_path):
                                                       Row("k-b", "kraken", "S", "league", "")]
 
 
-@pytest.mark.parametrize("line", ["k-s kraken", "k-s kraken S aggressive"])
+@pytest.mark.parametrize("line", ["k-s kraken", "k-s kraken S aggressive", "k-s kraken S ws=on",
+                                  "k-s kraken S league base ws=of", "k-s kraken S league base ws=off extra",
+                                  "k-s kraken S aggressive ws=off"])
 def test_a_row_of_another_width_is_refused(tmp_path, line, capsys):
     (tmp_path / "r.tsv").write_text(line + "\n")
     with pytest.raises(SystemExit):
         league.roster_rows(tmp_path / "r.tsv")
-    assert "want 'name exchange strategy [cohort overlay]'" in capsys.readouterr().err
+    assert "want 'name exchange strategy [cohort overlay] [ws=off]'" in capsys.readouterr().err
+
+
+def test_ws_off_preserves_roster_order_and_metadata(tmp_path):
+    roster = tmp_path / "r.tsv"
+    roster.write_text("# comment\n\nk-s kraken S ws=off\nk-a kraken S aggressive " + SLOTS5 +
+                      " ws=off\nk-b kraken S league base ws=off\nk-c kraken S\n")
+    assert league.roster_rows(roster) == [Row("k-s", "kraken", "S", ws_off=True),
+                                        Row("k-a", "kraken", "S", "aggressive", SLOTS5, True),
+                                        Row("k-b", "kraken", "S", ws_off=True),
+                                        Row("k-c", "kraken", "S")]
+
+
+@pytest.mark.parametrize("settings", ["", " league base", " aggressive " + SLOTS5])
+def test_ws_off_reaches_effective_config_without_changing_the_venue(pod, settings):
+    line = "k-s kraken SampleStrategy" + settings
+    original = json.loads((league.USER_DATA / "exchanges" / "kraken.json").read_text())
+    default = pod(line)
+    assert default["exchange"].get("enable_ws") == original["exchange"].get("enable_ws")
+    disabled = pod(line + " ws=off")
+    assert disabled["exchange"]["enable_ws"] is False
+    assert disabled["exchange"]["pair_whitelist"] == default["exchange"]["pair_whitelist"]
+    assert disabled["max_open_trades"] == default["max_open_trades"]
+    assert disabled["dry_run"] is True
+    assert disabled["api_server"]["ws_token"] == default["api_server"]["ws_token"]
+    assert json.loads((league.USER_DATA / "exchanges" / "kraken.json").read_text()) == original
 
 
 def test_an_overlay_reaches_the_config_freqtrade_runs(pod):
