@@ -216,8 +216,8 @@ def write_candles(data: Path, seed: int, start: dt.date, end: dt.date, c: dict) 
     return out
 
 
-def scratch_url() -> str:
-    return psycopg.conninfo.make_conninfo(url(), options=f"-csearch_path={SCHEMA}")
+def scratch_url(schema: str | None = None) -> str:
+    return psycopg.conninfo.make_conninfo(url(), options=f"-csearch_path={schema or SCHEMA}")
 
 
 def scratch_env(repo: Path, results: Path, n: int, folds: int) -> dict:
@@ -234,9 +234,9 @@ def digest(c: dict) -> str:
     return hashlib.sha256(json.dumps(c, sort_keys=True, default=str).encode()).hexdigest()
 
 
-def migrate_scratch() -> None:
+def migrate_scratch(schema: str | None = None) -> None:
     subprocess.run([sys.executable, str(REPO / "lab" / "migrate.py")], check=True,
-                   env={**os.environ, "DATABASE_URL": scratch_url()})
+                   env={**os.environ, "DATABASE_URL": scratch_url(schema)})
 
 
 def open_universe(conn, cfg: dict, today: dt.date) -> dict:

@@ -12,6 +12,7 @@ import pandas as pd
 import pytest
 
 from lab.families import generate
+from lab.flow_matrix import synthetic_candles
 
 LAB = Path(__file__).resolve().parents[1]
 FAMILIES = LAB / "families"
@@ -77,17 +78,6 @@ def test_no_lab_module_shadows_an_installed_one():
     repo = {"lab", "web"}
     installed = {m.name for m in pkgutil.iter_modules([p for p in sys.path if p and Path(p).resolve() not in (LAB, LAB.parent)])}
     assert (lab | repo) & (installed | set(sys.stdlib_module_names)) == set()
-
-
-def synthetic_candles(start: dt.datetime, end: dt.datetime, freq: str, seed: int = 11) -> pd.DataFrame:
-    date = pd.date_range(start, end, freq=freq, tz="UTC")
-    rng = np.random.default_rng(seed)
-    close = 30_000 * np.exp(np.cumsum(rng.normal(0, 0.012, len(date))))
-    opn = np.r_[close[0], close[:-1]]
-    wick = np.abs(rng.normal(0, 0.004, len(date)))
-    return pd.DataFrame({"date": date, "open": opn, "high": np.maximum(opn, close) * (1 + wick),
-                         "low": np.minimum(opn, close) * (1 - wick), "close": close,
-                         "volume": 10.0 * np.exp(rng.normal(0, 0.8, len(date)))})  # varies, so volume signals fire
 
 
 @pytest.fixture

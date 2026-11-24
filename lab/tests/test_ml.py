@@ -10,7 +10,8 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from test_families import bias_data, synthetic_candles  # noqa: F401 (bias_data is a fixture)
+from lab.flow_matrix import synthetic_candles
+from test_families import bias_data  # noqa: F401 (a fixture)
 
 LAB = Path(__file__).resolve().parents[1]
 REPO = LAB.parent

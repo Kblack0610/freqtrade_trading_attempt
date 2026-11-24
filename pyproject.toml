@@ -8,3 +8,6 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E9", "F63", "F7", "F82"]
+
+[tool.pytest.ini_options]
+markers = ["flow_gate: the flow matrix's gate sample, one strategy per family (lab/tests/test_flow_matrix.py)"]

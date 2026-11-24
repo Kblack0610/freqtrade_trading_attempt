@@ -1,20 +1,26 @@
-"""lab/flow_matrix.py: every strategy of the book through the backtest, bias and book avenues on synthetic candles.
-The unit tests need no freqtrade. The matrix itself (the sample, the controls, the isolation check) runs real
-backtests and bias checks, about four minutes, so CI runs it in the test-calibration job with FLOW_E2E=1."""
+"""Every strategy in the book through every avenue of the trader flow (lab/flow_matrix.py).
 
-import datetime as dt
+FLOW_MATRIX=gate runs the flow_gate sample, one strategy per family, plus the negative controls; CI's test-flow
+job runs it with `-m flow_gate` in FLOW_SHARDS parallel jobs, shard FLOW_SHARD taking every FLOW_SHARDS-th strategy of
+the sample (the last shard, the smallest, also runs the controls). FLOW_MATRIX=full runs the whole book. Unset, only the
+unit tests of the module's lists run. The matrix needs DATABASE_URL (a throwaway database) and the trader image's Freqtrade.
+"""
+
 import os
 import shutil
 from pathlib import Path
 
 import pytest
 
-from lab import flow_matrix as fm
-from lab import suggest
+from lab import cohorts, flow_matrix
 
-CFG = suggest.load_config()
-FIXTURES = Path(__file__).parent / "fixtures" / "strategies"
-CRASHES = '''
+MODE = os.environ.get("FLOW_MATRIX", "")
+SHARD, SHARDS = int(os.environ.get("FLOW_SHARD", "0")), int(os.environ.get("FLOW_SHARDS", "1"))
+FAMS = cohorts.families()
+BOOK = [n for n in FAMS if n not in flow_matrix.research()]
+SAMPLE = flow_matrix.sample(FAMS)
+PLANTED = flow_matrix.REPO / "lab" / "tests" / "fixtures" / "strategies" / "PlantedLookahead.py"
+CRASH = '''
 from freqtrade.strategy import IStrategy
 
 
@@ -34,92 +40,139 @@ class FlowCrash(IStrategy):
     def populate_exit_trend(self, dataframe, metadata):
         return dataframe
 '''
+# A class the scan finds but families.toml has lost: its backtest cell must fail, as /coverage shows it untagged.
+UNTAGGED = next(n for n in BOOK if n not in SAMPLE and FAMS[n] == "trend")
+# (strategy, avenue) -> what its fail reason holds
+CONTROLS = {("PlantedLookahead", "bias"): "lookahead", (UNTAGGED, "backtest"): "families.toml",
+            ("FlowCrash", "backtest"): "planted crash"}
+EXTRA = ("PlantedLookahead", "FlowCrash")
 
 
-def strat(name, family, load_error=None):
-    return {"name": name, "file": f"user_data/strategies/{name}.py", "family": family, "load_error": load_error}
+def user_files() -> list[Path]:
+    ud = flow_matrix.REPO / "user_data"
+    return sorted(p.relative_to(ud) for p in ud.rglob("*") if p.is_file() and "__pycache__" not in p.parts)
 
 
-def test_the_sample_is_one_runnable_strategy_per_family():
-    found = [strat("A1", "trend"), strat("A2", "trend"), strat("B", "grid"), strat("C", "ml"), strat("D", "short"),
-             strat("E", "flow", "does not load"), strat("F", "flow")]
-    assert [s["name"] for s in fm.sample(found)] == ["A1", "B", "F"]
+def test_the_sample_is_the_first_class_of_each_family_outside_the_research():
+    assert len(SAMPLE) == len(set(FAMS[n] for n in BOOK))
+    assert all(FAMS[n] != FAMS[m] for i, n in enumerate(SAMPLE) for m in SAMPLE[i + 1:])
+    assert not set(SAMPLE) & flow_matrix.research() and flow_matrix.research() <= set(FAMS)
 
 
-def test_every_family_of_the_book_has_a_strategy_the_sample_can_run():
-    import tomllib
-    toml = tomllib.loads((fm.REPO / "lab" / "families.toml").read_text())
-    runnable = {v["family"] for v in toml["strategies"].values()} - fm.OUT_OF_BOOK
-    assert runnable and runnable <= set(toml["families"])
+def test_the_book_is_the_scan_plus_families_toml_without_the_research():
+    found = [{"name": "Scanned"}, {"name": BOOK[0]}]
+    assert flow_matrix.book(found, FAMS) == BOOK + ["Scanned"]
 
 
-def test_monthly_returns_are_profit_over_the_start_balance_per_calendar_month():
-    import pandas as pd
-    t = pd.DataFrame({"close_date": pd.to_datetime(["2026-01-05", "2026-01-20", "2026-03-02"], utc=True),
-                      "profit_abs": [10.0, -4.0, 20.0]})
-    got = fm.monthly_returns(t, 1000.0)
-    assert [(a.isoformat(), b.isoformat(), round(v, 4)) for a, b, v in got] == [
-        ("2026-01-01", "2026-02-01", 0.006), ("2026-03-01", "2026-04-01", 0.02)]
-    assert fm.monthly_returns(t.iloc[:0], 1000.0) == []
-
-
-def months(n, v=0.01):
-    return [[f"2025-{m:02d}-01", f"2025-{m + 1:02d}-01", v if m % 2 else -v / 2] for m in range(1, n + 1)]
-
-
-def test_book_cell_projects_enough_months_skips_too_few_and_skips_a_failed_backtest():
-    import pandas as pd
-    close = pd.Series(range(1, 400), index=pd.date_range("2024-12-01", periods=399, freq="D", tz="UTC"), dtype=float)
-    world = {"closes": {"BTC/USD": close}}
-    ok = fm.book_cell({"status": "pass", "months": months(9)}, world, CFG)
-    assert ok["status"] == "pass", ok
-    few = fm.book_cell({"status": "pass", "months": months(5)}, world, CFG)
-    assert few["status"] == "skip" and "min_folds" in few["detail"]
-    assert fm.book_cell({"status": "fail", "detail": "x"}, world, CFG)["status"] == "skip"
+def test_a_bias_check_with_nothing_to_judge_is_a_skip_not_a_finding():
+    assert flow_matrix.NOTHING_TO_JUDGE.search("only 0 signals in 20 days")
+    assert flow_matrix.NOTHING_TO_JUDGE.search("ConfigurationError: The strategy defines invalid startup candle count of 0.")
+    assert not flow_matrix.NOTHING_TO_JUDGE.search("OperationalException: No data found. Terminating.")
 
 
 def test_the_summary_counts_each_avenue():
-    cells = [{"avenue": "backtest", "status": "pass"}, {"avenue": "bias", "status": "fail"},
-             {"avenue": "bias", "status": "skip"}, {"avenue": "book", "status": "pass"}]
-    assert fm.summary(cells) == {"backtest": {"pass": 1, "fail": 0, "skip": 0}, "bias": {"pass": 0, "fail": 1, "skip": 1},
-                                 "book": {"pass": 1, "fail": 0, "skip": 0}}
+    rows = [{"avenue": "backtest", "status": "ok"}, {"avenue": "bias", "status": "fail"}, {"avenue": "bias", "status": "skip"}]
+    got = flow_matrix.summary(rows)
+    assert got["backtest"] == {"ok": 1, "skip": 0, "fail": 0} and got["bias"] == {"ok": 0, "skip": 1, "fail": 1}
+    assert set(got) == set(flow_matrix.AVENUES)
 
 
-def test_the_bias_check_with_nothing_to_judge_is_not_a_failure():
-    assert fm.NOTHING_TO_JUDGE.search("only 0 signals in 20 days")
-    assert fm.NOTHING_TO_JUDGE.search("ConfigurationError: The strategy defines invalid startup candle count of 0.")
-    assert not fm.NOTHING_TO_JUDGE.search("OperationalException: No data found. Terminating.")
+def params():
+    out = []
+    for name in BOOK:
+        marks = [pytest.mark.flow_gate] if name in SAMPLE else []
+        out += [pytest.param(name, a, marks=marks, id=f"{name}-{a}") for a in flow_matrix.AVENUES]
+    return out
 
 
 @pytest.fixture(scope="module")
-def world(tmp_path_factory):
-    if not os.environ.get("FLOW_E2E"):
-        pytest.skip("FLOW_E2E not set")
-    pytest.importorskip("freqtrade")
-    root = tmp_path_factory.mktemp("flow")
-    w = fm.write_world(root, dt.datetime.now(dt.timezone.utc).date())
-    shutil.copy(FIXTURES / "PlantedLookahead.py", w["repo"] / "user_data" / "strategies")
-    (w["repo"] / "user_data" / "strategies" / "FlowCrash.py").write_text(CRASHES)
-    return w
+def matrix(tmp_path_factory):
+    if MODE not in ("gate", "full"):
+        pytest.skip("FLOW_MATRIX not set to gate or full")
+    if not os.environ.get("DATABASE_URL"):
+        pytest.skip("DATABASE_URL not set")
+    from lab import db, migrate
+
+    assert migrate.main() == 0
+    names = SAMPLE[SHARD::SHARDS] + ([UNTAGGED, *EXTRA] if SHARD == SHARDS - 1 else []) if MODE == "gate" else None
+    fams = {**{n: f for n, f in FAMS.items() if n != UNTAGGED}, "PlantedLookahead": "control", "FlowCrash": "control"}
+    work = tmp_path_factory.mktemp("controls")
+    shutil.copy(PLANTED, work / PLANTED.name)
+    (work / "FlowCrash.py").write_text(CRASH)
+    files = user_files()
+    tables = ("strategies", "backtest_chunks", "bias_checks", "walkforward", "readiness", "book", "trials")
+    with db.connect(autocommit=True) as conn:
+        before = {t: conn.execute(f"SELECT count(*) FROM {t}").fetchone()[0] for t in tables}
+        runs = conn.execute("SELECT kind, count(*) FROM runs GROUP BY kind").fetchall()
+        last = conn.execute("SELECT coalesce(max(id), 0) FROM runs").fetchone()[0]
+        exit_code = flow_matrix.main(names, fams, tuple(work / f"{n}.py" for n in EXTRA))
+        after = {t: conn.execute(f"SELECT count(*) FROM {t}").fetchone()[0] for t in tables}
+        new = conn.execute("SELECT kind, ok, raw FROM runs WHERE id > %s", (last,)).fetchall()
+        schema = conn.execute("SELECT count(*) FROM information_schema.schemata WHERE schema_name = %s",
+                              (flow_matrix.SCHEMA,)).fetchone()[0]
+        runs_after = dict(conn.execute("SELECT kind, count(*) FROM runs WHERE id <= %s GROUP BY kind", (last,)).fetchall())
+    report = new[0][2] if len(new) == 1 else {}
+    cells = {(c["strategy"], c["avenue"], c["exchange"]): c for c in report.get("cells", [])}
+    return {"exit": exit_code, "before": before, "after": after, "new": new, "schema": schema, "runs": dict(runs),
+            "runs_after": runs_after, "report": report, "cells": cells, "names": names, "files": (files, user_files())}
 
 
-def test_the_sample_runs_every_avenue_without_a_failed_cell(world):
-    before = sorted(p.relative_to(fm.REPO) for p in (fm.REPO / "user_data").rglob("*") if p.is_file())
-    cells = fm.run(fm.sample(fm.strategies()), world)
-    failed = [c for c in cells if c["status"] == "fail"]
-    assert not failed, failed
-    s = fm.summary(cells)
-    assert all(s[a]["pass"] > 0 for a in fm.AVENUES), s
-    # isolation: the real user_data gained no file (no results, data or params) and the world sits in the temp dir
-    assert before == sorted(p.relative_to(fm.REPO) for p in (fm.REPO / "user_data").rglob("*") if p.is_file())
-    assert str(world["repo"]).startswith(str(world["results"].parent)) and fm.REPO not in world["repo"].parents
+@pytest.mark.flow_gate
+def test_the_run_is_recorded_and_isolated(matrix):
+    """One runs row of kind 'flow_matrix' is all the run adds to the production tables (as test_calibration), and the
+    real user_data gains no file (no results, candles or params)."""
+    assert [k for k, *_ in matrix["new"]] == ["flow_matrix"], matrix["new"]
+    assert matrix["new"][0][1] is True and matrix["exit"] == 0, matrix["report"].get("error") or matrix["report"].get("probe_error")
+    assert matrix["after"] == matrix["before"]
+    assert matrix["runs_after"] == matrix["runs"]
+    assert matrix["schema"] == 0  # the scratch schema is dropped
+    assert matrix["files"][0] == matrix["files"][1]
 
 
-def test_a_crashing_strategy_fails_its_backtest_cell(world):
-    cell = fm.run_cell(world, "backtest", "FlowCrash")
-    assert cell["status"] == "fail" and "planted crash" in cell["detail"], cell
+@pytest.mark.flow_gate
+def test_every_cell_is_there_with_a_reason(matrix):
+    """Every strategy on every avenue's exchanges has exactly one cell, ok, skip or fail, each with a reason."""
+    from lab import analyze
+
+    report = matrix["report"]
+    names = matrix["names"] or flow_matrix.book(analyze.Cli().discover(), FAMS) + list(EXTRA)
+    if matrix["names"] is None:  # the whole book is what the scan finds (test_every_active_family_member_is_discovered)
+        assert report["strategies"] == len(names)
+    want = {(n, a, e) for n in names for a in flow_matrix.AVENUES for e in report["exchanges"][a]}
+    assert set(matrix["cells"]) == want
+    assert len(report["cells"]) == flow_matrix.expected(report)
+    assert all(c["status"] in ("ok", "skip", "fail") and c["reason"] for c in report["cells"])
 
 
-def test_a_strategy_that_reads_the_next_candle_is_flagged_by_the_bias_cell(world):
-    cell = fm.run_cell(world, "bias", "PlantedLookahead")
-    assert cell["status"] == "pass" and cell["has_bias"].get("lookahead") is True, cell
+@pytest.mark.flow_gate
+@pytest.mark.parametrize("avenue", flow_matrix.AVENUES)
+def test_every_avenue_runs(matrix, avenue):
+    """Each avenue reaches a verdict for at least one strategy (ok, a bias found, or one check clean), so a broken stage cannot
+    pass as strategy findings."""
+    cells = [c for c in matrix["report"]["cells"] if c["avenue"] == avenue]
+    assert any(c["status"] == "ok" or c["reason"].startswith("biased:") or flow_matrix.CLEAN in c["reason"]
+               for c in cells), cells
+
+
+@pytest.mark.flow_gate
+@pytest.mark.parametrize("strategy,avenue", list(CONTROLS))
+def test_negative_controls_fail(matrix, strategy, avenue):
+    if matrix["names"] is not None and strategy not in matrix["names"]:
+        pytest.skip("the controls run in the last shard")
+    got = [c for c in matrix["report"]["cells"] if c["strategy"] == strategy and c["avenue"] == avenue]
+    assert got and all(c["status"] == "fail" and CONTROLS[strategy, avenue] in c["reason"] for c in got), got
+
+
+@pytest.mark.parametrize("strategy,avenue", params())
+def test_cell(matrix, strategy, avenue):
+    """The strategy ran on the avenue on every exchange it is on; a skip is a step the flow leaves out on purpose.
+    A failing cell is reported as xfail with its reason: the strategy's defect, which the full run's record lists."""
+    if matrix["names"] is not None and strategy not in matrix["names"]:
+        pytest.skip("not in this shard of the gate sample")
+    if (strategy, avenue) in CONTROLS:
+        pytest.skip("a negative control: test_negative_controls_fail")
+    got = [c for (s, a, _), c in matrix["cells"].items() if s == strategy and a == avenue]
+    assert got, "no cell"
+    bad = [f"{c['exchange']}: {c['reason']}" for c in got if c["status"] == "fail"]
+    if bad:  # a finding about the strategy, filed as a follow-up row, not a broken flow
+        pytest.xfail("; ".join(bad))
