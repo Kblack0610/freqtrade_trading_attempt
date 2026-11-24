@@ -53,6 +53,10 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
     services:
       postgres:
         image: postgres:17
@@ -69,14 +73,15 @@ jobs:
           node-version: '22'
       - name: Build
         run: docker build -t trader:ci .
-      - name: Migrate twice, then unit and database tests
+      - name: Migrate twice, then this shard's unit and database tests (lab/tests/conftest.py)
         timeout-minutes: 10
         run: |
           test_command=$(node -p 'require("./package.json").scripts.test')
-          docker run --rm --network host --entrypoint bash \
+          docker run --rm --network host --entrypoint bash -e TEST_SHARD=${{ matrix.shard }} -e TEST_SHARDS=4 \
             -e DATABASE_URL=postgresql://postgres:test@localhost:5432/trader trader:ci \
             -c "python lab/migrate.py && python lab/migrate.py | grep -q '0 new' && $test_command"
       - name: Every strategy loads
+        if: matrix.shard == 0
         run: |
           docker run --rm --entrypoint freqtrade trader:ci list-strategies --recursive-strategy-search \
             --userdir /repo/user_data -c /repo/user_data/config.base.json -c /repo/user_data/exchanges/binanceus.json \
