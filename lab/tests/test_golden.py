@@ -10,7 +10,7 @@ pytest.importorskip("freqtrade")
 
 from lab.crypto import analyze, reproduce, walkforward  # noqa: E402
 from lab.tests.test_analyze import REPO  # noqa: E402
-from lab.tests.test_families import synthetic_candles  # noqa: E402
+from lab.crypto.flow_matrix import synthetic_candles  # noqa: E402
 
 EX = "binanceus"
 START, END = dt.date(2026, 1, 10), dt.date(2026, 2, 25)

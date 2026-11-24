@@ -363,7 +363,7 @@ def test_the_embargo_is_part_of_the_cache_key(monkeypatch):
 
 
 def test_a_changed_candle_reruns_only_the_folds_whose_span_holds_it(wlab, monkeypatch, tmp_path):
-    from lab.tests.test_families import synthetic_candles
+    from lab.crypto.flow_matrix import synthetic_candles
 
     monkeypatch.setattr(analyze, "RESULTS", tmp_path)
     feather = tmp_path / "data" / "binanceus" / "BTC_USD-5m.feather"
