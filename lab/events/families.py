@@ -106,6 +106,11 @@ def closing(row, m: Market, hours: float | None) -> bool:
     return left > 0 and (hours is None or left <= hours * 3600)
 
 
+def edge_of(fair: float, bid: float, ask: float, side: str) -> float:
+    """What the fair price beats the side's price by: the yes ask, or one minus the no ask (the yes bid)."""
+    return fair - ask if side == "yes" else bid - fair
+
+
 def side_for(fair: float, bid: float, ask: float, edge: float) -> str | None:
     if fair - ask >= edge:
         return "yes"
@@ -165,11 +170,13 @@ class Family:
         tight = self.passes("spread", q[1] - q[0], p["max_spread"], q[1] - q[0] <= p["max_spread"])
         return q if timely and tight else None
 
-    def order(self, row, side: str | None) -> list[Order]:
+    def order(self, row, side: str | None, fair: float | None = None) -> list[Order]:
+        """The order for `side`; `fair` is the rule's fair price of yes, which gives the order its edge."""
         if side is None:
             return []
         self.seen.add(row.market_id)
-        return [Order(row.market_id, side, self.params["stake"])]
+        edge = None if fair is None else edge_of(fair, row.bid, row.ask, side)
+        return [Order(row.market_id, side, self.params["stake"], edge=edge)]
 
 
 class Longshot(Family):
@@ -237,7 +244,7 @@ class Calibration(Family):
         if row.ts < self.before or not (q := self.entry(row, m)):
             return []
         fair = self.rate(_key(m, self.params["key"]), (q[0] + q[1]) / 2)
-        return self.order(row, None if fair is None else side_for(fair, *q, self.params["edge"]))
+        return self.order(row, None if fair is None else side_for(fair, *q, self.params["edge"]), fair)
 
 
 class RefBook:
@@ -313,7 +320,7 @@ class Gap(Family):
         if link is None or not (q := self.entry(row, m)):
             return []
         fair = self.ref.fair(*link, row.ts)
-        return self.order(row, None if fair is None else side_for(fair, *q, self.params["edge"]))
+        return self.order(row, None if fair is None else side_for(fair, *q, self.params["edge"]), fair)
 
 
 def line_resolution(line_id: str, r: Resolution) -> Resolution:
@@ -455,7 +462,7 @@ class TTTotals(Family):
                            p["last5"], agree[side]):
             return []
         self.seen.add(m.event_id)
-        return self.order(row, side)
+        return self.order(row, side, prob)
 
 
 TEMP = re.compile(r"(-?\d+)° (?:or (above|below)|to (-?\d+)°)")
@@ -546,7 +553,7 @@ class Weather(Family):
         side = side_for(prob, *got, p["edge"])
         if not self.passes("edge", {"prob": prob, "bid": got[0], "ask": got[1]}, p["edge"], side is not None):
             return []
-        return self.order(row, side if q else None)
+        return self.order(row, side if q else None, prob)
 
 
 def settled_by(kind: str, rng: tuple | None, obs: dict, margin: int) -> float | None:
@@ -631,7 +638,7 @@ class Observed(Family):
         side = side_for(fair, *got, p["edge"])
         if not self.passes("edge", {"fair": fair, "bid": got[0], "ask": got[1]}, p["edge"], side is not None):
             return []
-        return self.order(row, side if q else None)
+        return self.order(row, side if q else None, fair)
 
 
 FORECAST = ("You forecast the probability that a prediction market resolves yes, from its question alone. "
@@ -662,7 +669,7 @@ class Forecaster(Family):
     def on_book(self, row, m):
         if not (q := self.entry(row, m)) or (fair := self.forecast(m)) is None:
             return []
-        return self.order(row, side_for(fair, *q, self.params["edge"]))
+        return self.order(row, side_for(fair, *q, self.params["edge"]), fair)
 
 
 def span(start: dt.date, end: dt.date) -> list[dt.date]:
