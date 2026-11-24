@@ -127,11 +127,12 @@ def walk(frame: pd.DataFrame, months: list[tuple], label: pd.Series, spec: dict,
 def specs(pool: list[tuple], cfg: dict) -> list[dict]:
     """The baseline first, then every sleeve set of 2 to max_sleeves from the pool by each weighting and gate, in a
     fixed order, cut at the budget so the same pool gives the same trials. Sleeves are sorted inside a spec, so the id
-    (an md5 of the spec) is the same when two sleeves swap pool rank and the loop files no leaves-plus-enters (tr-376)."""
+    (an md5 of the spec) and the sets kept under the budget do not move when two sleeves swap pool rank (tr-376). Only the
+    baseline, the top max_sleeves by rank, still follows rank, since its membership is rank."""
     base = {"sleeves": [list(p) for p in sorted(pool[:cfg["max_sleeves"]])], "weighting": "equal", "gate": False}
     out = [base] if len(pool) >= 2 else []
     for k in range(2, cfg["max_sleeves"] + 1):
-        for sleeves in itertools.combinations(pool, k):
+        for sleeves in itertools.combinations(sorted(pool), k):
             for weighting in cfg["weightings"]:
                 for gate in cfg["gates"]:
                     s = {"sleeves": [list(p) for p in sorted(sleeves)], "weighting": weighting, "gate": gate}

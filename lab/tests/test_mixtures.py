@@ -132,3 +132,12 @@ def test_two_sleeves_swapping_pool_rank_keep_every_mixture_id():
     cfg = {**C, "budget": 10_000}
     ids = lambda pool: {mixtures.variant_of(s) for s in mixtures.specs(pool, cfg)}
     assert ids([a, b, c]) == ids([b, a, c]) == ids([c, b, a])
+
+
+def test_a_rank_swap_keeps_the_same_specs_under_a_budget_that_cuts():
+    pool = [(n, "x") for n in "ABCDEFGH"]
+    swapped = pool[:3] + [pool[4], pool[3]] + pool[5:]
+    cfg = {**C, "budget": 40}
+    ids = lambda p: {mixtures.variant_of(s) for s in mixtures.specs(p, cfg)[1:]}
+    assert ids(pool) == ids(swapped)
+    assert all(s["sleeves"] == sorted(s["sleeves"]) for s in mixtures.specs(list(reversed(pool)), cfg))
