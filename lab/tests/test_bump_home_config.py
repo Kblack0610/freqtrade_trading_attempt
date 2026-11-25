@@ -72,14 +72,19 @@ def test_merge_squashes_and_checks_it_merged(monkeypatch):
     calls = []
     posted_merges = True
     def fake(method, path, body=None, ok_404=False):
+        if path.endswith("/status"):
+            calls.append((method, path, body))
+            return {"state": "success"}
         if "/commits" in path:
             return [{"sha": "abcdef0123"}]
         calls.append((method, path, body))
         merged = posted_merges and any(c[0] == "POST" for c in calls)
-        return {"merged": merged, "mergeable": True, "merge_commit_sha": "abcdef0123", "state": "closed" if merged else "open"}
+        return {"merged": merged, "mergeable": True, "merge_commit_sha": "abcdef0123",
+                "state": "closed" if merged else "open", "head": {"sha": "f00dfeed"}}
     monkeypatch.setattr(bump_home_config, "call", fake)
     bump_home_config.merge(645)
     assert calls == [("GET", "/repos/kblack0610/home-config/pulls/645", None),
+                     ("GET", "/repos/kblack0610/home-config/commits/f00dfeed/status", None),
                      ("POST", "/repos/kblack0610/home-config/pulls/645/merge",
                       {"Do": "squash", "delete_branch_after_merge": True}),
                      ("GET", "/repos/kblack0610/home-config/pulls/645", None)]
@@ -88,21 +93,48 @@ def test_merge_squashes_and_checks_it_merged(monkeypatch):
         bump_home_config.merge(645)
 
 
+def forgejo(prs, checks):
+    """A fake call: each PR read takes the next of prs, each head status read the next of checks."""
+    prs, checks = iter(prs), iter(checks)
+    def fake(method, path, body=None, ok_404=False):
+        if path.endswith("/status"):
+            return {"state": next(checks)}
+        return {"state": "open", "head": {"sha": "f00dfeed"}, **next(prs)}
+    return fake
+
+
 def test_wait_mergeable_polls_until_forgejo_says_so(monkeypatch):
-    answers = iter([{"mergeable": False}, {"mergeable": False}, {"mergeable": True}])
+    monkeypatch.setattr(bump_home_config, "call", forgejo(
+        [{"mergeable": False}, {"mergeable": False}, {"mergeable": True}], ["success"] * 3))
     sleeps = []
-    monkeypatch.setattr(bump_home_config, "call", lambda *a, **k: next(answers))
     monkeypatch.setattr(bump_home_config.time, "sleep", sleeps.append)
     bump_home_config.wait_mergeable(645)
     assert sleeps == [bump_home_config.MERGEABLE_POLL_S] * 2
 
 
+def test_wait_mergeable_waits_for_the_required_checks(monkeypatch):
+    # The 405 of 2026-11-25: Forgejo read the PR mergeable while its checks were still pending.
+    monkeypatch.setattr(bump_home_config, "call", forgejo([{"mergeable": True}] * 3, ["", "pending", "success"]))
+    sleeps = []
+    monkeypatch.setattr(bump_home_config.time, "sleep", sleeps.append)
+    assert bump_home_config.wait_mergeable(645)["mergeable"]
+    assert sleeps == [bump_home_config.MERGEABLE_POLL_S] * 2
+
+
+@pytest.mark.parametrize("state", ["failure", "error"])
+def test_wait_mergeable_fails_at_once_on_a_red_check(monkeypatch, state):
+    monkeypatch.setattr(bump_home_config, "call", forgejo([{"mergeable": True}], [state]))
+    monkeypatch.setattr(bump_home_config.time, "sleep", lambda s: pytest.fail("slept"))
+    with pytest.raises(SystemExit, match=f"checks read {state} on f00dfee"):
+        bump_home_config.wait_mergeable(645)
+
+
 def test_wait_mergeable_gives_up_at_the_deadline(monkeypatch):
     clock = iter([0, 1, bump_home_config.MERGEABLE_TIMEOUT_S + 1])
-    monkeypatch.setattr(bump_home_config, "call", lambda *a, **k: {"mergeable": False, "state": "open"})
+    monkeypatch.setattr(bump_home_config, "call", forgejo([{"mergeable": False}] * 2, ["pending"] * 2))
     monkeypatch.setattr(bump_home_config.time, "sleep", lambda s: None)
     monkeypatch.setattr(bump_home_config.time, "monotonic", lambda: next(clock))
-    with pytest.raises(SystemExit, match="not mergeable after"):
+    with pytest.raises(SystemExit, match="not mergeable after .*checks pending"):
         bump_home_config.wait_mergeable(645)
 
 

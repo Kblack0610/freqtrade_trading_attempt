@@ -6,10 +6,10 @@ CI runs this after `publish` on each master push. It rewrites the `trader` and
 analysis job runs trader-ml, so both move together) through the Forgejo
 API (no clone), pushes it as branch trader-sha-<7>, opens the PR, and closes
 any older open trader-sha-* PR it supersedes, then squash-merges it once Forgejo
-reports it mergeable (right after opening it answers 405). That merge
-is the deploy: Flux rolls the bots onto the new digest. The image already
-passed this repo's test gate before publish, and home-config's own PR checks
-never exercise a digest line, so the merge does not wait on them.
+reports it mergeable and its head's checks green. That merge is the deploy:
+Flux rolls the bots onto the new digest. home-config's master branch protection
+requires its `checks / *` statuses, so a merge before they pass answers 405
+"Not all required status checks successful" and nothing deploys (ar-5150).
 
 Env: DIGEST and ML_DIGEST (sha256:...), GITHUB_SHA, SUBJECT (commit message),
 FORGEJO_TOKEN (write:repository on home-config; no issue scope needed), DRY_RUN=1 to print only.
@@ -28,11 +28,13 @@ REPO = "kblack0610/home-config"
 FILE = "apps/freqtrade/kustomization.yaml"
 BASE = "master"
 PREFIX = "trader-sha-"
-# Forgejo computes mergeability after the PR opens and answers the merge call 405
-# "Please try again later" until it has. It has no event for that, so the PR is
-# polled at this cadence, bounded by MERGEABLE_TIMEOUT_S.
-MERGEABLE_POLL_S = 2
-MERGEABLE_TIMEOUT_S = 120
+# Forgejo computes mergeability after the PR opens, and home-config's required
+# checks report on the head a minute or two later (90 s on #1519, 2026-11-25; a
+# cold runner pod adds a few minutes); the merge call answers 405 until both are
+# in. Forgejo has no event a script can await for either, so the PR and its head
+# status are polled at this cadence, bounded by MERGEABLE_TIMEOUT_S.
+MERGEABLE_POLL_S = 5
+MERGEABLE_TIMEOUT_S = 900
 # Merges after ours that could push it out of the commits list read back.
 BASE_COMMITS_CHECKED = 50
 ON_BASE_TRIES = 3
@@ -127,16 +129,28 @@ def main():
 
 
 def wait_mergeable(number):
-    """Poll the PR until Forgejo reports it mergeable or merged and return it; exit non-zero if it is closed or past the timeout."""
+    """Poll the PR until it is merged, or mergeable with its head's checks green, and return it.
+
+    Exits non-zero if the PR is closed, a check on its head failed, or the timeout
+    passed. The checks are the head's combined status, which reads "" or "pending"
+    until every check has reported.
+    """
     deadline = time.monotonic() + MERGEABLE_TIMEOUT_S
     while True:
         pr = call("GET", f"/repos/{REPO}/pulls/{number}")
-        if pr.get("merged") or pr.get("mergeable"):
+        if pr.get("merged"):
             return pr
         if pr.get("state") == "closed":
             raise SystemExit(f"PR #{number} is {pr.get('state')}, not mergeable")
+        head = pr["head"]["sha"]
+        checks = call("GET", f"/repos/{REPO}/commits/{head}/status").get("state") or "none"
+        if checks in ("failure", "error"):
+            raise SystemExit(f"PR #{number}: home-config checks read {checks} on {head[:7]}, so it cannot merge")
+        if pr.get("mergeable") and checks == "success":
+            return pr
         if time.monotonic() >= deadline:
-            raise SystemExit(f"PR #{number} not mergeable after {MERGEABLE_TIMEOUT_S}s (state {pr.get('state')}, mergeable {pr.get('mergeable')})")
+            raise SystemExit(f"PR #{number} not mergeable after {MERGEABLE_TIMEOUT_S}s "
+                             f"(state {pr.get('state')}, mergeable {pr.get('mergeable')}, checks {checks})")
         time.sleep(MERGEABLE_POLL_S)
 
 
