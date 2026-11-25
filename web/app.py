@@ -611,6 +611,47 @@ def today(request: Request, day: str = ""):
 
 
 
+# /desk: the lot-size notes, each recent day's best dry run, and the weather bets, on one page. A weather order is
+# "extreme" when it bought a side at 90c or more, or 10c or less: the market already called it.
+DESK_DAYS = 14
+DESK_WEATHER_FAMILIES = ("weather", "observed")
+DESK_EXTREME = 0.90
+DESK_BEST = """
+SELECT DISTINCT ON (d.day) d.day, f.*, m.title, d.pnl, d.closed FROM (
+  SELECT (close_date AT TIME ZONE 'UTC')::date AS day, sum(profit_abs) AS pnl, count(*) AS closed FROM fills
+  WHERE source = ANY(%s) AND close_date >= %s AND profit_ratio IS NOT NULL GROUP BY 1) d
+JOIN fills f ON (f.close_date AT TIME ZONE 'UTC')::date = d.day AND f.source = ANY(%s) AND f.profit_ratio IS NOT NULL
+LEFT JOIN markets m ON f.source = 'paper' AND m.venue = f.venue AND m.market_id = f.instrument
+ORDER BY d.day DESC, f.profit_ratio DESC, f.fill_id
+"""
+DESK_WEATHER = """
+SELECT o.account, a.family, o.side, o.price, o.contracts, o.stake, o.sent_at, o.settled_at, o.profit, m.title, m.subtitle
+FROM paper_orders o JOIN paper_accounts a USING (account)
+LEFT JOIN markets m ON m.venue = a.venue AND m.market_id = o.market_id
+WHERE a.family = ANY(%s) AND o.contracts > 0 ORDER BY o.sent_at DESC, o.id DESC LIMIT 200
+"""
+
+
+def weather_bets(orders: list[dict]) -> list[dict]:
+    """Mark each weather order extreme when its side was bought at DESK_EXTREME or more, or at 1 - DESK_EXTREME or less; extremes first."""
+    marked = [{**o, "extreme": o["price"] is not None and (o["price"] >= DESK_EXTREME or o["price"] <= 1 - DESK_EXTREME)}
+              for o in orders]
+    return sorted(marked, key=lambda o: not o["extreme"])
+
+
+@app.get("/desk", response_class=HTMLResponse)
+def desk(request: Request):
+    """Lot-size notes, the best dry run of each recent day and the weather bets, together."""
+    user_of(request)
+    since = dt.datetime.now(dt.timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0) - dt.timedelta(days=DESK_DAYS - 1)
+    sources = list(DRY_SOURCES)
+    g = glossary.load()
+    return page(request, "desk.html", days=DESK_DAYS, extreme=DESK_EXTREME,
+                sizing=[t for t in g["trading"] if t["group"] == "Sizing"],
+                best=rows(DESK_BEST, (sources, since, sources)),
+                weather=weather_bets(rows(DESK_WEATHER, (list(DESK_WEATHER_FAMILIES),))))
+
+
 def fills_today(source: str, venues: list[str] | None = None) -> int:
     """Fills a league opened today (UTC), for the count that links to /today; `venues` narrows a paper source."""
     start = dt.datetime.combine(dt.datetime.now(dt.timezone.utc).date(), dt.time(), dt.timezone.utc)

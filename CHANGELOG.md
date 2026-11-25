@@ -6,6 +6,7 @@ Notable changes to the trader strategy repo, newest first. The image is built on
 
 ### Added
 
+- `/desk` page: lot-size notes, the best dry run of each recent day and the weather bets on one page (ar-3306).
 - Beta stage documents: this changelog, privacy and terms (`docs/legal/`), a PRD and TSD (`docs/scope/trader/`), and a `.githooks/pre-push` that runs Ruff.
 
 ### Fixed
