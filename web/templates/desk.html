@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Desk{% endblock %}
+{% block body %}
+<h1>Desk</h1>
+<p class="muted">Three things on one page: how lots and stakes work, the best dry run of each recent day, and the weather bets. Paper money only.</p>
+
+<h2 class="sec">Lot size notes</h2>
+{% for t in sizing %}<dl><dt><strong>{{ t.name }}</strong></dt><dd>{{ t.means }} <span class="muted">In the trader: {{ t.uses }}</span></dd></dl>
+{% endfor %}
+
+<h2 class="sec">Best dry run of each day</h2>
+<p class="muted">The fill with the best return among all dry runs that closed that UTC day, for the last {{ days }} days. <a href="/today">Pick a day on Today</a>.</p>
+{% if best %}
+<div class="scroll">
+<table>
+  <thead><tr><th>Day</th><th>Account</th><th>Instrument</th><th class="n">Stake</th><th class="n">Profit</th><th class="n">Return</th><th class="n">Day P&amp;L</th><th class="n">Closed</th></tr></thead>
+  <tbody>
+  {% for f in best %}
+  <tr><td><a href="/today?day={{ f.day.isoformat() }}">{{ f.day.isoformat() }}</a></td><td>{{ f.account }}</td><td><a href="/trades/{{ f.source }}/{{ f.fill_id }}{% if f.source == 'freqtrade' %}?bot={{ f.account | urlencode }}{% endif %}">{{ f.title or f.instrument }}</a></td>
+    <td class="n">{{ f.stake | num(2) }}</td><td class="n {{ f.profit_abs | tone }}">{{ f.profit_abs | num(2) }}</td><td class="n {{ f.profit_ratio | tone }}">{{ f.profit_ratio | pct(1) }}</td>
+    <td class="n {{ f.pnl | tone }}">{{ f.pnl | num(2) }}</td><td class="n">{{ f.closed | num(0) }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}<p class="muted">Nothing closed in the last {{ days }} days.</p>{% endif %}
+
+<h2 class="sec">Weather bets</h2>
+<p class="muted">Filled orders of the weather and observed families, extreme ones first. Extreme means the side was bought at {{ (extreme * 100) | round | int }}c or more, or at {{ ((1 - extreme) * 100) | round | int }}c or less: the market had already called it. Newest 200 filled orders.</p>
+{% if weather %}
+<div class="scroll">
+<table>
+  <thead><tr><th>Sent</th><th>Family</th><th>Market</th><th>Side</th><th class="n">Price</th><th class="n">Contracts</th><th class="n">Stake</th><th>Status</th><th class="n">Profit</th></tr></thead>
+  <tbody>
+  {% for o in weather %}
+  <tr><td>{{ o.sent_at | local }}</td><td>{{ o.family }}{% if o.extreme %} <strong>extreme</strong>{% endif %}</td><td>{{ o.title or "-" }}{% if o.subtitle %} <span class="muted">{{ o.subtitle }}</span>{% endif %}</td><td>{{ o.side }}</td>
+    <td class="n">{{ o.price | num(2) }}</td><td class="n">{{ o.contracts | num(0) }}</td><td class="n">{{ o.stake | num(2) }}</td>
+    <td>{{ "settled" if o.settled_at else "open" }}</td><td class="n {{ o.profit | tone }}">{{ o.profit | num(2) if o.profit is not none else "-" }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}<p class="muted">No weather order has filled yet.</p>{% endif %}
+{% endblock %}

@@ -687,6 +687,21 @@ def test_book_sets_each_strategy_against_holding(conn, signed_in):
     assert "200-day filter" in body and ">beats<" in body
 
 
+def test_desk_shows_lot_size_best_of_day_and_weather_bets(conn, signed_in):
+    day = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=1)
+    seed(conn)
+    conn.execute("INSERT INTO paper_accounts (account, family, venue, variant, params, capital, started_at, retired_at) VALUES "
+                 "('paper-weather-bbbb2222', 'weather', 'kalshi', 'bbbb2222', '{}', 1000, now(), NULL)")
+    for market, price, profit in (("W1", 0.95, 0.5), ("W2", 0.4, -5.0)):
+        conn.execute("INSERT INTO paper_orders (account, market_id, side, stake, sent_at, quoted_at, contracts, price, fee, "
+                     "settled_at, payout, profit) VALUES ('paper-weather-bbbb2222', %s, 'yes', 10, %s, %s, 10, %s, 0, %s, 1, %s)",
+                     (market, day, day, price, day, profit))
+    _, client = signed_in
+    page = client.get("/desk").text
+    assert "Lot size" in page and "Best dry run of each day" in page
+    assert page.count("<strong>extreme</strong>") == 1 and page.index("0.95") < page.index("0.40")
+
+
 def test_nav_groups_render_in_order(signed_in):
     _, client = signed_in
     html = client.get("/").text
