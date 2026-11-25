@@ -45,7 +45,6 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import psycopg
 from psycopg.types.json import Jsonb
 
 from lab.crypto import calibration, cohorts
@@ -397,7 +396,7 @@ def run(conn, report: dict, names: list[str] | None = None, fams: dict[str, str]
             start, end = span()
             cover = write_candles(repo, results, all_ex, start, end)
             report["stage_s"]["candles"] = round(time.monotonic() - t0, 1)
-            with psycopg.connect(calibration.scratch_url(SCHEMA), autocommit=True) as sc:
+            with connect(autocommit=True, dsn=calibration.scratch_url(SCHEMA)) as sc:
                 with sc.cursor() as cur:
                     cur.executemany("INSERT INTO data_coverage (exchange, pair, timeframe, first_ts, last_ts, rows, "
                                     "oldest_reached) VALUES (%s, %s, %s, %s, %s, %s, true)",
@@ -418,7 +417,7 @@ def run(conn, report: dict, names: list[str] | None = None, fams: dict[str, str]
             if line is None:
                 report["probe_error"] = (p.stderr or p.stdout)[-1000:]
             probed = json.loads(line.removeprefix("FLOW_PROBE ")) if line else {"reproduce": {}, "paper": {}}
-        with psycopg.connect(calibration.scratch_url(SCHEMA), autocommit=True) as sc:
+        with connect(autocommit=True, dsn=calibration.scratch_url(SCHEMA)) as sc:
             wf = sc.execute("SELECT raw FROM runs WHERE kind = 'walkforward' ORDER BY id DESC LIMIT 1").fetchone()
             rows = cells(sc, names, fams, ex, wf[0] if wf else {}, probed)
     finally:
