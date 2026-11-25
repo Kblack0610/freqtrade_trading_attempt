@@ -211,6 +211,7 @@ jobs:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     concurrency: home-config-bump
+    timeout-minutes: 20  # the bump's merge waits at most MERGE_TIMEOUT_S (15 min) for home-config's checks
     steps:
       - uses: actions/checkout@v4
       - name: Open the digest-bump PR on Forgejo
