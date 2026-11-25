@@ -12,7 +12,7 @@ This reference maps the code and data boundaries. The [README layout](../README.
 | `lab/money/` | The live guard, broker and wallet reads, league scorecard and loss watcher |
 | `lab/inputs/` | Exogenous feeds (NWS) and calls, readable by any market's family |
 | `lab/crypto/`, `lab/events/`, `lab/sports/`, `lab/stocks/`, `lab/futures/` | One adapter package per market |
-| `lab/` root | Job runner and registry (`jobs.toml`), migrations, healthcheck, and the strategy library strategies import (`metrics`, `channels`, `forecasts`, `patterns`, `entry_inputs`, `families/`) |
+| `lab/` root | Job runner and registry (`jobs.toml`), migrations, healthcheck, and the strategy library strategies import (`metrics`, `channels`, `forecasts`, `patterns`, `entry_inputs`, `god_genes`, `families/`) |
 | `lab/tests/` | pytest, the package `lab.tests` |
 | `web/` | The read-only site: app, templates, glossary and venue data |
 | `user_data/` | Freqtrade configs, exchange overlays and strategies |
