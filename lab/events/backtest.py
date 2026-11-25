@@ -237,12 +237,13 @@ def trial_count(conn, cfg: dict) -> int:
 
 
 def evaluate(trades: pd.DataFrame, start: dt.datetime, end: dt.datetime, wallet: float, seed: int,
-             ccfg: dict, trials: int, events=None) -> dict:
+             ccfg: dict, trials: int, events=None, event: bool = True) -> dict:
     """window_metrics over the replay's days (to the last settlement, if later than end), the per-trade interval
-    (resampled by `events` when given), the deflated Sharpe at `trials`, and the daily returns."""
+    (resampled by `events` when given), the deflated Sharpe at `trials`, and the daily returns. `event` False is a
+    trade that is not a contract paying 1 (a stock: lab/stocks/backtest.py), whose breakeven win rate is not 1 over its price."""
     until = max(pd.Timestamp(end), trades["close_date"].max() + pd.Timedelta(days=1)) if len(trades) else end
     daily = metrics.daily_returns(trades, start, until, wallet)
-    w = metrics.window_metrics(daily, trades, seed, event=True)
+    w = metrics.window_metrics(daily, trades, seed, event=event)
     ev = confidence.interval(trades["profit_ratio"], seed, ccfg, events)
     dsr = metrics.deflated_sharpe(w["_sr_daily"], w["days"], w["_skew"], w["_kurt"], trials)
     m = {k: v.isoformat() if isinstance(v, dt.date) else finite(v)
