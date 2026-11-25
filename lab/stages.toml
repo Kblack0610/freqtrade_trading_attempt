@@ -26,6 +26,7 @@ paper = { module = "lab.events.paper", note = "line book only" }
 
 [markets.stocks]
 data = { module = "lab.stocks.paper", note = "AlpacaStocks Venue and History" }
+backtest = { module = "lab.stocks.backtest", note = "walk-forward over daily closes" }
 paper = { module = "lab.stocks.paper" }
 
 [markets.futures]
