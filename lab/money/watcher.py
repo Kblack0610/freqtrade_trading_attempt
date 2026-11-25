@@ -18,7 +18,7 @@ way a live breach will:
   python lab/money/watcher.py --drill-end <bot>   clear the breach and start entries again
   python lab/money/watcher.py --bankroll-clear    clear a bankroll breach; a human starts each money bot again
 
-The event-contract and stock leagues' accounts (lab/events/paper.py, lab/stocks/paper.py) are watched the same way, one
+The event-contract, stock and futures leagues' accounts (lab/events/paper.py, lab/stocks/paper.py, lab/futures/paper.py) are watched the same way, one
 row each, read from paper_accounts: equity is the last pass's mark, and seen_at that pass's time,
 so a dead pass job ages its rows like a dead bot. A drilled account is stopped by its watch row, which the next pass
 obeys; no API is called.
@@ -39,6 +39,7 @@ from lab.core.db import connect
 from lab.crypto.ingest import Fetch, http_fetch, ROSTER
 from lab.crypto.league import roster_rows
 from lab.events import paper_venues
+from lab.futures.paper import VENUE as FUTURES_VENUE
 from lab.stocks.paper import VENUE as STOCK_VENUE
 from lab.crypto.suggest import load_config
 
@@ -140,7 +141,7 @@ def tick(conn, bots: list[str], day_loss: float, fetch: Fetch, now: dt.datetime,
     for name, capital, equity, marked_at in conn.execute(
             "SELECT account, capital, equity, marked_at FROM paper_accounts WHERE marked_at IS NOT NULL "
             "AND venue = ANY(%s)",
-            ([*paper_venues(), STOCK_VENUE],)).fetchall():
+            ([*paper_venues(), STOCK_VENUE, FUTURES_VENUE],)).fetchall():
         p = prev.get(name)
         row = step(p, {"dry_run": True, "state": None, "capital": capital, "equity": equity}, now, day_loss)
         if p is not None and p["drill_at"] is not None:

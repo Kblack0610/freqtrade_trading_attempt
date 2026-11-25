@@ -12,7 +12,7 @@ retiring accounts, the stopped set, the ledger writes, the decision funnel's pru
   prices(conn, ctx, held)            {(market_id, side): exit price} for the open orders that have one
   after(conn, ctx, now)              the market's own checks once the account is marked (event contracts' forward)
 
-An order is a paper_orders row: market_id the instrument, side yes, no or long, contracts the size (shares for a
+An order is a paper_orders row: market_id the instrument, side yes, no, long or short, contracts the size (shares for a
 stock), price the fill, fee the entry cost; it closes with settled_at, payout (per unit), exit_fee, exit_reason and
 profit net of every cost. Paper only: no hook here can reach an order API.
 """
@@ -126,7 +126,8 @@ def mark(conn, ad: Adapter, ctx, now: dt.datetime) -> None:
     for account, capital in conn.execute("SELECT account, capital FROM paper_accounts WHERE venue = %s",
                                          (ad.venue,)).fetchall():
         rows = open_.get(account, [])
-        unrealized = sum(n * (px.get((m, s), price) - price) - fee for m, s, n, price, fee in rows)
+        unrealized = sum(n * (px.get((m, s), price) - price) * (-1 if s == "short" else 1) - fee
+                         for m, s, n, price, fee in rows)
         r = realized.get(account, 0.0)
         conn.execute("UPDATE paper_accounts SET equity = %s, realized = %s, open_positions = %s, marked_at = %s "
                      "WHERE account = %s", (capital + r + unrealized, r, len(rows), now, account))

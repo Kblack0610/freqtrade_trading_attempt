@@ -19,7 +19,7 @@ def test_declared_module_exists(market, stage, module):
 def test_known_gaps_are_missing():
     by = {m["market"]: m["missing"] for m in coverage.matrix()["markets"]}
     assert "backtest" in by["stocks"] and "gate" in by["stocks"]
-    assert by["futures"] == ["gate", "paper", "live"]
+    assert by["futures"] == ["gate", "live"]
     assert by["crypto"] == []
 
 
