@@ -253,7 +253,7 @@ def pool() -> ConnectionPool:
     global _pool
     with _pool_lock:
         if _pool is None:
-            _pool = ConnectionPool(db.url(), min_size=1, max_size=POOL_MAX, kwargs={"autocommit": True},
+            _pool = ConnectionPool(db.url(), min_size=1, max_size=POOL_MAX, kwargs={"autocommit": True, **db.KEEPALIVE},
                                   check=ConnectionPool.check_connection, open=True)
             atexit.register(_pool.close)
         return _pool

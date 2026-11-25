@@ -155,11 +155,10 @@ def main() -> int:
     if not dsn:
         print("call_rules: FEED_DATABASE_URL is not set (Secret freqtrade/trader-feeds)", file=sys.stderr)
         return 1
-    import psycopg
 
     cfg = load_config()
     now = dt.datetime.now(dt.timezone.utc)
-    with psycopg.connect(dsn, autocommit=True) as feed:
+    with connect(autocommit=True, dsn=dsn) as feed:
         found = items(feed, now - dt.timedelta(hours=cfg["max_age_hours"]))
     with connect(autocommit=True) as conn:
         run(conn, found, now, cfg)

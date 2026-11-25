@@ -381,7 +381,7 @@ def run(conn, cfg: dict, today: dt.date, report: dict) -> bool:
         t0 = time.monotonic()
         cover_spans = write_candles(results / "data" / EXCHANGE, u["seed"], start, end, c)
         report.setdefault("stage_s", {})["candles"] = round(time.monotonic() - t0, 1)
-        with psycopg.connect(scratch_url(), autocommit=True) as sc:
+        with connect(autocommit=True, dsn=scratch_url()) as sc:
             cover(sc, cover_spans)
             # migration 048 seeds production's real calls; with no prices in here they go overdue unscored and the
             # analysis exits 1, so the synthetic universe runs with an empty ledger, new or resumed
@@ -389,7 +389,7 @@ def run(conn, cfg: dict, today: dt.date, report: dict) -> bool:
         env = scratch_env(repo, results, len(strategies), max(c["oos_months"]))
         analysed = step("analysis", "import sys; from lab.crypto import analyze; sys.exit(analyze.main())", env, report)
         walked = step("walkforward", "import sys; from lab.crypto import walkforward; sys.exit(walkforward.main())", env, report)
-    with psycopg.connect(scratch_url(), autocommit=True) as sc:
+    with connect(autocommit=True, dsn=scratch_url()) as sc:
         wf = sc.execute("SELECT raw FROM runs WHERE kind = 'walkforward' ORDER BY id DESC LIMIT 1").fetchone()
         wf = wf[0] if wf else {}
         report.update(analysis_exit=analysed, walkforward_exit=walked,
@@ -409,7 +409,7 @@ def run(conn, cfg: dict, today: dt.date, report: dict) -> bool:
     trials = max(production, scratch_trials)
     rows = [r for m in c["oos_months"] for r in outcomes(facts, trials, cfg, strategies, m)]
     report.update(trials=trials, production_trials=production, outcomes=len(rows), table_rows=record(conn, u["tag"], rows))
-    with psycopg.connect(scratch_url(), autocommit=True) as sc:
+    with connect(autocommit=True, dsn=scratch_url()) as sc:
         sc.execute("UPDATE calibration_universe SET recorded_at = now() WHERE tag = %s", (u["tag"],))
     print(f"calibration: recorded {len(rows)} outcomes for universe {u['tag']}", flush=True)
     return analysed == 0 and walked == 0
