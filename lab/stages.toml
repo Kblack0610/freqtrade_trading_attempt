@@ -31,3 +31,4 @@ paper = { module = "lab.stocks.paper" }
 [markets.futures]
 data = { module = "lab.futures.funding" }
 backtest = { module = "lab.futures.research.carry", note = "ad hoc research script" }
+paper = { module = "lab.futures.paper", note = "longs and shorts on perp tickers, funding charged" }

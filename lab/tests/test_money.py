@@ -281,6 +281,7 @@ MONEY_MAP = {
     ("lab/healthcheck.py", "healthy"): Client("none", why="our own pod's health endpoint"),
     ("lab/crypto/archive.py", "<module>"): Client("none", why="public candle archives (Kraken zips, the OKX listing and files)"),
     ("lab/futures/funding.py", "Ccxt"): Client("none", why="public funding and open interest through ccxt, no key"),
+    ("lab/futures/paper.py", "Tickers"): Client("none", why="public swap tickers through ccxt, no key"),
     ("web/fetch_kit.py", "fetch"): Client("none", why="build-time download of the pinned web-kit files from GitHub, checked against web/kit.lock"),
     ("lab/crypto/backfill.py", "Cli"): Client("none", why="public candles through ccxt, no key"),
     ("lab/crypto/pairs.py", "main"): Client("none", why="public tickers through ccxt, no key"),
