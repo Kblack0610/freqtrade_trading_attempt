@@ -103,6 +103,23 @@ The gate pools each variant's windows before the lockbox and applies `suggest.to
 
 Only `longshot`, `tt_totals`, `weather` and `observed` can run here; `weather` trades on the forecasts read within `nws_high`'s `fresh_min`, `observed` on the observations within `nws_obs`'s. `longshot`, `weather` and `observed` are `[paper] forward`, so they trade without the readiness gate; `tt_totals` is on no paper venue until one records table tennis. A ready variant of another family is reported under `unrunnable` and not traded: `calibration` needs a bars fit each pass, `gap` needs a recorded `odds_api`, and `llm` needs a LiteLLM key. The forecaster's paper scores are its only scores, so it joins once the key is in SOPS. `lab/money/watcher.py` watches each account for the daily loss limit and runs the kill drill on it; see the README, Watcher. Deploy: home-config `apps/freqtrade/`, after each recorder sweep: `trader-markets-recorder` for Kalshi and `trader-markets-recorder-<venue>` for `polymarket_us` and `predictit`. No bet is ever placed at a sportsbook; a real-money question is the human's (lab `docs/briefs/2026-11-14-tt-totals-real-money.md`) and `lab/crypto/live.py` keeps the guard down.
 
+First week forward (see-keen-goose P5, read 2026-11-25 over 11-18 to 11-24 UTC, `paper_orders` joined to `paper_accounts`, settled fills only for P&L; ROI is profit over stake, fees in). The Sentinel `trader-paper-volume` watch is the standing check; this is the one-time baseline.
+
+| Venue | Family | Orders | Markets | Fills | Settled | Profit | ROI |
+|---|---|---|---|---|---|---|---|
+| kalshi | longshot | 82,423 (10k to 17k a day) | 60,247 | 2,214 | 1,861 | -703.51 | -3.8% |
+| kalshi | weather | 2,233 (255 to 374 a day) | 643 | 1,231 | 1,038 | -1,586.78 | -15.3% |
+| kalshi | observed | 6 (live from 11-23) | 4 | 5 | 5 | -6.85 | -13.7% |
+| polymarket_us | longshot | 6,243 (417 to 1,296 a day) | 5,172 | 6,243 | 5,949 | -1,769.19 | -3.0% |
+| predictit | longshot | 13 (a book of about 18 markets) | 9 | 13 | 0 | n/a | n/a |
+| alpaca | reversion and trend | 53 | 9 | 53 | 46 | -173.51 | -0.4% |
+| odds_api | tt_totals | 0 | 0 | 0 | 0 | n/a | n/a |
+
+- Volume is back: 7 of 7 days above 0 on kalshi and polymarket_us, kalshi touched 4,694 to 13,496 distinct markets a day, the 11-14 scale. Kalshi fills are 2.7% of orders, since most longshot entries find no depth at the recorded quote.
+- Every kalshi weather account lost, -362 to -440 each, on 295 to 316 fills; all 8 longshot accounts together lost 703 with 3 of 8 roughly flat. The forward test is not done for any family (`forward_days` 28 and `forward_bets` 300 settled): longshot and weather clear the bet count and not the day count.
+- Crypto in the same window (the `fills` view): 2,048 fills over binanceus 1,886, kraken 83 and coinbase 79, on 10 USD pairs; calls 41.
+- Stop: `weather` (the forecast family, guessed `sd`) on the evidence of -15% over 1,038 settled bets, filed as a board row. `observed` is not judged: 5 settled bets in 2 days; the open question is why it placed 6 orders where 23 stations are mapped.
+
 ## Board
 
 The nightly research loop (`lab/crypto/loop.py`, the analysis's last step; README, Nightly research loop) keeps two betting sets beside the crypto ones: every ready `readiness` variant (`bet-ready`) and every unretired paper account whose forward check drifted (`bet-drift`). A member entering or leaving is a `research_events` row carrying the markets trial count, and `ci/research_sync.py` files one agent-board row a night per set. The loop reads the gate the 12:30 UTC families run left, so a gate change reaches the board the morning after the next analysis.
