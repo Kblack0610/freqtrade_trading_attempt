@@ -5,7 +5,7 @@ Repo rules live in [docs/standards.md](docs/standards.md); the layout and comman
 ## Landing and deploy
 
 - Land with `agent-land <N>`, never `gh pr checks --watch` plus `gh pr merge`: the watch exits 0 with "no checks reported" before CI registers (#17, #35 merged unchecked).
-- A master merge goes live on its own: the `bump-home-config` CI job opens and merges the home-config digest PR 4-8 min after the image build. Do not bump by hand, queue a bump item, or write "not live until the bump" as Next. Check the live digest first: `kubectl --context home-k3s get deploy trader-web -n freqtrade`. No bump PR after a green build means `FORGEJO_DEPLOY_TOKEN` is unset or master moved on.
+- A master merge goes live on its own: the `bump-home-config` CI job opens the home-config digest PR after the image build and merges it once that PR's checks pass, about 2 min later. Do not bump by hand, queue a bump item, or write "not live until the bump" as Next. Check the live digest first: `kubectl --context home-k3s get deploy trader-web -n freqtrade`. No bump PR after a green build means `FORGEJO_DEPLOY_TOKEN` is unset or master moved on.
 - There is no hold on the bump (`ci/bump_home_config.py` has no skip switch). Order merges so a cache-key change lands before the 01:00 UTC walk-forward.
 - Deploy is home-config `apps/freqtrade/` on Forgejo; never push or open PRs for it on GitHub.
 

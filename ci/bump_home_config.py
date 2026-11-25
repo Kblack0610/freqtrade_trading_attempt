@@ -6,10 +6,11 @@ CI runs this after `publish` on each master push. It rewrites the `trader` and
 analysis job runs trader-ml, so both move together) through the Forgejo
 API (no clone), pushes it as branch trader-sha-<7>, opens the PR, and closes
 any older open trader-sha-* PR it supersedes, then squash-merges it once Forgejo
-reports it mergeable (right after opening it answers 405). That merge
-is the deploy: Flux rolls the bots onto the new digest. The image already
-passed this repo's test gate before publish, and home-config's own PR checks
-never exercise a digest line, so the merge does not wait on them.
+lets it. That merge is the deploy: Flux rolls the bots onto the new digest.
+home-config's master branch protection requires its PR checks, and Forgejo
+answers the merge call 405 until they pass, so a 405 is read as "not yet" and
+the merge is tried again until MERGE_TIMEOUT_S; Forgejo stays the one judge of
+which checks are required (ar-5150).
 
 Env: DIGEST and ML_DIGEST (sha256:...), GITHUB_SHA, SUBJECT (commit message),
 FORGEJO_TOKEN (write:repository on home-config; no issue scope needed), DRY_RUN=1 to print only.
@@ -28,11 +29,15 @@ REPO = "kblack0610/home-config"
 FILE = "apps/freqtrade/kustomization.yaml"
 BASE = "master"
 PREFIX = "trader-sha-"
-# Forgejo computes mergeability after the PR opens and answers the merge call 405
-# "Please try again later" until it has. It has no event for that, so the PR is
-# polled at this cadence, bounded by MERGEABLE_TIMEOUT_S.
-MERGEABLE_POLL_S = 2
-MERGEABLE_TIMEOUT_S = 120
+# Forgejo answers the merge call 405 until it has computed mergeability and
+# home-config's required checks have passed on the head (90 s on #1519,
+# 2026-11-25; a cold runner pod adds a few minutes). It has no event a script can
+# await for either, so the merge is retried at this cadence, bounded by
+# MERGE_TIMEOUT_S.
+MERGE_POLL_S = 5
+MERGE_TIMEOUT_S = 900
+# Forgejo's commit list can trail a merge by a moment; it is re-read at this cadence.
+ON_BASE_POLL_S = 2
 # Merges after ours that could push it out of the commits list read back.
 BASE_COMMITS_CHECKED = 50
 ON_BASE_TRIES = 3
@@ -56,7 +61,8 @@ def bump(text, digest, tag, name="trader"):
     raise ValueError(f"no digest line under '- name: {name}' in {FILE}")
 
 
-def call(method, path, body=None, ok_404=False):
+def call(method, path, body=None, ok_404=False, ok_405=False):
+    """One API call; a 404 (ok_404) returns None, a 405 (ok_405) returns {"refused": <its message>}."""
     req = urllib.request.Request(
         API + path,
         method=method,
@@ -74,6 +80,8 @@ def call(method, path, body=None, ok_404=False):
     except urllib.error.HTTPError as e:
         if ok_404 and e.code == 404:
             return None
+        if ok_405 and e.code == 405:
+            return {"refused": e.read().decode(errors="replace")[:300]}
         raise SystemExit(f"{method} {path}: HTTP {e.code} {e.read().decode(errors='replace')[:500]}")
     return json.loads(raw) if raw else {}
 
@@ -126,34 +134,39 @@ def main():
     merge(mine["number"])
 
 
-def wait_mergeable(number):
-    """Poll the PR until Forgejo reports it mergeable or merged and return it; exit non-zero if it is closed or past the timeout."""
-    deadline = time.monotonic() + MERGEABLE_TIMEOUT_S
+def merge(number):
+    """Squash-merge the bump PR once Forgejo lets it, and delete its branch; exit non-zero if it did not merge.
+
+    A 405 on the merge call (mergeability not computed yet, or a required check
+    still pending or red) is retried until MERGE_TIMEOUT_S. Forgejo answers the
+    merge call 200 even when nothing merged, and a PR can read merged=true with a
+    merge commit that never reached BASE, so the PR is read back and its
+    merge_commit_sha is looked up on BASE.
+    """
+    deadline = time.monotonic() + MERGE_TIMEOUT_S
+    refused = "not tried"
     while True:
         pr = call("GET", f"/repos/{REPO}/pulls/{number}")
-        if pr.get("merged") or pr.get("mergeable"):
-            return pr
+        if pr.get("merged"):
+            break
         if pr.get("state") == "closed":
-            raise SystemExit(f"PR #{number} is {pr.get('state')}, not mergeable")
+            raise SystemExit(f"PR #{number} is closed, not merged")
+        if pr.get("mergeable"):
+            answer = call("POST", f"/repos/{REPO}/pulls/{number}/merge",
+                          {"Do": "squash", "delete_branch_after_merge": True}, ok_405=True)
+            if "refused" in (answer or {}):
+                refused = answer["refused"]
+            else:
+                pr = call("GET", f"/repos/{REPO}/pulls/{number}")
+                if pr.get("merged"):
+                    break
+                refused = "answered 200 but did not merge"
+        else:
+            refused = "Forgejo reads it not mergeable yet"
         if time.monotonic() >= deadline:
-            raise SystemExit(f"PR #{number} not mergeable after {MERGEABLE_TIMEOUT_S}s (state {pr.get('state')}, mergeable {pr.get('mergeable')})")
-        time.sleep(MERGEABLE_POLL_S)
-
-
-def merge(number):
-    """Squash-merge the bump PR and delete its branch; exit non-zero if it did not merge.
-
-    Forgejo answers the merge call 200 even when nothing merged, and a PR can read
-    merged=true with a merge commit that never reached BASE, so the PR is read back
-    and its merge_commit_sha is looked up on BASE.
-    """
-    pr = wait_mergeable(number)
-    if not pr.get("merged"):
-        call("POST", f"/repos/{REPO}/pulls/{number}/merge",
-             {"Do": "squash", "delete_branch_after_merge": True})
-        pr = call("GET", f"/repos/{REPO}/pulls/{number}")
-    if not pr.get("merged"):
-        raise SystemExit(f"PR #{number} did not merge (state {pr.get('state')}, mergeable {pr.get('mergeable')})")
+            raise SystemExit(f"PR #{number} did not merge in {MERGE_TIMEOUT_S}s (state {pr.get('state')}, "
+                             f"mergeable {pr.get('mergeable')}; last: {refused})")
+        time.sleep(MERGE_POLL_S)
     sha = pr.get("merge_commit_sha") or ""
     if not on_base(sha):
         raise SystemExit(f"PR #{number} reads merged but {sha[:7] or 'no merge commit'} is not on {BASE}")
@@ -165,13 +178,13 @@ def on_base(sha):
     if not sha:
         return False
     # Forgejo has no event for its commit list catching up with a merge, so the
-    # list is re-read at the merge-poll cadence, bounded by ON_BASE_TRIES.
+    # list is re-read at ON_BASE_POLL_S, bounded by ON_BASE_TRIES.
     for attempt in range(ON_BASE_TRIES):
         commits = call("GET", f"/repos/{REPO}/commits?sha={BASE}&limit={BASE_COMMITS_CHECKED}&stat=false&verification=false&files=false")
         if any(c.get("sha") == sha for c in commits):
             return True
         if attempt < ON_BASE_TRIES - 1:
-            time.sleep(MERGEABLE_POLL_S)
+            time.sleep(ON_BASE_POLL_S)
     return False
 
 
