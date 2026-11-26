@@ -22,6 +22,13 @@ href = "/leagues#stocks"
 what = "One paper account per family variant on an ETF universe, filled at Alpaca quotes (lab/stocks/paper.py)"
 
 [[lane]]
+id = "futures"
+title = "Futures league"
+href = "/leagues#futures"
+what = "One paper account per family variant, long or short on okx and kucoin perpetual swaps with funding charged (lab/futures/paper.py)"
+max_age_h = 30  # daily, after the funding job; the same limit as lab/futures/futures.toml max_mark_age_h
+
+[[lane]]
 id = "shadow"
 title = "Replay accounts"
 href = "/accounts#shadow"

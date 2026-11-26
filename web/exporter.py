@@ -13,6 +13,7 @@ from prometheus_client.core import GaugeMetricFamily
 from psycopg.rows import dict_row
 
 from lab import inputs
+from lab.futures import paper as futures
 from lab.stocks import paper as stocks
 from lab.core.db import connect
 from lab.events import paper_venues, quiet_limits, sweep_ages
@@ -228,6 +229,8 @@ def watch_metrics(now, watch):
         # freshness limit, past which that league takes no entries either.
         if w["stock"]:
             return max(unseen, quote * 60)
+        if w["venue"] == futures.VENUE:
+            return max(unseen, futures.load_config()["paper"]["max_mark_age_h"] * 3600)
         if w["venue"]:
             return max(unseen, venues.get(w["venue"], book) * 60)
         return unseen

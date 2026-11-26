@@ -64,8 +64,8 @@ Status is `scanned` (in `user_data/strategies/`, backtested nightly, a counted t
 | FreqAI ML | scanned | `user_data/strategies/ml/` LightGBM, over the last `ML_DAYS` on the trader-ml image (a load failure on the plain one); a bounded lookahead check, no recursive check or walk-forward yet (README, Generated families and Bias) |
 
 | Pairs, market neutral | blocked | the short leg needs margin or futures; `lab/crypto/league.py` runs spot only |
-| Funding carry and basis | blocked | long spot, short perpetual: needs a futures short. Measured offline in [carry.md](carry.md): it paid in 2024 and not since |
-| Shorts on a trend or a bust | blocked | futures; research only in `lab/futures/research/` (BustShort, DonchianLongShort, CarverLongShort64 and 16, docs/short-bust.md) |
+| Funding carry and basis | paper, one leg | the futures league (`lab/futures/paper.py`, daily) shorts a perpetual whose funding is high, with funding charged; the long spot leg is not paired. Measured offline in [carry.md](carry.md): it paid in 2024 and not since |
+| Shorts on a trend or a bust | gate by hand | futures: `lab/futures/gate.py` judges BustShort-family research (DonchianLongShort, CarverLongShort64 and 16, docs/short-bust.md) net of funding; the paper league trades funding only, not these yet |
 | Cross-venue spread | blocked | needs inventory on two exchanges and two legs at once; a freqtrade bot trades one exchange. The event-contract version is `lab/events/` cross-venue gaps |
 | Market making | blocked by the backtester | freqtrade fills a limit order when price touches it, with no queue position, so a maker's edge cannot be measured; it would read as free money |
 
