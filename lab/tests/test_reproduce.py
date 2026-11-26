@@ -105,14 +105,30 @@ def test_a_fold_the_timeout_stopped_is_never_sampled(folds):
 
 def test_reproduction_detects_changed_robustness_returns():
     result = {'ok': True, 'params': {'buy': {'x': 10}},
-              'robustness': {'delay:1': {'ok': True, 'returns': [0.01]}}}
+              'robustness': {'detail:1m': {'ok': True, 'returns': [0.01]}}}
     class Runner:
         def fold(self, *args):
             return result
     f = {'strategy': 'S', 'exchange': 'binanceus', 'file': 'S.py', 'fold': (WF_TODAY,) * 3,
          'stored': reproduce.fold_result(result['params'], None, None, [], None, [],
-                                         {'delay:1': {'ok': True, 'returns': [0.01]}})}
+                                         {'detail:1m': {'ok': True, 'returns': [0.01]}})}
     assert reproduce.check_fold(Runner(), f)['diff'] == []
-    result['robustness']['delay:1']['returns'] = [-0.01]
+    result['robustness']['detail:1m']['returns'] = [-0.01]
     [difference] = reproduce.check_fold(Runner(), f)['diff']
     assert difference.startswith('robustness:')
+
+
+def test_a_fold_rerun_compares_its_detail_scenario_and_not_the_merged_replays():
+    """A fold reruns only detail inline; the delay and nudge results the second pass merged in are no mismatch."""
+    result = {'ok': True, 'params': {'buy': {'x': 10}}, 'robustness': {'detail:1m': {'ok': True, 'returns': [0.01]}}}
+
+    class Runner:
+        def fold(self, *args):
+            return result
+    for stored in ({'detail:1m': {'ok': True, 'returns': [0.01]}, '_settings': {'implementation': 'x'}},
+                   {'detail:1m': {'ok': True, 'returns': [0.01]}, '_settings': {}, 'delay:1': {'ok': True, 'returns': [0.2]},
+                    'nudge:buy.x:up': {'ok': False, 'error': 'boom', 'returns': []}}):
+        f = {'strategy': 'S', 'exchange': 'binanceus', 'file': 'S.py', 'fold': (WF_TODAY,) * 3,
+             'stored': reproduce.fold_result(result['params'], None, None, [], None, [], stored)}
+        assert f['stored']['robustness'] == {'detail:1m': {'ok': True, 'returns': [0.01]}}
+        assert reproduce.check_fold(Runner(), f)['diff'] == []

@@ -108,6 +108,14 @@ slippage_sweep = [0.001, 0.002, 0.004]
 entry_delay_candles = 1
 parameter_nudge_fraction = 0.10
 detail_timeframe = "1m"
+# Walk-forward replays entry delay and parameter nudges only for a pair passing every gate named here (a gate or the
+# start of its label); any other pair reads them as not run. Timeframe detail runs with every fold. Left out:
+# survivorship, which fails for every pair until tr-414, and the paper gates (dry run, drift, not decayed), which need
+# a bot that has run for weeks.
+replay_after = ["bias", "costs", "out-of-sample trades", "expectancy interval low", "deflated Sharpe",
+                "overfit probability", "minimum backtest length", "months positive", "regime spread",
+                "excess over hold, low", "worst open loss", "cost stress", "slippage sweep", "timeframe detail",
+                "trades reordered, worst fall", "without its best pair", "venues agreeing", "score"]
 # Positive out of sample on this many venues, so an edge is not one venue's fee or data.
 min_venues_agreeing = 2
 # Anytime-valid paper gates (docs/anytime-gates.md, option a): confidence sequences read after every closed trade, so
