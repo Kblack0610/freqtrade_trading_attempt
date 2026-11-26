@@ -118,7 +118,27 @@ First week forward (see-keen-goose P5, read 2026-11-25 over 11-18 to 11-24 UTC, 
 - Volume is back: 7 of 7 days above 0 on kalshi and polymarket_us, kalshi touched 4,694 to 13,496 distinct markets a day, the 11-14 scale. Kalshi fills are 2.7% of orders, since most longshot entries find no depth at the recorded quote.
 - Every kalshi weather account lost, -362 to -440 each, on 295 to 316 fills; all 8 longshot accounts together lost 703 with 3 of 8 roughly flat. The forward test is not done for any family (`forward_days` 28 and `forward_bets` 300 settled): longshot and weather clear the bet count and not the day count.
 - Crypto in the same window (the `fills` view): 2,048 fills over binanceus 1,886, kraken 83 and coinbase 79, on 10 USD pairs; calls 41.
-- Stop: `weather` (the forecast family, guessed `sd`) on the evidence of -15% over 1,038 settled bets, filed as a board row. `observed` is not judged: 5 settled bets in 2 days; the open question is why it placed 6 orders where 23 stations are mapped.
+- Stop: `weather` (the forecast family, guessed `sd`) on the evidence of -15% over 1,038 settled bets, filed as a board row. `observed` is not judged: 5 settled bets in 2 days. Why only 6 orders: see below.
+
+Observed entries (tr-443, read 2026-11-26 over markets closing 11-17 to 11-26). The two `paper-observed-*` accounts were traced from 11-17 and traded from 11-23; `paper-observed-d91a9257` placed 4 orders (11-23 to 11-25) and `paper-observed-68709001` 2 (11-23). Per market day the book holds 298 mapped markets (138 `KXHIGH*`, 138 `KXLOWT*`, 22 `KXRAIN*`; 144 `KXRAIN` city markets over the 10 days (about 14 a day, outside the 298), Trenton's `KXHIGHTTTN` and `KXLOWTTTN`, and the multi-day rain series have no station in `lab/inputs/inputs.toml`). Replaying `settled_by` on the recorded `nws_obs` readings and the recorder's quotes over each market's last 24 h, at 5-minute steps, for the `edge` 0.03 variant (the 0.06 variant: 3 stopped at edge and 2 would order, all 11-19 to 11-24):
+
+| Market day | Decided (high, low, rain) | Stopped at quote valid | Stopped at spread | Stopped at edge (0.03) | Would order |
+|---|---|---|---|---|---|
+| 11-17 | 61 (39, 21, 1) | 61 | 0 | 0 | 0 |
+| 11-18 | 72 (48, 22, 2) | 72 | 0 | 0 | 0 |
+| 11-19 | 71 (44, 21, 6) | 69 | 0 | 2 | 0 |
+| 11-20 | 56 (41, 14, 1) | 56 | 0 | 0 | 0 |
+| 11-21 | 61 (33, 24, 4) | 61 | 0 | 0 | 0 |
+| 11-22 | 70 (31, 31, 8) | 70 | 0 | 0 | 0 |
+| 11-23 | 53 (33, 17, 3) | 50 | 0 | 0 | 3 |
+| 11-24 | 66 (36, 28, 2) | 65 | 0 | 0 | 1 |
+| 11-25 | 54 (28, 20, 6) | 54 | 0 | 0 | 0 |
+| 11-26 (to 14:00 UTC) | 22 (3, 15, 4) | 22 | 0 | 0 | 0 |
+
+- `quote valid` blocks the most: by the first hourly `nws_obs` read that decides a market, Kalshi already quotes it 0/0.01 (decided no) or 0.99/1.00 (decided yes), so no side lags by `edge`. The check is right; the family can only trade the minutes between an ASOS report and the reprice, and `nws_obs` is read hourly.
+- The decision funnel agrees: of the rows of mapped markets, `hours to close` stops the most (outside the last 24 h), then `quote valid`, then `settled by observation` (not yet decided); `spread`, `observation known` and `observation fresh` are minor, and no row passed `settled by observation` after 11-25 00:32 UTC, because a decided market's rows stop at `quote valid` first (the table's 11-25 row).
+- The 4 markets the replay would order on match the 4 markets of the 6 orders (both accounts bought some of the same; the 11-25 00:17 UTC order is `KXLOWTDEN-26NOV24-T21`, market day 11-24). One, `KXHIGHTSDF-26NOV23-B52.5`, `settled_by` called no from 01:30 EST while Kalshi quoted yes near 0.80, and it settled yes: the only wrong call in 586 decided markets.
+- Query: `SELECT pass_at::date, reason, sum(n) FROM decision_funnel WHERE account LIKE 'paper-observed-%' GROUP BY 1, 2`; `SELECT account, decided_at::date, action, count(*) FROM decisions WHERE account LIKE 'paper-observed-%' GROUP BY 1, 2, 3`; `SELECT account, count(*), min(sent_at), max(sent_at) FROM paper_orders WHERE account LIKE 'paper-observed-%' GROUP BY 1`; the replay reads `markets`, `resolutions` and `input_readings` (`nws_obs`) and the recorder's `trader-markets/quotes/venue=kalshi` objects.
 
 ## Board
 
