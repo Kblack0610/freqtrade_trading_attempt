@@ -53,13 +53,13 @@ def test_hard_stop_share_counts_the_planted_paths():
     assert metrics.hard_stop_share(ret, 2, 5, 0.15, paths=2000, block=1) == metrics.hard_stop_share(ret, 2, 5, 0.15, paths=2000, block=1)
 
 
-def test_stop_rows_give_each_stage_its_own_share_of_the_projection_paths():
+def test_stop_rows_give_each_stage_the_share_of_the_projection_paths():
     f = {PAIR: folds([-0.2, 0.0] * 3)}
     cfg = {**CFG, "book": {**CFG["book"], "block_months": 1,
-                           "stages": [{"name": "A", "capital": 1.0}, {"name": "B", "capital": 1.0, "hard_stop": 0.99}]}}
+                           "stages": [{"name": "A", "capital": 1.0}, {"name": "B", "capital": 1.0}]}}
     a, b = book.stop_rows(f, cfg)
-    assert (a["stage"], a["hard_stop"], b["stage"], b["hard_stop"]) == ("A", CFG["book"]["hard_stop"], "B", 0.99)
-    assert a["p_hard_stop"] > 0.99 and b["p_hard_stop"] == 0.0 and a["horizon_months"] == 12
+    assert (a["stage"], a["hard_stop"], b["stage"], b["hard_stop"]) == ("A", CFG["book"]["hard_stop"], "B", CFG["book"]["hard_stop"])
+    assert a["p_hard_stop"] > 0.99 and b["p_hard_stop"] == a["p_hard_stop"] and a["horizon_months"] == 12
     assert a["p_hard_stop"] == metrics.hard_stop_share([x[2] for x in f[PAIR]], 12, metrics.seed_of(*PAIR, "strategy", 12), a["hard_stop"], block=1)
 
 

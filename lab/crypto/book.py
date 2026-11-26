@@ -57,18 +57,18 @@ def rows(folds: dict, close: pd.Series, cfg: dict) -> list[dict]:
 
 def stop_rows(folds: dict, cfg: dict) -> list[dict]:
     """Per scored strategy and stage: the share of its 12-month out-of-sample paths (those behind exp_max_drawdown)
-    whose fall from peak reaches the stage's hard stop, a share of capital ([book] hard_stop unless the stage sets its own)."""
+    whose fall from peak reaches [book] hard_stop, a share of capital. Every stage shares that share, so it is bootstrapped once per pair
+    and written under each stage's name."""
     c = cfg["book"]
     out = []
     for (s, e), f in folds.items():
         if len(f) < cfg["confidence"]["min_folds"]:
             continue
         monthly = [x[2] for x in f]
-        for st in c["stages"]:
-            out.append({"strategy": s, "exchange": e, "stage": st["name"], "horizon_months": STOP_HORIZON,
-                        "hard_stop": st.get("hard_stop", c["hard_stop"]), "basis_months": len(monthly),
-                        "p_hard_stop": metrics.hard_stop_share(monthly, STOP_HORIZON, metrics.seed_of(s, e, "strategy", STOP_HORIZON),
-                                                               st.get("hard_stop", c["hard_stop"]), block=c["block_months"])})
+        share = metrics.hard_stop_share(monthly, STOP_HORIZON, metrics.seed_of(s, e, "strategy", STOP_HORIZON),
+                                        c["hard_stop"], block=c["block_months"])
+        out += [{"strategy": s, "exchange": e, "stage": st["name"], "horizon_months": STOP_HORIZON, "hard_stop": c["hard_stop"],
+                 "basis_months": len(monthly), "p_hard_stop": share} for st in c["stages"]]
     return out
 
 
@@ -192,14 +192,14 @@ def run(conn, cfg: dict | None = None) -> dict:
         folds.setdefault((s, e), []).append((start, end, profit))
     days = conn.execute("SELECT day, btc_close FROM regimes ORDER BY day").fetchall()
     close = pd.Series([c for _, c in days], index=pd.to_datetime([d for d, _ in days]), dtype=float)
-    out = rows(folds, close, cfg)
+    out, stops = rows(folds, close, cfg), stop_rows(folds, cfg)
     with conn.transaction():
         conn.execute("DELETE FROM book")
         conn.execute("DELETE FROM book_stops")
         with conn.cursor() as cur:
             cur.executemany(f"INSERT INTO book ({', '.join(COLS)}) VALUES ({', '.join(f'%({k})s' for k in COLS)})", out)
             cur.executemany(f"INSERT INTO book_stops ({', '.join(STOP_COLS)}) VALUES ({', '.join(f'%({k})s' for k in STOP_COLS)})",
-                            stop_rows(folds, cfg))
+                            stops)
     return {"book": len({(r["strategy"], r["exchange"]) for r in out})}
 
 
