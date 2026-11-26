@@ -97,7 +97,13 @@ def test_a_planted_basket_gives_the_hand_computed_ceiling():
 
 def test_the_ceiling_never_passes_capital_and_unknown_inputs_mark_nothing():
     assert book.kelly_ceiling(500, mu=5.0, sigma=0.2, years=10, cfg=CFG) == 500
-    assert all(s["kelly_ceiling"] is None and s["over_kelly"] is None for s in book.budget(CFG, mu=0.3)["stages"])
+    for inputs in ({"mu": 0.3}, {"mu": 0.3, "sigma": 0.0, "years": 2}, {"mu": float("nan"), "sigma": 0.2, "years": 2}):
+        assert all(s["kelly_ceiling"] is None and s["over_kelly"] is None for s in book.budget(CFG, **inputs)["stages"])
+
+
+def test_a_coin_listed_later_still_counts_from_its_first_day():
+    closes = pd.DataFrame({"A": [100, 101, 100, 101.0], "B": [None, None, 100, 102.0]})
+    assert book.basket_sigma(closes) == pytest.approx(pd.Series([0.01, 100 / 101 - 1, (0.01 + 0.02) / 2]).std() * 365 ** 0.5)
 
 
 def test_run_stores_only_scored_pairs_and_replaces_the_last(conn):

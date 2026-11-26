@@ -27,6 +27,7 @@ WHERE c.score IS NOT NULL AND w.ok AND w.params IS NOT NULL AND w.test_end <= %s
 """
 COLS = ["strategy", "exchange", "basis", "horizon_months", "p5", "p50", "p95", "prob_loss", "exp_max_drawdown", "paths",
         "basis_months"]
+DAYS_PER_YEAR = 365  # crypto trades every day: annualizes daily volatility
 
 
 def hold_months(folds: list[tuple], close: pd.Series) -> list[float]:
@@ -157,13 +158,11 @@ def benchmark_rows(btc: pd.Series, eth: pd.Series, cfg: dict) -> list[dict]:
     return out
 
 
-DAYS_PER_YEAR = 365  # crypto trades every day
-
-
 def basket_sigma(closes: pd.DataFrame) -> float:
     """Annualized volatility of an equal-weight basket's daily returns: one column of daily closes per coin.
     The bots are one bet (lab docs/risk.md section 2), so their sizing takes the basket's sigma, not one pair's."""
-    return float(closes.astype(float).pct_change().dropna().mean(axis=1).std() * math.sqrt(DAYS_PER_YEAR))
+    daily = closes.astype(float).sort_index().pct_change(fill_method=None).mean(axis=1).dropna()
+    return float(daily.std() * math.sqrt(DAYS_PER_YEAR))
 
 
 def kelly_ceiling(capital: float, mu: float, sigma: float, years: float, cfg: dict) -> float:
@@ -178,11 +177,12 @@ def budget(cfg: dict, mu: float | None = None, sigma: float | None = None, years
     """Each stage's capital and what it can lose at each limit, and the yearly cost of running at all.
 
     mu: the annual edge the step rests on; sigma: basket_sigma; years: the length of the record behind mu. With all
-    three, each stage gets a kelly_ceiling and over_kelly marks one whose open trades would exceed it; else both None.
+    three finite and sigma above zero, each stage gets a kelly_ceiling and over_kelly marks one whose open trades
+    would exceed it; else both are None, since an unknown ceiling must not read as within it.
     """
     c = cfg["book"]
     vps = 12 * c["vps_per_month"]
-    known = None not in (mu, sigma, years)
+    known = all(x is not None and math.isfinite(x) for x in (mu, sigma, years)) and sigma > 0
     stages = []
     for s in c["stages"]:
         at_risk = s["stake"] * s["max_open"]
