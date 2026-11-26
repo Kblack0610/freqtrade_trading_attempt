@@ -8,14 +8,26 @@ import math
 from pathlib import Path
 
 
+# The replay version every stored fold cache key and robustness result carries. It was this file's sha256 until
+# tr-412, so stored folds kept their keys. Change it when an edit changes any scenario's result; a refactor or the
+# kinds filter does not. test_robustness pins the scenario code, so an edit there has to decide.
+IMPLEMENTATION = "5214b91fe2bf9d615fb29a113d359cf4f00abd2bd2238bd921566dcf864ddd86"
+
+
 def settings(cfg: dict) -> dict:
-    """The perturbation settings and implementation digest that invalidate stored fold caches."""
+    """The perturbation settings and implementation version that invalidate stored fold caches."""
     return {**{key: cfg[key] for key in ("entry_delay_candles", "parameter_nudge_fraction", "detail_timeframe")},
-            "implementation": hashlib.sha256(Path(__file__).read_bytes()).hexdigest()}
+            "implementation": IMPLEMENTATION}
 
 
-def plan(cfg: dict, params: dict | None) -> dict[str, dict]:
-    """Scenario ids and instructions; their order is stable and does not depend on results."""
+def kind(name: str) -> str:
+    """A scenario's family from its id: delay, nudge or detail (nudge:unsupported is a nudge)."""
+    return name.split(":", 1)[0]
+
+
+def plan(cfg: dict, params: dict | None, kinds: set[str] | None = None) -> dict[str, dict]:
+    """Scenario ids and instructions; their order is stable and does not depend on results. kinds keeps only
+    those families; the settings are checked whatever it keeps."""
     delay = cfg["entry_delay_candles"]
     fraction = cfg["parameter_nudge_fraction"]
     detail = cfg["detail_timeframe"]
@@ -41,7 +53,7 @@ def plan(cfg: dict, params: dict | None) -> dict[str, dict]:
     if not any(s["kind"] == "nudge" for s in out.values()):
         out["nudge:unsupported"] = {"kind": "unsupported", "error": "no numeric buy or sell parameter to nudge"}
     out[f"detail:{detail}"] = {"kind": "detail", "timeframe": detail}
-    return out
+    return out if kinds is None else {name: spec for name, spec in out.items() if kind(name) in kinds}
 
 
 def expected(scenarios: dict) -> list[str]:
@@ -95,7 +107,7 @@ def _wrapper(strategy: str, module: str, spec: dict) -> tuple[str, str]:
 
 
 def run(bt, strategy: str, strat: Path, params_file: Path, exchange: str, start, end,
-        cfg: dict, summarize) -> dict[str, dict]:
+        cfg: dict, summarize, kinds: set[str] | None = None) -> dict[str, dict]:
     """Replay each scenario independently, restore the tuned file even after a runner exception.
 
     Errors are evidence, so one failed replay does not discard the original tuned fold or stop the other scenarios.
@@ -103,7 +115,7 @@ def run(bt, strategy: str, strat: Path, params_file: Path, exchange: str, start,
     """
     original = params_file.read_bytes()
     document = json.loads(original)
-    scenarios = plan(cfg, document.get("params"))
+    scenarios = plan(cfg, document.get("params"), kinds)
     out = {}
     try:
         for scenario, spec in scenarios.items():
