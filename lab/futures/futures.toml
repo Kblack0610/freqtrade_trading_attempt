@@ -20,3 +20,12 @@ near_misses = 2         # near-miss decisions kept per account per pass (one che
 [families.funding]
 threshold = [0.0001, 0.0003]
 hold_hours = 24
+
+# The futures gate (lab/futures/gate.py): the research backtests of `strategies` (lab/futures/research/bust.py), each trade net
+# of the venue's recorded funding, cut into windows and judged by the suggest.toml [confidence] thresholds.
+[gate]
+strategies = ["DonchianLongShort", "CarverLongShort64", "CarverLongShort16"]
+trial_strategies = ["BustShort", "DonchianLongShort", "CarverLongShort64", "CarverLongShort16"]  # their trial register rows
+window_days = 30        # one window per month of trades, as the walk-forward months gate reads them
+lockbox_windows = 3     # the newest windows, read only by a strategy passing every other gate
+pbo_blocks = 4          # the strategies rank against each other over this many blocks
