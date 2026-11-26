@@ -37,6 +37,7 @@ from lab.crypto import diversity, suggest, taxonomy, universe
 from lab import metrics
 from lab.money import leagues as league_rows
 from lab.stages import coverage as stage_coverage
+from lab.futures import paper as futures_lab
 from lab.stocks import paper as stocks_lab
 from lab.events import paper as paper_lab, paper_venues, sweep_ages as market_sweep_ages
 from web import auth, charts, exporter, glossary, lanes, nav
@@ -485,6 +486,7 @@ def lane_reads(bots: list[dict], paper: list[dict]) -> dict:
     paper_age = {c["match"]: c["max_age_h"] for v in venue_roster.load() for c in v["checks"] if c["source"] == "paper"}
     return {"stale_h": STALE.total_seconds() / 3600, "bots": bots, "paper": paper, "paper_max_age_h": paper_age,
             "stocks": rows(PAPER_ACCOUNTS, ([stocks_lab.VENUE],)),
+            "futures": rows(PAPER_ACCOUNTS, ([futures_lab.VENUE],)),
             "shadow_counts": rows(SHADOW_COUNTS),
             "shadow_newest": rows("SELECT max(day) AS day FROM shadow_marks")[0]["day"],
             "calls": rows(CALLS), "calls_cfg": calls_lab.load_config(), "venues": venue_roster.rows(rows),
@@ -672,6 +674,8 @@ def leagues(request: Request):
     events = league_rows.event_rows(accounts, profits, paper_lab.rule_of)
     stocks = league_rows.event_rows(rows(PAPER_ACCOUNTS, ([stocks_lab.VENUE],)), profits,
                                     stocks_lab.rule_of)
+    futures = league_rows.event_rows(rows(PAPER_ACCOUNTS, ([futures_lab.VENUE],)), profits,
+                                     lambda family, params: futures_lab.rule_of(params))
     return page(request, "leagues.html", glossary=glossary.load(),
                 tabs=[{"id": "crypto", "title": "Crypto", "rows": crypto, "fills": fills_today("freqtrade"),
                        "about": "Freqtrade spot bots on live prices (lab/crypto/league.py), grouped into cohorts."},
@@ -681,7 +685,10 @@ def leagues(request: Request):
                        "about": "One account per family variant, filled against the recorded books (lab/events/paper.py)."},
                       {"id": "stocks", "title": "Stocks", "rows": stocks, "fills": fills_today("paper", [stocks_lab.VENUE]),
                        "about": "One account per family variant on a small ETF universe, filled at Alpaca's latest "
-                                "quote with no order sent (lab/stocks/paper.py)."}],
+                                "quote with no order sent (lab/stocks/paper.py)."},
+                      {"id": "futures", "title": "Futures", "rows": futures, "fills": fills_today("paper", [futures_lab.VENUE]),
+                       "about": "One account per family variant, long or short on okx and kucoin perpetual swaps at the "
+                                "exchange's public ticker, funding charged while held (lab/futures/paper.py)."}],
                 hard_stop=suggest.load_config()["book"]["hard_stop"])
 
 

@@ -16,7 +16,8 @@ analysis = ["lab.crypto.analyze"]
 # A failed candle fetch must not start a walk-forward on an empty disk.
 walkforward = { steps = ["lab.crypto.snapshot fetch $WF_EXCHANGES", "lab.crypto.walkforward"], stop_on_failure = true }
 snapshot-publish = ["lab.crypto.snapshot publish"]
-futures = ["lab.futures.funding"]
+# Funding first, then the paper pass that trades on it: the pass runs even when the funding fetch failed.
+futures = ["lab.futures.funding", "lab.futures.paper"]
 calibration = ["lab.crypto.calibration"]
 call-rules = ["lab.inputs.call_rules"]
 wallet = ["lab.money.wallet"]

@@ -303,11 +303,12 @@ def test_the_event_contract_league_is_not_a_cohort_and_scores_beside_the_crypto_
     head = lambda t: re.findall(r"<th[^>]*>([^<]+)</th>", t[t.index("<thead>"):t.index("</thead>")])  # noqa: E731
     assert head(crypto) == head(events) and "Max drawdown" in head(events)  # one scorecard, the same columns
     stocks = page[page.index('<h2 class="sec" id="stocks">'):]
-    assert "No accounts in this league yet" in stocks  # no stock pass has run
+    assert "No accounts in this league yet" in stocks.split('<h2 class="sec" id="futures">')[0]  # no stock pass has run
+    assert 'id="futures"' in page and "No accounts in this league yet" in page.split('<h2 class="sec" id="futures">')[1]
 
 
 def test_pages_render_on_an_empty_database(conn, signed_in):
-    assert signed_in[1].get("/").text.count('<span class="tag">no data</span>') == 9  # every lane but the guard
+    assert signed_in[1].get("/").text.count('<span class="tag">no data</span>') == 10  # every lane but the guard
     for path in ("/", "/cohorts", "/data", "/runs", "/strategies", "/suggestions", "/walkforward", "/coverage", "/markets", "/links", "/markets/book", "/accounts", "/calls", "/leagues", "/today"):
         assert signed_in[1].get(path).status_code == 200, path
 
@@ -1059,7 +1060,7 @@ def test_a_stock_fill_shows_its_rule_its_checks_and_its_exit(conn, signed_in):
     pid = conn.execute("SELECT id FROM paper_orders WHERE account = %s", (ts.TREND,)).fetchone()[0]
     _, client = signed_in
     page = client.get("/leagues").text
-    tab = page[page.index('<h2 class="sec" id="stocks">'):]
+    tab = page[page.index('<h2 class="sec" id="stocks">'):page.index('<h2 class="sec" id="futures">')]
     assert ts.TREND in tab and "fills opened today" in tab
     assert stocks.rule_of("trend", {"sma": 3}) in tab and "No accounts in this league yet" not in tab
     body = client.get(f"/trades/paper/{pid}").text
@@ -1127,4 +1128,21 @@ def test_coverage_shows_stocks_backtest_and_gate_present_only_when_rows_exist(co
                  "VALUES ('stocks', 'alpaca', 'trend/v', false, 0, 0, '[]')")
     full = stocks_row()
     assert "<code>lab.stocks.backtest</code>" in full and "<code>lab.stocks.gate</code>" in full
+    assert full.count('class="down"') == 1  # live
+
+
+def test_coverage_shows_futures_gate_and_paper_present_only_when_rows_exist(conn, signed_in):
+    def futures_row():
+        page = signed_in[1].get("/coverage").text
+        return page[page.index("<td>futures</td>"):].split("</tr>")[0]
+
+    empty = futures_row()
+    assert "<code>lab.futures.gate</code>" not in empty and "<code>lab.futures.paper</code>" not in empty
+    assert empty.count('class="down"') == 3  # gate, paper and live
+    conn.execute("INSERT INTO readiness (market, venue, strategy, ready, passed, trades, gates) "
+                 "VALUES ('futures', 'okx', 'DonchianLongShort', false, 0, 0, '[]')")
+    conn.execute("INSERT INTO paper_accounts (account, family, variant, venue, params, capital, started_at) "
+                 "VALUES ('futures-funding-aaaa1111', 'funding', 'aaaa1111', 'futures', '{}', 10000, now())")
+    full = futures_row()
+    assert "<code>lab.futures.gate</code>" in full and "<code>lab.futures.paper</code>" in full
     assert full.count('class="down"') == 1  # live

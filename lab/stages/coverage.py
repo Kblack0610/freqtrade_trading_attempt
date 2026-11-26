@@ -12,7 +12,8 @@ def load(path: Path = STAGES_TOML) -> dict:
 
 # The row count behind a declared stage's `rows` table, for the stage's `key`.
 EVIDENCE = {"market_backtests": "SELECT count(*) AS n FROM market_backtests WHERE venue = %s",
-            "readiness": "SELECT count(*) AS n FROM readiness WHERE market = %s"}
+            "readiness": "SELECT count(*) AS n FROM readiness WHERE market = %s",
+            "paper_accounts": "SELECT count(*) AS n FROM paper_accounts WHERE venue = %s"}
 
 
 def matrix(declared: dict | None = None, count=None) -> dict:
