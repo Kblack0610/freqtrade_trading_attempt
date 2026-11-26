@@ -301,7 +301,8 @@ def slippage_gate(ev: dict, c: dict) -> dict:
 
 
 NOT_RUN = "not run: other gates not cleared"
-REPLAYED = ("entry delay", "parameter nudges")  # the gates lab/crypto/walkforward.py replay_folds feeds
+FAMILIES = (("delay", "entry delay"), ("nudge", "parameter nudges"), ("detail", "timeframe detail"))
+REPLAYED = tuple(label for _, label in FAMILIES[:2])  # the gates lab/crypto/walkforward.py replay_folds feeds
 
 
 def cleared(others: list[dict], c: dict) -> bool:
@@ -315,17 +316,21 @@ def cleared(others: list[dict], c: dict) -> bool:
 
 
 def robustness_gates(folds: list[dict], pair: tuple, c: dict, others: list[dict] | None = None) -> list[dict]:
-    """Entry delay, parameter nudges and timeframe detail. With others, the pair's remaining gates, entry delay and
-    parameter nudges fail as not run unless cleared() passes on them and timeframe detail."""
+    """Entry delay, parameter nudges and timeframe detail. With others, the pair's remaining gates, entry delay or
+    parameter nudges with a scenario not stored fail as not run unless cleared() passes on them and timeframe detail;
+    stored evidence always shows, so a pair replayed once keeps its reading when the trial count moves."""
     pooled: dict = {}
     settings = robustness.settings(c)
-    errors: dict = {kind: [] for kind in ("delay", "nudge", "detail")}
+    errors: dict = {kind: [] for kind, _ in FAMILIES}
+    missing = {kind for kind, _ in FAMILIES} if not folds else set()
     for f in folds:
         expected = robustness.plan(c, f.get("params") or {})
         stored = f.get("robustness") or {}
         for name in expected:
             kind = robustness.kind(name)
             r = stored.get(name) or {}
+            if not r or stored.get("_settings") != settings:
+                missing.add(kind)
             if stored.get("_settings") != settings:
                 r = {"error": "missing or stale experiment settings"}
             values = r.get("returns")
@@ -335,7 +340,7 @@ def robustness_gates(folds: list[dict], pair: tuple, c: dict, others: list[dict]
                 pooled.setdefault(name, []).extend(values)
     out = []
     need = f"all scenarios, >= {c['min_member_trades']} trades each, interval low > 0"
-    for kind, label in (("delay", "entry delay"), ("nudge", "parameter nudges"), ("detail", "timeframe detail")):
+    for kind, label in FAMILIES:
         tested = []
         ok = bool(folds) and not errors[kind]
         for name, values in pooled.items():
@@ -347,7 +352,7 @@ def robustness_gates(folds: list[dict], pair: tuple, c: dict, others: list[dict]
             tested.append(f"{name}: {ev['trades']} trades, low {ev['lo']}")
         out.append(gate(label, "; ".join(errors[kind] + tested) or "no evidence", need, ok and bool(tested)))
     if others is not None and not cleared([*others, out[2]], c):
-        out[:2] = [gate(label, NOT_RUN, need, False) for label in REPLAYED]
+        out[:2] = [gate(label, NOT_RUN, need, False) if kind in missing else g for (kind, label), g in zip(FAMILIES[:2], out)]
     return out
 
 
@@ -452,12 +457,12 @@ def retire_rows(facts: dict, cfg: dict) -> list[dict]:
 
 
 def cleared_pairs(conn, cfg: dict) -> set[tuple]:
-    """The strategy x exchange pairs whose entry delay and parameter nudges would not read NOT_RUN today: the ones
-    lab/crypto/walkforward.py replays. It reads what run() reads, so the two agree."""
+    """The strategy x exchange pairs passing cleared(): the ones lab/crypto/walkforward.py replays. It reads what run()
+    reads, so the two agree."""
     trials = register(conn)
     facts = load(conn, cfg)
     return {(r["strategy"], r["venue"]) for r in rows(facts, trials, cfg)
-            if next(g for g in r["gates"].obj if g["gate"] == REPLAYED[0])["value"] != NOT_RUN}
+            if cleared([g for g in r["gates"].obj if g["gate"] not in REPLAYED], cfg["confidence"])}
 
 
 def run(conn, cfg: dict | None = None) -> dict:

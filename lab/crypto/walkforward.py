@@ -496,7 +496,8 @@ def replay_plan(conn, pairs: set[tuple], ft_version: str) -> list[dict]:
 def replay_folds(conn, runner: Runner, report: dict, stop_at: float | None = None) -> bool:
     """The second pass, after run_folds: entry delay and parameter nudge replays for the pairs whose other
     confidence gates pass (confidence.cleared_pairs), merged into each fold's stored robustness beside its detail
-    scenario and _settings. False when a replay's runner raised; its fold retries next run."""
+    scenario and _settings. It shares run_folds' deadline, so during a fold backlog the replays wait for it to drain,
+    as a verdict does. False when replay runners raised more than run_folds tolerates; such a fold retries next run."""
     todo = replay_plan(conn, confidence.cleared_pairs(conn, suggest.load_config()), runner.version())
     print(f"walkforward: shard {SHARD + 1}/{SHARDS}: {len(todo)} folds to replay for delay and nudges", flush=True)
     budget = analyze.Budget(MEMORY_GB)
@@ -530,7 +531,7 @@ def replay_folds(conn, runner: Runner, report: dict, stop_at: float | None = Non
             pool.shutdown(cancel_futures=True)
             raise
     report.update(replays_run=done, replays_failed=len(failures), replays_left=left, replay_failures=failures[:100])
-    return not failures
+    return len(failures) <= max(FAIL_SHARE * done, LONE_FAILURES if done > 1 else 0)
 
 
 def close_shard(conn, shard_id: int, job: str, report: dict, ok: bool) -> list[tuple] | None:

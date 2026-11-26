@@ -115,14 +115,15 @@ def test_settings_track_algorithm_and_configuration():
     assert original == robustness.settings({**CFG, "replay_after": ["bias"]}), "only the scenario settings count"
 
 
-SCENARIO_CODE = "29bcb8560df5035b5f0d0166e7ca52d1ef1a37813b2d5f80def7f13cf10ea474"
+SCENARIO_CODE = "9a3d64eb52f35e01dd75213ecb2a07f0c030258deee42ebfb757643cf9ee01a6"
 
 
 def test_the_implementation_version_pins_the_scenario_code():
     """IMPLEMENTATION is in every fold's cache key, so it is a version, not a file digest. An edit to the code that
     makes the scenarios has to decide: a changed result changes IMPLEMENTATION (every fold reruns once), and either
     way SCENARIO_CODE becomes the new digest."""
-    code = "".join(inspect.getsource(f) for f in (robustness.kind, robustness.plan, robustness._wrapper, robustness.run))
+    code = "".join(inspect.getsource(f) for f in (robustness.kind, robustness.plan, robustness._source,
+                                                  robustness._wrapper, robustness.run))
     assert hashlib.sha256(code.encode()).hexdigest() == SCENARIO_CODE
 
 
