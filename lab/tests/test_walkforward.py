@@ -612,6 +612,7 @@ def test_a_fold_runs_only_its_detail_scenario_and_stores_no_delay_or_nudge(wlab,
     assert list(res["robustness"]) == ["detail:1m"]
     task = {"name": "Strategy001", "exchange": "binanceus", "fold": fold, "key": "k", "candles": "c", "seed": 1,
             "attempts": 0, "tune": TUNE}
+    wlab.execute("INSERT INTO strategies (name, file, file_hash, timeframe) VALUES ('Strategy001', 'f.py', 'h', '5m')")
     wf.store(wlab, task, res)
     stored = wlab.execute("SELECT robustness FROM walkforward").fetchone()[0]
     assert set(stored) == {"detail:1m", "_settings"}
