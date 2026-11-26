@@ -10,6 +10,7 @@ nothing about a market they did not contain, and 12 months cannot carry a 5-year
 Run alone with `python lab/crypto/book.py`; lab/crypto/analyze.py and lab/crypto/walkforward.py run it after the score.
 """
 
+import math
 import sys
 
 import pandas as pd
@@ -156,12 +157,39 @@ def benchmark_rows(btc: pd.Series, eth: pd.Series, cfg: dict) -> list[dict]:
     return out
 
 
-def budget(cfg: dict) -> dict:
-    """Each stage's capital and what it can lose at each limit, and the yearly cost of running at all."""
+DAYS_PER_YEAR = 365  # crypto trades every day
+
+
+def basket_sigma(closes: pd.DataFrame) -> float:
+    """Annualized volatility of an equal-weight basket's daily returns: one column of daily closes per coin.
+    The bots are one bet (lab docs/risk.md section 2), so their sizing takes the basket's sigma, not one pair's."""
+    return float(closes.astype(float).pct_change().dropna().mean(axis=1).std() * math.sqrt(DAYS_PER_YEAR))
+
+
+def kelly_ceiling(capital: float, mu: float, sigma: float, years: float, cfg: dict) -> float:
+    """The most a stage may hold in open trades: [book] kelly_fraction of continuous Kelly, mu / sigma^2, on the
+    lower bound of the edge, mu - z sigma / sqrt(T). Zero until T > (z / Sharpe)^2; never above capital."""
+    c = cfg["book"]
+    lower = mu - c["kelly_z"] * sigma / math.sqrt(years) if years > 0 else 0.0
+    return capital * min(c["kelly_fraction"] * max(lower, 0.0) / sigma ** 2, 1.0)
+
+
+def budget(cfg: dict, mu: float | None = None, sigma: float | None = None, years: float | None = None) -> dict:
+    """Each stage's capital and what it can lose at each limit, and the yearly cost of running at all.
+
+    mu: the annual edge the step rests on; sigma: basket_sigma; years: the length of the record behind mu. With all
+    three, each stage gets a kelly_ceiling and over_kelly marks one whose open trades would exceed it; else both None.
+    """
     c = cfg["book"]
     vps = 12 * c["vps_per_month"]
-    stages = [{**s, "at_risk": s["stake"] * s["max_open"], "day_loss": s["capital"] * cfg["watcher"]["day_loss"],
-               "hard_stop": s["capital"] * c["hard_stop"], "vps_share": vps / s["capital"]} for s in c["stages"]]
+    known = None not in (mu, sigma, years)
+    stages = []
+    for s in c["stages"]:
+        at_risk = s["stake"] * s["max_open"]
+        ceiling = kelly_ceiling(s["capital"], mu, sigma, years, cfg) if known else None
+        stages.append({**s, "at_risk": at_risk, "day_loss": s["capital"] * cfg["watcher"]["day_loss"],
+                       "hard_stop": s["capital"] * c["hard_stop"], "vps_share": vps / s["capital"],
+                       "kelly_ceiling": ceiling, "over_kelly": None if ceiling is None else at_risk > ceiling})
     return {"stages": stages, "vps_year": vps, "cpa_once": c["cpa_once"]}
 
 

@@ -74,6 +74,32 @@ def test_budget_traces_to_config():
     assert b["vps_year"] == 12 * CFG["book"]["vps_per_month"]
 
 
+def test_a_record_shorter_than_z_over_sharpe_squared_gets_a_zero_ceiling():
+    sigma, sharpe = 0.6, 1.0
+    short = (CFG["book"]["kelly_z"] / sharpe) ** 2 * 0.9
+    one = book.budget(CFG, mu=sharpe * sigma, sigma=sigma, years=short)["stages"][0]
+    assert one["kelly_ceiling"] == 0 and one["over_kelly"]
+    assert book.budget(CFG, mu=sharpe * sigma, sigma=sigma, years=0)["stages"][0]["kelly_ceiling"] == 0
+
+
+def test_a_planted_basket_gives_the_hand_computed_ceiling():
+    # Daily returns: A +2% -2%, B flat, C +1% -1%, so the basket goes +1% -1% over 4 days.
+    closes = pd.DataFrame({"A": [100, 102, 99.96, 101.9592, 99.920016], "B": [100.0] * 5,
+                           "C": [100, 101, 98.98, 99.9698, 97.970404]})
+    sigma = book.basket_sigma(closes)
+    assert sigma == pytest.approx(0.01 * (4 / 3) ** 0.5 * 365 ** 0.5)  # 0.220605
+    # Lower bound 0.3 - 1.645 * 0.220605 / 3 = 0.179035; a quarter of that over 0.220605^2 is 0.919699 of capital.
+    stages = book.budget(CFG, mu=0.3, sigma=sigma, years=9)["stages"]
+    one = stages[0]
+    assert one["kelly_ceiling"] == pytest.approx(459.8497, abs=1e-3) and one["over_kelly"] is False
+    assert [s["kelly_ceiling"] / s["capital"] for s in stages] == pytest.approx([0.919699] * len(stages), abs=1e-6)
+
+
+def test_the_ceiling_never_passes_capital_and_unknown_inputs_mark_nothing():
+    assert book.kelly_ceiling(500, mu=5.0, sigma=0.2, years=10, cfg=CFG) == 500
+    assert all(s["kelly_ceiling"] is None and s["over_kelly"] is None for s in book.budget(CFG, mu=0.3)["stages"])
+
+
 def test_run_stores_only_scored_pairs_and_replaces_the_last(conn):
     conn.execute("INSERT INTO strategies (name, file, file_hash) VALUES ('Good', 'x', 'h'), ('Bad', 'y', 'h')")
     conn.execute("INSERT INTO readiness (market, strategy, venue, score, ready, passed, trades, gates) VALUES "
