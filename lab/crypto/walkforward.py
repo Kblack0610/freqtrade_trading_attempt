@@ -24,7 +24,9 @@ not guessed.
 A fold is cached by strategy file, configs, Freqtrade version, dates, hyperopt settings and a digest of the
 candles from its training start to its test end, so a weekly run adds the newest month and whatever a changed
 file, a changed candle or a new candidate needs. Folds share a memory budget
-(WF_MEMORY_GB) by their estimated size, like analyze's chunks, so wide venues do not all hyperopt at once.
+(WF_MEMORY_GB) by their estimated size, like analyze's chunks, so wide venues do not all hyperopt at once. A fold holds
+its hyperopt estimate while it tunes and backtests on its own candles; the detail replay runs in [confidence]
+detail_chunk_days pieces, each holding only its own estimate.
 
 A FreqAI strategy (analyze.freqai_fragment) is left out: hyperopt over a fold's training span would fit a model per pair
 for every 7-day window in it, each fold anew, far past WF_BUDGET_S.
@@ -45,6 +47,7 @@ Exits 1 when more than a tenth of the folds this shard ran failed (a shard toler
 retried next run), or on a crash.
 """
 
+import contextlib
 import datetime as dt
 import json
 import os
@@ -161,7 +164,7 @@ def fold_candles(exchange: str, timeframe: str, fold: tuple, days: dict) -> str:
 
 class Runner(Protocol):
     def version(self) -> str: ...
-    def fold(self, strategy: str, file: str, exchange: str, fold: tuple, seed: int) -> dict: ...
+    def fold(self, strategy: str, file: str, exchange: str, fold: tuple, seed: int, hold=None) -> dict: ...
 
 
 def stats(res: dict) -> dict:
@@ -188,7 +191,11 @@ class Cli:
     def version(self) -> str:
         return self.bt.version()
 
-    def fold(self, strategy: str, file: str, exchange: str, fold: tuple, seed: int) -> dict:
+    def fold(self, strategy: str, file: str, exchange: str, fold: tuple, seed: int, hold=None) -> dict:
+        """hold(kind) is entered around the fold's memory-heavy steps: "native" over hyperopt and the backtests on the
+        strategy's own candles, "detail" over each piece of the detail replay (robustness.detail_backtest). The two
+        never nest, so a fold waiting for a piece holds nothing."""
+        hold = hold or (lambda kind: contextlib.nullcontext())
         train_start, test_start, test_end = fold
         tune = tuning(file, seed)
         t0, hyperopt_s = time.monotonic(), None
@@ -207,49 +214,51 @@ class Cli:
             params_file = strat / f"{src.stem}.json"
             with open(strat / src.name, "a") as f:
                 f.write(sampler_override(strategy, tune["sampler"]))
-            base = self.bt.backtest(strategy, exchange, test_start, test_end, strategy_path=strat)
-            if not base["ok"]:
-                return took({"ok": False, "no_data": base.get("no_data", False), "error": f"base: {base['error']}"})
-            before = params_file.stat().st_mtime_ns if params_file.exists() else None
-            cmd = ["freqtrade", "hyperopt", "--userdir", d,
-                   *[a for p in analyze.config_files(exchange) for a in ("-c", str(p))],
-                   "--datadir", str(analyze.RESULTS / "data" / exchange), "--strategy", strategy,
-                   "--strategy-path", str(strat), "--timerange", f"{train_start:%Y%m%d}-{train_end(test_start):%Y%m%d}",
-                   "--hyperopt-loss", LOSS, "--spaces", *tune["spaces"].split(), "--ignore-missing-spaces",
-                   "-e", str(tune["epochs"]), *(["--early-stop", str(tune["early_stop"])] if tune["early_stop"] else []),
-                   "-j", "1", "--random-state", str(seed), "--min-trades", str(MIN_TRADES)]  # freqtrade refuses 0
-            h0 = time.monotonic()
-            try:
-                p = subprocess.run(cmd, capture_output=True, text=True, timeout=TIMEOUT)
-            except subprocess.TimeoutExpired:  # the same fold times out again on a retry: keep what it found
-                p = None
-            finally:
-                hyperopt_s = time.monotonic() - h0
-            note = None
-            if p is None:
-                epochs_run, found = best_so_far(Path(d), strategy, params_file)
-                if not found:
-                    return took({"ok": False, "error": f"hyperopt timed out after {TIMEOUT}s, {epochs_run} epochs saved, "
-                                                       f"none reaching {MIN_TRADES} training trades"})
-                note = f"hyperopt stopped at WF_TIMEOUT ({TIMEOUT}s) after {epochs_run} epochs, tuned with the best so far"
-            elif p.returncode:  # a training span with nothing to run is no data, as a backtest's is: no retry changes it
-                if why := analyze.nothing_to_run(p.stdout + p.stderr):
-                    return took({"ok": False, "no_data": True, "error": f"hyperopt: {why}"})
-                return took({"ok": False, "error": f"hyperopt exit {p.returncode}: {analyze._errors(p.stdout + p.stderr)}"})
-            else:
-                stopped = EARLY_STOPPED.search(p.stdout + p.stderr)
-                epochs_run = int(stopped.group(1)) if stopped else tune["epochs"]
-            out = {"ok": True, "error": note, "base": stats(base), "params": None, "epochs_run": epochs_run}
-            if not params_file.exists() or params_file.stat().st_mtime_ns == before:
-                return took({**out, "error": f"no hyperopt epoch reached {MIN_TRADES} training trades"})
-            out["params"] = json.loads(params_file.read_text())["params"]
-            for side, (a, b) in (("tuned", (test_start, test_end)), ("is", (train_start, train_end(test_start)))):
-                r = self.bt.backtest(strategy, exchange, a, b, strategy_path=strat)
-                if not r["ok"]:
-                    return took({"ok": False, "no_data": r.get("no_data", False), "error": f"{side}: {r['error']}"})
-                out[side] = stats(r)
+            with hold("native"):
+                base = self.bt.backtest(strategy, exchange, test_start, test_end, strategy_path=strat)
+                if not base["ok"]:
+                    return took({"ok": False, "no_data": base.get("no_data", False), "error": f"base: {base['error']}"})
+                before = params_file.stat().st_mtime_ns if params_file.exists() else None
+                cmd = ["freqtrade", "hyperopt", "--userdir", d,
+                       *[a for p in analyze.config_files(exchange) for a in ("-c", str(p))],
+                       "--datadir", str(analyze.RESULTS / "data" / exchange), "--strategy", strategy,
+                       "--strategy-path", str(strat), "--timerange", f"{train_start:%Y%m%d}-{train_end(test_start):%Y%m%d}",
+                       "--hyperopt-loss", LOSS, "--spaces", *tune["spaces"].split(), "--ignore-missing-spaces",
+                       "-e", str(tune["epochs"]), *(["--early-stop", str(tune["early_stop"])] if tune["early_stop"] else []),
+                       "-j", "1", "--random-state", str(seed), "--min-trades", str(MIN_TRADES)]  # freqtrade refuses 0
+                h0 = time.monotonic()
+                try:
+                    p = subprocess.run(cmd, capture_output=True, text=True, timeout=TIMEOUT)
+                except subprocess.TimeoutExpired:  # the same fold times out again on a retry: keep what it found
+                    p = None
+                finally:
+                    hyperopt_s = time.monotonic() - h0
+                note = None
+                if p is None:
+                    epochs_run, found = best_so_far(Path(d), strategy, params_file)
+                    if not found:
+                        return took({"ok": False, "error": f"hyperopt timed out after {TIMEOUT}s, {epochs_run} epochs saved, "
+                                                           f"none reaching {MIN_TRADES} training trades"})
+                    note = f"hyperopt stopped at WF_TIMEOUT ({TIMEOUT}s) after {epochs_run} epochs, tuned with the best so far"
+                elif p.returncode:  # a training span with nothing to run is no data, as a backtest's is: no retry changes it
+                    if why := analyze.nothing_to_run(p.stdout + p.stderr):
+                        return took({"ok": False, "no_data": True, "error": f"hyperopt: {why}"})
+                    return took({"ok": False, "error": f"hyperopt exit {p.returncode}: {analyze._errors(p.stdout + p.stderr)}"})
+                else:
+                    stopped = EARLY_STOPPED.search(p.stdout + p.stderr)
+                    epochs_run = int(stopped.group(1)) if stopped else tune["epochs"]
+                out = {"ok": True, "error": note, "base": stats(base), "params": None, "epochs_run": epochs_run}
+                if not params_file.exists() or params_file.stat().st_mtime_ns == before:
+                    return took({**out, "error": f"no hyperopt epoch reached {MIN_TRADES} training trades"})
+                out["params"] = json.loads(params_file.read_text())["params"]
+                for side, (a, b) in (("tuned", (test_start, test_end)), ("is", (train_start, train_end(test_start)))):
+                    r = self.bt.backtest(strategy, exchange, a, b, strategy_path=strat)
+                    if not r["ok"]:
+                        return took({"ok": False, "no_data": r.get("no_data", False), "error": f"{side}: {r['error']}"})
+                    out[side] = stats(r)
             out["robustness"] = robustness.run(self.bt, strategy, strat, params_file, exchange,
-                                               test_start, test_end, suggest.load_config()["confidence"], stats)
+                                               test_start, test_end, suggest.load_config()["confidence"], stats,
+                                               hold)
         return took(out)
 
 
@@ -404,12 +413,16 @@ def run_folds(conn, runner: Runner, today: dt.date, report: dict, spent: float =
     left = 0
 
     def run(t):
-        gb = max(analyze.task_gb(t["exchange"], t["timeframe"], TRAIN_DAYS + 31, HYPEROPT_LOAD),
-                 analyze.task_gb(t["exchange"], suggest.load_config()["confidence"]["detail_timeframe"], 31))
-        with budget.hold(gb):
+        c = suggest.load_config()["confidence"]
+        gb = {"native": analyze.task_gb(t["exchange"], t["timeframe"], TRAIN_DAYS + 31, HYPEROPT_LOAD),
+              "detail": analyze.task_gb(t["exchange"], c["detail_timeframe"], c["detail_chunk_days"])}
+        # Wait for room before reading the clock, so a fold queued behind others does not start past the budget. The
+        # fold takes its holds itself (Cli.fold), since it frees the native one while its detail pieces run.
+        with budget.hold(gb["native"]):
             if stop_at is not None and time.monotonic() >= stop_at:
                 return None  # out of time: left for the next run
-            return runner.fold(t["name"], t["file"], t["exchange"], t["fold"], t["seed"])
+        return runner.fold(t["name"], t["file"], t["exchange"], t["fold"], t["seed"],
+                           hold=lambda kind: budget.hold(gb[kind]))
 
     with ThreadPoolExecutor(max_workers=WORKERS) as pool:
         futs = {pool.submit(run, t): t for t in todo}

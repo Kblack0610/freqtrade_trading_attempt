@@ -2,15 +2,20 @@
 
 import ast
 import copy
+import datetime as dt
 import hashlib
 import json
 import math
+from contextlib import nullcontext
 from pathlib import Path
+
+import pandas as pd
 
 
 def settings(cfg: dict) -> dict:
     """The perturbation settings and implementation digest that invalidate stored fold caches."""
-    return {**{key: cfg[key] for key in ("entry_delay_candles", "parameter_nudge_fraction", "detail_timeframe")},
+    return {**{key: cfg[key] for key in ("entry_delay_candles", "parameter_nudge_fraction", "detail_timeframe",
+                                     "detail_chunk_days")},
             "implementation": hashlib.sha256(Path(__file__).read_bytes()).hexdigest()}
 
 
@@ -19,12 +24,15 @@ def plan(cfg: dict, params: dict | None) -> dict[str, dict]:
     delay = cfg["entry_delay_candles"]
     fraction = cfg["parameter_nudge_fraction"]
     detail = cfg["detail_timeframe"]
+    chunk = cfg["detail_chunk_days"]
     if isinstance(delay, bool) or not isinstance(delay, int) or delay < 1:
         raise ValueError("entry_delay_candles must be a positive integer")
     if isinstance(fraction, bool) or not isinstance(fraction, (float, int)) or not 0 < fraction < 1:
         raise ValueError("parameter_nudge_fraction must be between zero and one")
     if not isinstance(detail, str) or not detail:
         raise ValueError("detail_timeframe must name a smaller candle timeframe")
+    if isinstance(chunk, bool) or not isinstance(chunk, int) or chunk < 1:
+        raise ValueError("detail_chunk_days must be a positive integer")
     out = {f"delay:{delay}": {"kind": "delay", "candles": delay}}
     for space in ("buy", "sell"):
         for key, value in sorted((params or {}).get(space, {}).items()):
@@ -40,13 +48,58 @@ def plan(cfg: dict, params: dict | None) -> dict[str, dict]:
                     "kind": "nudge", "space": space, "key": key, "value": candidate}
     if not any(s["kind"] == "nudge" for s in out.values()):
         out["nudge:unsupported"] = {"kind": "unsupported", "error": "no numeric buy or sell parameter to nudge"}
-    out[f"detail:{detail}"] = {"kind": "detail", "timeframe": detail}
+    out[f"detail:{detail}"] = {"kind": "detail", "timeframe": detail, "chunk_days": chunk}
     return out
 
 
 def expected(scenarios: dict) -> list[str]:
     """Names required by this fixed experiment plan."""
     return list(scenarios)
+
+
+def pieces(start: dt.date, end: dt.date, days: int) -> list[tuple[dt.date, dt.date]]:
+    """[start, end) as consecutive spans of at most `days` days, the last one shorter."""
+    out = []
+    while start < end:
+        out.append((start, min(start + dt.timedelta(days=days), end)))
+        start = out[-1][1]
+    return out
+
+
+def join(results: list[dict]) -> dict:
+    """Pieces run back to back as one result shaped like analyze.Cli.backtest's. Each piece starts from the configured
+    balance, so its return compounds on the balance the pieces before it left, and its trades' profit_abs scale by the
+    same factor. max_drawdown is the worst piece's: a drawdown that spans a boundary is not seen. A trade still open at
+    an inner boundary is force-exited there by freqtrade; boundary_exits counts them (stats() drops force exits)."""
+    start = balance = results[0]["start_balance"]
+    frames = []
+    for r in results:
+        trades = r["trades"].copy()
+        if "profit_abs" in trades:
+            trades["profit_abs"] = trades["profit_abs"] * (balance / r["start_balance"])
+        frames.append(trades)
+        balance *= r["final_balance"] / r["start_balance"]
+    inner = [r["trades"] for r in results[:-1]]
+    return {"ok": True, "error": None, "duration_s": sum(r.get("duration_s") or 0.0 for r in results),
+            "trades": pd.concat(frames, ignore_index=True), "bt_start": results[0]["bt_start"],
+            "bt_end": results[-1]["bt_end"], "start_balance": start, "final_balance": balance,
+            "max_drawdown": max(r["max_drawdown"] for r in results),
+            "boundary_exits": sum(int((t["exit_reason"] == "force_exit").sum()) for t in inner if "exit_reason" in t)}
+
+
+def detail_backtest(bt, strategy: str, exchange: str, start: dt.date, end: dt.date, timeframe: str, days: int,
+                    hold=None, **kwargs) -> dict:
+    """The --timeframe-detail replay of [start, end) in `days`-day pieces, each run under hold("detail") so a piece's
+    intrabar candles, not a whole month's, take the memory budget. The first failed piece is the result."""
+    hold = hold or (lambda kind: nullcontext())
+    results = []
+    for a, b in pieces(start, end, days):
+        with hold("detail"):
+            r = bt.backtest(strategy, exchange, a, b, detail=timeframe, **kwargs)
+        if not r["ok"]:
+            return r
+        results.append(r)
+    return join(results)
 
 
 def _source(strat: Path, strategy: str) -> Path:
@@ -94,13 +147,17 @@ def _wrapper(strategy: str, module: str, spec: dict) -> tuple[str, str]:
     return name, source
 
 
-def run(bt, strategy: str, strat: Path, params_file: Path, exchange: str, start, end,
-        cfg: dict, summarize) -> dict[str, dict]:
+def run(bt, strategy: str, strat: Path, params_file: Path, exchange: str, start: dt.date, end: dt.date,
+        cfg: dict, summarize, hold=None) -> dict[str, dict]:
     """Replay each scenario independently, restore the tuned file even after a runner exception.
+
+    hold(kind) is entered around each replay: "native" for a scenario on the strategy's own candles, "detail" for each
+    piece of the detail scenario (detail_backtest). Neither is held while the other runs.
 
     Errors are evidence, so one failed replay does not discard the original tuned fold or stop the other scenarios.
     Temporary subclasses retain the tuned parameter filename under their own class name, as Freqtrade requires.
     """
+    hold = hold or (lambda kind: nullcontext())
     original = params_file.read_bytes()
     document = json.loads(original)
     scenarios = plan(cfg, document.get("params"))
@@ -113,10 +170,6 @@ def run(bt, strategy: str, strat: Path, params_file: Path, exchange: str, start,
                 if spec["kind"] == "unsupported":
                     out[scenario] = {"ok": False, "error": spec["error"], "returns": []}
                     continue
-                name = strategy
-                kwargs = {"strategy_path": strat}
-                if spec["kind"] == "detail":
-                    kwargs["detail"] = spec["timeframe"]
                 name, source = _wrapper(strategy, _source(strat, strategy).stem, spec)
                 source_path = strat / f"{name}.py"
                 params_path = strat / f"{name}.json"
@@ -129,7 +182,12 @@ def run(bt, strategy: str, strat: Path, params_file: Path, exchange: str, start,
                 if spec["kind"] == "nudge":
                     changed["params"][spec["space"]][spec["key"]] = spec["value"]
                 wrapper_params.write_text(json.dumps(changed))
-                result = bt.backtest(name, exchange, start, end, **kwargs)
+                if spec["kind"] == "detail":
+                    result = detail_backtest(bt, name, exchange, start, end, spec["timeframe"], spec["chunk_days"],
+                                             hold, strategy_path=strat)
+                else:
+                    with hold("native"):
+                        result = bt.backtest(name, exchange, start, end, strategy_path=strat)
                 if not result["ok"]:
                     out[scenario] = {"ok": False, "error": result.get("error", "backtest failed"), "returns": []}
                     continue
@@ -137,6 +195,8 @@ def run(bt, strategy: str, strat: Path, params_file: Path, exchange: str, start,
                 if not all(math.isfinite(value) for value in summary.get("returns", [])):
                     raise ValueError("nonfinite scenario returns")
                 out[scenario] = {"ok": True, "error": None, **summary}
+                if "boundary_exits" in result:
+                    out[scenario]["boundary_exits"] = result["boundary_exits"]
             except Exception as exc:
                 out[scenario] = {"ok": False, "error": f"{type(exc).__name__}: {exc}", "returns": []}
             finally:

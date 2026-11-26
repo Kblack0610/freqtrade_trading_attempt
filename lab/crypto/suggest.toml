@@ -108,6 +108,10 @@ slippage_sweep = [0.001, 0.002, 0.004]
 entry_delay_candles = 1
 parameter_nudge_fraction = 0.10
 detail_timeframe = "1m"
+# The detail replay runs in pieces this many days long, each held in the walk-forward memory budget (WF_MEMORY_GB) by
+# its own size, so a fold never holds a whole month of intrabar candles at once. Shorter pieces force-exit more trades at
+# their boundaries; the stored scenario counts them (boundary_exits).
+detail_chunk_days = 7
 # Positive out of sample on this many venues, so an edge is not one venue's fee or data.
 min_venues_agreeing = 2
 # Anytime-valid paper gates (docs/anytime-gates.md, option a): confidence sequences read after every closed trade, so

@@ -1,3 +1,4 @@
+import contextlib
 import datetime as dt
 import json
 import threading
@@ -26,7 +27,7 @@ class FakeRunner:
     def version(self):
         return "test"
 
-    def fold(self, strategy, file, exchange, fold, seed):
+    def fold(self, strategy, file, exchange, fold, seed, hold=None):
         self.calls.append((strategy, fold[1], seed, exchange))
         if strategy in self.fail:
             return {"ok": False, "error": "hyperopt exit 2: boom", "duration_s": 1.0}
@@ -90,11 +91,12 @@ class WindowSpy:
         return "test"
 
     def backtest(self, strategy, exchange, start, end, overlay=None, strategy_path=None, detail=None):
-        self.windows.append(("backtest", start, end))
+        self.windows.append(("detail" if detail else "backtest", start, end))
         t = pd.DataFrame({"pair": ["BTC/USD"], "open_date": [pd.Timestamp(start, tz="UTC")],
                           "close_date": [pd.Timestamp(start, tz="UTC") + pd.Timedelta(hours=2)],
                           "profit_ratio": [0.01], "profit_abs": [10.0], "exit_reason": ["roi"]})
-        return {"ok": True, "trades": t, "start_balance": 1000.0}
+        return {"ok": True, "trades": t, "start_balance": 1000.0, "final_balance": 1010.0, "max_drawdown": 0.0,
+                "bt_start": pd.Timestamp(start, tz="UTC"), "bt_end": pd.Timestamp(end, tz="UTC")}
 
     def hyperopt(self, cmd, **kwargs):
         a, b = (dt.datetime.strptime(d, "%Y%m%d").date() for d in cmd[cmd.index("--timerange") + 1].split("-"))
@@ -116,7 +118,8 @@ def leaks(spy: WindowSpy, fold: tuple) -> list[tuple]:
     cutoff = test_start - dt.timedelta(days=wf.EMBARGO_DAYS)
     tuned = [w for w in spy.windows if w[0] == "hyperopt" or (w[0] == "backtest" and w[1] < test_start)]
     assert [w[0] for w in tuned] == ["hyperopt", "backtest"]  # the tuning and the in-sample score
-    assert all(w[1:] == (test_start, test_end) for w in spy.windows if w not in tuned)
+    assert all(w[1:] == (test_start, test_end) for w in spy.windows if w not in tuned and w[0] != "detail")
+    assert all(test_start <= w[1] < w[2] <= test_end for w in spy.windows if w[0] == "detail")
     return [w for w in tuned if w[1] < train_start or w[2] > cutoff]
 
 
@@ -302,11 +305,11 @@ def test_one_failed_fold_among_others_does_not_fail_the_run_and_its_error_is_log
     ok_fold, bad = runner.fold, FakeRunner(fail={"Live"})
     lock, failed = threading.Lock(), []  # the pool runs folds on several threads: exactly one takes the failure
 
-    def fold(*a):
+    def fold(*a, **k):
         with lock:
             fails = not failed
             failed.append(1)
-        return bad.fold(*a) if fails else ok_fold(*a)
+        return bad.fold(*a, **k) if fails else ok_fold(*a, **k)
 
     runner.fold = fold
     assert wf.main(runner, TODAY) == 0
@@ -568,3 +571,134 @@ def test_a_freqai_strategy_is_no_candidate(wlab):
     wlab.execute("INSERT INTO strategy_windows (strategy, exchange, win, days, trades, expectancy_lo) "
                  "VALUES ('MLLightGBMBaseline', 'binanceus', '365d', 365, 100, 0.05)")
     assert "MLLightGBMBaseline" not in [c["name"] for c in wf.candidates(wlab)]
+
+
+def with_confidence(monkeypatch, **changes):
+    cfg = wf.suggest.load_config()
+    monkeypatch.setattr(wf.suggest, "load_config", lambda: {**cfg, "confidence": {**cfg["confidence"], **changes}})
+
+
+def detail_fold(monkeypatch, spy, hold=None):
+    """One October fold (a 31-day test month) of Strategy001 through Cli.fold, its backtests answered by spy."""
+    monkeypatch.setattr(analyze, "USER_DATA", REPO / "user_data")
+    cli = wf.Cli.__new__(wf.Cli)
+    cli.bt = spy
+    fold = wf.folds(TODAY, n=1)[0]
+    assert (fold[2] - fold[1]).days == 31
+    return fold, cli.fold("Strategy001", "user_data/strategies/Strategy001.py", "binanceus", fold, 1, hold=hold)
+
+
+def test_the_detail_replay_runs_in_contiguous_pieces_each_under_its_own_hold(monkeypatch):
+    with_confidence(monkeypatch, detail_chunk_days=7)
+    spy = WindowSpy(monkeypatch)
+    held, holds = [], []
+
+    @contextlib.contextmanager
+    def hold(kind):
+        holds.append(kind)
+        held.append(kind)
+        try:
+            yield
+        finally:
+            held.remove(kind)
+
+    real = spy.backtest
+    under = []
+
+    def backtest(*a, **k):
+        under.append(list(held))
+        return real(*a, **k)
+
+    spy.backtest = backtest
+    fold, res = detail_fold(monkeypatch, spy, hold)
+    assert res["ok"], res["error"]
+    pieces = [(w[1], w[2]) for w in spy.windows if w[0] == "detail"]
+    assert len(pieces) == 5 and pieces[0][0] == fold[1] and pieces[-1][1] == fold[2]
+    assert all(a[1] == b[0] for a, b in zip(pieces, pieces[1:])), "contiguous, no gap and no overlap"
+    assert [(b - a).days for a, b in pieces] == [7, 7, 7, 7, 3]
+    detail = [u for w, u in zip(spy.windows, under) if w[0] == "detail"]
+    assert detail == [["detail"]] * 5, "each piece holds only its own estimate, never the fold's"
+    assert all(u == ["native"] for w, u in zip(spy.windows, under) if w[0] == "backtest")
+    assert holds.count("detail") == 5
+    scenario = res["robustness"]["detail:1m"]
+    assert scenario["ok"] and scenario["trades"] == 5 and scenario["boundary_exits"] == 0
+
+
+def test_a_failed_detail_piece_fails_only_the_detail_scenario(monkeypatch):
+    with_confidence(monkeypatch, detail_chunk_days=7)
+    spy = WindowSpy(monkeypatch)
+    real = spy.backtest
+    error = "incomplete 1m candles for BTC/USD over 2026-10-15 to 2026-10-22"
+
+    def backtest(strategy, exchange, start, end, **k):
+        if k.get("detail") and sum(w[0] == "detail" for w in spy.windows) == 2:
+            spy.windows.append(("detail", start, end))
+            return {"ok": False, "error": error}
+        return real(strategy, exchange, start, end, **k)
+
+    spy.backtest = backtest
+    _, res = detail_fold(monkeypatch, spy)
+    assert res["ok"] and res["tuned"]["trades"] == 1
+    rob = res["robustness"]
+    assert rob["detail:1m"] == {"ok": False, "error": error, "returns": []}
+    assert rob["delay:1"]["ok"] and set(rob) == {"delay:1", "nudge:unsupported", "detail:1m"}
+    assert sum(w[0] == "detail" for w in spy.windows) == 3, "no piece runs after the failed one"
+
+
+def test_folds_share_a_budget_below_a_whole_month_of_detail_and_never_exceed_it(wlab, monkeypatch):
+    """Before, a fold held its 31-day detail estimate (5 GB here) the whole time, so under a 3 GB budget it ran alone.
+    Now it holds 1 GB to tune and 1.5 GB per detail piece, never both, so two folds tune at once within 3 GB."""
+    with_confidence(monkeypatch, detail_chunk_days=7)
+    sizes = {("5m", wf.TRAIN_DAYS + 31): 1.0, ("1m", 7): 1.5, ("1m", 31): 5.0}
+    monkeypatch.setattr(analyze, "task_gb", lambda ex, tf, days, load=1: sizes[tf, days])
+    monkeypatch.setattr(wf, "MEMORY_GB", 3.0)
+    monkeypatch.setattr(wf, "WORKERS", 2)
+    monkeypatch.setattr(wf, "candidates", lambda conn: [
+        {"name": "Strategy001", "file": "user_data/strategies/Strategy001.py", "file_hash": "h", "timeframe": "5m"}])
+    used, held = [], []
+
+    class Budget(analyze.Budget):
+        @contextlib.contextmanager
+        def hold(self, gb):
+            with super().hold(gb):
+                used.append(self.used)
+                held.append(gb)
+                yield
+
+    monkeypatch.setattr(analyze, "Budget", Budget)
+    spy = WindowSpy(monkeypatch)
+    hyperopt, lock, both = spy.hyperopt, threading.Lock(), threading.Event()
+    running, peak = [0], [0]
+
+    def concurrent(cmd, **kw):
+        with lock:
+            running[0] += 1
+            peak[0] = max(peak[0], running[0])
+            if running[0] == 2:
+                both.set()
+        both.wait(timeout=10)  # the first fold waits here for a second to start tuning beside it
+        with lock:
+            running[0] -= 1
+        return hyperopt(cmd, **kw)
+
+    monkeypatch.setattr(wf.subprocess, "run", concurrent)
+    cli = wf.Cli.__new__(wf.Cli)
+    cli.bt = spy
+    report = {}
+    assert wf.run_folds(wlab, cli, TODAY, report)
+    assert report["folds_run"] == 3 and report["folds_failed"] == 0
+    assert peak[0] == 2, "two folds tuned at once"
+    assert max(used) <= 3.0 and 5.0 not in held and held.count(1.5) == 15
+
+
+def test_the_detail_piece_length_is_part_of_the_cache_key(wlab, monkeypatch):
+    with_confidence(monkeypatch, detail_chunk_days=7)
+    fold = (TODAY, TODAY, TODAY)
+    first = wf.fold_key("h", "binanceus", fold, "v", "candles", TUNE)
+    assert wf.main(FakeRunner(), TODAY) == 0
+    same = FakeRunner()
+    assert wf.main(same, TODAY) == 0 and same.calls == []
+    with_confidence(monkeypatch, detail_chunk_days=10)
+    assert wf.fold_key("h", "binanceus", fold, "v", "candles", TUNE) != first
+    changed = FakeRunner()
+    assert wf.main(changed, TODAY) == 0 and len(changed.calls) == 9
