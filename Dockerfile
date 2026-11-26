@@ -18,6 +18,9 @@ WORKDIR /repo
 # A job run as `python /repo/lab/<job>.py` also has lab/ first on sys.path, so no lab module shares a name
 # with an installed one; lab/tests/test_families.py checks that.
 ENV PYTHONPATH=/repo
+# League bots read a trade with hundreds of orders every */5 ingest; glibc's per-thread arenas keep that freed memory resident and the bot
+# grows into its 768Mi limit. Two arenas bound it (tr-395; lab/tests/test_league.py checks it).
+ENV MALLOC_ARENA_MAX=2
 # Every userdir subfolder, from freqtrade's own list. freqtrade creates missing ones itself, but its
 # check-then-create races when several freqtrade processes start at once (lab/crypto/backfill.py runs one
 # per exchange, the analysis one per worker) and the loser exits with FileExistsError.

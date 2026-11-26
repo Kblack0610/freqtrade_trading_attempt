@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import pytest
 from freqtrade.configuration import Configuration
@@ -101,3 +102,10 @@ def test_an_overlay_cannot_set_dry_run_or_a_key(tmp_path, toml, params, capsys):
     with pytest.raises(SystemExit):
         league.guard([league.USER_DATA / "config.base.json", league.USER_DATA / "exchanges" / "kraken.json", over])
     assert "refusing to start" in capsys.readouterr().err
+
+
+def test_an_exit_that_never_fills_is_bounded_and_the_image_caps_malloc_arenas():
+    # tr-395: unlimited exit re-placement left trades with hundreds of canceled orders, and reading them leaked native memory.
+    cfg = json.loads((league.USER_DATA / "config.base.json").read_text())
+    assert 0 < cfg["unfilledtimeout"]["exit_timeout_count"] <= 5
+    assert "ENV MALLOC_ARENA_MAX=2" in (Path(__file__).parents[2] / "Dockerfile").read_text()
