@@ -85,7 +85,7 @@ def test_a_record_shorter_than_z_over_sharpe_squared_gets_a_zero_ceiling():
 def test_a_planted_basket_gives_the_hand_computed_ceiling():
     # Daily returns: A +2% -2%, B flat, C +1% -1%, so the basket goes +1% -1% over 4 days.
     closes = pd.DataFrame({"A": [100, 102, 99.96, 101.9592, 99.920016], "B": [100.0] * 5,
-                           "C": [100, 101, 98.98, 99.9698, 97.970404]})
+                           "C": [100, 101, 99.99, 100.9899, 99.980001]})
     sigma = book.basket_sigma(closes)
     assert sigma == pytest.approx(0.01 * (4 / 3) ** 0.5 * 365 ** 0.5)  # 0.220605
     # Lower bound 0.3 - 1.645 * 0.220605 / 3 = 0.179035; a quarter of that over 0.220605^2 is 0.919699 of capital.
