@@ -1,6 +1,7 @@
 # What each market's adapter declares for each lifecycle stage, for /coverage (docs/architecture.md).
 # A stage is a module that does the work, or absent: absent shows red on /coverage and is a gap to build.
-# A "note" says how far the stage goes. test_coverage_matrix.py checks every module exists.
+# A "note" says how far the stage goes. A "rows" table (see lab/stages/coverage.py EVIDENCE) with its "key" makes /coverage
+# show the stage missing until that table has rows for the key. test_coverage_matrix.py checks every module exists.
 
 stages = ["data", "backtest", "gate", "paper", "live"]
 
@@ -26,7 +27,8 @@ paper = { module = "lab.events.paper", note = "line book only" }
 
 [markets.stocks]
 data = { module = "lab.stocks.paper", note = "AlpacaStocks Venue and History" }
-backtest = { module = "lab.stocks.backtest", note = "walk-forward over daily closes" }
+backtest = { module = "lab.stocks.backtest", note = "walk-forward over daily closes", rows = "market_backtests", key = "alpaca" }
+gate = { module = "lab.stocks.gate", note = "lockbox read once", rows = "readiness", key = "stocks" }
 paper = { module = "lab.stocks.paper" }
 
 [markets.futures]

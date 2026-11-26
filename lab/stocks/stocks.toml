@@ -21,10 +21,14 @@ trace_days = 30        # near-miss decisions and funnel rows older than this are
 
 # The walk-forward backtest (lab/stocks/backtest.py): the last `windows` windows of `window_days` calendar days, each variant
 # run on each from the paper capital and stake above. `warmup_days` of closes before the first window feed the 200-session average.
+# The gate (lab/stocks/gate.py) holds back the newest `lockbox_months` months of the run (30 days each) as its lockbox, read once by a
+# variant that passes every other gate; PBO splits a family's daily returns into `pbo_blocks` blocks.
 [backtest]
 windows = 6
 window_days = 120
 warmup_days = 400
+lockbox_months = 4
+pbo_blocks = 8
 
 # Trend: hold while the last close is above its n-session simple average; sell when it closes below.
 [families.trend]

@@ -1110,3 +1110,21 @@ def test_coverage_shows_the_stage_gaps_red(conn, signed_in):
     body = signed_in[1].get("/coverage").text
     assert "Lifecycle stages" in body and '<td class="down">missing</td>' in body
     assert "<code>lab.stocks.paper</code>" in body
+
+
+def test_coverage_shows_stocks_backtest_and_gate_present_only_when_rows_exist(conn, signed_in):
+    def stocks_row():
+        page = signed_in[1].get("/coverage").text
+        return page[page.index("<td>stocks</td>"):].split("</tr>")[0]
+
+    empty = stocks_row()
+    assert "<code>lab.stocks.backtest</code>" not in empty and "<code>lab.stocks.gate</code>" not in empty
+    assert empty.count('class="down"') == 3  # backtest, gate and live
+    conn.execute("INSERT INTO market_backtests (family, venue, variant, params, start_at, end_at, orders, fills, trades, "
+                 "open_fills, metrics, returns, events, daily, trials) VALUES ('trend', 'alpaca', 'v', '{}', now(), now(), "
+                 "0, 0, 0, 0, '{}', '{}', '{}', '{}', 0)")
+    conn.execute("INSERT INTO readiness (market, venue, strategy, ready, passed, trades, gates) "
+                 "VALUES ('stocks', 'alpaca', 'trend/v', false, 0, 0, '[]')")
+    full = stocks_row()
+    assert "<code>lab.stocks.backtest</code>" in full and "<code>lab.stocks.gate</code>" in full
+    assert full.count('class="down"') == 1  # live

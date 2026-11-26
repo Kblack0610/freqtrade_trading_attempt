@@ -18,7 +18,7 @@ def test_declared_module_exists(market, stage, module):
 
 def test_known_gaps_are_missing():
     by = {m["market"]: m["missing"] for m in coverage.matrix()["markets"]}
-    assert by["stocks"] == ["gate", "live"]
+    assert by["stocks"] == ["live"]
     assert by["futures"] == ["gate", "live"]
     assert by["crypto"] == []
 
@@ -26,3 +26,10 @@ def test_known_gaps_are_missing():
 def test_a_market_with_no_declaration_is_all_missing():
     m = coverage.matrix({"stages": ["data", "paper"], "markets": {"x": {}}})["markets"][0]
     assert m["missing"] == ["data", "paper"]
+
+
+def test_a_stage_with_rows_declared_is_missing_until_its_table_has_some():
+    declared = {"stages": ["gate"], "markets": {"x": {"gate": {"module": "lab.stocks.gate", "rows": "readiness", "key": "x"}}}}
+    assert coverage.matrix(declared, count=lambda t, k: 0)["markets"][0]["missing"] == ["gate"]
+    assert coverage.matrix(declared, count=lambda t, k: 3)["markets"][0]["missing"] == []
+    assert coverage.matrix(declared)["markets"][0]["missing"] == []
