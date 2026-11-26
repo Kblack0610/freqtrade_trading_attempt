@@ -397,6 +397,10 @@ def arms(conn) -> list[dict]:
             for s, sp, n, h, e, u in rows]
 
 
+class OutOfTime(Exception):
+    """A fold's first memory hold came after WF_BUDGET_S ran out: the fold is left for the next run."""
+
+
 def run_folds(conn, runner: Runner, today: dt.date, report: dict, spent: float = 0.0) -> bool:
     """This shard's folds, stored as each finishes; True unless more than FAIL_SHARE of them failed;
     LONE_FAILURES among several folds are tolerated, per shard. spent: seconds
@@ -412,17 +416,32 @@ def run_folds(conn, runner: Runner, today: dt.date, report: dict, spent: float =
     stop_at = time.monotonic() + BUDGET_S - spent if BUDGET_S else None
     left = 0
 
+    def out_of_time() -> bool:
+        return stop_at is not None and time.monotonic() >= stop_at
+
     def run(t):
         c = suggest.load_config()["confidence"]
         gb = {"native": analyze.task_gb(t["exchange"], t["timeframe"], TRAIN_DAYS + 31, HYPEROPT_LOAD),
               "detail": analyze.task_gb(t["exchange"], c["detail_timeframe"], c["detail_chunk_days"])}
-        # Wait for room before reading the clock, so a fold queued behind others does not start past the budget. The
-        # fold takes its holds itself (Cli.fold), since it frees the native one while its detail pieces run.
-        with budget.hold(gb["native"]):
-            if stop_at is not None and time.monotonic() >= stop_at:
-                return None  # out of time: left for the next run
-        return runner.fold(t["name"], t["file"], t["exchange"], t["fold"], t["seed"],
-                           hold=lambda kind: budget.hold(gb[kind]))
+        started = []
+
+        @contextlib.contextmanager
+        def hold(kind):
+            # The fold takes its holds itself (Cli.fold), since it frees the native one while its detail pieces run.
+            # Its first hold reads the clock once it has room, so a fold queued behind others does not start past it.
+            with budget.hold(gb[kind]):
+                if not started:
+                    if out_of_time():
+                        raise OutOfTime
+                    started.append(True)
+                yield
+
+        if out_of_time():
+            return None  # out of time: left for the next run
+        try:
+            return runner.fold(t["name"], t["file"], t["exchange"], t["fold"], t["seed"], hold=hold)
+        except OutOfTime:
+            return None
 
     with ThreadPoolExecutor(max_workers=WORKERS) as pool:
         futs = {pool.submit(run, t): t for t in todo}

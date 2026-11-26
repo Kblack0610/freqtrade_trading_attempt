@@ -69,22 +69,28 @@ def pieces(start: dt.date, end: dt.date, days: int) -> list[tuple[dt.date, dt.da
 def join(results: list[dict]) -> dict:
     """Pieces run back to back as one result shaped like analyze.Cli.backtest's. Each piece starts from the configured
     balance, so its return compounds on the balance the pieces before it left, and its trades' profit_abs scale by the
-    same factor. max_drawdown is the worst piece's: a drawdown that spans a boundary is not seen. A trade still open at
-    an inner boundary is force-exited there by freqtrade; boundary_exits counts them (stats() drops force exits)."""
+    same factor. max_drawdown is the worst piece's, an approximation: a drawdown that spans a boundary is not seen.
+
+    A trade still open at an inner boundary is force-exited there by freqtrade. It is kept as a boundary_exit at the
+    boundary's price, since stats() drops force exits and dropping these would remove the longest trades from the sample
+    most often; boundary_exits counts them. Only the last piece's force exits are the span's own end."""
     start = balance = results[0]["start_balance"]
-    frames = []
-    for r in results:
+    frames, boundary = [], 0
+    for i, r in enumerate(results):
         trades = r["trades"].copy()
+        if i < len(results) - 1 and "exit_reason" in trades:
+            cut = trades["exit_reason"] == "force_exit"
+            boundary += int(cut.sum())
+            trades.loc[cut, "exit_reason"] = "boundary_exit"
         if "profit_abs" in trades:
             trades["profit_abs"] = trades["profit_abs"] * (balance / r["start_balance"])
         frames.append(trades)
         balance *= r["final_balance"] / r["start_balance"]
-    inner = [r["trades"] for r in results[:-1]]
     return {"ok": True, "error": None, "duration_s": sum(r.get("duration_s") or 0.0 for r in results),
             "trades": pd.concat(frames, ignore_index=True), "bt_start": results[0]["bt_start"],
             "bt_end": results[-1]["bt_end"], "start_balance": start, "final_balance": balance,
             "max_drawdown": max(r["max_drawdown"] for r in results),
-            "boundary_exits": sum(int((t["exit_reason"] == "force_exit").sum()) for t in inner if "exit_reason" in t)}
+            "boundary_exits": boundary}
 
 
 def detail_backtest(bt, strategy: str, exchange: str, start: dt.date, end: dt.date, timeframe: str, days: int,
@@ -97,7 +103,7 @@ def detail_backtest(bt, strategy: str, exchange: str, start: dt.date, end: dt.da
         with hold("detail"):
             r = bt.backtest(strategy, exchange, a, b, detail=timeframe, **kwargs)
         if not r["ok"]:
-            return r
+            return {**r, "error": f"detail piece {a} to {b}: {r.get('error')}"}
         results.append(r)
     return join(results)
 

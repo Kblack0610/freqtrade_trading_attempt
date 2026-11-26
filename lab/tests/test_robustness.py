@@ -192,6 +192,7 @@ def test_joined_pieces_compound_their_balances_and_count_boundary_force_exits():
     joined = robustness.join([a, b])
     assert joined["final_balance"] == pytest.approx(1000 * 1.09 * 1.05)
     assert list(joined["trades"]["profit_abs"]) == pytest.approx([100.0, -10.0, 50.0 * 1.09])
+    assert list(joined["trades"]["exit_reason"]) == ["roi", "boundary_exit", "force_exit"], "only the span's end drops"
     assert joined["trades"]["profit_abs"].sum() == pytest.approx(joined["final_balance"] - 1000)
     assert (joined["bt_start"], joined["bt_end"]) == (a["bt_start"], b["bt_end"])
     assert joined["max_drawdown"] == 0.05 and joined["duration_s"] == 2.0

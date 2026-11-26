@@ -640,7 +640,7 @@ def test_a_failed_detail_piece_fails_only_the_detail_scenario(monkeypatch):
     _, res = detail_fold(monkeypatch, spy)
     assert res["ok"] and res["tuned"]["trades"] == 1
     rob = res["robustness"]
-    assert rob["detail:1m"] == {"ok": False, "error": error, "returns": []}
+    assert rob["detail:1m"] == {"ok": False, "error": f"detail piece 2026-10-15 to 2026-10-22: {error}", "returns": []}
     assert rob["delay:1"]["ok"] and set(rob) == {"delay:1", "nudge:unsupported", "detail:1m"}
     assert sum(w[0] == "detail" for w in spy.windows) == 3, "no piece runs after the failed one"
 
@@ -702,3 +702,32 @@ def test_the_detail_piece_length_is_part_of_the_cache_key(wlab, monkeypatch):
     assert wf.fold_key("h", "binanceus", fold, "v", "candles", TUNE) != first
     changed = FakeRunner()
     assert wf.main(changed, TODAY) == 0 and len(changed.calls) == 9
+
+
+def test_a_fold_that_gets_room_only_after_the_budget_ran_out_does_not_start(wlab, monkeypatch):
+    """The clock is read again once the fold's first hold has room: waiting behind other folds can outlast WF_BUDGET_S."""
+    monkeypatch.setattr(wf, "BUDGET_S", 100.0)
+    now = [0.0]
+    monkeypatch.setattr(wf.time, "monotonic", lambda: now[0])
+
+    class Budget(analyze.Budget):
+        @contextlib.contextmanager
+        def hold(self, gb):
+            now[0] = 200.0  # the wait for room outlasts the budget
+            with super().hold(gb):
+                yield
+
+    monkeypatch.setattr(analyze, "Budget", Budget)
+    monkeypatch.setattr(wf, "WORKERS", 1)
+    monkeypatch.setattr(wf, "ONLY", {"Live"})
+    entered = []
+
+    class Runner(FakeRunner):
+        def fold(self, strategy, file, exchange, fold, seed, hold=None):
+            with hold("native"):
+                entered.append(fold)
+            return super().fold(strategy, file, exchange, fold, seed, hold)
+
+    report = {}
+    wf.run_folds(wlab, Runner(), TODAY, report)
+    assert entered == [] and report["folds_left"] == report["folds_run"] == 3
