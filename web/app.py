@@ -1060,7 +1060,7 @@ def coverage(request: Request, signal_source: str = ""):
     clusters = [] if signal_source else diversity.cluster_table(rows("SELECT * FROM residual_clusters"), rows("SELECT * FROM residual_venues"),
                                        family, {(r["strategy"], r["exchange"]): r["sharpe_lo"] for r in found})
     archive = diversity.build(found, rows(diversity.CLIMATE_ROWS), family, dcfg)
-    return page(request, "coverage.html", signal_source=signal_source, stage_matrix=stage_coverage.matrix(), signal_sources=toml["signal_sources"],
+    return page(request, "coverage.html", signal_source=signal_source, stage_matrix=stage_coverage.matrix(count=lambda t, k: rows(stage_coverage.EVIDENCE[t], (k,))[0]["n"]), signal_sources=toml["signal_sources"],
                 family_categories=toml["family_categories"], untagged=UNTAGGED, **board, archive=archive, clusters=clusters, families={
         **toml["families"], UNTAGGED: "On disk, no line in lab/crypto/families.toml.", GONE: "In the results only, not on disk."})
 

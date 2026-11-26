@@ -10,7 +10,7 @@
   <thead><tr><th>Market</th>{% for s in stage_matrix.stages %}<th>{{ s }}</th>{% endfor %}</tr></thead>
   <tbody>
   {% for m in stage_matrix.markets %}
-  <tr><td>{{ m.market }}</td>{% for c in m.cells %}<td{% if not c.module %} class="down"{% endif %}>{% if c.module %}<code>{{ c.module }}</code>{% if c.note %}<br><span class="muted">{{ c.note }}</span>{% endif %}{% else %}missing{% endif %}</td>{% endfor %}</tr>
+  <tr><td>{{ m.market }}</td>{% for c in m.cells %}<td{% if not c.module %} class="down"{% endif %}>{% if c.module %}<code>{{ c.module }}</code>{% if c.note %}<br><span class="muted">{{ c.note }}</span>{% endif %}{% else %}missing{% if c.note %}<br><span class="muted">{{ c.note }}</span>{% endif %}{% endif %}</td>{% endfor %}</tr>
   {% endfor %}
   </tbody>
 </table>

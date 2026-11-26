@@ -1,12 +1,12 @@
 """The one readiness table and its one writer. Every gate (lab/crypto/confidence.py for crypto, lab/events/families.py for
-event contracts) hands its verdict rows to store(); every reader selects from `readiness` by market.
+event contracts, lab/stocks/gate.py for stocks) hands its verdict rows to store(); every reader selects from `readiness` by market.
 
 A row is one strategy on one venue: market, venue, strategy, and the verdict (score, ready, passed, trades, the
 expectancy and its interval, gates). An event-contract strategy is 'family/variant' and also keeps family, variant and
 params for the paper pass."""
 from psycopg.types.json import Jsonb
 
-CRYPTO, EVENTS = "crypto", "events"
+CRYPTO, EVENTS, STOCKS = "crypto", "events", "stocks"
 
 # Crypto rows under the names its readers use: exchange, oos_trades and oos_expectancy.
 CRYPTO_ROWS = ("SELECT strategy, venue AS exchange, score, ready, passed, trades AS oos_trades, expectancy AS oos_expectancy, "

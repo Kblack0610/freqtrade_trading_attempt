@@ -12,7 +12,8 @@ close, each side paying lab/inputs/calls.toml cost_bps on its notional, and an e
 `max_open` or the cash stops it. A position still open at a window's end is not a trade (open_fills). Reading a bar
 that is later than the decision's time raises Lookahead (Tape.read). Results go through lab/events/backtest.py
 evaluate, the statistics the event-contract backtests use, and the trial register: each (variant, window) is a trial
-of exchange alpaca.
+of exchange alpaca. A trade's event is its close session: trades closing together move together, and
+the gate (lab/stocks/gate.py) resamples whole sessions, since the 10-ticker universe is under the 20 clusters an interval needs.
 """
 
 import argparse
@@ -125,7 +126,7 @@ def store(conn, family: str, params: dict, res: Result, start: dt.date, end: dt.
                expectancy_lo = EXCLUDED.expectancy_lo, expectancy_hi = EXCLUDED.expectancy_hi, dsr = EXCLUDED.dsr,
                trials = EXCLUDED.trials, computed_at = now()""",
         (family, venue, variant, Jsonb(params), s, e, res.orders, res.orders, len(t), res.open_fills,
-         Jsonb(out["metrics"]), ev["returns"].tolist(), t["ticker"].tolist(), out["daily"].tolist(), ev["mean"],
+         Jsonb(out["metrics"]), ev["returns"].tolist(), t["close_date"].dt.strftime("%Y-%m-%d").tolist(), out["daily"].tolist(), ev["mean"],
          ev["lo"], ev["hi"], out["dsr"], trials))
     return {"orders": res.orders, "trades": len(t), "open": res.open_fills, "expectancy": ev["mean"]}
 
