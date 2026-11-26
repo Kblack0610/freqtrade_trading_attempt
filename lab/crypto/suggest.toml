@@ -108,6 +108,10 @@ slippage_sweep = [0.001, 0.002, 0.004]
 entry_delay_candles = 1
 parameter_nudge_fraction = 0.10
 detail_timeframe = "1m"
+# The detail replay runs in pieces this many days long, each held in the walk-forward memory budget (WF_MEMORY_GB) by
+# its own size, so a fold never holds a whole month of intrabar candles at once. Shorter pieces force-exit more trades at
+# their boundaries; the stored scenario counts them (boundary_exits).
+detail_chunk_days = 7
 # Walk-forward replays entry delay and parameter nudges only for a pair passing every gate named here (a gate or the
 # start of its label); any other pair reads them as not run. Timeframe detail runs with every fold. Left out:
 # survivorship, which fails for every pair until tr-414, and the paper gates (dry run, drift, not decayed), which need

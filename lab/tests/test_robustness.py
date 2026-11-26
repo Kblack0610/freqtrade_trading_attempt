@@ -1,3 +1,4 @@
+import datetime as dt
 import hashlib
 import inspect
 import json
@@ -8,7 +9,15 @@ import pytest
 
 from lab.crypto import robustness
 
-CFG = {"entry_delay_candles": 1, "parameter_nudge_fraction": 0.1, "detail_timeframe": "1m"}
+CFG = {"entry_delay_candles": 1, "parameter_nudge_fraction": 0.1, "detail_timeframe": "1m", "detail_chunk_days": 7}
+START, END = dt.date(2026, 10, 1), dt.date(2026, 11, 1)
+
+
+def shaped(start, end, trades=None, final=1000.0, drawdown=0.0):
+    """A result shaped like analyze.Cli.backtest's."""
+    return {"ok": True, "error": None, "duration_s": 1.0, "start_balance": 1000.0, "final_balance": final,
+            "max_drawdown": drawdown, "bt_start": pd.Timestamp(start, tz="UTC"), "bt_end": pd.Timestamp(end, tz="UTC"),
+            "trades": trades if trades is not None else pd.DataFrame({"profit_abs": [], "exit_reason": []})}
 
 
 def isolated(tmp_path):
@@ -35,7 +44,8 @@ def test_fixed_plan_changes_one_numeric_buy_sell_leaf_at_a_time():
 
 @pytest.mark.parametrize("key,value", [("entry_delay_candles", 0), ("entry_delay_candles", True),
                                       ("parameter_nudge_fraction", 0), ("parameter_nudge_fraction", 1),
-                                      ("detail_timeframe", "")])
+                                      ("detail_timeframe", ""), ("detail_chunk_days", 0),
+                                      ("detail_chunk_days", True), ("detail_chunk_days", 1.5)])
 def test_invalid_experiment_settings_are_rejected(key, value):
     with pytest.raises(ValueError):
         robustness.plan({**CFG, key: value}, {})
@@ -55,9 +65,9 @@ def test_every_replay_uses_original_parameters_and_restores_files_after_errors(t
                 assert kwargs["detail"] == "1m"
             if len(seen) == 2:
                 raise RuntimeError("scenario error")
-            return {"ok": True}
+            return shaped(start, end)
 
-    results = robustness.run(Runner(), "Example", tmp_path, path, "venue", "start", "end", CFG,
+    results = robustness.run(Runner(), "Example", tmp_path, path, "venue", START, END, CFG,
                              lambda r: {"returns": [0.01], "trades": 1, "dated": [("non-json", object())]})
     assert list(results) == robustness.expected(robustness.plan(CFG, json.loads(original)["params"]))
     assert any(not r["ok"] and "scenario error" in r["error"] for r in results.values())
@@ -103,7 +113,7 @@ def test_a_strategy_without_numeric_parameters_reports_unsupported(tmp_path):
         def backtest(self, *args, **kwargs):
             return {"ok": False, "error": "no data"}
 
-    results = robustness.run(Runner(), "Example", tmp_path, path, "venue", 1, 2, CFG, lambda r: {})
+    results = robustness.run(Runner(), "Example", tmp_path, path, "venue", START, END, CFG, lambda r: {})
     assert not results["nudge:unsupported"]["ok"]
     assert not any(r["ok"] for r in results.values())
 
@@ -112,17 +122,19 @@ def test_settings_track_algorithm_and_configuration():
     original = robustness.settings(CFG)
     assert original["implementation"] == robustness.IMPLEMENTATION
     assert original != robustness.settings({**CFG, "entry_delay_candles": 2})
+    assert original != robustness.settings({**CFG, "detail_chunk_days": 10})
     assert original == robustness.settings({**CFG, "replay_after": ["bias"]}), "only the scenario settings count"
 
 
-SCENARIO_CODE = "9a3d64eb52f35e01dd75213ecb2a07f0c030258deee42ebfb757643cf9ee01a6"
+SCENARIO_CODE = "81bbf72aca0c4903a3fd3f16046931b213b01049057de797bc141689b069036b"
 
 
 def test_the_implementation_version_pins_the_scenario_code():
     """IMPLEMENTATION is in every fold's cache key, so it is a version, not a file digest. An edit to the code that
     makes the scenarios has to decide: a changed result changes IMPLEMENTATION (every fold reruns once), and either
     way SCENARIO_CODE becomes the new digest."""
-    code = "".join(inspect.getsource(f) for f in (robustness.kind, robustness.plan, robustness._source,
+    code = "".join(inspect.getsource(f) for f in (robustness.kind, robustness.plan, robustness.pieces, robustness.join,
+                                                  robustness.detail_backtest, robustness._source,
                                                   robustness._wrapper, robustness.run))
     assert hashlib.sha256(code.encode()).hexdigest() == SCENARIO_CODE
 
@@ -146,13 +158,14 @@ def test_run_with_kinds_backtests_only_those_scenarios(tmp_path):
     class Runner:
         def backtest(self, strategy, exchange, start, end, **kwargs):
             calls.append(kwargs.get("detail"))
-            return {"ok": True}
+            return shaped(start, end)
 
     summary = lambda r: {"returns": [0.01], "trades": 1}  # noqa: E731
-    assert list(robustness.run(Runner(), "Example", tmp_path, path, "venue", 1, 2, CFG, summary, {"detail"})) == ["detail:1m"]
-    assert calls == ["1m"]
+    assert list(robustness.run(Runner(), "Example", tmp_path, path, "venue", START, END, CFG, summary, {"detail"})) == \
+        ["detail:1m"]
+    assert calls == ["1m"] * 5, "the detail scenario runs in 7-day pieces"
     calls.clear()
-    replayed = robustness.run(Runner(), "Example", tmp_path, path, "venue", 1, 2, CFG, summary, {"delay", "nudge"})
+    replayed = robustness.run(Runner(), "Example", tmp_path, path, "venue", START, END, CFG, summary, {"delay", "nudge"})
     assert "detail:1m" not in replayed and len(replayed) == len(calls) == 5 and None in calls and "1m" not in calls
 
 
@@ -202,9 +215,31 @@ class NudgeExample(IStrategy):
 def test_nonfinite_replays_remain_serializable_failed_evidence(tmp_path):
     path = isolated(tmp_path)
     class Runner:
-        def backtest(self, *args, **kwargs):
-            return {'ok': True}
-    results = robustness.run(Runner(), 'Example', tmp_path, path, 'venue', 1, 2, CFG,
+        def backtest(self, strategy, exchange, start, end, **kwargs):
+            return shaped(start, end)
+    results = robustness.run(Runner(), 'Example', tmp_path, path, 'venue', START, END, CFG,
                              lambda r: {'returns': [float('nan')]})
     assert all(not r['ok'] and 'nonfinite' in r['error'] for r in results.values())
     json.dumps(results, allow_nan=False)
+
+
+def test_pieces_cover_the_span_back_to_back():
+    assert robustness.pieces(START, END, 7)[-1] == (dt.date(2026, 10, 29), END)
+    assert robustness.pieces(START, END, 31) == [(START, END)]
+    assert robustness.pieces(START, END, 40) == [(START, END)]
+
+
+def test_joined_pieces_compound_their_balances_and_count_boundary_force_exits():
+    def trades(*rows):
+        return pd.DataFrame(rows, columns=["profit_abs", "exit_reason"])
+
+    a = shaped(START, dt.date(2026, 10, 8), trades((100.0, "roi"), (-10.0, "force_exit")), final=1090.0, drawdown=0.02)
+    b = shaped(dt.date(2026, 10, 8), END, trades((50.0, "force_exit")), final=1050.0, drawdown=0.05)
+    joined = robustness.join([a, b])
+    assert joined["final_balance"] == pytest.approx(1000 * 1.09 * 1.05)
+    assert list(joined["trades"]["profit_abs"]) == pytest.approx([100.0, -10.0, 50.0 * 1.09])
+    assert list(joined["trades"]["exit_reason"]) == ["roi", "boundary_exit", "force_exit"], "only the span's end drops"
+    assert joined["trades"]["profit_abs"].sum() == pytest.approx(joined["final_balance"] - 1000)
+    assert (joined["bt_start"], joined["bt_end"]) == (a["bt_start"], b["bt_end"])
+    assert joined["max_drawdown"] == 0.05 and joined["duration_s"] == 2.0
+    assert joined["boundary_exits"] == 1, "the last piece's force exit is the span's own end, as in one whole run"

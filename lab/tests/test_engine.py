@@ -15,7 +15,7 @@ import pytest
 
 pytest.importorskip("freqtrade")
 
-from lab.crypto import analyze  # noqa: E402
+from lab.crypto import analyze, robustness  # noqa: E402
 from lab.tests.test_analyze import REPO  # noqa: E402
 
 EX = "binanceus"
@@ -49,7 +49,8 @@ class Marked(IStrategy):
 
 @pytest.fixture
 def engine(tmp_path, monkeypatch):
-    """run(candles, overlay, detail=None) backtests Marked over the candles, BTC/USD on binanceus."""
+    """run(candles, overlay, detail=None, chunk_days=None) backtests Marked over the candles, BTC/USD on binanceus;
+    chunk_days runs the detail replay in pieces, as the walk-forward does (robustness.detail_backtest)."""
     monkeypatch.setattr(analyze, "USER_DATA", REPO / "user_data")
     monkeypatch.setattr(analyze, "RESULTS", tmp_path)
     data = tmp_path / "data" / EX
@@ -58,15 +59,20 @@ def engine(tmp_path, monkeypatch):
     strategies.mkdir()
     (strategies / "Marked.py").write_text(STRATEGY)
 
-    def run(candles: pd.DataFrame, overlay: dict | None = None, detail: pd.DataFrame | None = None) -> dict:
+    def run(candles: pd.DataFrame, overlay: dict | None = None, detail: pd.DataFrame | None = None,
+            chunk_days: int | None = None) -> dict:
         candles.to_feather(data / "BTC_USD-1h.feather")
         if detail is not None:  # analyze.detail_coverage wants every whitelist pair's
             for pair in analyze.whitelist(EX):
                 detail.to_feather(data / f"{pair.replace('/', '_')}-1m.feather")
         start, end = candles["date"].iloc[0].date(), (candles["date"].iloc[-1] + pd.Timedelta(days=1)).date()
         overlay = {"minimal_roi": NO_ROI, "stoploss": NO_STOP, **(overlay or {})}
-        res = analyze.Cli().backtest("Marked", EX, start, end, overlay=overlay, strategy_path=strategies,
-                                     detail="1m" if detail is not None else None)
+        if chunk_days:
+            res = robustness.detail_backtest(analyze.Cli(), "Marked", EX, start, end, "1m", chunk_days,
+                                             overlay=overlay, strategy_path=strategies)
+        else:
+            res = analyze.Cli().backtest("Marked", EX, start, end, overlay=overlay, strategy_path=strategies,
+                                         detail="1m" if detail is not None else None)
         assert res["ok"], res["error"]
         return res
 
@@ -175,6 +181,26 @@ def test_one_minute_detail_decides_whether_roi_or_the_stop_came_first(engine):
         t = one_trade(engine(bars(rows), {"minimal_roi": {"0": 0.02}, "stoploss": -0.05},
                              detail=bars(path + tail, "min")))
         assert t["exit_reason"] == reason, reason
+
+
+def test_detail_pieces_with_no_trade_open_at_a_boundary_join_to_the_whole_span(engine):
+    """Two 2-day pieces against one 4-day detail run: the same trades, and the second piece's trade, sized on the
+    balance the first left, so the joined balance compounds to the whole run's."""
+    prices = [100.0] * 8 + [110.0] * 48 + [121.0] * 40
+    volume = {3: ENTER, 10: EXIT, 51: ENTER, 58: EXIT}
+    rows = [(p, p, p, p, volume.get(i, QUIET)) for i, p in enumerate(prices)]
+    minutes = bars([(p, p, p, p, QUIET) for p in prices for _ in range(60)], "min")
+    whole = engine(bars(rows), detail=minutes)
+    joined = engine(bars(rows), detail=minutes, chunk_days=2)
+    assert len(whole["trades"]) == 2 and joined["boundary_exits"] == 0
+    assert not (joined["trades"]["exit_reason"] == "force_exit").any()
+    for column in ("pair", "open_date", "close_date", "exit_reason"):
+        assert list(joined["trades"][column]) == list(whole["trades"][column]), column
+    assert list(joined["trades"]["profit_ratio"]) == pytest.approx(list(whole["trades"]["profit_ratio"]), rel=1e-9)
+    assert list(joined["trades"]["profit_abs"]) == pytest.approx(list(whole["trades"]["profit_abs"]), rel=1e-4)
+    assert joined["final_balance"] == pytest.approx(whole["final_balance"], rel=1e-4)
+    profits = list(joined["trades"]["profit_abs"])
+    assert profits[1] > profits[0] > 0  # the same 10% move on a stake sized from the grown balance
 
 
 def random_candles(seed: int, n: int = 600) -> pd.DataFrame:
