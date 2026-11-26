@@ -33,6 +33,10 @@ Hyperopt runs on a copy of the strategy's folder in a temporary userdir, so its 
 next to the real strategy, where every nightly backtest would load it.
 
 Rows go to `walkforward`, and each test-month trade, dated, to `walkforward_trades`; lab/crypto/suggest.py turns them into retune suggestions and runs at the end.
+Each fold replays its tuned test month on detail candles only (FOLD_KINDS). After its folds, a shard replays entry delay
+and parameter nudges (REPLAY_KINDS) on the stored current folds of the pairs that clear every gate in suggest.toml
+[confidence] replay_after (confidence.cleared_pairs), merged into each fold's `robustness` without touching its cache_key;
+a fold whose scenarios are all stored is not replayed again. The same WF_BUDGET_S applies (`replays_left`).
 A run starts no fold after WF_BUDGET_S seconds from its Job's first shard start (0: no limit), so a shard rescheduled
 after a preemption still stops in time, and so a backlog longer than the job's deadline still ends in
 a recorded run with its post steps; the folds it left (`folds_left`) run next time, skipped by cache_key once stored.
@@ -88,6 +92,8 @@ JOB = os.environ.get("WF_JOB", "")  # the Job's name, shared by its shards; a si
 MAX_ATTEMPTS = analyze.MAX_ATTEMPTS
 FAIL_SHARE = analyze.FAIL_SHARE
 LONE_FAILURES = 1  # failures one shard tolerates when it ran more than one fold: a failed fold retries next run
+FOLD_KINDS = {"detail"}  # robustness scenarios each fold runs inline
+REPLAY_KINDS = {"delay", "nudge"}  # the rest, replayed by replay_folds for pairs confidence.cleared_pairs names
 
 
 def folds(today: dt.date, n: int | None = None, train_days: int | None = None, lockbox: dt.date | None = None,
@@ -162,6 +168,7 @@ def fold_candles(exchange: str, timeframe: str, fold: tuple, days: dict) -> str:
 class Runner(Protocol):
     def version(self) -> str: ...
     def fold(self, strategy: str, file: str, exchange: str, fold: tuple, seed: int) -> dict: ...
+    def replay(self, strategy: str, file: str, exchange: str, fold: tuple, params: dict) -> dict: ...
 
 
 def stats(res: dict) -> dict:
@@ -198,14 +205,9 @@ class Cli:
             return {**r, "duration_s": total, "hyperopt_s": hyperopt_s,
                     "backtest_s": total - (hyperopt_s or 0)}  # everything but hyperopt: the backtests
 
-        src = analyze.REPO / file
         with tempfile.TemporaryDirectory(prefix="wf-") as d:
-            strat = Path(d) / "strategies"
-            strat.mkdir()
-            for f in [*src.parent.glob("*.py"), *src.parent.glob("*.json")]:  # siblings it may import, its params
-                shutil.copy2(f, strat / f.name)
-            params_file = strat / f"{src.stem}.json"
-            with open(strat / src.name, "a") as f:
+            strat, params_file = isolate(file, Path(d))
+            with open(strat / Path(file).name, "a") as f:
                 f.write(sampler_override(strategy, tune["sampler"]))
             base = self.bt.backtest(strategy, exchange, test_start, test_end, strategy_path=strat)
             if not base["ok"]:
@@ -248,9 +250,27 @@ class Cli:
                 if not r["ok"]:
                     return took({"ok": False, "no_data": r.get("no_data", False), "error": f"{side}: {r['error']}"})
                 out[side] = stats(r)
-            out["robustness"] = robustness.run(self.bt, strategy, strat, params_file, exchange,
-                                               test_start, test_end, suggest.load_config()["confidence"], stats)
+            out["robustness"] = robustness.run(self.bt, strategy, strat, params_file, exchange, test_start, test_end,
+                                               suggest.load_config()["confidence"], stats, FOLD_KINDS)
         return took(out)
+
+    def replay(self, strategy: str, file: str, exchange: str, fold: tuple, params: dict) -> dict:
+        """A stored fold's delay and nudge scenarios: its tuned params written back as the file hyperopt exported."""
+        with tempfile.TemporaryDirectory(prefix="wf-replay-") as d:
+            strat, params_file = isolate(file, Path(d))
+            params_file.write_text(json.dumps({"strategy_name": strategy, "params": params, "ft_stratparam_v": 1}))
+            return robustness.run(self.bt, strategy, strat, params_file, exchange, fold[1], fold[2],
+                                  suggest.load_config()["confidence"], stats, REPLAY_KINDS)
+
+
+def isolate(file: str, d: Path) -> tuple[Path, Path]:
+    """A strategy's directory copied under d (siblings it may import, its params) and its params file there."""
+    src = analyze.REPO / file
+    strat = d / "strategies"
+    strat.mkdir()
+    for f in [*src.parent.glob("*.py"), *src.parent.glob("*.json")]:
+        shutil.copy2(f, strat / f.name)
+    return strat, strat / f"{src.stem}.json"
 
 
 def best_so_far(userdir: Path, strategy: str, params_file: Path) -> tuple[int, bool]:
@@ -388,10 +408,14 @@ def arms(conn) -> list[dict]:
             for s, sp, n, h, e, u in rows]
 
 
-def run_folds(conn, runner: Runner, today: dt.date, report: dict, spent: float = 0.0) -> bool:
+def deadline(spent: float = 0.0) -> float | None:
+    """When this pod stops starting work: WF_BUDGET_S less the seconds the Job used before this pod started."""
+    return time.monotonic() + BUDGET_S - spent if BUDGET_S else None
+
+
+def run_folds(conn, runner: Runner, today: dt.date, report: dict, stop_at: float | None = None) -> bool:
     """This shard's folds, stored as each finishes; True unless more than FAIL_SHARE of them failed;
-    LONE_FAILURES among several folds are tolerated, per shard. spent: seconds
-    of WF_BUDGET_S the Job used before this pod started."""
+    LONE_FAILURES among several folds are tolerated, per shard. stop_at: deadline()."""
     found = candidates(conn)
     todo, cached, skipped = plan(conn, found, analyze.coverage(conn), today, runner.version())
     report.update(candidates=[s["name"] for s in found], folds_run=len(todo), folds_cached=cached,
@@ -400,7 +424,6 @@ def run_folds(conn, runner: Runner, today: dt.date, report: dict, spent: float =
           f"to run, {cached} cached, {len(skipped)} skipped, {WORKERS} workers", flush=True)
     failed, done, failures = 0, 0, []
     budget = analyze.Budget(MEMORY_GB)
-    stop_at = time.monotonic() + BUDGET_S - spent if BUDGET_S else None
     left = 0
 
     def run(t):
@@ -439,6 +462,77 @@ def run_folds(conn, runner: Runner, today: dt.date, report: dict, spent: float =
     return failed <= max(FAIL_SHARE * done, LONE_FAILURES if done > 1 else 0)
 
 
+REPLAYS = """
+SELECT w.strategy, w.exchange, w.train_start, w.fold_start, w.test_end, w.cache_key, w.params, w.robustness,
+       s.file, s.file_hash, s.timeframe
+FROM walkforward w JOIN strategies s ON s.name = w.strategy
+WHERE w.ok AND w.params IS NOT NULL AND w.robustness IS NOT NULL AND w.test_end <= %s AND s.load_error IS NULL
+ORDER BY w.fold_start DESC, w.strategy, w.exchange
+"""
+
+
+def replay_plan(conn, pairs: set[tuple], ft_version: str) -> list[dict]:
+    """This shard's stored folds of pairs whose delay and nudge scenarios are missing: tuned, cache key current
+    (a stale fold reruns in run_folds first), settings current. A fold with every scenario stored, failed or not,
+    is done: an error is evidence, as in robustness.run."""
+    c = suggest.load_config()["confidence"]
+    settings = robustness.settings(c)
+    days: dict[tuple[str, str], dict] = {}
+    out = []
+    for (name, ex, train_start, fold_start, test_end, key, params, stored, file, file_hash,
+         timeframe) in conn.execute(REPLAYS, (suggest.load_config()["lockbox"]["start"],)):
+        if ((name, ex) not in pairs or ex not in EXCHANGES or (ONLY and name not in ONLY)
+                or analyze.shard_of(name, ex, SHARDS) != SHARD or stored.get("_settings") != settings
+                or set(robustness.plan(c, params, REPLAY_KINDS)) <= set(stored)):
+            continue
+        fold = (train_start, fold_start, test_end)
+        tune = tuning(file, metrics.seed_of(name, ex, fold_start))
+        if fold_key(file_hash, ex, fold, ft_version, fold_candles(ex, timeframe, fold, days), tune) == key:
+            out.append({"name": name, "exchange": ex, "file": file, "timeframe": timeframe, "fold": fold,
+                        "key": key, "params": params})
+    return out
+
+
+def replay_folds(conn, runner: Runner, report: dict, stop_at: float | None = None) -> bool:
+    """The second pass, after run_folds: entry delay and parameter nudge replays for the pairs whose other
+    confidence gates pass (confidence.cleared_pairs), merged into each fold's stored robustness beside its detail
+    scenario and _settings. False when a replay's runner raised; its fold retries next run."""
+    todo = replay_plan(conn, confidence.cleared_pairs(conn, suggest.load_config()), runner.version())
+    print(f"walkforward: shard {SHARD + 1}/{SHARDS}: {len(todo)} folds to replay for delay and nudges", flush=True)
+    budget = analyze.Budget(MEMORY_GB)
+    failures, done, left = [], 0, 0
+
+    def run(t):
+        with budget.hold(analyze.task_gb(t["exchange"], t["timeframe"], 31)):
+            if stop_at is not None and time.monotonic() >= stop_at:
+                return None
+            return runner.replay(t["name"], t["file"], t["exchange"], t["fold"], t["params"])
+
+    with ThreadPoolExecutor(max_workers=WORKERS) as pool:
+        futs = {pool.submit(run, t): t for t in todo}
+        try:
+            for fut in as_completed(futs):
+                task = futs[fut]
+                try:
+                    res = fut.result()
+                except Exception as e:  # one replay's runner bug must not lose the others
+                    failures.append(f"{task['name']} {task['exchange']} {task['fold'][1]:%Y-%m}: {type(e).__name__}: {e}"[:300])
+                    print(f"walkforward: replay failed: {failures[-1]}", flush=True)
+                    continue
+                if res is None:
+                    left += 1
+                    continue
+                conn.execute("UPDATE walkforward SET robustness = robustness || %s WHERE strategy = %s AND exchange = %s "
+                             "AND fold_start = %s AND cache_key = %s",
+                             (Jsonb(res), task["name"], task["exchange"], task["fold"][1], task["key"]))
+                done += 1
+        except BaseException:
+            pool.shutdown(cancel_futures=True)
+            raise
+    report.update(replays_run=done, replays_failed=len(failures), replays_left=left, replay_failures=failures[:100])
+    return not failures
+
+
 def close_shard(conn, shard_id: int, job: str, report: dict, ok: bool) -> list[tuple] | None:
     """Records this shard; when it is the last of the job's shards to finish, the finished shards' (started_at,
     ok, raw), for the run's row. The advisory lock makes exactly one shard the last."""
@@ -456,10 +550,10 @@ def finish(conn, job: str, shards: list[tuple]) -> bool:
     report: dict = {k: raws[0].get(k) for k in ("exchanges", "universe", "folds", "train_days", "epochs",
                                                  "epochs_roi", "early_stop", "samplers", "loss")}
     report["shards"] = len(raws)
-    for k in ("folds_run", "folds_cached", "folds_failed", "folds_left"):
+    for k in ("folds_run", "folds_cached", "folds_failed", "folds_left", "replays_run", "replays_failed", "replays_left"):
         report[k] = sum(r.get(k) or 0 for r in raws)
     report["candidates"] = list(dict.fromkeys(x for r in raws for x in r.get("candidates") or []))
-    for k in ("skipped", "failures"):
+    for k in ("skipped", "failures", "replay_failures"):
         report[k] = [x for r in raws for x in r.get(k) or []][:100]
     errors = [r["error"] for r in raws if r.get("error")]
     if errors:
@@ -503,8 +597,11 @@ def main(runner: Runner | None = None, today: dt.date | None = None) -> int:
                         "samplers": SAMPLERS, "loss": LOSS, "shard": SHARD, "shards": SHARDS}
         ok = False
         try:
-            ok = run_folds(conn, runner, today, report, spent)
+            stop_at = deadline(spent)
+            ok = run_folds(conn, runner, today, report, stop_at)
+            ok = replay_folds(conn, runner, report, stop_at) and ok
         except Exception as e:  # recorded, so the last shard still finishes the run over the others' folds
+            ok = False
             report["error"] = f"{type(e).__name__}: {e}"
             traceback.print_exc()
         shards = close_shard(conn, shard_id, job, report, ok)

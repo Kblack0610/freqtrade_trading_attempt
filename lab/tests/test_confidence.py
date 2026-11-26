@@ -129,7 +129,8 @@ def test_one_bad_gate_is_named_and_blocks_ready_whatever_the_score():
                  "not decayed"):
         row = result(spoil(good_facts(), name))
         # losing live trades fail the dry run's expectancy sequence as well as the decay test
-        assert set(failed(row)) == {"survivorship", name} | ({"dry run"} if name == "not decayed" else set())
+        replays = set(confidence.REPLAYED) if name in C["replay_after"] else set()  # a prerequisite: not run
+        assert set(failed(row)) == {"survivorship", name} | ({"dry run"} if name == "not decayed" else set()) | replays
         assert not row["ready"] and row["score"] >= C["ready_score"]
 
 
@@ -438,7 +439,8 @@ def test_each_robustness_family_independently_blocks_a_high_score():
         facts = good_facts()
         f = facts["walkforward"][PAIR][0]
         del f["robustness"][next(n for n in f["robustness"] if n.startswith(prefix))]
-        assert failed(result(facts)) == ["survivorship", label]
+        # timeframe detail is a prerequisite of the other two, so without it they are not run
+        assert failed(result(facts)) == ["survivorship", *(confidence.REPLAYED if prefix == "detail:" else ()), label]
 
 
 def test_slippage_sweep_reports_each_cost_and_uses_the_worst():
@@ -526,3 +528,32 @@ def test_live_reads_the_fills_view_on_this_lanes_venues_only(conn):
     trades = pd.DataFrame(conn.execute("SELECT close_date, profit_abs FROM fills WHERE source = 'freqtrade'").fetchall(),
                           columns=["close_date", "profit_abs"])
     assert metrics.daily_returns(trades, pd.Timestamp(at), pd.Timestamp(at) + pd.Timedelta(days=1), 50.0)["pnl"].tolist() == [-0.5]
+
+
+def test_a_pair_failing_a_prerequisite_gate_reads_delay_and_nudges_as_not_run():
+    facts = good_facts()
+    facts["strategies"]["Good"]["lookahead"] = True
+    gates = {g["gate"]: g for g in result(facts)["gates"].obj}
+    for label in confidence.REPLAYED:
+        assert gates[label]["value"] == confidence.NOT_RUN and not gates[label]["pass"]
+    assert gates["timeframe detail"]["pass"], "detail runs with every fold, whatever the other gates say"
+    cleared = {g["gate"]: g for g in result(good_facts())["gates"].obj}
+    for label in confidence.REPLAYED:
+        assert cleared[label]["pass"] and cleared[label]["value"].startswith(("delay:", "nudge:"))
+
+
+def test_survivorship_and_the_paper_gates_do_not_hold_back_the_replays():
+    facts = good_facts()
+    facts["live"].pop(PAIR)  # no paper bot yet: dry run fails
+    row = result(facts)
+    assert {"survivorship", "dry run"} <= set(failed(row)) and not set(confidence.REPLAYED) & set(failed(row))
+
+
+def test_a_prerequisite_naming_no_gate_is_refused():
+    with pytest.raises(ValueError, match="no prerequisite gate: bais"):
+        confidence.cleared([suggest.gate("bias", "clean", "", True)], {**C, "replay_after": ["bias", "bais"]})
+    with pytest.raises(ValueError, match="entry delay"):
+        confidence.cleared([suggest.gate("entry delay", None, "", True)], {**C, "replay_after": ["entry delay"]})
+    named = [suggest.gate("deflated Sharpe, 40 trials", 0.99, "", True), suggest.gate("bias", "clean", "", False)]
+    assert confidence.cleared(named, {**C, "replay_after": ["deflated Sharpe"]})
+    assert not confidence.cleared(named, {**C, "replay_after": ["deflated Sharpe", "bias"]})

@@ -129,7 +129,7 @@ The confidence gates and what each one waits on. The thresholds live in `lab/cry
 | worst open loss | no trade deeper against its entry than the cap | compute |
 | cost stress | still positive with only part of the gross edge | compute |
 | slippage sweep | the interval low stays above zero at each extra round-trip cost | compute |
-| entry delay, parameter nudges, timeframe detail | each tuned month survives entries one candle late, every numeric parameter nudged up and down, and fills checked on 1m candles | compute |
+| entry delay, parameter nudges, timeframe detail | each tuned month survives entries one candle late, every numeric parameter nudged up and down, and fills checked on 1m candles; delay and nudges run only once the other gates in `[confidence] replay_after` pass | compute |
 | trades reordered, worst fall | the worst drawdown over shuffled trade orders stays inside the book's hard stop | compute |
 | without its best pair | still positive with its best pair removed | compute |
 | venues agreeing | positive on enough exchanges | compute and data |

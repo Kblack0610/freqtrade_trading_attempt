@@ -24,7 +24,7 @@ import sys
 
 from psycopg.types.json import Jsonb
 
-from lab.crypto import analyze, walkforward
+from lab.crypto import analyze, robustness, walkforward
 from lab import metrics
 from lab.core.db import connect
 from lab.core.util import finite
@@ -78,7 +78,7 @@ def fold_sample(conn, rng: random.Random, n: int, ft_version: str) -> list[dict]
     days: dict[tuple[str, str], dict] = {}
     out = []
     for (strategy, ex, train_start, fold_start, test_end, key, file, file_hash, tf, params, is_trades,
-         base_trades, base_returns, tuned_trades, tuned_returns, robustness) in rows:
+         base_trades, base_returns, tuned_trades, tuned_returns, scenarios) in rows:
         if len(out) >= n:
             break
         fold = (train_start, fold_start, test_end)
@@ -87,12 +87,16 @@ def fold_sample(conn, rng: random.Random, n: int, ft_version: str) -> list[dict]
         if walkforward.fold_key(file_hash, ex, fold, ft_version, candles, tune) == key:
             out.append({"strategy": strategy, "exchange": ex, "fold": fold, "file": file,
                         "stored": fold_result(params, is_trades, base_trades, base_returns, tuned_trades, tuned_returns,
-                                              {k: v for k, v in robustness.items() if k != "_settings"} if robustness is not None else None)})
+                                              scenarios)})
     return out
 
 
-def fold_result(params, is_trades, base_trades, base_returns, tuned_trades, tuned_returns, robustness=None) -> dict:
-    return {**({"robustness": robustness} if robustness is not None else {}),
+def fold_result(params, is_trades, base_trades, base_returns, tuned_trades, tuned_returns, scenarios=None) -> dict:
+    """What a fold rerun must give again. Of robustness, only the scenarios a fold runs inline (FOLD_KINDS): the
+    delay and nudge results replay_folds merged in come from a separate pass a fold rerun does not repeat."""
+    if scenarios is not None:
+        scenarios = {k: v for k, v in scenarios.items() if robustness.kind(k) in walkforward.FOLD_KINDS}
+    return {**({"robustness": scenarios} if scenarios is not None else {}),
             "params": params, "is_trades": is_trades, "base_trades": base_trades, "base_returns": list(base_returns or []),
             "tuned_trades": tuned_trades, "tuned_returns": list(tuned_returns or [])}
 
