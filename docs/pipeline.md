@@ -110,7 +110,7 @@ At the end of the analysis the derived tables are rebuilt from everything stored
 - **Ready** means the score is at least 90 and every gate passes. It earns a small capped experiment and nothing more.
 - **The trial register.** `trials` counts every strategy, exchange, overlay, tuned setting, stress scenario, volatility-target variant and mixture ever tried, plus each strategy that failed to load, and never forgets one (`REGISTER` in `lab/crypto/confidence.py`, `lab/crypto/mixtures.py`, `lab/crypto/vol_target.py`). The more things are tried, the higher the bar for all of them, because more tries make a lucky winner more likely.
 - **The lockbox.** Months from `[lockbox] start` (2026-05-01) on are kept out of tuning and scoring. When a strategy clears everything else, a PR moves the date and it gets one look at those months.
-- **Book and mixtures** (`lab/crypto/book.py`, `lab/crypto/mixtures.py`): what a scored strategy might return over 1 and 5 years next to holding BTC, and portfolios of several strategies fitted on earlier months and tested on the next.
+- **Book and mixtures** (`lab/crypto/book.py`, `lab/crypto/mixtures.py`): what a scored strategy might return over 1 and 5 years next to holding BTC, the share of its 12-month paths that reach each stage's hard stop (`book_stops`), and portfolios of several strategies fitted on earlier months and tested on the next.
 
 The confidence gates and what each one waits on. The thresholds live in `lab/crypto/suggest.toml` `[confidence]` and nowhere else; every confidence row shows the value each gate was held to.
 

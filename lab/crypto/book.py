@@ -29,6 +29,9 @@ COLS = ["strategy", "exchange", "basis", "horizon_months", "p5", "p50", "p95", "
         "basis_months"]
 DAYS_PER_YEAR = 365  # crypto trades every day: annualizes daily volatility
 
+STOP_COLS = ["strategy", "exchange", "stage", "horizon_months", "hard_stop", "p_hard_stop", "basis_months"]
+STOP_HORIZON = 12
+
 
 def hold_months(folds: list[tuple], close: pd.Series) -> list[float]:
     """BTC's return over each fold's month, or nothing when a month has no close to start from."""
@@ -51,6 +54,23 @@ def rows(folds: dict, close: pd.Series, cfg: dict) -> list[dict]:
             for h in c["horizon_months"] if monthly else ():
                 out.append({"strategy": s, "exchange": e, "basis": basis, "horizon_months": h, "basis_months": len(monthly),
                             **metrics.projection(monthly, h, metrics.seed_of(s, e, basis, h), block=c["block_months"])})
+    return out
+
+
+def stop_rows(folds: dict, cfg: dict) -> list[dict]:
+    """Per scored strategy and stage: the share of its 12-month out-of-sample paths (those behind exp_max_drawdown)
+    whose fall from peak reaches [book] hard_stop, a share of capital. Every stage shares that share, so it is bootstrapped once per pair
+    and written under each stage's name."""
+    c = cfg["book"]
+    out = []
+    for (s, e), f in folds.items():
+        if len(f) < cfg["confidence"]["min_folds"]:
+            continue
+        monthly = [x[2] for x in f]
+        share = metrics.hard_stop_share(monthly, STOP_HORIZON, metrics.seed_of(s, e, "strategy", STOP_HORIZON),
+                                        c["hard_stop"], block=c["block_months"])
+        out += [{"strategy": s, "exchange": e, "stage": st["name"], "horizon_months": STOP_HORIZON, "hard_stop": c["hard_stop"],
+                 "basis_months": len(monthly), "p_hard_stop": share} for st in c["stages"]]
     return out
 
 
@@ -200,11 +220,14 @@ def run(conn, cfg: dict | None = None) -> dict:
         folds.setdefault((s, e), []).append((start, end, profit))
     days = conn.execute("SELECT day, btc_close FROM regimes ORDER BY day").fetchall()
     close = pd.Series([c for _, c in days], index=pd.to_datetime([d for d, _ in days]), dtype=float)
-    out = rows(folds, close, cfg)
+    out, stops = rows(folds, close, cfg), stop_rows(folds, cfg)
     with conn.transaction():
         conn.execute("DELETE FROM book")
+        conn.execute("DELETE FROM book_stops")
         with conn.cursor() as cur:
             cur.executemany(f"INSERT INTO book ({', '.join(COLS)}) VALUES ({', '.join(f'%({k})s' for k in COLS)})", out)
+            cur.executemany(f"INSERT INTO book_stops ({', '.join(STOP_COLS)}) VALUES ({', '.join(f'%({k})s' for k in STOP_COLS)})",
+                            stops)
     return {"book": len({(r["strategy"], r["exchange"]) for r in out})}
 
 

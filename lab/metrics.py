@@ -450,6 +450,11 @@ def projection(ret: np.ndarray, horizon: int, seed: int, paths: int = 5000, bloc
             "exp_max_drawdown": float(mdd.mean()), "paths": paths}
 
 
+def hard_stop_share(ret: np.ndarray, horizon: int, seed: int, level: float, paths: int = 5000, block: int = 3) -> float:
+    """The share of the bootstrapped paths `projection` draws (same seed, same paths) whose fall from peak reaches `level`."""
+    return float((_paths(ret, horizon, seed, paths, block)[1] >= level).mean())
+
+
 def reorder_drawdown(ret: np.ndarray, seed: int, level: float = 0.95, paths: int = 2000) -> float:
     """The drawdown at `level` when the same trades arrive in a random order, resampled one at a time."""
     return float(np.quantile(_paths(ret, len(ret), seed, paths, 1)[1], level))
