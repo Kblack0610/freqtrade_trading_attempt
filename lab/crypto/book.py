@@ -27,6 +27,9 @@ WHERE c.score IS NOT NULL AND w.ok AND w.params IS NOT NULL AND w.test_end <= %s
 COLS = ["strategy", "exchange", "basis", "horizon_months", "p5", "p50", "p95", "prob_loss", "exp_max_drawdown", "paths",
         "basis_months"]
 
+STOP_COLS = ["strategy", "exchange", "stage", "horizon_months", "hard_stop", "p_hard_stop", "basis_months"]
+STOP_HORIZON = 12
+
 
 def hold_months(folds: list[tuple], close: pd.Series) -> list[float]:
     """BTC's return over each fold's month, or nothing when a month has no close to start from."""
@@ -49,6 +52,23 @@ def rows(folds: dict, close: pd.Series, cfg: dict) -> list[dict]:
             for h in c["horizon_months"] if monthly else ():
                 out.append({"strategy": s, "exchange": e, "basis": basis, "horizon_months": h, "basis_months": len(monthly),
                             **metrics.projection(monthly, h, metrics.seed_of(s, e, basis, h), block=c["block_months"])})
+    return out
+
+
+def stop_rows(folds: dict, cfg: dict) -> list[dict]:
+    """Per scored strategy and stage: the share of its 12-month out-of-sample paths (those behind exp_max_drawdown)
+    whose fall from peak reaches the stage's hard stop, a share of capital ([book] hard_stop unless the stage sets its own)."""
+    c = cfg["book"]
+    out = []
+    for (s, e), f in folds.items():
+        if len(f) < cfg["confidence"]["min_folds"]:
+            continue
+        monthly = [x[2] for x in f]
+        for st in c["stages"]:
+            out.append({"strategy": s, "exchange": e, "stage": st["name"], "horizon_months": STOP_HORIZON,
+                        "hard_stop": st.get("hard_stop", c["hard_stop"]), "basis_months": len(monthly),
+                        "p_hard_stop": metrics.hard_stop_share(monthly, STOP_HORIZON, metrics.seed_of(s, e, "strategy", STOP_HORIZON),
+                                                               st.get("hard_stop", c["hard_stop"]), block=c["block_months"])})
     return out
 
 
@@ -175,8 +195,11 @@ def run(conn, cfg: dict | None = None) -> dict:
     out = rows(folds, close, cfg)
     with conn.transaction():
         conn.execute("DELETE FROM book")
+        conn.execute("DELETE FROM book_stops")
         with conn.cursor() as cur:
             cur.executemany(f"INSERT INTO book ({', '.join(COLS)}) VALUES ({', '.join(f'%({k})s' for k in COLS)})", out)
+            cur.executemany(f"INSERT INTO book_stops ({', '.join(STOP_COLS)}) VALUES ({', '.join(f'%({k})s' for k in STOP_COLS)})",
+                            stop_rows(folds, cfg))
     return {"book": len({(r["strategy"], r["exchange"]) for r in out})}
 
 

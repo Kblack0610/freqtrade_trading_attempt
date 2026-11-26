@@ -42,6 +42,27 @@ def test_a_steady_loser_shows_a_loss_and_a_fall():
     assert abs(p["exp_max_drawdown"] - (1 - 0.97 ** 12)) < 1e-9
 
 
+def test_hard_stop_share_counts_the_planted_paths():
+    # Two months, one block of 2: each path is the whole series or its mirror start; -20% then +10% falls 20%, +10% then -20% too.
+    # Months [-0.2, 0.0] with block 1 draw a -20% month in a path of 2 with probability 3/4, so the share is near 0.75.
+    ret = np.array([-0.2, 0.0])
+    assert metrics.hard_stop_share(np.full(12, -0.03), 12, 1, 0.30, paths=200) == 1.0
+    assert metrics.hard_stop_share(np.full(12, -0.03), 12, 1, 0.40, paths=200) == 0.0
+    share = metrics.hard_stop_share(ret, 2, 5, 0.15, paths=20000, block=1)
+    assert abs(share - 0.75) < 0.02
+    assert metrics.hard_stop_share(ret, 2, 5, 0.15, paths=2000, block=1) == metrics.hard_stop_share(ret, 2, 5, 0.15, paths=2000, block=1)
+
+
+def test_stop_rows_give_each_stage_its_own_share_of_the_projection_paths():
+    f = {PAIR: folds([-0.2, 0.0] * 3)}
+    cfg = {**CFG, "book": {**CFG["book"], "block_months": 1,
+                           "stages": [{"name": "A", "capital": 1.0}, {"name": "B", "capital": 1.0, "hard_stop": 0.99}]}}
+    a, b = book.stop_rows(f, cfg)
+    assert (a["stage"], a["hard_stop"], b["stage"], b["hard_stop"]) == ("A", CFG["book"]["hard_stop"], "B", 0.99)
+    assert a["p_hard_stop"] > 0.99 and b["p_hard_stop"] == 0.0 and a["horizon_months"] == 12
+    assert a["p_hard_stop"] == metrics.hard_stop_share([x[2] for x in f[PAIR]], 12, metrics.seed_of(*PAIR, "strategy", 12), a["hard_stop"], block=1)
+
+
 def test_monte_carlo_is_unchanged_by_the_shared_paths():
     r = np.random.default_rng(3).normal(0.001, 0.02, 200)
     res = metrics.block_sample(r, 10, 500, np.random.default_rng(9), 90)
@@ -87,8 +108,10 @@ def test_run_stores_only_scored_pairs_and_replaces_the_last(conn):
         conn.execute("INSERT INTO regimes (day, btc_close) VALUES (%s, %s)", (d.date(), float(c)))
     assert book.run(conn, CFG) == {"book": 1} == book.run(conn, CFG)
     assert conn.execute("SELECT count(*), min(strategy) FROM book").fetchone() == (4, "Good")
+    assert conn.execute("SELECT count(*), min(strategy) FROM book_stops").fetchone() == (len(CFG["book"]["stages"]), "Good")
     book.run(conn, {**CFG, "lockbox": {"start": dt.date(2000, 1, 1)}})
     assert conn.execute("SELECT count(*) FROM book").fetchone() == (0,)
+    assert conn.execute("SELECT count(*) FROM book_stops").fetchone() == (0,)
 
 
 def series(values, start="2020-01-01"):
