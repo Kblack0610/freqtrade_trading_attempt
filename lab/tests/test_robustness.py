@@ -1,4 +1,6 @@
 import datetime as dt
+import hashlib
+import inspect
 import json
 from pathlib import Path
 
@@ -118,9 +120,53 @@ def test_a_strategy_without_numeric_parameters_reports_unsupported(tmp_path):
 
 def test_settings_track_algorithm_and_configuration():
     original = robustness.settings(CFG)
-    assert len(original["implementation"]) == 64
+    assert original["implementation"] == robustness.IMPLEMENTATION
     assert original != robustness.settings({**CFG, "entry_delay_candles": 2})
     assert original != robustness.settings({**CFG, "detail_chunk_days": 10})
+    assert original == robustness.settings({**CFG, "replay_after": ["bias"]}), "only the scenario settings count"
+
+
+SCENARIO_CODE = "81bbf72aca0c4903a3fd3f16046931b213b01049057de797bc141689b069036b"
+
+
+def test_the_implementation_version_pins_the_scenario_code():
+    """IMPLEMENTATION is in every fold's cache key, so it is a version, not a file digest. An edit to the code that
+    makes the scenarios has to decide: a changed result changes IMPLEMENTATION (every fold reruns once), and either
+    way SCENARIO_CODE becomes the new digest."""
+    code = "".join(inspect.getsource(f) for f in (robustness.kind, robustness.plan, robustness.pieces, robustness.join,
+                                                  robustness.detail_backtest, robustness._source,
+                                                  robustness._wrapper, robustness.run))
+    assert hashlib.sha256(code.encode()).hexdigest() == SCENARIO_CODE
+
+
+def test_kinds_keep_only_their_scenario_families_in_plan_order():
+    params = {"buy": {"period": 20}}
+    assert list(robustness.plan(CFG, params, {"detail"})) == ["detail:1m"]
+    assert list(robustness.plan(CFG, params, {"delay", "nudge"})) == [
+        "delay:1", "nudge:buy.period:down", "nudge:buy.period:up"]
+    assert list(robustness.plan(CFG, {}, {"nudge"})) == ["nudge:unsupported"]
+    assert {**robustness.plan(CFG, params, {"delay", "nudge"}), **robustness.plan(CFG, params, {"detail"})} == \
+        robustness.plan(CFG, params), "the two halves make the whole plan"
+    with pytest.raises(ValueError):
+        robustness.plan({**CFG, "entry_delay_candles": 0}, params, {"detail"})
+
+
+def test_run_with_kinds_backtests_only_those_scenarios(tmp_path):
+    path = isolated(tmp_path)
+    calls = []
+
+    class Runner:
+        def backtest(self, strategy, exchange, start, end, **kwargs):
+            calls.append(kwargs.get("detail"))
+            return shaped(start, end)
+
+    summary = lambda r: {"returns": [0.01], "trades": 1}  # noqa: E731
+    assert list(robustness.run(Runner(), "Example", tmp_path, path, "venue", START, END, CFG, summary, {"detail"})) == \
+        ["detail:1m"]
+    assert calls == ["1m"] * 5, "the detail scenario runs in 7-day pieces"
+    calls.clear()
+    replayed = robustness.run(Runner(), "Example", tmp_path, path, "venue", START, END, CFG, summary, {"delay", "nudge"})
+    assert "detail:1m" not in replayed and len(replayed) == len(calls) == 5 and None in calls and "1m" not in calls
 
 
 def test_freqtrade_resolver_loads_wrapper_parameters_and_rejects_ignored_nudges(tmp_path):

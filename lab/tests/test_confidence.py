@@ -526,3 +526,51 @@ def test_live_reads_the_fills_view_on_this_lanes_venues_only(conn):
     trades = pd.DataFrame(conn.execute("SELECT close_date, profit_abs FROM fills WHERE source = 'freqtrade'").fetchall(),
                           columns=["close_date", "profit_abs"])
     assert metrics.daily_returns(trades, pd.Timestamp(at), pd.Timestamp(at) + pd.Timedelta(days=1), 50.0)["pnl"].tolist() == [-0.5]
+
+
+def unreplayed(facts: dict) -> dict:
+    """What a fold stores since tr-412: detail inline, delay and nudges only once the second pass replays them."""
+    for f in facts["walkforward"][PAIR]:
+        f["robustness"] = {k: v for k, v in f["robustness"].items() if not k.startswith(("delay:", "nudge:"))}
+    return facts
+
+
+def test_a_pair_failing_a_prerequisite_gate_reads_delay_and_nudges_as_not_run():
+    facts = unreplayed(good_facts())
+    facts["strategies"]["Good"]["lookahead"] = True
+    gates = {g["gate"]: g for g in result(facts)["gates"].obj}
+    for label in confidence.REPLAYED:
+        assert gates[label]["value"] == confidence.NOT_RUN and not gates[label]["pass"]
+    assert gates["timeframe detail"]["pass"], "detail runs with every fold, whatever the other gates say"
+    waiting = {g["gate"]: g for g in result(unreplayed(good_facts()))["gates"].obj}
+    for label in confidence.REPLAYED:  # cleared but not yet replayed: the next walk-forward runs them
+        assert waiting[label]["value"] != confidence.NOT_RUN and not waiting[label]["pass"]
+    cleared = {g["gate"]: g for g in result(good_facts())["gates"].obj}
+    for label in confidence.REPLAYED:
+        assert cleared[label]["pass"] and cleared[label]["value"].startswith(("delay:", "nudge:"))
+
+
+def test_survivorship_and_the_paper_gates_do_not_hold_back_the_replays():
+    facts = good_facts()
+    facts["live"].pop(PAIR)  # no paper bot yet: dry run fails
+    row = result(facts)
+    assert {"survivorship", "dry run"} <= set(failed(row)) and not set(confidence.REPLAYED) & set(failed(row))
+
+
+def test_a_prerequisite_naming_no_gate_is_refused():
+    with pytest.raises(ValueError, match="no prerequisite gate: bais"):
+        confidence.cleared([suggest.gate("bias", "clean", "", True)], {**C, "replay_after": ["bias", "bais"]})
+    with pytest.raises(ValueError, match="entry delay"):
+        confidence.cleared([suggest.gate("entry delay", None, "", True)], {**C, "replay_after": ["entry delay"]})
+    named = [suggest.gate("deflated Sharpe, 40 trials", 0.99, "", True), suggest.gate("bias", "clean", "", False)]
+    assert confidence.cleared(named, {**C, "replay_after": ["deflated Sharpe"]})
+    assert not confidence.cleared(named, {**C, "replay_after": ["deflated Sharpe", "bias"]})
+
+
+def test_stored_replay_evidence_shows_even_once_a_prerequisite_fails():
+    """The replays add trials, which can lower deflated Sharpe: a pair replayed once keeps its reading, not NOT_RUN."""
+    facts = good_facts()
+    facts["strategies"]["Good"]["lookahead"] = True
+    gates = {g["gate"]: g for g in result(facts)["gates"].obj}
+    for label in confidence.REPLAYED:
+        assert gates[label]["pass"] and gates[label]["value"] != confidence.NOT_RUN

@@ -12,15 +12,27 @@ from pathlib import Path
 import pandas as pd
 
 
+# The replay version every stored fold cache key and robustness result carries. It was this file's sha256 until
+# tr-412, so stored folds kept their keys; tr-413 changed it for the detail replay in pieces. Change it when an edit changes any scenario's result; a refactor or the
+# kinds filter does not. test_robustness pins the scenario code, so an edit there has to decide.
+IMPLEMENTATION = "tr-413 detail pieces"
+
+
 def settings(cfg: dict) -> dict:
-    """The perturbation settings and implementation digest that invalidate stored fold caches."""
+    """The perturbation settings and implementation version that invalidate stored fold caches."""
     return {**{key: cfg[key] for key in ("entry_delay_candles", "parameter_nudge_fraction", "detail_timeframe",
                                      "detail_chunk_days")},
-            "implementation": hashlib.sha256(Path(__file__).read_bytes()).hexdigest()}
+            "implementation": IMPLEMENTATION}
 
 
-def plan(cfg: dict, params: dict | None) -> dict[str, dict]:
-    """Scenario ids and instructions; their order is stable and does not depend on results."""
+def kind(name: str) -> str:
+    """A scenario's family from its id: delay, nudge or detail (nudge:unsupported is a nudge)."""
+    return name.split(":", 1)[0]
+
+
+def plan(cfg: dict, params: dict | None, kinds: set[str] | None = None) -> dict[str, dict]:
+    """Scenario ids and instructions; their order is stable and does not depend on results. kinds keeps only
+    those families; the settings are checked whatever it keeps."""
     delay = cfg["entry_delay_candles"]
     fraction = cfg["parameter_nudge_fraction"]
     detail = cfg["detail_timeframe"]
@@ -49,7 +61,7 @@ def plan(cfg: dict, params: dict | None) -> dict[str, dict]:
     if not any(s["kind"] == "nudge" for s in out.values()):
         out["nudge:unsupported"] = {"kind": "unsupported", "error": "no numeric buy or sell parameter to nudge"}
     out[f"detail:{detail}"] = {"kind": "detail", "timeframe": detail, "chunk_days": chunk}
-    return out
+    return out if kinds is None else {name: spec for name, spec in out.items() if kind(name) in kinds}
 
 
 def expected(scenarios: dict) -> list[str]:
@@ -154,7 +166,7 @@ def _wrapper(strategy: str, module: str, spec: dict) -> tuple[str, str]:
 
 
 def run(bt, strategy: str, strat: Path, params_file: Path, exchange: str, start: dt.date, end: dt.date,
-        cfg: dict, summarize, hold=None) -> dict[str, dict]:
+        cfg: dict, summarize, kinds: set[str] | None = None, hold=None) -> dict[str, dict]:
     """Replay each scenario independently, restore the tuned file even after a runner exception.
 
     hold(kind) is entered around each replay: "native" for a scenario on the strategy's own candles, "detail" for each
@@ -166,7 +178,7 @@ def run(bt, strategy: str, strat: Path, params_file: Path, exchange: str, start:
     hold = hold or (lambda kind: nullcontext())
     original = params_file.read_bytes()
     document = json.loads(original)
-    scenarios = plan(cfg, document.get("params"))
+    scenarios = plan(cfg, document.get("params"), kinds)
     out = {}
     try:
         for scenario, spec in scenarios.items():

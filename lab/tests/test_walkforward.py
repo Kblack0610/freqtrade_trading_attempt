@@ -8,7 +8,9 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from lab.crypto import analyze
+from psycopg.types.json import Jsonb
+
+from lab.crypto import analyze, confidence, robustness, suggest
 from lab import metrics
 from lab.crypto import walkforward as wf
 from lab.tests.test_analyze import REPO
@@ -23,6 +25,7 @@ class FakeRunner:
     def __init__(self, fail=frozenset(), hole=frozenset(), untuned=frozenset()):
         self.fail, self.hole, self.untuned = set(fail), set(hole), set(untuned)
         self.calls: list[tuple] = []
+        self.replays: list[tuple] = []
 
     def version(self):
         return "test"
@@ -41,7 +44,14 @@ class FakeRunner:
                "base": side(0.01, 10), "params": None}
         if strategy in self.untuned:
             return {**out, "error": "no hyperopt epoch reached 10 training trades"}
-        return {**out, "params": {"roi": {"0": 0.03}, "stoploss": -0.08}, "tuned": side(0.04, 12), "is": side(0.2, 70)}
+        detail = {"ok": True, "error": None, "trades": 12, "returns": [0.04 / 12] * 12}
+        return {**out, "params": {"roi": {"0": 0.03}, "stoploss": -0.08}, "tuned": side(0.04, 12), "is": side(0.2, 70),
+                "robustness": {"detail:1m": detail}}
+
+    def replay(self, strategy, file, exchange, fold, params):
+        self.replays.append((strategy, fold[1], exchange))
+        return {name: {"ok": True, "error": None, "trades": 12, "returns": [0.03 / 12] * 12}
+                for name in robustness.plan(suggest.load_config()["confidence"], params, wf.REPLAY_KINDS)}
 
 
 @pytest.fixture
@@ -640,7 +650,7 @@ def test_a_failed_detail_piece_fails_only_the_detail_scenario(monkeypatch):
     assert res["ok"] and res["tuned"]["trades"] == 1
     rob = res["robustness"]
     assert rob["detail:1m"] == {"ok": False, "error": f"detail piece 2026-10-15 to 2026-10-22: {error}", "returns": []}
-    assert rob["delay:1"]["ok"] and set(rob) == {"delay:1", "nudge:unsupported", "detail:1m"}
+    assert set(rob) == {"detail:1m"}, "a fold runs only the detail scenario; the failed piece leaves base and tuned"
     assert sum(w[0] == "detail" for w in spy.windows) == 3, "no piece runs after the failed one"
 
 
@@ -730,5 +740,102 @@ def test_a_fold_that_gets_room_only_after_the_budget_ran_out_does_not_start(wlab
             return super().fold(strategy, file, exchange, fold, seed, hold)
 
     report = {}
-    wf.run_folds(wlab, Runner(), TODAY, report)
+    wf.run_folds(wlab, Runner(), TODAY, report, wf.deadline())
     assert entered == [] and report["folds_left"] == report["folds_run"] == 3
+
+
+class ScenarioSpy(WindowSpy):
+    """A WindowSpy whose hyperopt tunes a buy parameter, so a full plan would nudge it, and which records each
+    backtest's strategy class and detail timeframe."""
+
+    def __init__(self, monkeypatch):
+        super().__init__(monkeypatch)
+        self.runs: list[tuple[str, str | None]] = []
+
+    def backtest(self, strategy, exchange, start, end, overlay=None, strategy_path=None, detail=None):
+        self.runs.append((strategy, detail))
+        return super().backtest(strategy, exchange, start, end, overlay, strategy_path, detail)
+
+    def hyperopt(self, cmd, **kwargs):
+        out = super().hyperopt(cmd, **kwargs)
+        strat = Path(cmd[cmd.index("--strategy-path") + 1])
+        name = cmd[cmd.index("--strategy") + 1]
+        (strat / f"{name}.json").write_text(json.dumps({"strategy_name": name, "params": {"buy": {"x": 10}}}))
+        return out
+
+
+def test_a_fold_runs_only_its_detail_scenario_and_stores_no_delay_or_nudge(wlab, monkeypatch):
+    spy = ScenarioSpy(monkeypatch)
+    cli = wf.Cli.__new__(wf.Cli)
+    cli.bt = spy
+    fold = wf.folds(TODAY, n=1)[0]
+    res = cli.fold("Strategy001", "user_data/strategies/Strategy001.py", "binanceus", fold, 1)
+    assert res["ok"], res["error"]
+    replays = [r for r in spy.runs if r[0].endswith("Robustness")]
+    assert [detail for _, detail in replays] == ["1m"] * 5, "only the detail replay, in 7-day pieces; no delay or nudge"
+    assert list(res["robustness"]) == ["detail:1m"]
+    task = {"name": "Strategy001", "exchange": "binanceus", "fold": fold, "key": "k", "candles": "c", "seed": 1,
+            "attempts": 0, "tune": TUNE}
+    wlab.execute("INSERT INTO strategies (name, file, file_hash, timeframe) VALUES ('Strategy001', 'f.py', 'h', '5m')")
+    wf.store(wlab, task, res)
+    stored = wlab.execute("SELECT robustness FROM walkforward").fetchone()[0]
+    assert set(stored) == {"detail:1m", "_settings"}
+
+
+def test_a_replay_writes_back_the_stored_params_and_runs_only_delay_and_nudges(monkeypatch):
+    monkeypatch.setattr(analyze, "USER_DATA", REPO / "user_data")
+    spy = ScenarioSpy(monkeypatch)
+    cli = wf.Cli.__new__(wf.Cli)
+    cli.bt = spy
+    fold = wf.folds(TODAY, n=1)[0]
+    res = cli.replay("Strategy001", "user_data/strategies/Strategy001.py", "binanceus", fold, {"buy": {"x": 10}})
+    assert list(res) == ["delay:1", "nudge:buy.x:down", "nudge:buy.x:up"]
+    assert all(r["ok"] for r in res.values()), res
+    assert all(detail is None for _, detail in spy.runs) and len(spy.runs) == 3
+    assert {w[1:] for w in spy.windows} == {fold[1:]}, "the test month only"
+
+
+def prerequisite_rows(fail: set[str]):
+    """confidence.rows for Live and Promising on binanceus, every prerequisite gate passing but `fail`'s bias,
+    their replayed gates from the real robustness_gates."""
+    def rows(facts, trials, cfg):
+        c = cfg["confidence"]
+        out = []
+        for pair in (("Live", "binanceus"), ("Promising", "binanceus")):
+            others = [suggest.gate(n, None, "", n != "bias" or pair[0] not in fail)
+                      for n in c["replay_after"] if n != "timeframe detail"]
+            g = confidence.robustness_gates(facts["walkforward"].get(pair, []), pair, c, others)
+            out.append({"strategy": pair[0], "venue": pair[1], "gates": Jsonb([*others, *g])})
+        return out
+    return rows
+
+
+def test_the_second_pass_replays_only_the_pair_clearing_the_other_gates_and_once(wlab, monkeypatch):
+    monkeypatch.setattr(wf, "ONLY", {"Live", "Promising"})
+    first = FakeRunner()
+    assert wf.main(first, TODAY) == 0 and len(first.calls) == 6
+    assert first.replays == [], "the fixture's pairs clear no gate"
+    keys = dict(wlab.execute("SELECT strategy || fold_start, cache_key FROM walkforward").fetchall())
+    with monkeypatch.context() as m:
+        m.setattr(confidence, "rows", prerequisite_rows({"Promising"}))
+        runner, report = FakeRunner(), {}
+        assert wf.replay_folds(wlab, runner, report)
+        assert sorted({r[0] for r in runner.replays}) == ["Live"] and len(runner.replays) == 3
+        assert report["replays_run"] == 3 and report["replays_left"] == 0
+        stored = dict(wlab.execute("SELECT strategy, robustness FROM walkforward").fetchall())
+        assert set(stored["Live"]) == {"detail:1m", "_settings", "delay:1", "nudge:unsupported"}
+        assert set(stored["Promising"]) == {"detail:1m", "_settings"}
+        assert stored["Live"]["_settings"] == robustness.settings(suggest.load_config()["confidence"])
+        again = FakeRunner()
+        assert wf.replay_folds(wlab, again, {}) and again.replays == [], "current evidence is not replayed"
+    assert dict(wlab.execute("SELECT strategy || fold_start, cache_key FROM walkforward").fetchall()) == keys
+    rerun = FakeRunner()
+    assert wf.main(rerun, TODAY) == 0 and rerun.calls == [], "the merge leaves every fold cached"
+
+
+def test_the_replay_prerequisites_and_code_are_not_part_of_the_cache_key(monkeypatch):
+    cfg = wf.suggest.load_config()
+    first = wf.fold_key("h", "binanceus", (TODAY, TODAY, TODAY), "v", "candles", TUNE)
+    monkeypatch.setattr(wf.suggest, "load_config", lambda: {**cfg, "confidence": {**cfg["confidence"], "replay_after": []}})
+    assert wf.fold_key("h", "binanceus", (TODAY, TODAY, TODAY), "v", "candles", TUNE) == first
+    assert robustness.settings(cfg["confidence"])["implementation"] == robustness.IMPLEMENTATION
