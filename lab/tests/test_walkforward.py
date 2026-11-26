@@ -606,7 +606,7 @@ def test_the_detail_replay_runs_in_contiguous_pieces_each_under_its_own_hold(mon
     under = []
 
     def backtest(*a, **k):
-        under.append(list(held))
+        under.append(("detail" if k.get("detail") else "backtest", list(held)))
         return real(*a, **k)
 
     spy.backtest = backtest
@@ -616,9 +616,8 @@ def test_the_detail_replay_runs_in_contiguous_pieces_each_under_its_own_hold(mon
     assert len(pieces) == 5 and pieces[0][0] == fold[1] and pieces[-1][1] == fold[2]
     assert all(a[1] == b[0] for a, b in zip(pieces, pieces[1:])), "contiguous, no gap and no overlap"
     assert [(b - a).days for a, b in pieces] == [7, 7, 7, 7, 3]
-    detail = [u for w, u in zip(spy.windows, under) if w[0] == "detail"]
-    assert detail == [["detail"]] * 5, "each piece holds only its own estimate, never the fold's"
-    assert all(u == ["native"] for w, u in zip(spy.windows, under) if w[0] == "backtest")
+    assert [h for kind, h in under if kind == "detail"] == [["detail"]] * 5, "a piece holds only its own estimate"
+    assert all(h == ["native"] for kind, h in under if kind == "backtest")
     assert holds.count("detail") == 5
     scenario = res["robustness"]["detail:1m"]
     assert scenario["ok"] and scenario["trades"] == 5 and scenario["boundary_exits"] == 0
@@ -653,6 +652,8 @@ def test_folds_share_a_budget_below_a_whole_month_of_detail_and_never_exceed_it(
     monkeypatch.setattr(analyze, "task_gb", lambda ex, tf, days, load=1: sizes[tf, days])
     monkeypatch.setattr(wf, "MEMORY_GB", 3.0)
     monkeypatch.setattr(wf, "WORKERS", 2)
+    wlab.execute("INSERT INTO strategies (name, file, file_hash, timeframe) "
+                 "VALUES ('Strategy001', 'user_data/strategies/Strategy001.py', 'h', '5m')")
     monkeypatch.setattr(wf, "candidates", lambda conn: [
         {"name": "Strategy001", "file": "user_data/strategies/Strategy001.py", "file_hash": "h", "timeframe": "5m"}])
     used, held = [], []
