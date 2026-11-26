@@ -77,6 +77,17 @@ def backtest(user: Path, conf: Path, strategy: str) -> pd.DataFrame:
     return trades
 
 
+def download(user: Path) -> Path:
+    """The okx daily swap candles of every basket coin into `user`, once; returns the config path the backtests write."""
+    (user / "data").mkdir(parents=True, exist_ok=True)
+    conf = user / "bust.json"
+    if not (user / "data" / "okx" / "futures").exists():
+        config(conf, BASKETS["majors"] + BASKETS["ai"])
+        freqtrade("download-data", "--userdir", str(user), "--config", str(conf), "--timeframes", "1d",
+                  "--timerange", f"{START}-", "--trading-mode", "futures")
+    return conf
+
+
 def load_funding(conn, pairs: list[str]) -> pd.DataFrame:
     """Every stored settlement for these swaps: exchange, pair, ts (naive UTC), rate."""
     rows = conn.execute("SELECT exchange, pair, ts, rate FROM funding_rates WHERE pair = ANY(%s) ORDER BY ts",
@@ -86,9 +97,9 @@ def load_funding(conn, pairs: list[str]) -> pd.DataFrame:
     return out
 
 
-def measured(trades: pd.DataFrame, rates: pd.DataFrame) -> pd.DataFrame:
+def measured(trades: pd.DataFrame, rates: pd.DataFrame, venues: tuple = FUNDING_VENUES) -> pd.DataFrame:
     """Each trade with `funding`, what it received (positive) or paid on its stake, from the first venue in
-    FUNDING_VENUES whose series starts by the trade's open, and `funding_from`, that venue. A positive rate is
+    `venues` whose series starts by the trade's open, and `funding_from`, that venue. A positive rate is
     paid by longs to shorts. Both are NaN for a trade no venue covers. Freqtrade's own funding_fees, from
     whatever funding candles it downloaded, are taken out of profit_abs into `gross`, so nothing is counted twice."""
     out = trades.copy()
@@ -96,7 +107,7 @@ def measured(trades: pd.DataFrame, rates: pd.DataFrame) -> pd.DataFrame:
     out["funding"], out["funding_from"] = float("nan"), None
     starts = rates.groupby(["exchange", "pair"])["ts"].min()
     for i, t in out.iterrows():
-        for venue in FUNDING_VENUES:
+        for venue in venues:
             first = starts.get((venue, t["pair"]))
             if first is None or first > t["open_date"]:
                 continue
@@ -135,12 +146,7 @@ def main() -> None:
     from lab.core.db import connect
 
     user, strategy = Path(sys.argv[1]).resolve(), (sys.argv[2:] or ["BustShort"])[0]
-    (user / "data").mkdir(parents=True, exist_ok=True)
-    conf = user / "bust.json"
-    if not (user / "data" / "okx" / "futures").exists():
-        config(conf, BASKETS["majors"] + BASKETS["ai"])
-        freqtrade("download-data", "--userdir", str(user), "--config", str(conf), "--timeframes", "1d",
-                  "--timerange", f"{START}-", "--trading-mode", "futures")
+    conf = download(user)
     candles = load_pair_history(pair("BTC"), "1d", user / "data" / "okx", candle_type=CandleType.FUTURES)
     close = candles.set_index(candles["date"].dt.date)["close"]
     print(f"BTC swap candles {close.index[0]} to {close.index[-1]}\n")

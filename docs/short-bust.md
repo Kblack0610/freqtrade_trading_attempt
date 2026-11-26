@@ -104,3 +104,5 @@ Equity puts and inverse ETFs need data this lab does not hold, so they stay unte
 ## Run it
 
 `python lab/futures/research/bust.py <userdir> [BustShort|DonchianLongShort|CarverLongShort64|CarverLongShort16]` inside the image, with `DATABASE_URL` set for the funding. It downloads into the userdir once, about 20 minutes.
+
+`python -m lab.futures.gate <userdir>` runs `DonchianLongShort`, `CarverLongShort64` and `CarverLongShort16` the same way and writes their `readiness` rows, market `futures`, one per strategy per venue, each trade net of that venue's measured funding (README, `lab/futures/gate.py`).
