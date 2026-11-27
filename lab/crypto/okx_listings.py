@@ -3,7 +3,9 @@
 OKX's instruments API lists live pairs only and its candles API refuses a delisted one (code 51001), but the monthly
 archive in lab/crypto/archive.py keeps the delisted pair's 1m files if asked for the id (docs tr-449, findings 5-10).
 Tardis's free metadata names the ids, ended ones included. A pair's window is its first and last candle in the archive
-files, never Tardis's availableTo, which is when Tardis stopped recording and can lag the delisting. A pair counts as
+files, never Tardis's dates: they only bound which months of the archive are asked for (SLACK each side), since Tardis
+can start recording after OKX listed a pair or keep recording after it delisted. A live pair's window runs to now, as
+OKX publishes a month's file only once it is over. A pair counts as
 listed in a month when its window overlaps it. `refresh` writes pair_windows and pair_listings; an id with no archive
 file (OKX's archive starts 2020-01 and skips some pairs) is counted and returned, never dropped silently. Candles are
 read through archive.okx_candles() when a rerun wants a pair's series; none are stored here.
@@ -23,8 +25,9 @@ QUOTE = "USDT"
 # Tardis's free exchange metadata is one call; no limit is published for it (read 2026-11-27, https://docs.tardis.dev/api/exchanges).
 TARDIS = Api("tardis_okex", {"base_url": "https://api.tardis.dev/v1", "page_gap_s": 1.0, "retries": 4, "timeout_s": 60})
 FROM = pd.Timestamp(archive.OKX_FROM, tz="UTC")
-# Tardis's dates are day-grained and its months are UTC while OKX's files start 8 hours early: a month's slack each side.
-SLACK = pd.DateOffset(months=1)
+# Tardis's dates bound the archive span only. Six months of slack each side catches a pair Tardis began recording late;
+# wider would cost another listing call per 9 months per id, hours over 2400 ids at OKX's 0.8 s pace.
+SLACK = pd.DateOffset(months=6)
 
 
 def ids() -> list[dict]:
@@ -47,6 +50,7 @@ def refresh(conn, now: pd.Timestamp | None = None) -> tuple[dict[str, tuple[dt.d
     ids with no archive file, and the pairs whose files could not be read, whose old rows stay as they were."""
     now = now or pd.Timestamp.now(tz="UTC")
     found, ended, missing, failed = {}, {}, [], []
+    stored = {r[0] for r in conn.execute("SELECT pair FROM pair_windows WHERE exchange = %s", (VENUE,))}
     for s in ids():
         sp = span(s["since"], s["until"], now)
         try:
@@ -55,10 +59,14 @@ def refresh(conn, now: pd.Timestamp | None = None) -> tuple[dict[str, tuple[dt.d
             failed.append(s["pair"])
             print(f"listings: {VENUE}: {s['id']}: {type(e).__name__}: {e}", file=sys.stderr, flush=True)
             continue
+        if w is None and s["pair"] in stored:  # a pair we had files for that now has none is a read fault, not a delisting
+            failed.append(s["pair"])
+            print(f"listings: {VENUE}: {s['id']}: no archive file now, was listed before", file=sys.stderr, flush=True)
+            continue
         if w is None:
             missing.append(s["pair"])
             continue
-        found[s["pair"]] = (w[0].to_pydatetime(), w[1].to_pydatetime())
+        found[s["pair"]] = (w[0].to_pydatetime(), (now if s["until"] is None else w[1]).to_pydatetime())
         ended[s["pair"]] = s["until"] is not None
     if not found:
         return {}, missing, failed

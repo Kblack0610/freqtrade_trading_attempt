@@ -30,7 +30,7 @@ FILES = {
     "SRM-USDT": {f"{CDN}/202008/SRM-USDT-2020-08.zip": okx_zip("SRM-USDT", "2020-08", [SRM_FIRST, SRM_FIRST + 60_000]),
                  f"{CDN}/202310/SRM-USDT-2023-10.zip": okx_zip("SRM-USDT", "2023-10", [SRM_LAST - 60_000, SRM_LAST])},
     "BTC-USDT": {f"{CDN}/202001/BTC-USDT-2020-01.zip": okx_zip("BTC-USDT", "2020-01", [ms(2020, 1, 1, 1)]),
-                 f"{CDN}/202611/BTC-USDT-2026-11.zip": okx_zip("BTC-USDT", "2026-11", [ms(2026, 11, 26, 23)])},
+                 f"{CDN}/202610/BTC-USDT-2026-10.zip": okx_zip("BTC-USDT", "2026-10", [ms(2026, 10, 31, 23)])},
 }
 TARDIS = {"availableSymbols": [
     {"id": "SRM-USDT", "type": "spot", "availableSince": "2020-08-14T00:00:00.000Z", "availableTo": "2023-10-17T00:00:00.000Z"},
@@ -81,6 +81,7 @@ def test_srm_is_listed_through_2023_10_and_its_candles_load(conn, monkeypatch):
     assert months[0] == dt.date(2020, 8, 1) and months[-1] == dt.date(2023, 10, 1) and dt.date(2023, 11, 1) not in months
     status = dict(conn.execute("SELECT pair, status FROM pair_windows WHERE exchange = 'okx'").fetchall())
     assert status == {"SRM/USDT": "ENDED", "BTC/USDT": "LIVE"}
+    assert conn.execute("SELECT max(month) FROM pair_listings WHERE exchange = 'okx' AND pair = 'BTC/USDT'").fetchone()[0] == dt.date(2026, 11, 1), "a live pair runs to now"
     df = archive.okx_candles("SRM/USDT", "20231001")
     assert list(df["date"].dt.strftime("%Y-%m")) == ["2023-10", "2023-10"] and len(df) == 2
 
@@ -93,3 +94,24 @@ def test_an_unreadable_id_keeps_its_old_rows(conn, monkeypatch):
     found, missing, failed = okx_listings.refresh(conn, NOW)
     assert failed == ["SRM/USDT"] and set(found) == {"BTC/USDT"}
     assert conn.execute("SELECT count(*) FROM pair_listings WHERE exchange = 'okx' AND pair = 'SRM/USDT'").fetchone()[0] > 0
+
+
+def test_a_file_with_no_confirmed_candle_is_stepped_over(monkeypatch):
+    unconfirmed = zipfile.ZipFile(io.BytesIO(okx_zip("SRM-USDT", "2020-07", [SRM_FIRST - 1])))
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("x.csv", unconfirmed.read(unconfirmed.namelist()[0]).decode().replace(",1\n", ",0\n"))
+    files = {f"{CDN}/202007/SRM-USDT-2020-07.zip": buf.getvalue(), **FILES["SRM-USDT"]}
+    monkeypatch.setitem(FILES, "SRM-USDT", files)
+    monkeypatch.setattr(archive, "_get", fake_get)
+    first, _ = archive.okx_window("SRM/USDT", pd.Timestamp("2020-01-01", tz="UTC"), NOW)
+    assert first == pd.Timestamp("2020-08-14 01:00", tz="UTC")
+
+
+def test_a_stored_pair_with_no_file_now_fails_and_keeps_its_rows(conn, monkeypatch):
+    setup(monkeypatch)
+    okx_listings.refresh(conn, NOW)
+    monkeypatch.setitem(FILES, "SRM-USDT", {})
+    found, missing, failed = okx_listings.refresh(conn, NOW)
+    assert failed == ["SRM/USDT"] and "SRM/USDT" not in missing
+    assert conn.execute("SELECT count(*) FROM pair_windows WHERE pair = 'SRM/USDT'").fetchone()[0] == 1

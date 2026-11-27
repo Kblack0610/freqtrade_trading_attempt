@@ -174,12 +174,13 @@ def okx_file(url: str) -> pd.DataFrame:
 
 def okx_window(pair: str, start: pd.Timestamp, end: pd.Timestamp) -> tuple[pd.Timestamp, pd.Timestamp] | None:
     """The first and last confirmed 1m candle OKX's files hold for a pair between start and end, reading only the
-    first and last file; None if it has no candle there."""
+    first and last file with candles; None if it has no candle there."""
     urls = okx_months(pair.replace("/", "-"), start, end)
     if not urls:
         return None
-    first, last = okx_file(urls[0]), okx_file(urls[-1])
-    return (first["date"].min(), last["date"].max()) if len(first) and len(last) else None
+    first = next((df for u in urls if len(df := okx_file(u))), None)  # a file with only unconfirmed rows is stepped over
+    last = next((df for u in reversed(urls) if len(df := okx_file(u))), None)
+    return (first["date"].min(), last["date"].max()) if first is not None and last is not None else None
 
 
 def main() -> int:
