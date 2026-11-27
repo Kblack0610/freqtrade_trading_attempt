@@ -151,18 +151,19 @@ def _literal(node: ast.AST | None):
 def declared_informative(root: Path) -> set[tuple[str, str]]:
     """(pair, timeframe) each strategy file under root names as informative: an @informative(timeframe, asset)
     decorator, or a literal informative_pairs() return. A pair built at run time (self.btc()) or per whitelist pair
-    ({base}) is left out: those resolve to whitelist pairs, which are fetched anyway."""
+    ({base}, {quote}) is left out: those resolve to whitelist pairs, which are fetched anyway."""
     out = set()
     for f in sorted(root.rglob("*.py")):
         try:
             tree = ast.parse(f.read_text(encoding="utf-8"))
-        except (SyntaxError, UnicodeDecodeError):
+        except (SyntaxError, UnicodeDecodeError, OSError) as e:
+            print(f"backfill: informative: {f.name}: {type(e).__name__}, skipped", flush=True)
             continue
         for node in ast.walk(tree):
             if isinstance(node, ast.Call) and getattr(node.func, "id", getattr(node.func, "attr", None)) == "informative":
                 args = dict(zip(("timeframe", "asset"), node.args)) | {k.arg: k.value for k in node.keywords}
                 tf, asset = _literal(args.get("timeframe")), _literal(args.get("asset"))
-                if isinstance(tf, str) and isinstance(asset, str) and asset and "{base}" not in asset.lower():
+                if isinstance(tf, str) and isinstance(asset, str) and asset and not re.search(r"\{(base|quote)\}", asset, re.I):
                     out.add((asset, tf))
             elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "informative_pairs":
                 for ret in ast.walk(node):
@@ -327,6 +328,8 @@ def backfill_exchange(ft: Freqtrade, conn, exchange: str, pairs: list[str], time
         for t in (tf, derived.get(tf)):  # a derived series needs its source series too
             if t in at and p not in at[t]:
                 at[t].append(p)
+        if tf not in at:
+            print(f"backfill: {exchange}: informative {p} {tf}: {tf} is not in TIMEFRAMES, skipped", flush=True)
     if skipped := [tf for tf in timeframes if tf not in supported and tf not in derived]:
         print(f"backfill: {exchange}: no {' '.join(skipped)} candles on this exchange, skipped", flush=True)
     archived: set[tuple[str, str]] = set()

@@ -633,7 +633,7 @@ def coverage(conn) -> dict[tuple[str, str], dt.datetime]:
     for ex, tf, pair, f in conn.execute("SELECT exchange, timeframe, pair, first_ts FROM data_coverage "
                                         "WHERE first_ts IS NOT NULL AND oldest_reached"):
         firsts.setdefault((ex, tf), {})[pair] = f
-    return {(ex, tf): min(by[p] for p in wl) for (ex, tf), by in firsts.items() if (wl := whitelist(ex)) <= set(by)}
+    return {(ex, tf): min(by[p] for p in wl) for (ex, tf), by in firsts.items() if (wl := whitelist(ex)) and wl <= set(by)}
 
 
 def plan(conn, found: list[dict], first: dict, today: dt.date, ft_version: str, overlays: dict[str, dict] | None = None,
