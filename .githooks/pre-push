@@ -3,4 +3,4 @@
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 if git config --get core.hooksPath >/dev/null 2>&1 && command -v git-lfs >/dev/null 2>&1 && [ -f .gitattributes ]; then git lfs pre-push "$@"; fi
-python -m ruff check lab web ci user_data/strategies
+ci/ruff.sh check lab web ci user_data/strategies

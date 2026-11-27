@@ -4,7 +4,7 @@
   "scripts": {
     "checks:env": "uv venv -q --allow-existing --python 3.12 .venv-checks && uv pip sync -q --require-hashes --python .venv-checks lab/requirements-dev.lock",
     "typecheck": "npm run -s checks:env && .venv-checks/bin/mypy",
-    "lint": "npm run -s checks:env && .venv-checks/bin/ruff check lab web ci user_data/strategies",
+    "lint": "ci/ruff.sh check lab web ci user_data/strategies",
     "test": "python -m pytest -q -p no:cacheprovider lab/tests",
     "test:web": "node --test web/tests/*.test.cjs"
   }
