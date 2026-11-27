@@ -11,7 +11,7 @@ Repo rules live in [docs/standards.md](docs/standards.md); the layout and comman
 
 ## Tests
 
-- `test_kit_files_match_the_lock` fails in a fresh worktree or any `-v "$PWD:/repo"` run: `web/static/kit/` is gitignored and only the image build fetches it. Run `python ~/.dotfiles/.local/src/web-kit/fetch-kit.py web/kit.lock web/static/kit` once or deselect that test; do not edit `kit.lock` or the test. At least 9 sessions re-diagnosed it.
+- `test_kit_files_match_the_lock` fails in a fresh worktree or any `-v "$PWD:/repo"` run: `web/static/kit/` is gitignored and only the image build fetches it. Run `python ~/.dotfiles/.local/src/web-kit/fetch-kit.py web/kit.lock web/static/kit` once (needs a dotfiles checkout; in a container run, deselect that test); do not edit `kit.lock` or the test. At least 9 sessions re-diagnosed it.
 - DB tests run only against a disposable Postgres: `lab/tests/conftest.py` truncates the schema.
 
 ## Cluster
