@@ -11,6 +11,7 @@ The repo README is the reference for layout, the analysis and the site. These pa
 - [Operating rules](operating-rules.md): the rules that bind the operator, paper league included, written before any real money.
 - [Brand](brand.md): the site palette and why there is no logo.
 - [Support](support.md): where problems land when the only user is the operator.
+- [Telemetry](telemetry.md): the events the lab records, as the `## Usage events` table `event-catalogue` reads.
 - [Anytime-valid gates](anytime-gates.md): proposed confidence-sequence replacements for the drift and dry run gates, option a chosen, build queued.
 
 ## Scope and legal
