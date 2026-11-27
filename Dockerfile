@@ -26,9 +26,11 @@ ENV MALLOC_ARENA_MAX=2
 # per exchange, the analysis one per worker) and the loser exits with FileExistsError.
 # lab/tests/test_backfill.py checks the image has them all.
 RUN freqtrade create-userdir --userdir user_data
-# The site's shell and shared parts (tokens, fonts, <kb-shell>, ui.css, kb-ui.js) are the pinned web-kit: fetch_kit.py downloads it and checks every
-# file against web/kit.lock, so a bad checksum fails the build. Needs no pip package.
-RUN python web/fetch_kit.py
+# The site's shell and shared parts (tokens, fonts, <kb-shell>, ui.css, kb-ui.js) are the pinned web-kit: the dotfiles fetch-kit.py, itself pinned by
+# commit and sha256 below, downloads it and checks every file against web/kit.lock, so a bad checksum fails the build. Needs no pip package.
+# After a kit bump run `kit-lock bump web/kit.lock`, which rewrites this ADD line too.
+ADD --checksum=sha256:37527446e053ddcaf0c00abc9fdf163db3b63f3be824e5c030c2b27b3ddb4e0d https://raw.githubusercontent.com/Kblack0610/.dotfiles/502b29fb1b633d3d03e00ee6b358dc880b0cd746/.local/src/web-kit/fetch-kit.py /tmp/fetch-kit.py
+RUN python /tmp/fetch-kit.py web/kit.lock web/static/kit
 # The entrypoint stays freqtrade's: every workload in home-config sets its own command.
 # Healthy when the bot API (lab/crypto/league.py, :8080) or the site (web/app.py, :8000) answers. Docker
 # and compose read this; k8s ignores it and uses the probes in home-config. A one-shot job has
