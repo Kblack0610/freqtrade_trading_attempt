@@ -1,4 +1,4 @@
 # Static checks run outside the runtime image; pytest is in requirements.txt.
-# CI installs requirements-dev.lock: re-run ci/lock_requirements.sh after editing a pin here.
+# npm run typecheck and lint (locally and in CI) sync requirements-dev.lock into .venv-checks: re-run ci/lock_requirements.sh after editing a pin here.
 mypy==1.18.2
 ruff==0.14.3
