@@ -145,12 +145,11 @@ Backfill knobs (env): `BACKFILL_EXCHANGES` (`binanceus coinbase kraken`), `TIMEF
 docker run --rm -v "$PWD:/repo:ro" zricethezav/gitleaks:v8.28.0 git /repo --redact --no-banner
 ```
 
-`quality` installs the hash-pinned tools from `lab/requirements-dev.lock` (generated from `lab/requirements-dev.txt` by `ci/lock_requirements.sh`), then runs `npm run typecheck` and `npm run lint`. [package.json](package.json) is a private command manifest with no Node dependencies; Python remains the runtime. [pyproject.toml](pyproject.toml) owns the initial mypy module scope and Ruff rule selection; [standards](docs/standards.md) explains their limits. The image test job reads `scripts.test` from the same manifest and executes it inside the Python image, after migrations.
+`quality` sets up uv and runs `npm run typecheck` and `npm run lint`, the same commands a local run uses: each first syncs `.venv-checks` (gitignored, Python 3.12) from the hash-pinned `lab/requirements-dev.lock` (generated from `lab/requirements-dev.txt` by `ci/lock_requirements.sh`) with `uv pip sync --require-hashes`. [package.json](package.json) is a private command manifest with no Node dependencies; Python remains the runtime. [pyproject.toml](pyproject.toml) owns the initial mypy module scope and Ruff rule selection; [standards](docs/standards.md) explains their limits. The image test job reads `scripts.test` from the same manifest and executes it inside the Python image, after migrations.
 
-For static checks in a local Python environment:
+Static checks need only uv and npm on the machine; no Python package has to be installed first:
 
 ```sh
-python -m pip install --require-hashes -r lab/requirements-dev.lock
 npm run typecheck
 npm run lint
 ```

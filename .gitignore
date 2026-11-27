@@ -10,3 +10,4 @@ user_data/*.sqlite*
 __pycache__/
 *.pyc
 web/static/kit/
+.venv-checks/
