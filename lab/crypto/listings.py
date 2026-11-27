@@ -52,29 +52,31 @@ def months(first: dt.datetime, last: dt.datetime) -> list[dt.date]:
     return [d.date() for d in pd.date_range(first.strftime("%Y-%m-01"), last.strftime("%Y-%m-01"), freq="MS")]
 
 
-def refresh(conn) -> dict[str, tuple[dt.datetime, dt.datetime]]:
-    """Rewrite the venue's windows and monthly listings; returns the window of every pair that has candles."""
-    found, status = {}, {}
+def refresh(conn) -> tuple[dict[str, tuple[dt.datetime, dt.datetime]], list[str]]:
+    """Rewrite the venue's windows and monthly listings; returns the window of every pair that has candles, and the
+    pairs whose candles could not be read, whose old rows stay as they were."""
+    found, status, failed = {}, {}, []
     for s in symbols():
         try:
             w = window(s["symbol"])
-        except Exception as e:  # one symbol's failure keeps its old row, not the others'
+        except Exception as e:  # one symbol's failure keeps its old rows, not the others'
+            failed.append(s["pair"])
             print(f"listings: {VENUE}: {s['symbol']}: {type(e).__name__}: {e}", file=sys.stderr, flush=True)
             continue
         if w:
             found[s["pair"]], status[s["pair"]] = w, s["status"]
     if not found:
-        return {}
+        return {}, failed
     with conn.transaction():
-        conn.execute("DELETE FROM pair_windows WHERE exchange = %s", (VENUE,))
-        conn.execute("DELETE FROM pair_listings WHERE exchange = %s", (VENUE,))
+        for table in ("pair_windows", "pair_listings"):
+            conn.execute(f"DELETE FROM {table} WHERE exchange = %s AND NOT (pair = ANY(%s::text[]))", (VENUE, failed))
         cur = conn.cursor()
         cur.executemany("INSERT INTO pair_windows (exchange, pair, status, first_ts, last_ts) VALUES (%s, %s, %s, %s, %s)",
                         [(VENUE, p, status[p], f, l) for p, (f, l) in found.items()])
         cur.executemany("INSERT INTO pair_listings (exchange, month, pair) VALUES (%s, %s, %s)",
                         [(VENUE, m, p) for p, (f, l) in found.items() for m in months(f, l)])
-    print(f"listings: {VENUE}: {len(found)} USDT pairs, {sum(s == 'BREAK' for s in status.values())} delisted", flush=True)
-    return found
+    print(f"listings: {VENUE}: {len(found)} USDT pairs, {sum(s == 'BREAK' for s in status.values())} delisted, {len(failed)} unread", flush=True)
+    return found, failed
 
 
 def listed_in(conn, month: dt.date) -> list[str]:
@@ -122,6 +124,8 @@ def backfill_delisted(conn, found: dict[str, tuple[dt.datetime, dt.datetime]], t
                 if not new.empty:
                     backfill.merge_candles(dh, pair, tf, new)
             r = backfill.scan(backfill.series_file(VENUE, pair, tf), tf)
+            if r["first_ts"] is None:  # nothing on disk: no coverage row to claim the oldest candle
+                continue
             rows.append(r | {"exchange": VENUE, "pair": pair, "timeframe": tf, "oldest_reached": True})
     if rows:
         conn.cursor().executemany(backfill.UPSERT, rows)
@@ -132,8 +136,8 @@ def backfill_delisted(conn, found: dict[str, tuple[dt.datetime, dt.datetime]], t
 def main() -> int:
     from lab.core.db import connect
     with connect(autocommit=True) as conn:
-        found = refresh(conn)
-        return 0 if found and backfill_delisted(conn, found, backfill.TIMEFRAMES) else 1
+        found, failed = refresh(conn)
+        return 0 if found and backfill_delisted(conn, found, backfill.TIMEFRAMES) and not failed else 1
 
 
 if __name__ == "__main__":

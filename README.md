@@ -423,10 +423,10 @@ The first run fetches full history (5m since 2019 on binanceus is the long pole)
 - `055`: `decisions` (why each paper order was made: rule, checks, inputs, sizing, its `fills` row; and capped near-misses) and `decision_funnel` (book rows per pass and account by the first check failed), written by `lab/events/paper.py`.
 - `062`: `readiness`, the one verdict table keyed (market, venue, strategy), written only by `lab/core/readiness.py` `store()`. It replaces `confidence` (market `crypto`) and `market_readiness` (market `events`, strategy `family/variant`); rows are copied over and both tables are dropped.
 - `063`: one paper ledger. `stock_accounts` and `stock_positions` fold into `paper_accounts` (venue `alpaca`) and `paper_orders` (`contracts` becomes fractional, `exit_fee` and `exit_reason` join, one open order per account and market), `decisions` keyed `stock` re-key to `paper`, and `fills` drops its stock union.
-- `067`: `pair_windows` and `pair_listings`, the binanceus historical universe written by `lab/crypto/listings.py`: a pair's first and last candle, and the months it was listed.
 - `058`: `stock_accounts` and `stock_positions`, the stock league's paper accounts and positions (`lab/stocks/paper.py`); `fills` gains the `stock` source.
 - `056`: `input_readings`, what our own input readers read (`lab/inputs/__init__.py`; the first is `lab/inputs/nws.py`), one row per input, key and read time.
 - `057`: `decisions` keyed by fill source, account, fill id and decided_at, so league bots (whose trade ids repeat across bots) join it: `lab/crypto/ingest.py` writes one `crypto` decision per traced bot trade.
+- `067`: `pair_windows` and `pair_listings`, the binanceus historical universe written by `lab/crypto/listings.py`: a pair's first and last candle, and the months it was listed.
 - `049`: the event-contract walk-forward. `market_backtests` keeps one row per test window (key gains `start_at`, `score` goes, each trade's event and the window's daily returns come in), `market_category_results` follows it, and `market_readiness` holds the markets readiness gate, one row per variant (`lab/events/families.py`).
 
  A schema change is a new numbered file; never edit an applied one.

@@ -63,7 +63,7 @@ def test_symbols_keep_usdt_trading_and_break(api):
 
 
 def test_refresh_puts_srm_in_2022_10_and_not_2023_01(conn, api):
-    found = listings.refresh(conn)
+    found, failed = listings.refresh(conn)
     assert set(found) == {"SRM/USDT", "BTC/USDT"}, "a symbol with no candles has no window"
     assert "SRM/USDT" in listings.listed_in(conn, dt.date(2022, 10, 15))
     assert "SRM/USDT" not in listings.listed_in(conn, dt.date(2023, 1, 1))
@@ -74,7 +74,7 @@ def test_refresh_puts_srm_in_2022_10_and_not_2023_01(conn, api):
 
 def test_delisted_candles_run_over_the_window_and_are_not_refetched(conn, api, tmp_path, monkeypatch):
     monkeypatch.setattr(backfill, "RESULTS", tmp_path)
-    found = listings.refresh(conn)
+    found, failed = listings.refresh(conn)
     assert listings.backfill_delisted(conn, found, ["1h"])
     df = pd.read_feather(backfill.series_file("binanceus", "SRM/USDT", "1h"))
     assert df["date"].min() == SRM[1] and df["date"].max() == SRM[2]
@@ -90,5 +90,14 @@ def test_delisted_candles_run_over_the_window_and_are_not_refetched(conn, api, t
 def test_a_timeframe_floor_skips_a_series_that_ended_before_it(conn, api, tmp_path, monkeypatch):
     monkeypatch.setattr(backfill, "RESULTS", tmp_path)
     monkeypatch.setattr(backfill, "PREPEND_FLOORS", {"1h": "20240101"})
-    assert listings.backfill_delisted(conn, listings.refresh(conn), ["1h"])
+    assert listings.backfill_delisted(conn, listings.refresh(conn)[0], ["1h"])
     assert not backfill.series_file("binanceus", "SRM/USDT", "1h").exists()
+
+
+def test_an_unreadable_symbol_keeps_its_old_rows(conn, api, monkeypatch):
+    listings.refresh(conn)
+    real = listings.window
+    monkeypatch.setattr(listings, "window", lambda sym: (_ for _ in ()).throw(OSError("down")) if sym == "SRMUSDT" else real(sym))
+    found, failed = listings.refresh(conn)
+    assert failed == ["SRM/USDT"] and set(found) == {"BTC/USDT"}
+    assert "SRM/USDT" in listings.listed_in(conn, dt.date(2022, 10, 15)), "its months were not wiped"
