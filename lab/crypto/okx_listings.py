@@ -24,7 +24,8 @@ VENUE = "okx"
 QUOTE = "USDT"
 # Tardis's free exchange metadata is one call; no limit is published for it (read 2026-11-27, https://docs.tardis.dev/api/exchanges).
 TARDIS = Api("tardis_okex", {"base_url": "https://api.tardis.dev/v1", "page_gap_s": 1.0, "retries": 4, "timeout_s": 60})
-FROM = pd.Timestamp(archive.OKX_FROM, tz="UTC")
+# The archive holds nothing before 2020-01 (docs tr-449, finding 8); archive.OKX_FROM is a looser floor for a series read.
+FROM = pd.Timestamp("2020-01-01", tz="UTC")
 # Tardis's dates bound the archive span only. Six months of slack each side catches a pair Tardis began recording late;
 # wider would cost another listing call per 9 months per id, hours over 2400 ids at OKX's 0.8 s pace.
 SLACK = pd.DateOffset(months=6)
