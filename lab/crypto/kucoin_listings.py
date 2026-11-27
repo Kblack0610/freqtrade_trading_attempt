@@ -6,7 +6,7 @@ included (docs tr-449, findings 11-13). The bucket is an S3 listing: 1000 entrie
 `list-type=2` tokens are not returned. A pair's window is its first and last 1h candle in the files; it counts as
 listed in a month when its window overlaps it. The archive starts 2022-12-31, so the universe runs from 2023-01 and
 cannot test the 2022 bear market. A pair whose last file is within LIVE_DAYS of now is LIVE (files land about a day
-late). `refresh` writes pair_windows and pair_listings; `candles` reads a series for a rerun, none are stored here.
+late) and its window runs to now. `refresh` writes pair_windows and pair_listings; `candles` reads a series for a rerun, none are stored here.
 Each CSV is `time,open,close,high,low,volume,turnover` with unix-second times in no fixed order: read by column name.
 """
 
@@ -40,11 +40,16 @@ def _list(prefix: str) -> tuple[list[str], list[str]]:
         r = BUCKET.request("GET", "/", {"delimiter": "/", "prefix": prefix, "marker": marker})
         r.raise_for_status()
         root = ET.fromstring(r.content)
-        keys += [e.findtext(f"{S3}Key") for e in root.iter(f"{S3}Contents")]
-        prefixes += [e.findtext(f"{S3}Prefix") for e in root.iter(f"{S3}CommonPrefixes")]
+        page_keys = [e.findtext(f"{S3}Key") for e in root.iter(f"{S3}Contents")]
+        page_prefixes = [e.findtext(f"{S3}Prefix") for e in root.iter(f"{S3}CommonPrefixes")]
+        keys += page_keys
+        prefixes += page_prefixes
         if root.findtext(f"{S3}IsTruncated") != "true":
             return keys, prefixes
-        nxt = root.findtext(f"{S3}NextMarker") or (keys[-1] if keys else prefixes[-1])
+        nxt = root.findtext(f"{S3}NextMarker")
+        if not nxt:  # the last entry of this page; a prefix is passed whole, so the marker sorts after everything in it
+            last = max(page_keys + page_prefixes)
+            nxt = last + "\U0010ffff" if last.endswith("/") else last
         if nxt == marker:
             raise RuntimeError(f"listing {prefix}: marker {nxt!r} did not advance")
         marker = nxt
@@ -71,7 +76,10 @@ def day_file(symbol: str, tf: str, day: dt.date) -> pd.DataFrame:
     r = BUCKET.request("GET", f"/{ROOT}{symbol}/{tf}/{symbol}-{tf}-{day.isoformat()}.zip")
     r.raise_for_status()
     z = zipfile.ZipFile(io.BytesIO(r.content))
-    df = pd.read_csv(io.BytesIO(z.read(z.namelist()[0])))
+    try:
+        df = pd.read_csv(io.BytesIO(z.read(z.namelist()[0])))
+    except (IndexError, pd.errors.EmptyDataError):  # a zip with no member or an empty CSV has no rows
+        return pd.DataFrame(columns=["date", *COLUMNS])
     missing = {"time", *COLUMNS} - set(df.columns)
     if missing:
         raise ValueError(f"{symbol} {day}: no column {sorted(missing)} in {list(df.columns)}")
@@ -102,6 +110,7 @@ def refresh(conn, now: pd.Timestamp | None = None) -> tuple[dict[str, tuple[dt.d
     whose files could not be read, whose old rows stay as they were."""
     now = now or pd.Timestamp.now(tz="UTC")
     found, live, failed = {}, {}, []
+    stored = {r[0] for r in conn.execute("SELECT pair FROM pair_windows WHERE exchange = %s", (VENUE,))}
     for s in symbols():
         pair = pair_of(s)
         try:
@@ -110,8 +119,12 @@ def refresh(conn, now: pd.Timestamp | None = None) -> tuple[dict[str, tuple[dt.d
             failed.append(pair)
             print(f"listings: {VENUE}: {s}: {type(e).__name__}: {e}", file=sys.stderr, flush=True)
             continue
-        if w:
-            found[pair], live[pair] = (w[0], w[1]), w[2] >= (now - pd.Timedelta(days=LIVE_DAYS)).date()
+        if w is None and pair in stored:  # a pair we had files for that now has none is a read fault, not a delisting
+            failed.append(pair)
+            print(f"listings: {VENUE}: {s}: no candle now, was listed before", file=sys.stderr, flush=True)
+        elif w:
+            live[pair] = w[2] >= (now - pd.Timedelta(days=LIVE_DAYS)).date()
+            found[pair] = (w[0], now.to_pydatetime() if live[pair] else w[1])  # a live pair runs to now, files land late
     if not found:
         return {}, failed
     floor = FROM.replace(day=1)
@@ -131,6 +144,8 @@ def main() -> int:
     from lab.core.db import connect
     with connect(autocommit=True) as conn:
         found, failed = refresh(conn)
+        if failed:
+            print(f"listings: {VENUE}: unread: {', '.join(failed)}", flush=True)
         return 0 if found and not failed else 1
 
 

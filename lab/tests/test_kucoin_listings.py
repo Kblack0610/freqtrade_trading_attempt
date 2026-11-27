@@ -133,3 +133,32 @@ def test_an_unreadable_symbol_keeps_its_old_rows(conn, monkeypatch):
     found, failed = kl.refresh(conn, NOW)
     assert failed == ["2CRZ/USDT"] and "2CRZ/USDT" not in found
     assert conn.execute("SELECT count(*) FROM pair_listings WHERE exchange = 'kucoin' AND pair = '2CRZ/USDT'").fetchone()[0] > 0
+
+
+def test_a_live_pair_is_listed_in_the_current_month(conn, monkeypatch):
+    setup(monkeypatch)
+    monkeypatch.setitem(BUCKET, "BTCUSDT", {"2022-12-31": [ts(2022, 12, 31, 0)], "2026-11-30": [ts(2026, 11, 30, 23)]})
+    kl.refresh(conn, pd.Timestamp("2026-12-01", tz="UTC"))
+    assert conn.execute("SELECT max(month) FROM pair_listings WHERE exchange = 'kucoin' AND pair = 'BTC/USDT'").fetchone()[0] == dt.date(2026, 12, 1)
+
+
+def test_a_stored_pair_with_no_candle_now_fails_and_keeps_its_rows(conn, monkeypatch):
+    setup(monkeypatch)
+    kl.refresh(conn, NOW)
+    monkeypatch.setitem(BUCKET, "2CRZUSDT", {})
+    found, failed = kl.refresh(conn, NOW)
+    assert failed == ["2CRZ/USDT"]
+    assert conn.execute("SELECT count(*) FROM pair_windows WHERE pair = '2CRZ/USDT'").fetchone()[0] == 1
+
+
+def test_a_zero_byte_csv_has_no_rows():
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("x.csv", "")
+    class R(Resp):
+        pass
+    kl.BUCKET, old = type("B", (), {"request": lambda self, *a, **k: R(buf.getvalue())})(), kl.BUCKET
+    try:
+        assert kl.day_file("X", "1h", dt.date(2023, 1, 1)).empty
+    finally:
+        kl.BUCKET = old
