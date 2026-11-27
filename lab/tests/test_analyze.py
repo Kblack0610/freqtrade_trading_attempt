@@ -100,6 +100,15 @@ def test_a_venue_is_planned_only_once_every_pair_reached_its_oldest_candle(lab):
     assert analyze.coverage(lab) == {}
 
 
+def test_an_informative_pair_neither_gates_nor_moves_a_venue(lab):
+    lab.execute("INSERT INTO data_coverage (exchange, pair, timeframe, first_ts, last_ts, rows, oldest_reached) "
+                "VALUES ('binanceus', 'ETH/BTC', '5m', '2019-01-01', now(), 1, true), "
+                "('coinbase', 'ETH/BTC', '5m', '2016-01-01', now(), 1, false)")
+    first = analyze.coverage(lab)
+    assert set(first) == {("binanceus", "5m"), ("coinbase", "5m")}
+    assert first["binanceus", "5m"].date() == dt.date(2024, 3, 1), "only whitelist pairs set the first candle"
+
+
 def test_full_history_in_yearly_chunks_then_cached(lab):
     found = [strat("Good"), strat("Other"), strat("Planted"), strat("Scalper", "1m"), strat("Broken", None, "failed to import")]
     r = FakeRunner(found, biased={"Planted"})

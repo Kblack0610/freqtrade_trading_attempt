@@ -170,7 +170,9 @@ def main() -> int:
     from lab.crypto import backfill
 
     z = zipfile.ZipFile(RangeFile(sys.argv[1:]))
-    series = [(p, tf) for p in backfill.pairs_of("kraken") for tf in MINUTES if tf in backfill.TIMEFRAMES]
+    pairs, extra = backfill.pairs_of("kraken"), backfill.informative_of("kraken")
+    series = [(p, tf) for tf in MINUTES if tf in backfill.TIMEFRAMES
+              for p in pairs + [p for p, t in extra if t == tf and p not in pairs]]
     done = backfill.import_archive(z, "kraken", series)
     print(f"archive: {len(done)} of {len(series)} series", flush=True)
     return 0 if len(done) == len(series) else 1

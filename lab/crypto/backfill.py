@@ -20,6 +20,11 @@ were open. Dropped, the halt is a gap, as it already is on the timeframes the ex
 A timeframe the exchange does not serve (coinbase 4h) is built from the longest served one that divides
 it (1h) after each run, and inherits that series' oldest_reached.
 
+Besides each exchange's whitelist, it fetches the informative pairs strategies name in their source
+(`declared_informative`, e.g. multi_tf's ETH/BTC 1h), at the timeframe each names, with {stake} resolved to the
+exchange's stake currency. The whitelist stays the trading universe: analyze.py's whitelist, chunk digests and
+coverage gate read only it.
+
 An exchange with no OHLCV history (FORWARD_EXCHANGES, i.e. Kraken, which serves only its newest
 720 candles) takes its past from the exchange's published archive (lab/crypto/archive.py), once per series,
 and is collected forward instead: each run fetches those candles through ccxt and merges
@@ -32,6 +37,7 @@ Exchanges run in parallel, since each has its own rate limit. Exits 1 if any dow
 failed; coverage is still written for whatever is on disk.
 """
 
+import ast
 import datetime as dt
 import json
 import os
@@ -126,9 +132,58 @@ class Cli:
         return None
 
 
+def exchange_config(exchange: str) -> dict:
+    ud = REPO / "user_data"
+    return json.loads((ud / "config.base.json").read_text()) | json.loads((ud / "exchanges" / f"{exchange}.json").read_text())
+
+
 def pairs_of(exchange: str) -> list[str]:
-    cfg = json.loads((REPO / "user_data" / "exchanges" / f"{exchange}.json").read_text())
-    return cfg["exchange"]["pair_whitelist"]
+    return exchange_config(exchange)["exchange"]["pair_whitelist"]
+
+
+def _literal(node: ast.AST | None):
+    try:
+        return ast.literal_eval(node) if node is not None else None
+    except (ValueError, TypeError, SyntaxError):
+        return None
+
+
+def declared_informative(root: Path) -> set[tuple[str, str]]:
+    """(pair, timeframe) each strategy file under root names as informative: an @informative(timeframe, asset)
+    decorator, or a literal informative_pairs() return. A pair built at run time (self.btc()) or per whitelist pair
+    ({base}, {quote}) is left out: those resolve to whitelist pairs, which are fetched anyway."""
+    out = set()
+    for f in sorted(root.rglob("*.py")):
+        try:
+            tree = ast.parse(f.read_text(encoding="utf-8"))
+        except (SyntaxError, UnicodeDecodeError, OSError) as e:
+            print(f"backfill: informative: {f.name}: {type(e).__name__}, skipped", flush=True)
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and getattr(node.func, "id", getattr(node.func, "attr", None)) == "informative":
+                args = dict(zip(("timeframe", "asset"), node.args)) | {k.arg: k.value for k in node.keywords}
+                tf, asset = _literal(args.get("timeframe")), _literal(args.get("asset"))
+                if isinstance(tf, str) and isinstance(asset, str) and asset and not re.search(r"\{(base|quote)\}", asset, re.I):
+                    out.add((asset, tf))
+            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "informative_pairs":
+                for ret in ast.walk(node):
+                    value = _literal(ret.value) if isinstance(ret, ast.Return) else None
+                    for t in value if isinstance(value, (list, tuple)) else ():
+                        if isinstance(t, (list, tuple)) and len(t) >= 2 and all(isinstance(x, str) for x in t[:2]):
+                            out.add((t[0], t[1]))
+    return out
+
+
+def informative_of(exchange: str, root: Path | None = None) -> list[tuple[str, str]]:
+    """The declared informative pairs on this exchange, {stake} resolved as freqtrade does; one it cannot resolve is skipped."""
+    stake = exchange_config(exchange)["stake_currency"]
+    out = set()
+    for asset, tf in declared_informative(root or REPO / "user_data" / "strategies"):
+        try:
+            out.add((asset.format(stake=stake, stake_currency=stake).upper(), tf))
+        except (KeyError, IndexError, ValueError):
+            print(f"backfill: {exchange}: informative {asset} {tf}: cannot resolve, skipped", flush=True)
+    return sorted(out)
 
 
 def series_file(exchange: str, pair: str, timeframe: str) -> Path:
@@ -256,7 +311,9 @@ ON CONFLICT (exchange, pair, timeframe) DO UPDATE SET
 """
 
 
-def backfill_exchange(ft: Freqtrade, conn, exchange: str, pairs: list[str], timeframes: list[str]) -> bool:
+def backfill_exchange(ft: Freqtrade, conn, exchange: str, pairs: list[str], timeframes: list[str],
+                      informative: list[tuple[str, str]] = ()) -> bool:
+    """pairs at every timeframe, plus each (pair, timeframe) in informative at its own one."""
     prior = {(p, tf): {"first_ts": f, "oldest_reached": r} for p, tf, f, r in conn.execute(
         "SELECT pair, timeframe, first_ts, oldest_reached FROM data_coverage WHERE exchange = %s", (exchange,))}
     ok = True
@@ -266,11 +323,18 @@ def backfill_exchange(ft: Freqtrade, conn, exchange: str, pairs: list[str], time
     derived = {tf: src for tf in timeframes if tf not in supported and (src := source_of(tf, tfs))}
     for tf, src in derived.items():
         print(f"backfill: {exchange}: no {tf} candles on this exchange, built from {src}", flush=True)
+    at = {tf: list(pairs) for tf in timeframes}
+    for p, tf in informative:
+        for t in (tf, derived.get(tf)):  # a derived series needs its source series too
+            if t in at and p not in at[t]:
+                at[t].append(p)
+        if tf not in at:
+            print(f"backfill: {exchange}: informative {p} {tf}: {tf} is not in TIMEFRAMES, skipped", flush=True)
     if skipped := [tf for tf in timeframes if tf not in supported and tf not in derived]:
         print(f"backfill: {exchange}: no {' '.join(skipped)} candles on this exchange, skipped", flush=True)
     archived: set[tuple[str, str]] = set()
     if exchange in FORWARD_EXCHANGES:
-        todo = [(p, tf) for p in pairs for tf in tfs if not prior.get((p, tf), {}).get("oldest_reached")]
+        todo = [(p, tf) for tf in tfs for p in at[tf] if not prior.get((p, tf), {}).get("oldest_reached")]
         if todo:
             try:
                 z = ft.archive(exchange)
@@ -280,10 +344,10 @@ def backfill_exchange(ft: Freqtrade, conn, exchange: str, pairs: list[str], time
             if z:
                 archived = import_archive(z, exchange, todo)
                 ok = len(archived) == len(todo)
-        ok = collect_forward(ft, exchange, pairs, tfs) and ok
+        ok = all([collect_forward(ft, exchange, at[tf], [tf]) for tf in tfs]) and ok
     else:
         for tf in tfs:
-            todo = [p for p in pairs if not prior.get((p, tf), {}).get("oldest_reached")]
+            todo = [p for p in at[tf] if not prior.get((p, tf), {}).get("oldest_reached")]
             for p in todo:
                 if prior.get((p, tf), {}).get("first_ts") is None:
                     import_bulk(ft, exchange, p, tf)
@@ -292,15 +356,15 @@ def backfill_exchange(ft: Freqtrade, conn, exchange: str, pairs: list[str], time
                     prepended.update((p, tf) for p in todo)
                 else:
                     ok = False
-            ok = ft.download(exchange, ["-t", tf, "--pairs", *pairs]) and ok
+            ok = ft.download(exchange, ["-t", tf, "--pairs", *at[tf]]) and ok
     for tf in tfs:
-        for p in pairs:
+        for p in at[tf]:
             if n := drop_halts(exchange, p, tf):
                 print(f"backfill: {exchange}: {p} {tf}: dropped {n} halted candles", flush=True)
     for tf, src in derived.items():
-        for p in pairs:
+        for p in at[tf]:
             derive(exchange, p, src, tf)
-    series = [(p, tf) for p in pairs for tf in tfs]
+    series = [(p, tf) for tf in tfs for p in at[tf]]
 
     rows = []
     for pair, tf in series:
@@ -310,7 +374,7 @@ def backfill_exchange(ft: Freqtrade, conn, exchange: str, pairs: list[str], time
         rows.append(r)
     done_at = {(r["pair"], r["timeframe"]): r["oldest_reached"] for r in rows}
     for tf, src in derived.items():
-        for pair in pairs:
+        for pair in at[tf]:
             r = scan(series_file(exchange, pair, tf), tf)
             r.update(exchange=exchange, pair=pair, timeframe=tf, oldest_reached=done_at[pair, src])
             rows.append(r)
@@ -330,7 +394,7 @@ def backfill_exchange(ft: Freqtrade, conn, exchange: str, pairs: list[str], time
 def run_one(ft: Freqtrade, exchange: str) -> bool:
     try:
         with connect(autocommit=True) as conn:
-            return backfill_exchange(ft, conn, exchange, pairs_of(exchange), TIMEFRAMES)
+            return backfill_exchange(ft, conn, exchange, pairs_of(exchange), TIMEFRAMES, informative_of(exchange))
     except Exception as e:  # one exchange's outage must not hide the others' results
         print(f"backfill: {exchange}: {type(e).__name__}: {e}", file=sys.stderr, flush=True)
         return False
