@@ -10,7 +10,8 @@
 migrate = ["lab.migrate"]
 watcher = ["lab.money.watcher"]
 league = ["lab.crypto.league"]
-backfill = ["lab.crypto.backfill"]
+# Listings after the backfill: its data_coverage prune drops the delisted series, which the second step records again.
+backfill = ["lab.crypto.backfill", "lab.crypto.listings"]
 ingest = ["lab.crypto.ingest"]
 analysis = ["lab.crypto.analyze"]
 # A failed candle fetch must not start a walk-forward on an empty disk.
