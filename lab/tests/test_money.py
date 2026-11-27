@@ -282,6 +282,7 @@ MONEY_MAP = {
     ("lab/crypto/archive.py", "<module>"): Client("none", why="public candle archives (Kraken zips, the OKX listing and files)"),
     ("lab/futures/funding.py", "Ccxt"): Client("none", why="public funding and open interest through ccxt, no key"),
     ("lab/futures/paper.py", "Tickers"): Client("none", why="public swap tickers through ccxt, no key"),
+    ("lab/crypto/kucoin_listings.py", "<module>"): Client("none", why="KuCoin public kline archive bucket, GET only, no key"),
     ("lab/crypto/okx_listings.py", "<module>"): Client("none", why="Tardis free exchange metadata, GET only, no key"),
     ("lab/crypto/listings.py", "<module>"): Client("none", why="Binance.US public exchangeInfo and klines, GET only, no key"),
     ("lab/crypto/backfill.py", "Cli"): Client("none", why="public candles through ccxt, no key"),

@@ -14,6 +14,8 @@ league = ["lab.crypto.league"]
 backfill = ["lab.crypto.backfill", "lab.crypto.listings"]
 # Hours of archive reads (two files per id): run by hand or on its own schedule, never inside the backfill.
 okx-listings = ["lab.crypto.okx_listings"]
+# Thousands of archive reads (a listing and two files per symbol): run by hand or on its own schedule.
+kucoin-listings = ["lab.crypto.kucoin_listings"]
 ingest = ["lab.crypto.ingest"]
 analysis = ["lab.crypto.analyze"]
 # A failed candle fetch must not start a walk-forward on an empty disk.
