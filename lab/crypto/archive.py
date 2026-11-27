@@ -152,18 +152,34 @@ def okx_months(inst_id: str, start: pd.Timestamp, end: pd.Timestamp) -> list[str
 def okx_candles(pair: str, floor: str | None = None) -> pd.DataFrame | None:
     """One pair's 1m candles from OKX's monthly files, from floor to the last published month; None if it has none."""
     start = pd.Timestamp(floor or OKX_FROM, tz="UTC")
-    frames = []
-    for url in okx_months(pair.replace("/", "-"), start, pd.Timestamp.now(tz="UTC")):
-        z = zipfile.ZipFile(io.BytesIO(_get(OKX_FILES, url)))
-        for name in z.namelist():
-            df = pd.read_csv(io.BytesIO(z.read(name)), usecols=["open_time", "open", "high", "low", "close", "vol", "confirm"])
-            frames.append(df[df["confirm"] == 1])
+    frames = [okx_file(url) for url in okx_months(pair.replace("/", "-"), start, pd.Timestamp.now(tz="UTC"))]
     if not frames:
         return None
-    df = pd.concat(frames).rename(columns={"open_time": "date", "vol": "volume"})
-    df["date"] = pd.to_datetime(df["date"], unit="ms", utc=True)
+    df = pd.concat(frames)
     df = df[df["date"] >= start]
     return df[COLS].sort_values("date").drop_duplicates("date").reset_index(drop=True)
+
+
+def okx_file(url: str) -> pd.DataFrame:
+    """The confirmed candles of one monthly file, as Freqtrade's columns."""
+    z = zipfile.ZipFile(io.BytesIO(_get(OKX_FILES, url)))
+    frames = []
+    for name in z.namelist():
+        df = pd.read_csv(io.BytesIO(z.read(name)), usecols=["open_time", "open", "high", "low", "close", "vol", "confirm"])
+        frames.append(df[df["confirm"] == 1])
+    df = pd.concat(frames).rename(columns={"open_time": "date", "vol": "volume"})
+    df["date"] = pd.to_datetime(df["date"], unit="ms", utc=True)
+    return df[COLS]
+
+
+def okx_window(pair: str, start: pd.Timestamp, end: pd.Timestamp) -> tuple[pd.Timestamp, pd.Timestamp] | None:
+    """The first and last confirmed 1m candle OKX's files hold for a pair between start and end, reading only the
+    first and last file; None if it has no candle there."""
+    urls = okx_months(pair.replace("/", "-"), start, end)
+    if not urls:
+        return None
+    first, last = okx_file(urls[0]), okx_file(urls[-1])
+    return (first["date"].min(), last["date"].max()) if len(first) and len(last) else None
 
 
 def main() -> int:

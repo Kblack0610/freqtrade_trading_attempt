@@ -12,6 +12,8 @@ watcher = ["lab.money.watcher"]
 league = ["lab.crypto.league"]
 # Listings after the backfill: its data_coverage prune drops the delisted series, which the second step records again.
 backfill = ["lab.crypto.backfill", "lab.crypto.listings"]
+# Hours of archive reads (two files per id): run by hand or on its own schedule, never inside the backfill.
+okx-listings = ["lab.crypto.okx_listings"]
 ingest = ["lab.crypto.ingest"]
 analysis = ["lab.crypto.analyze"]
 # A failed candle fetch must not start a walk-forward on an empty disk.
