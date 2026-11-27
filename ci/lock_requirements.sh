@@ -2,8 +2,8 @@
 # Regenerate lab/requirements.lock from lab/requirements.txt: every package the image adds on top of the
 # Freqtrade base, transitive ones included, pinned with hashes. The Dockerfile installs only the lock
 # (--require-hashes --no-deps), so a build never resolves a version no commit chose.
-# Also regenerates lab/requirements-dev.lock from lab/requirements-dev.txt: the static-check tools CI's
-# quality job installs with --require-hashes.
+# Also regenerates lab/requirements-dev.lock from lab/requirements-dev.txt: the static-check tools that
+# package.json's checks:env syncs into .venv-checks with --require-hashes (locally and in CI's quality job).
 # Resolved against the base image named by the Dockerfile's FREQTRADE_IMAGE default: a package the base
 # already ships is held at the base's version and left out of the lock, so the install never replaces one.
 # Run it after editing either requirements file or bumping the base digest; lab/tests/test_requirements_lock.py
