@@ -627,10 +627,13 @@ def sync_strategies(conn, found: list[dict]) -> None:
 
 def coverage(conn) -> dict[tuple[str, str], dt.datetime]:
     """The first candle per exchange x timeframe, once every whitelisted pair is backfilled to its oldest candle.
-    A venue still mid-backfill would otherwise run its years on the few pairs done so far and cache them as ok."""
-    return {(ex, tf): f for ex, tf, f, pairs in conn.execute(
-        "SELECT exchange, timeframe, min(first_ts), array_agg(pair) FROM data_coverage "
-        "WHERE first_ts IS NOT NULL AND oldest_reached GROUP BY 1, 2") if whitelist(ex) <= set(pairs)}
+    A venue still mid-backfill would otherwise run its years on the few pairs done so far and cache them as ok.
+    The informative pairs backfill also fetches (ETH/BTC) neither gate nor move it."""
+    firsts: dict[tuple[str, str], dict[str, dt.datetime]] = {}
+    for ex, tf, pair, f in conn.execute("SELECT exchange, timeframe, pair, first_ts FROM data_coverage "
+                                        "WHERE first_ts IS NOT NULL AND oldest_reached"):
+        firsts.setdefault((ex, tf), {})[pair] = f
+    return {(ex, tf): min(by[p] for p in wl) for (ex, tf), by in firsts.items() if (wl := whitelist(ex)) <= set(by)}
 
 
 def plan(conn, found: list[dict], first: dict, today: dt.date, ft_version: str, overlays: dict[str, dict] | None = None,

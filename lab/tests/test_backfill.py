@@ -131,6 +131,51 @@ def test_unserved_timeframe_is_built_from_a_shorter_one(conn, lab):
     assert coverage(conn, "coinbase")[("BTC/USD", "4h")][-1] is True, "done when its source is"
 
 
+def test_informative_pairs_are_fetched_at_their_own_timeframe(conn, lab):
+    ex = FakeExchange()
+    assert backfill.backfill_exchange(ex, conn, "coinbase", ["BTC/USD"], ["1h", "1d"], [("ETH/BTC", "1h"), ("BTC/USD", "1h")])
+    assert set(coverage(conn, "coinbase")) == {("BTC/USD", "1h"), ("BTC/USD", "1d"), ("ETH/BTC", "1h")}
+    assert ["-t", "1h", "--pairs", "BTC/USD", "ETH/BTC"] in ex.calls, "a whitelisted informative pair is fetched once"
+    assert not any("ETH/BTC" in c for c in ex.calls if "1d" in c)
+
+
+def test_an_informative_pair_on_a_derived_timeframe_fetches_its_source(conn, lab):
+    ex = FakeExchange(supported=("1h",))
+    assert backfill.backfill_exchange(ex, conn, "coinbase", ["BTC/USD"], ["1h", "4h"], [("ETH/BTC", "4h")])
+    assert {("ETH/BTC", "1h"), ("ETH/BTC", "4h")} <= set(coverage(conn, "coinbase"))
+    assert backfill.series_file("coinbase", "ETH/BTC", "4h").exists()
+
+
+def test_declared_informative_reads_decorators_and_literal_returns(tmp_path, monkeypatch):
+    (tmp_path / "sub").mkdir()
+    (tmp_path / "sub" / "a.py").write_text(
+        "from freqtrade.strategy import IStrategy, informative\n"
+        "class A(IStrategy):\n"
+        "    @informative('30m')\n"
+        "    @informative('1h', 'BTC/{stake}')\n"
+        "    @informative('1h', 'ETH/BTC')\n"
+        "    @informative(timeframe='4h', asset='{base}/BTC')\n"
+        "    def populate_indicators_1h(self, df, md): return df\n")
+    (tmp_path / "b.py").write_text(
+        "class B:\n"
+        "    def btc(self): return 'BTC/' + self.config['stake_currency']\n"
+        "    def informative_pairs(self):\n"
+        "        if self.x: return [(self.btc(), '1d')]\n"
+        "        return [('SOL/BTC', '1d', 'spot')]\n")
+    (tmp_path / "broken.py").write_text("def (:\n")
+    assert backfill.declared_informative(tmp_path) == {("BTC/{stake}", "1h"), ("ETH/BTC", "1h"), ("SOL/BTC", "1d")}
+    monkeypatch.setattr(backfill, "REPO", Path(__file__).resolve().parents[2])
+    assert backfill.informative_of("coinbase", tmp_path) == [("BTC/USD", "1h"), ("ETH/BTC", "1h"), ("SOL/BTC", "1d")]
+    assert ("BTC/USDT", "1h") in backfill.informative_of("okx", tmp_path), "{stake} is the exchange's stake currency"
+
+
+def test_multi_tf_informative_pair_is_backfilled_on_every_exchange(monkeypatch):
+    monkeypatch.setattr(backfill, "REPO", Path(__file__).resolve().parents[2])
+    for ex in ("binanceus", "coinbase", "kraken", "kucoin", "okx"):
+        assert ("ETH/BTC", "1h") in backfill.informative_of(ex), ex
+        assert "ETH/BTC" not in backfill.pairs_of(ex), "the trading whitelist does not gain it"
+
+
 def test_an_unfinished_last_bucket_is_left_out(lab):
     backfill.datadir("coinbase").mkdir(parents=True)
     candles(LISTED, LISTED + dt.timedelta(hours=7), "1h").to_feather(backfill.series_file("coinbase", "BTC/USD", "1h"))
