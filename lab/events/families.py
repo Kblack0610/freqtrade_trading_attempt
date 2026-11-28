@@ -579,6 +579,24 @@ def settled_by(kind: str, rng: tuple | None, obs: dict, margin: int) -> float | 
     return 1.0 if lo is None and hi is not None and low + margin <= hi else None
 
 
+def weather_markets(reg: dict) -> dict[str, tuple[str, str]]:
+    """series -> (station, kind) of every daily high, low and rain series of the registry's stations; the KXRAIN event's
+    series holds every city, told by its code (station_of)."""
+    out = {}
+    for key, st in reg["nws_high"]["stations"].items():
+        for s in st["series"]:
+            out[s] = (key, "high")
+        out[f"KXLOWT{st['code']}"] = (key, "low")
+        out[f"KXRAIND{st['code']}"] = (key, "rain")
+        out[f"KXRAIN-{st['code']}"] = (key, "rain")
+    return out
+
+
+def station_of(markets: dict, series_id: str | None, market_id: str) -> tuple[str, str] | None:
+    s = series_id or ""
+    return markets.get(f"{s}-{market_id.rsplit('-', 1)[-1]}" if s == "KXRAIN" else s)
+
+
 class Observed(Family):
     """A Kalshi daily weather market (high, low, or will it rain) the station's own readings of that day have already
     decided (settled_by): buys the side the observation settles while the price still lags it by `edge`. The
@@ -591,15 +609,8 @@ class Observed(Family):
 
     def __init__(self, params: dict, observations: Forecasts, reg: dict):
         super().__init__(params)
-        e = reg["nws_high"]
         self.obs, self.fresh_min = observations, reg["nws_obs"]["fresh_min"]
-        self.markets = {}  # series -> (station, kind); the rain event's series holds every city, told by its code
-        for key, st in e["stations"].items():
-            for s in st["series"]:
-                self.markets[s] = (key, "high")
-            self.markets[f"KXLOWT{st['code']}"] = (key, "low")
-            self.markets[f"KXRAIND{st['code']}"] = (key, "rain")
-            self.markets[f"KXRAIN-{st['code']}"] = (key, "rain")
+        self.markets = weather_markets(reg)
 
     def rule(self) -> str:
         p = self.params
@@ -608,8 +619,7 @@ class Observed(Family):
                 f"within {p['hours']} h of close, {p['margin']} F of slack")
 
     def station(self, m: Market) -> tuple[str, str] | None:
-        s = m.series_id or ""
-        return self.markets.get(f"{s}-{m.market_id.rsplit('-', 1)[-1]}" if s == "KXRAIN" else s)
+        return station_of(self.markets, m.series_id, m.market_id)
 
     def on_book(self, row, m):
         p, hit = self.params, self.station(m)
