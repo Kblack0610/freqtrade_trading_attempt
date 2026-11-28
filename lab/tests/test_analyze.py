@@ -264,6 +264,8 @@ FT_REFUSALS = [  # freqtrade 2026.10's output and exit code for each, from the 2
     (LOG + WARMUP, 0, WARMUP),
     (LOG + "No data left after adjusting for startup candles.", 2, analyze.NO_CANDLES_LEFT),
     (LOG + "No data found. Terminating.", 2, analyze.NO_DATA),
+    (LOG + "ValueError: Informative dataframe for (ETH/BTC, 1h, spot) is empty. Can't populate informative indicators.", 1,
+     "ValueError: Informative dataframe for (ETH/BTC, 1h, spot) is empty."),
 ]
 
 

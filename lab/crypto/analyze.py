@@ -362,15 +362,22 @@ NO_CANDLES_LEFT = "no candles left after the strategy's warm-up"
 WARMUP_REFUSED = re.compile(r"This strategy requires \d+ candles to start, which is more than \(\d+ candles\) the amount")
 
 
+# an informative pair with no candles in the chunk's window: Kraken serves ~720 candles, so its older years (and a
+# venue's pre-listing years) hold none; the 2026-11-28 analysis failed 26 multi_tf chunks on it
+INFORMATIVE_EMPTY = re.compile(r"ValueError: Informative dataframe for \([^)]*\) is empty\.")
+
+
 def nothing_to_run(out: str) -> str | None:
     """Why a failed freqtrade backtest had nothing to run, when no retry changes it, else None: no candles in the
-    period, none left once the warm-up is taken from the data's start, or a warm-up longer than the one OHLCV call a
+    period, none left once the warm-up is taken from the data's start, an informative pair with no candles in the window, or a warm-up longer than the one OHLCV call a
     history-less venue serves, which freqtrade refuses before it loads any data. Each is freqtrade's whole message,
     since a crash can follow a per-pair "No data found for (pair, ...)" warning."""
     if "No data found. Terminating." in out:
         return NO_DATA
     if "No data left after adjusting for startup candles." in out:
         return NO_CANDLES_LEFT
+    if m := INFORMATIVE_EMPTY.search(out):
+        return m.group(0)
     return _errors(out) if WARMUP_REFUSED.search(out) else None
 
 
