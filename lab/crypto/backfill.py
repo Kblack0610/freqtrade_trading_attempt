@@ -51,8 +51,9 @@ from typing import Protocol
 
 import ccxt
 import pandas as pd
+import pyarrow as pa
 from freqtrade.data.converter import clean_ohlcv_dataframe, ohlcv_to_dataframe
-from freqtrade.data.history import get_datahandler
+from freqtrade.data.history.datahandlers.featherdatahandler import FeatherDataHandler
 from freqtrade.enums import CandleType
 from freqtrade.exchange import timeframe_to_seconds
 from freqtrade.misc import pair_to_filename
@@ -190,12 +191,39 @@ def series_file(exchange: str, pair: str, timeframe: str) -> Path:
     return datadir(exchange) / f"{pair_to_filename(pair)}-{timeframe}.feather"
 
 
+class AtomicFeather(FeatherDataHandler):
+    """Writes each series to a temp file and renames it over the old one, so a run killed mid-write leaves the old file whole."""
+
+    def _store_dataframe(self, data: pd.DataFrame, filename: Path) -> None:
+        tmp = filename.with_name(filename.name + ".tmp")
+        super()._store_dataframe(data, tmp)
+        os.replace(tmp, filename)
+
+
+def handler(exchange: str) -> AtomicFeather:
+    return AtomicFeather(datadir(exchange))
+
+
+def readable(path: Path) -> bool:
+    """False for a file a killed write left empty or truncated (freqtrade's own download-data writes in place)."""
+    try:
+        with open(path, "rb") as f:
+            pa.ipc.open_file(f)
+    except (pa.ArrowException, OSError):
+        return False
+    return True
+
+
 def scan(path: Path, timeframe: str) -> dict:
-    """First and last candle, row count, and the gaps between them."""
+    """First and last candle, row count, and the gaps between them; an unreadable file counts as no candles."""
     out = {"first_ts": None, "last_ts": None, "rows": 0, "gaps": 0, "missing_candles": 0}
     if not path.exists():
         return out
-    ts = pd.read_feather(path, columns=["date"])["date"]
+    try:
+        ts = pd.read_feather(path, columns=["date"])["date"]
+    except (pa.ArrowException, OSError) as e:
+        print(f"backfill: {path}: unreadable, counted empty: {type(e).__name__}: {e}", flush=True)
+        return out
     if ts.empty:
         return out
     ts = ts.sort_values()
@@ -216,7 +244,7 @@ def merge_candles(dh, pair: str, tf: str, new: pd.DataFrame) -> None:
 
 def drop_halts(exchange: str, pair: str, tf: str) -> int:
     """Drop each run of flat, zero-volume candles lasting HALT_DAYS or more; returns how many went."""
-    dh = get_datahandler(datadir(exchange), "feather")
+    dh = handler(exchange)
     df = dh.ohlcv_load(pair, tf, CandleType.SPOT, fill_missing=False, warn_no_data=False)
     if df.empty:
         return 0
@@ -230,7 +258,7 @@ def drop_halts(exchange: str, pair: str, tf: str) -> int:
 
 def collect_forward(ft: Freqtrade, exchange: str, pairs: list[str], timeframes: list[str]) -> bool:
     datadir(exchange).mkdir(parents=True, exist_ok=True)
-    dh = get_datahandler(datadir(exchange), "feather")
+    dh = handler(exchange)
     ok = True
     for pair in pairs:
         for tf in timeframes:
@@ -248,7 +276,7 @@ def collect_forward(ft: Freqtrade, exchange: str, pairs: list[str], timeframes: 
 def import_archive(z: zipfile.ZipFile, exchange: str, series: list[tuple[str, str]]) -> set[tuple[str, str]]:
     """Merge the archive into these series; returns the ones it finished. A pair the archive lacks has nothing older."""
     datadir(exchange).mkdir(parents=True, exist_ok=True)
-    dh = get_datahandler(datadir(exchange), "feather")
+    dh = handler(exchange)
     done = set()
     for pair, tf in series:
         try:
@@ -270,7 +298,7 @@ def import_bulk(ft: Freqtrade, exchange: str, pair: str, tf: str) -> None:
         return
     if new is not None and not new.empty:
         datadir(exchange).mkdir(parents=True, exist_ok=True)
-        merge_candles(get_datahandler(datadir(exchange), "feather"), pair, tf, new)
+        merge_candles(handler(exchange), pair, tf, new)
         print(f"backfill: {exchange}: bulk {pair} {tf}: {len(new)} candles", flush=True)
 
 
@@ -283,7 +311,7 @@ def source_of(tf: str, served: list[str]) -> str | None:
 
 def derive(exchange: str, pair: str, src: str, tf: str) -> None:
     """Rebuild one series from its source series; a last bucket the source has not finished is left out."""
-    dh = get_datahandler(datadir(exchange), "feather")
+    dh = handler(exchange)
     old = dh.ohlcv_load(pair, src, CandleType.SPOT, fill_missing=False, warn_no_data=False)
     if old.empty:
         return
@@ -316,6 +344,12 @@ def backfill_exchange(ft: Freqtrade, conn, exchange: str, pairs: list[str], time
     """pairs at every timeframe, plus each (pair, timeframe) in informative at its own one."""
     prior = {(p, tf): {"first_ts": f, "oldest_reached": r} for p, tf, f, r in conn.execute(
         "SELECT pair, timeframe, first_ts, oldest_reached FROM data_coverage WHERE exchange = %s", (exchange,))}
+    for p, tf in list(prior):
+        if (f := series_file(exchange, p, tf)).exists() and not readable(f):
+            # a truncated file loads as empty, so its history is fetched again from the start
+            print(f"backfill: {exchange}: {p} {tf}: {f.name} is unreadable, fetched again", flush=True)
+            f.unlink()
+            del prior[p, tf]
     ok = True
     prepended: set[tuple[str, str]] = set()
     supported = set(ft.timeframes(exchange))
