@@ -5,10 +5,11 @@ Runs on the fleet machine after the nightly analysis (the agentctl runner `trade
 origin/master, never from a checkout. It reads the events lab/crypto/loop.py wrote that are not yet reported, through
 the deployed image (`kubectl exec deploy/trader-web -- python -m lab.crypto.loop pending`, the site's read-only role), then:
 
-- climate changes: one agent-board row per night listing each strategy or mixture that entered or left a market
-  climate's passing set (`notes ptask trader --agent add`);
-- a promotion that enters or leaves: a board row. Forward testing is lab/crypto/shadow.py's shadow accounts, database rows
-  with no pod; a pod is a person's pick through ci/cohort_roster.py, so this sync opens no roster PR;
+- climate changes (a strategy or mixture entering or leaving a market climate's passing set): acked with one log line
+  and no board row. /book shows the sets, and their follow-up is the promote gates below and the shadow accounts; a
+  nightly "read /book and pick follow-ups" row had no done line, so dispatch skipped it every night (tr-491);
+- a promotion that enters or leaves: a board row (`notes ptask trader --agent add`). Forward testing is
+  lab/crypto/shadow.py's shadow accounts, database rows with no pod; a pod is a person's pick through ci/cohort_roster.py, so this sync opens no roster PR;
 - a monthly retune fit entering or leaving qualification: a review row with its parameter artifact. Parameters
   are never saved to a strategy or applied to a bot by this sync;
 - betting: one row per night for the event-contract variants that entered or left the markets readiness gate's
@@ -26,26 +27,8 @@ import subprocess
 import sys
 
 AVENUES = "https://trader.kblab.me/avenues"
+BOOK = "https://trader.kblab.me/book"
 MOST_DETAILS = 40  # a board row past this many detail lines points at /book instead
-
-
-def label(e: dict) -> str:
-    who = e["name"] + (f" on {e['exchange']}" if e["exchange"] else "") + (f" ({e['variant']})" if e["variant"] else "")
-    nums = "" if e["lo"] is None else f", annual {e['annual']:+.1%}, low end {e['lo']:+.1%}"
-    return f"{e['change']} {e['cell']}: {e['kind']} {who}{nums}"
-
-
-def climate_row(events: list[dict]) -> tuple[str, list[str]]:
-    enters = sum(e["change"] == "enters" for e in events)
-    day = min(e["at"] for e in events)[:10]
-    text = (f"check(trader): research loop {day}: {enters} enter and {len(events) - enters} leave a market climate's "
-            "passing set; read them on /book and say which to follow up #size/s")
-    details = [label(e) for e in events[:MOST_DETAILS]]
-    if len(events) > MOST_DETAILS:
-        details.append(f"and {len(events) - MOST_DETAILS} more: https://trader.kblab.me/book")
-    details.append(f"trial register at {events[-1]['trials']}: the interval is per cell, not corrected for the search; "
-                   f"avenues: {AVENUES}")
-    return text, details
 
 
 BETTING = {
@@ -107,10 +90,9 @@ def main() -> int:
     done: list[int] = []
     climate = [e for e in events if e["signal"] == "climate"]
     if climate:
-        text, details = climate_row(climate)
-        print(text, *details, sep="\n  ")
+        enters = sum(e["change"] == "enters" for e in climate)
+        print(f"climate: {enters} enter and {len(climate) - enters} leave a passing set, no board row: {BOOK}")
         if not dry:
-            board(text, details)
             done += [e["id"] for e in climate]
     for e in (e for e in events if e["signal"] == "promote"):
         if e["change"] == "enters":

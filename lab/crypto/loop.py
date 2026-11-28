@@ -13,7 +13,8 @@ backtest (signal bet-drift, written by lab/events/paper.py). Their events carry 
 the others the crypto lab's. The first run has no previous set, so everything passing enters.
 
 ci/research_sync.py, on the fleet machine, reads the unreported events (`python -m lab.crypto.loop pending`), files
-them on the agent board with the avenues register link (a promotion gets a board row, no roster PR) and marks them reported
+the promotion, retune and betting ones on the agent board with the avenues register link (a promotion gets a board
+row, no roster PR; a climate change gets none, /book shows it) and marks them all reported
 (`python -m lab.crypto.loop ack <id>...`). Nothing here trades or edits the roster.
 """
 

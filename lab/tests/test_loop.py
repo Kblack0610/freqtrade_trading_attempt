@@ -46,16 +46,23 @@ def test_a_change_is_an_event_once_and_a_steady_set_is_none(conn):
     assert [e["name"] for e in loop.pending(conn)] == ["T", "S", "Good"]
 
 
-def test_one_board_row_carries_a_nights_climate_changes():
-    ev = [{"at": "2026-11-10T03:30:00+00:00", "change": c, "cell": "up/low", "kind": "strategy", "name": n,
-           "exchange": "kraken", "variant": "tuned", "lo": 0.01, "annual": 0.2, "trials": 40}
-          for c, n in [("enters", "S"), ("enters", "T"), ("leaves", "U")]]
-    text, details = research_sync.climate_row(ev)
-    assert "2026-11-10: 2 enter and 1 leave" in text
-    assert details[0] == "enters up/low: strategy S on kraken (tuned), annual +20.0%, low end +1.0%"
-    assert "trial register at 40" in details[-1] and research_sync.AVENUES in details[-1]
-    many = research_sync.climate_row(ev * 20)[1]
-    assert len(many) == research_sync.MOST_DETAILS + 2 and many[-2].startswith("and 20 more")
+@pytest.mark.parametrize("dry", [False, True])
+def test_climate_changes_are_acked_with_no_board_row(monkeypatch, capsys, dry):
+    events = [{"id": i, "signal": "climate", "at": "2026-11-10T03:30:00+00:00", "change": c, "name": "S"}
+              for i, c in enumerate(("enters", "enters", "leaves"), 1)]
+    calls, rows = [], []
+
+    def kubectl(*args):
+        calls.append(args)
+        return research_sync.json.dumps(events) if args == ("pending",) else "acked"
+
+    monkeypatch.setenv("DRY_RUN", "1" if dry else "0")
+    monkeypatch.setattr(research_sync, "kubectl_research", kubectl)
+    monkeypatch.setattr(research_sync, "board", lambda *a: rows.append(a))
+    assert research_sync.main() == 0
+    assert rows == []
+    assert calls == ([("pending",)] if dry else [("pending",), ("ack", "1", "2", "3")])
+    assert "2 enter and 1 leave" in capsys.readouterr().out
 
 
 def test_monthly_retune_reports_new_fits_and_lost_qualification(conn):
