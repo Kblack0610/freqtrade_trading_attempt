@@ -13,7 +13,6 @@ import sys
 
 import pandas as pd
 from freqtrade.data.converter import ohlcv_to_dataframe
-from freqtrade.data.history import get_datahandler
 from freqtrade.exchange import timeframe_to_seconds
 
 from lab.core.api import Api
@@ -103,7 +102,7 @@ def backfill_delisted(conn, found: dict[str, tuple[dt.datetime, dt.datetime]], t
     a delisted series has no older candles to find). A series already on disk to its last candle is not fetched again."""
     delisted = {r[0] for r in conn.execute("SELECT pair FROM pair_windows WHERE exchange = %s AND status = 'BREAK'", (VENUE,))}
     served = set(backfill.Cli().timeframes(VENUE))
-    dh = get_datahandler(backfill.datadir(VENUE), "feather")
+    dh = backfill.handler(VENUE)
     backfill.datadir(VENUE).mkdir(parents=True, exist_ok=True)
     ok, rows = True, []
     for pair in sorted(delisted & found.keys()):
