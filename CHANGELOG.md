@@ -11,6 +11,7 @@ Notable changes to the trader strategy repo, newest first. The image is built on
 
 ### Fixed
 
+- The analysis counts a chunk whose informative pair has no candles in its window (multi_tf on Kraken's older years, a venue's pre-listing years) as empty, not failed (tr-486).
 - Data: the backfill job's second step, `lab/crypto/listings.py`, records binanceus's historical universe (USDT pairs TRADING or BREAK in exchangeInfo, each window from its first and last 1h kline, the months listed) and downloads the delisted pairs' candles (tr-482).
 - Data: `lab/crypto/kucoin_listings.py` (job `kucoin-listings`, run by hand until home-config schedules it) records KuCoin's historical USDT spot universe from the `k-line-history-data` archive into `pair_windows` and `pair_listings`: each window from the first and last 1h candle in the daily zips, months from 2023-01 (the archive starts 2022-12-31), and `candles()` reads a series by column name (tr-484).
 - Data: `lab/crypto/okx_listings.py` (job `okx-listings`, run by hand until home-config schedules it) records OKX's historical USDT spot universe into `pair_windows` and `pair_listings`: ids from Tardis's okex metadata (ended ones included), each window from the first and last candle in the monthly archive files (`archive.okx_window`), ids with no archive file counted (tr-483).
