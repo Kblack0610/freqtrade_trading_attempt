@@ -16,7 +16,7 @@ Each market lands in one bucket: `lagged` (the minutes from report to reprice), 
 report was already untradeable; its minutes, negative, go back to the quote that ended its last tradeable run, and it
 has none when no quote of the window was tradeable), `held` (still tradeable at its last quote), `missing` (no quote at
 or before the report), `undecided` (no report of the day decides it) or `wrong` (the report's side lost at
-settlement). Reads `markets`, `resolutions`, the recorder's quote objects and IEM; its only write is the IEM client's
+settlement); a void market is left out. Reads `markets`, `resolutions`, the recorder's quote objects and IEM; its only write is the IEM client's
 pacing row (lab/core/budget.py), so it needs the jobs' database role.
 """
 
@@ -88,6 +88,8 @@ def measure(markets: list[tuple], obs: dict[str, list[tuple]], book: pd.DataFram
         rng = None if kind == "rain" else degrees(subtitle)
         if kind != "rain" and rng is None:
             continue
+        if result not in ("yes", "no"):
+            continue
         got = deciding(obs.get(key, []), stations[key], kind, rng, day, margin)
         if got is None or got[1] != (1.0 if result == "yes" else 0.0):
             out.append((kind, "undecided" if got is None else "wrong", None))
@@ -145,7 +147,8 @@ def main(argv: list[str] | None = None, fs=None) -> int:
     obs = {k: nws.asos(iem, k, reg[nws.NAME]["stations"][k], a.since - dt.timedelta(days=2), a.until) for k in keys}
     fs = fs or s3_from_env()
     root = f"{cfg['recorder']['bucket']}/{cfg['recorder']['prefix']}"
-    book = backtest.load_quotes(fs, root, VENUE, a.since - dt.timedelta(days=2), a.until + dt.timedelta(days=1),
+    # Recording is change-only: a week back finds the quote standing at a report early in the range.
+    book = backtest.load_quotes(fs, root, VENUE, a.since - dt.timedelta(days=7), a.until + dt.timedelta(days=1),
                                 [r[0] for r in markets])
     out = measure(markets, obs, book, reg, fam["margin"], a.edge)
     print(f"obs_lag: {len(markets)} settled markets closing {a.since} to {a.until}, {len(keys)} stations, "

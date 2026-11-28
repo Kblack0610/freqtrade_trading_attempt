@@ -16,8 +16,10 @@ passed (after about 6 pm local) the forecast no longer lists that day.
 nws_obs: the station's observations of its local STANDARD day so far (a CLI day never follows daylight saving):
 the highest and lowest whole degree F, and whether a measured 0.01 inch or more fell in an hour. The day's high only
 grows and its low only falls, so an observed value settles part of a daily market before the day ends (the `observed`
-family). Kalshi reprices a market a few minutes after the report that decides it (lab/events/research/obs_lag.py,
-docs/markets.md), so observations are read every 5 minutes, apart from the hourly forecast and CLI. The IEM ASOS archive backfills the same shape, one reading per observation, so a backtest window exists for
+family).
+
+Observations are read every 5 minutes, apart from the hourly forecast and CLI: lab/events/research/obs_lag.py measures
+how soon Kalshi reprices a market after the report that decides it. The IEM ASOS archive backfills the same shape, one reading per observation, so a backtest window exists for
 every month it holds.
 
 nws_cli: the climate report of a finished day, parsed by IEM, from `python -m lab.inputs.nws` once a day is `FINAL_H` old.

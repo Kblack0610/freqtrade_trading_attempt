@@ -285,13 +285,13 @@ signal_source = "observation"
 origin = "api.weather.gov station observations"
 cadence = "every 5 minutes"
 reader = "lab/inputs/nws.py"
-# Read every 5 minutes (home-config trader-inputs-nws-obs): Kalshi reprices a decided market a median 4 minutes after
-# the report (docs/markets.md, observed). A reading is the station's local standard day so far: {day, high, low, rained,
-# n, last}. The same shape is backfilled from the IEM ASOS archive (`python -m lab.inputs.nws backfill`), one reading per
-# observation, so a backtest window exists for every month the archive holds. Those readings are an hour apart, so
-# fresh_min is the hourly report plus lag_min with slack, not three 5-minute reads, or the family would refuse a
-# backfilled row between two reports.
-fresh_min = 75
+# Read every 5 minutes (home-config trader-inputs-nws-obs): most decided markets are priced in by the deciding report,
+# and the few that lag it reprice within minutes (docs/markets.md, observed), so an hourly read caught none of them.
+# A reading is the station's local standard day so far: {day, high, low, rained, n, last}. The same shape is backfilled
+# from the IEM ASOS archive (`python -m lab.inputs.nws backfill`), one reading per observation, about an hour apart, so
+# fresh_min covers one missed hourly report plus lag_min, not three 5-minute reads, or the family would refuse
+# backfilled rows a live read would have taken.
+fresh_min = 130
 # A reading counts as known this long after its observation, the lag between an ASOS report and the NWS API serving it.
 lag_min = 10
 

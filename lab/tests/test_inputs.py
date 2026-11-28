@@ -102,7 +102,7 @@ def test_input_metrics_give_each_read_input_its_age_and_limit():
     got = {m.name: [(s.labels, s.value) for s in m.samples] for m in input_metrics(NOW, {"nws_high": NOW - dt.timedelta(hours=1)})}
     assert got == {"trader_input_age_seconds": [({"input": "nws_high"}, 3600.0)],
                    "trader_input_fresh_seconds": [({"input": "nws_cli"}, 126000.0), ({"input": "nws_high"}, 10800.0),
-                                                  ({"input": "nws_obs"}, 4500.0)]}
+                                                  ({"input": "nws_obs"}, 7800.0)]}
     assert [m.samples for m in input_metrics(NOW, {})][0] == []  # never read: no age, absent() fires
 
 

@@ -52,13 +52,13 @@ def test_a_market_priced_before_the_report_is_ahead_by_the_start_of_its_untradea
 def test_every_other_market_lands_in_its_own_bucket():
     q = book(("H", 13, 0, 0.50, 0.52), ("H", 16, 0, 0.60, 0.62), ("M", 15, 0, 0.50, 0.52))
     rows = run([high("H"), high("M"), high("N"), high("U", "70° or above"), high("W", result="no"),
-                ("X", EVENT, "KXHIGHNY", "not a range", "yes"), ("Y", "KXHIGHTTTN-26NOV02", "KXHIGHTTTN", "63° or above", "yes")],
+                ("X", EVENT, "KXHIGHNY", "not a range", "yes"), high("V", result="void"), ("Y", "KXHIGHTTTN-26NOV02", "KXHIGHTTTN", "63° or above", "yes")],
                q)
     assert rows == [("high", "held", None),  # still tradeable at its last quote
                     ("high", "missing", None),  # its first quote came after the report
                     ("high", "missing", None),  # no quote at all
                     ("high", "undecided", None),  # the day never reached 71
-                    ("high", "wrong", None)]  # the report's side lost; the unparsed and unmapped markets are left out
+                    ("high", "wrong", None)]  # the report's side lost; the unparsed, void and unmapped markets are left out
 
 
 def test_the_report_gives_each_kind_its_lag_quantiles_and_bucket_counts():
