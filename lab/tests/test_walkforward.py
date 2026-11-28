@@ -345,7 +345,8 @@ def test_a_shard_of_nine_folds_tolerates_one_failure_and_not_two(wlab, monkeypat
     runner.fold = fold
     report = {}
     assert wf.run_folds(wlab, runner, TODAY, report) is passes
-    assert report["folds_run"] == 9 and report["folds_failed"] == bad
+    assert report["folds_run"] == wf.FOLDS and report["folds_failed"] == bad
+    assert wlab.execute("SELECT count(*) FROM walkforward WHERE NOT ok").fetchone()[0] == bad
 
 
 def test_a_fold_hyperopt_could_not_tune_is_ok_and_keeps_its_base(wlab, monkeypatch):
