@@ -327,6 +327,27 @@ def test_one_failed_fold_among_others_does_not_fail_the_run_and_its_error_is_log
         "SELECT count(*) FROM walkforward WHERE NOT ok").fetchone()[0] == 1
 
 
+@pytest.mark.parametrize("bad, passes", [(1, True), (2, False)])
+def test_a_shard_of_nine_folds_tolerates_one_failure_and_not_two(wlab, monkeypatch, bad, passes):
+    """freqtrade-walkforward-29917500 shard 0: 9 folds, 1 failed, exited 1 on FAIL_SHARE alone."""
+    monkeypatch.setattr(wf, "ONLY", {"Live"})
+    monkeypatch.setattr(wf, "FOLDS", 9)
+    runner = FakeRunner()
+    ok_fold, bad_runner = runner.fold, FakeRunner(fail={"Live"})
+    lock, seen = threading.Lock(), []
+
+    def fold(*a, **k):
+        with lock:
+            seen.append(1)
+            fails = len(seen) <= bad
+        return bad_runner.fold(*a, **k) if fails else ok_fold(*a, **k)
+
+    runner.fold = fold
+    report = {}
+    assert wf.run_folds(wlab, runner, TODAY, report) is passes
+    assert report["folds_run"] == 9 and report["folds_failed"] == bad
+
+
 def test_a_fold_hyperopt_could_not_tune_is_ok_and_keeps_its_base(wlab, monkeypatch):
     monkeypatch.setattr(wf, "ONLY", {"Live"})
     assert wf.main(FakeRunner(untuned={"Live"}), TODAY) == 0
