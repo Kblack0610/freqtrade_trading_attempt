@@ -8,8 +8,8 @@ the deployed image (`kubectl exec deploy/trader-web -- python -m lab.crypto.loop
 - climate changes (a strategy or mixture entering or leaving a market climate's passing set): acked with one log line
   and no board row. /book shows the sets, and their follow-up is the promote gates below and the shadow accounts; a
   nightly "read /book and pick follow-ups" row had no done line, so dispatch skipped it every night (tr-491);
-- a promotion that enters or leaves: a board row (`notes ptask trader --agent add`). Forward testing is lab/crypto/shadow.py's shadow accounts, database rows
-  with no pod; a pod is a person's pick through ci/cohort_roster.py, so this sync opens no roster PR;
+- a promotion that enters or leaves: a board row (`notes ptask trader --agent add`). Forward testing is
+  lab/crypto/shadow.py's shadow accounts, database rows with no pod; a pod is a person's pick through ci/cohort_roster.py, so this sync opens no roster PR;
 - a monthly retune fit entering or leaving qualification: a review row with its parameter artifact. Parameters
   are never saved to a strategy or applied to a bot by this sync;
 - betting: one row per night for the event-contract variants that entered or left the markets readiness gate's

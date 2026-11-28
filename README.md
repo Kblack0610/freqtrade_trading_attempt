@@ -86,7 +86,7 @@ Each file:
 | `ci/bump_home_config.py` | Opens and merges the home-config digest-bump PR after each master build (the deploy). See CI |
 | `lab/crypto/cohorts.py`, `lab/crypto/cohorts.toml` | Picks a dry-run cohort's roster rows from the analysis tables or the best mixture (see Cohorts) |
 | `ci/cohort_roster.py` | Run on the fleet machine: opens the home-config PR that seeds a cohort's roster rows (see Cohorts) |
-| `ci/research_sync.py` | Run on the fleet machine each morning: files the loop's changes on the agent board. See Nightly research loop |
+| `ci/research_sync.py` | Run on the fleet machine each morning: files the loop's promotion, retune and betting changes on the agent board and acks its climate changes. See Nightly research loop |
 | `docs/README.md` | Index of the pages in `docs/` |
 
 ## The no-real-money guard
