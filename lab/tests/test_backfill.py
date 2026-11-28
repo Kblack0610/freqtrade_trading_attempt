@@ -394,6 +394,52 @@ def test_scan_counts_gaps(tmp_path):
     assert backfill.scan(tmp_path / "missing.feather", "1h")["rows"] == 0
 
 
+def test_an_unreadable_file_scans_as_empty(tmp_path):
+    """A run OOM-killed mid-write left zero-byte and truncated feather files (ar-6380); scan must not abort the job."""
+    whole = tmp_path / "whole.feather"
+    candles(LISTED, NOW, "1h").to_feather(whole)
+    (tmp_path / "empty.feather").write_bytes(b"")
+    (tmp_path / "cut.feather").write_bytes(whole.read_bytes()[:200])
+    for name in ("empty.feather", "cut.feather"):
+        assert backfill.scan(tmp_path / name, "1h")["first_ts"] is None
+        assert not backfill.readable(tmp_path / name)
+    assert backfill.readable(whole)
+
+
+def test_an_unreadable_series_is_fetched_again_from_the_start(conn, lab):
+    ex = FakeExchange()
+    backfill.backfill_exchange(ex, conn, "binanceus", ["BTC/USD"], ["1h"])
+    backfill.backfill_exchange(ex, conn, "binanceus", ["BTC/USD"], ["1h"])
+    assert coverage(conn)[("BTC/USD", "1h")][-1], "at its oldest candle"
+    backfill.series_file("binanceus", "BTC/USD", "1h").write_bytes(b"")
+
+    ex.calls.clear()
+    assert backfill.backfill_exchange(ex, conn, "binanceus", ["BTC/USD"], ["1h"])
+    assert any("--prepend" in c for c in ex.calls), "its lost history is prepended again"
+    first, last, rows, *_, done = coverage(conn)[("BTC/USD", "1h")]
+    assert (first, rows, done) == (LISTED, 48, False)
+
+
+def test_a_series_is_written_whole_or_not_at_all(tmp_path, monkeypatch):
+    f = tmp_path / "BTC_USD-1h.feather"
+    candles(LISTED, NOW, "1h").to_feather(f)
+    monkeypatch.setattr(backfill, "datadir", lambda exchange: tmp_path)
+    dh = backfill.handler("binanceus")
+
+    def killed(src, dst):
+        raise KeyboardInterrupt  # the pod dies between the write and the rename
+
+    monkeypatch.setattr(backfill.os, "replace", killed)
+    with pytest.raises(KeyboardInterrupt):
+        dh.ohlcv_store("BTC/USD", "1h", candles(LISTED, LISTED + dt.timedelta(hours=2), "1h"), backfill.CandleType.SPOT)
+    assert backfill.scan(f, "1h")["rows"] == 48, "the old file is untouched"
+    monkeypatch.undo()
+    monkeypatch.setattr(backfill, "datadir", lambda exchange: tmp_path)
+    backfill.handler("binanceus").ohlcv_store("BTC/USD", "1h", candles(LISTED, LISTED + dt.timedelta(hours=2), "1h"),
+                                              backfill.CandleType.SPOT)
+    assert backfill.scan(f, "1h")["rows"] == 2 and [p.name for p in tmp_path.iterdir()] == [f.name]
+
+
 def test_a_halted_market_is_a_gap_and_a_quiet_one_is_kept(conn, lab):
     """binanceus 1d pads its USD suspension with flat zero-volume days; a backtest would trade the frozen price."""
     days = candles(LISTED - dt.timedelta(days=60), NOW, "1D")
