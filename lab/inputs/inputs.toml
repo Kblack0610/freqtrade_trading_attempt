@@ -283,12 +283,15 @@ utc_offset = -8
 title = "What a station has measured so far today"
 signal_source = "observation"
 origin = "api.weather.gov station observations"
-cadence = "hourly"
+cadence = "every 5 minutes"
 reader = "lab/inputs/nws.py"
-# Read hourly with nws_high (home-config trader-inputs-nws); three missed reads is stale. A reading is the station's
-# local standard day so far: {day, high, low, rained, n, last}. The same shape is backfilled from the IEM ASOS archive
-# (`python -m lab.inputs.nws backfill`), one reading per observation, so a backtest window exists for every month the archive holds.
-fresh_min = 180
+# Read every 5 minutes (home-config trader-inputs-nws-obs): most decided markets are priced in by the deciding report,
+# and the few that lag it reprice within minutes (docs/markets.md, observed), so an hourly read caught none of them.
+# A reading is the station's local standard day so far: {day, high, low, rained, n, last}. The same shape is backfilled
+# from the IEM ASOS archive (`python -m lab.inputs.nws backfill`), one reading per observation, about an hour apart, so
+# fresh_min covers one missed hourly report plus lag_min, not three 5-minute reads, or the family would refuse
+# backfilled rows a live read would have taken.
+fresh_min = 130
 # A reading counts as known this long after its observation, the lag between an ASOS report and the NWS API serving it.
 lag_min = 10
 

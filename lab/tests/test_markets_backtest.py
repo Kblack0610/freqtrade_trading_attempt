@@ -223,6 +223,8 @@ def test_load_quotes_reads_the_recorders_objects_and_keeps_the_first_of_equal_qu
     a = b.iloc[0]
     assert (a["depth_yes"], a["depth_no"]) == (20, 10)  # YES takes the ask's size, NO the bid's
     assert backtest.load_quotes(fs, root, "polymarket", T0.date(), T0.date() + dt.timedelta(days=1)).empty
+    only = backtest.load_quotes(fs, root, "kalshi", T0.date(), T0.date() + dt.timedelta(days=1), ["B"])
+    assert list(zip(only["market_id"], only["bid"])) == [("B", 0.1)]  # ids keeps only the markets asked for
 
 
 def test_load_bars_takes_a_share_of_each_periods_volume_as_depth(tmp_path):

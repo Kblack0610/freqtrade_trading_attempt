@@ -3,7 +3,8 @@
 daily climate report (CLI) every Kalshi weather market settles on. One input_readings row each, per station of
 lab/inputs/inputs.toml [inputs.nws_high.stations].
 
-  python -m lab.inputs.nws                                 # the hourly CronJob (home-config trader-inputs-nws): all three
+  python -m lab.inputs.nws                                 # the hourly CronJob (home-config trader-inputs-nws): forecasts, CLI
+  python -m lab.inputs.nws obs                             # the 5-min CronJob (trader-inputs-nws-obs): observations
   python -m lab.inputs.nws backfill [--station K..] --since 2026-10-01 [--until 2026-11-01]
   python -m lab.inputs.nws sd                              # how far the forecast high ran from the CLI high, per station
 
@@ -15,7 +16,10 @@ passed (after about 6 pm local) the forecast no longer lists that day.
 nws_obs: the station's observations of its local STANDARD day so far (a CLI day never follows daylight saving):
 the highest and lowest whole degree F, and whether a measured 0.01 inch or more fell in an hour. The day's high only
 grows and its low only falls, so an observed value settles part of a daily market before the day ends (the `observed`
-family). The IEM ASOS archive backfills the same shape, one reading per observation, so a backtest window exists for
+family).
+
+Observations are read every 5 minutes, apart from the hourly forecast and CLI: lab/events/research/obs_lag.py measures
+how soon Kalshi reprices a market after the report that decides it. The IEM ASOS archive backfills the same shape, one reading per observation, so a backtest window exists for
 every month it holds.
 
 nws_cli: the climate report of a finished day, parsed by IEM, from `python -m lab.inputs.nws` once a day is `FINAL_H` old.
@@ -265,6 +269,7 @@ def main(argv: list[str] | None = None) -> int:
     bf.add_argument("--since", type=dt.date.fromisoformat, required=True)
     bf.add_argument("--until", type=dt.date.fromisoformat, default=dt.datetime.now(UTC).date())
     sub.add_parser("sd", help="the forecast high's error against the CLI high")
+    sub.add_parser("obs", help="every station's observations of its day so far")
     args = ap.parse_args(argv)
     reg = inputs.load()
     now = dt.datetime.now(UTC)
@@ -280,12 +285,15 @@ def main(argv: list[str] | None = None) -> int:
             print(f"nws: backfilled {n} observations and {wrote} climate reports, {len(failed)} failed {failed}", flush=True)
             return 1 if failed else 0
         nws = client(reg[NAME]["api"])
+        if args.cmd == "obs":
+            wrote, failed = run_obs(conn, nws, reg, now)
+            print(f"nws: {wrote} observations read, failed {failed}", flush=True)
+            return 1 if failed else 0
         wrote, failed = run(conn, nws, reg, now)
-        owrote, ofailed = run_obs(conn, nws, reg, now)
         cwrote, cfailed = run_cli(conn, iem, reg, now)
-    print(f"nws: {wrote} forecasts, {owrote} observations, {cwrote} climate reports read; "
-          f"failed forecasts {failed}, observations {ofailed}, climate reports {cfailed}", flush=True)
-    return 1 if failed or ofailed or cfailed else 0
+    print(f"nws: {wrote} forecasts, {cwrote} climate reports read; failed forecasts {failed}, climate reports {cfailed}",
+          flush=True)
+    return 1 if failed or cfailed else 0
 
 
 if __name__ == "__main__":
