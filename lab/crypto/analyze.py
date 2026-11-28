@@ -89,7 +89,7 @@ from psycopg.types.json import Jsonb
 from lab.inputs import calls
 from lab import metrics
 from lab.crypto import book, confidence, horizon, loop, markouts, mixtures, scorecard, shadow, suggest, universe, variants, vol_target, volatility
-from lab.core.db import connect
+from lab.core.db import Reconnecting
 from lab.core.util import finite, utc
 
 REPO = Path(os.environ.get("REPO", "/repo"))
@@ -1030,7 +1030,7 @@ def main(runner: Runner | None = None, today: dt.date | None = None) -> int:
     today = today or dt.datetime.now(dt.timezone.utc).date()
     started = dt.datetime.now(dt.timezone.utc)
     summary: dict = {"exchanges": EXCHANGES, "only": sorted(ONLY), "universe": universe.describe_all(USER_DATA, EXCHANGES)}
-    with connect(autocommit=True) as conn:
+    with Reconnecting() as conn:
         job = JOB or f"{today}"
         sharded = SHARDS > 1
         run_id = conn.execute("INSERT INTO runs (kind, name, raw, started_at) VALUES (%s, %s, '{}', %s) RETURNING id",

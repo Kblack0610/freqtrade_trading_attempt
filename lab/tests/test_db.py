@@ -1,4 +1,4 @@
-"""lab.core.db.connect sets TCP keepalives, and every lab connection goes through it (lab/core/db.py says why)."""
+"""lab.core.db.connect sets TCP keepalives, every lab connection goes through it, and Reconnecting outlives a Postgres restart (lab/core/db.py says why)."""
 
 import ast
 import os
@@ -75,3 +75,60 @@ def test_the_guard_sees_each_form():
             "ConnectionPool(\n    u,\n    kwargs={'autocommit': True, **db.KEEPALIVE},\n)"]
     assert [c for c in bad if not any(skips_keepalive(n) for n in ast.walk(ast.parse(c)))] == []
     assert [c for c in good if any(skips_keepalive(n) for n in ast.walk(ast.parse(c)))] == []
+
+
+def kill(conn, r: db.Reconnecting) -> None:
+    """What a Postgres restart does to an idle client: the server ends its backend."""
+    conn.execute("SELECT pg_terminate_backend(%s)", (r.conn.info.backend_pid,))
+
+
+def test_reconnecting_reruns_a_statement_on_a_lost_connection(conn):
+    with db.Reconnecting() as r:
+        before = r.conn.info.backend_pid
+        kill(conn, r)
+        assert r.execute("SELECT 41 + 1").fetchone()[0] == 42
+        assert r.conn.info.backend_pid != before
+
+
+def test_reconnecting_probes_before_a_transaction_and_a_cursor(conn):
+    with db.Reconnecting() as r:
+        kill(conn, r)
+        with r.transaction():
+            r.execute("INSERT INTO runs (kind, name, raw, started_at) VALUES ('test', 'tx', '{}', now())")
+        kill(conn, r)
+        with r.cursor() as cur:
+            cur.execute("SELECT count(*) FROM runs WHERE name = 'tx'")
+            assert cur.fetchone()[0] == 1
+
+
+def test_reconnecting_does_not_rerun_inside_a_transaction(conn):
+    """The block's earlier statements died with the connection, so a rerun of the last one alone would commit half."""
+    with db.Reconnecting() as r:
+        with pytest.raises(db.psycopg.OperationalError):
+            with r.transaction():
+                r.execute("INSERT INTO runs (kind, name, raw, started_at) VALUES ('test', 'half', '{}', now())")
+                kill(conn, r)
+                r.execute("SELECT 1")
+        assert r.execute("SELECT count(*) FROM runs WHERE name = 'half'").fetchone()[0] == 0
+
+
+def test_reconnecting_gives_up_after_its_budget(conn, monkeypatch):
+    with db.Reconnecting() as r:
+        kill(conn, r)
+        monkeypatch.setattr(db, "RECONNECT_S", 0)
+        monkeypatch.setattr(db, "connect", lambda **k: (_ for _ in ()).throw(db.psycopg.OperationalError("down")))
+        with pytest.raises(db.psycopg.OperationalError, match="down"):
+            r.execute("SELECT 1")
+
+
+def test_walkforward_records_its_shard_after_postgres_restarted(conn, monkeypatch):
+    """2026-11-26 and 11-27: Postgres moved hours into the night and close_shard failed on the dead connection."""
+    from lab.crypto import walkforward
+
+    monkeypatch.setattr(walkforward, "SHARDS", 1)
+    with db.Reconnecting() as r:
+        shard_id = r.execute("INSERT INTO runs (kind, name, raw, started_at) VALUES ('walkforward_shard', 'night#0', '{}', "
+                             "now()) RETURNING id").fetchone()[0]
+        kill(conn, r)
+        rows = walkforward.close_shard(r, shard_id, "night", {"folds_run": 3}, True)
+    assert [(ok, raw) for _, ok, raw in rows] == [(True, {"folds_run": 3})]

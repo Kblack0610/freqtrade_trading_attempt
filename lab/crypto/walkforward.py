@@ -70,7 +70,7 @@ from psycopg.types.json import Jsonb
 
 from lab.crypto import analyze, book, confidence, horizon, mixtures, robustness, scorecard, suggest, universe, vol_target
 from lab import metrics
-from lab.core.db import connect
+from lab.core.db import Reconnecting
 
 EXCHANGES = os.environ.get("WF_EXCHANGES", "binanceus").split()
 FOLDS = int(os.environ.get("WF_FOLDS", "0"))  # 0: every month back to the venue's first TRAIN_DAYS
@@ -614,7 +614,7 @@ def finish(conn, job: str, shards: list[tuple]) -> bool:
 def main(runner: Runner | None = None, today: dt.date | None = None) -> int:
     runner = runner or Cli()
     today = today or dt.datetime.now(dt.timezone.utc).date()
-    with connect(autocommit=True) as conn:
+    with Reconnecting() as conn:
         started = dt.datetime.now(dt.timezone.utc)
         job = JOB or f"{started:%Y-%m-%d %H:%M:%S.%f}"
         name = f"{job}#{SHARD}"
