@@ -127,6 +127,18 @@ def test_a_coin_listed_later_still_counts_from_its_first_day():
     assert book.basket_sigma(closes) == pytest.approx(pd.Series([0.01, 100 / 101 - 1, (0.01 + 0.02) / 2]).std() * 365 ** 0.5)
 
 
+def test_day_rows_count_zero_padded_days_scaled_to_the_stage_risk():
+    cfg = {**CFG, "watcher": {**CFG["watcher"], "day_loss": 0.05},
+           "book": {**CFG["book"], "stages": [{"name": "A", "capital": 100.0, "stake": 10.0, "max_open": 2},
+                                              {"name": "B", "capital": 400.0, "stake": 10.0, "max_open": 2}]}}
+    ret = pd.Series({dt.date(2024, 1, 2): -0.5, dt.date(2024, 1, 3): -0.2, dt.date(2024, 1, 4): 0.3})
+    a, b = book.day_rows({PAIR: (dt.date(2024, 1, 1), dt.date(2024, 1, 11))}, {PAIR: ret}, cfg)
+    # A scales by 0.2: -0.1 and -0.04, so one day reaches -5%. B scales by 0.05: neither does.
+    assert (a["days"], a["limit_days"], a["p_day_limit"], a["day_limit"]) == (10, 1, 0.1, 0.05)
+    assert (b["stage"], b["limit_days"], b["p_day_limit"]) == ("B", 0, 0.0)
+    assert book.day_rows({PAIR: (dt.date(2024, 1, 1), dt.date(2024, 1, 3))}, {}, cfg)[0]["p_day_limit"] == 0.0
+
+
 def test_run_stores_only_scored_pairs_and_replaces_the_last(conn):
     conn.execute("INSERT INTO strategies (name, file, file_hash) VALUES ('Good', 'x', 'h'), ('Bad', 'y', 'h')")
     conn.execute("INSERT INTO readiness (market, strategy, venue, score, ready, passed, trades, gates) VALUES "
@@ -141,9 +153,11 @@ def test_run_stores_only_scored_pairs_and_replaces_the_last(conn):
     assert book.run(conn, CFG) == {"book": 1} == book.run(conn, CFG)
     assert conn.execute("SELECT count(*), min(strategy) FROM book").fetchone() == (4, "Good")
     assert conn.execute("SELECT count(*), min(strategy) FROM book_stops").fetchone() == (len(CFG["book"]["stages"]), "Good")
+    assert conn.execute("SELECT count(*), min(days) > 0 FROM book_days").fetchone() == (len(CFG["book"]["stages"]), True)
     book.run(conn, {**CFG, "lockbox": {"start": dt.date(2000, 1, 1)}})
     assert conn.execute("SELECT count(*) FROM book").fetchone() == (0,)
     assert conn.execute("SELECT count(*) FROM book_stops").fetchone() == (0,)
+    assert conn.execute("SELECT count(*) FROM book_days").fetchone() == (0,)
 
 
 def series(values, start="2020-01-01"):

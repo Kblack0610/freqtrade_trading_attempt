@@ -32,6 +32,15 @@ DAYS_PER_YEAR = 365  # crypto trades every day: annualizes daily volatility
 STOP_COLS = ["strategy", "exchange", "stage", "horizon_months", "hard_stop", "p_hard_stop", "basis_months"]
 STOP_HORIZON = 12
 
+DAY_COLS = ["strategy", "exchange", "stage", "days", "limit_days", "day_limit", "p_day_limit"]
+# Tuned out-of-sample days before the lockbox, as scorecard reads them; the span is the scored folds' first start to last end.
+SPANS = f"""
+SELECT w.strategy, w.exchange, min(w.fold_start), max(w.test_end)
+FROM walkforward w JOIN ({readiness.CRYPTO_ROWS}) c USING (strategy, exchange)
+WHERE c.score IS NOT NULL AND w.ok AND w.params IS NOT NULL AND w.test_end <= %s GROUP BY 1, 2
+"""
+DAILY = "SELECT strategy, exchange, day, ret FROM walkforward_daily WHERE variant = 'tuned' AND day < %s ORDER BY 1, 2, 3"
+
 
 def hold_months(folds: list[tuple], close: pd.Series) -> list[float]:
     """BTC's return over each fold's month, or nothing when a month has no close to start from."""
@@ -71,6 +80,26 @@ def stop_rows(folds: dict, cfg: dict) -> list[dict]:
                                         c["hard_stop"], block=c["block_months"])
         out += [{"strategy": s, "exchange": e, "stage": st["name"], "horizon_months": STOP_HORIZON, "hard_stop": c["hard_stop"],
                  "basis_months": len(monthly), "p_hard_stop": share} for st in c["stages"]]
+    return out
+
+
+def day_rows(spans: dict, daily: dict, cfg: dict) -> list[dict]:
+    """Per scored strategy and stage: the share of its calendar days (zero where it did not trade) whose return, scaled to
+    the stage's open risk (ret x stake x max_open / capital), reaches -[watcher] day_loss. A count of days, not a bootstrap.
+
+    spans: (strategy, exchange) -> (first day, last day exclusive); daily: (strategy, exchange) -> Series of ret by day."""
+    limit = cfg["watcher"]["day_loss"]
+    out = []
+    for (s, e), (start, end) in spans.items():
+        days = pd.date_range(pd.Timestamp(start), pd.Timestamp(end) - pd.Timedelta(days=1), freq="D")
+        ret = daily.get((s, e), pd.Series(dtype=float))
+        ret = ret.set_axis(pd.to_datetime(ret.index)).reindex(days).fillna(0.0)
+        if not len(days):
+            continue
+        for st in cfg["book"]["stages"]:
+            hit = int((ret * st["stake"] * st["max_open"] / st["capital"] <= -limit).sum())
+            out.append({"strategy": s, "exchange": e, "stage": st["name"], "days": len(days), "limit_days": hit,
+                        "day_limit": limit, "p_day_limit": hit / len(days)})
     return out
 
 
@@ -221,13 +250,23 @@ def run(conn, cfg: dict | None = None) -> dict:
     days = conn.execute("SELECT day, btc_close FROM regimes ORDER BY day").fetchall()
     close = pd.Series([c for _, c in days], index=pd.to_datetime([d for d, _ in days]), dtype=float)
     out, stops = rows(folds, close, cfg), stop_rows(folds, cfg)
+    box = (cfg["lockbox"]["start"],)
+    scored = {k for k, f in folds.items() if len(f) >= cfg["confidence"]["min_folds"]}
+    spans = {(s, e): (a, b) for s, e, a, b in conn.execute(SPANS, box) if (s, e) in scored}
+    daily: dict = {}
+    for s, e, day, ret in conn.execute(DAILY, box):
+        daily.setdefault((s, e), {})[day] = ret
+    limits = day_rows(spans, {k: pd.Series(v) for k, v in daily.items()}, cfg)
     with conn.transaction():
         conn.execute("DELETE FROM book")
         conn.execute("DELETE FROM book_stops")
+        conn.execute("DELETE FROM book_days")
         with conn.cursor() as cur:
             cur.executemany(f"INSERT INTO book ({', '.join(COLS)}) VALUES ({', '.join(f'%({k})s' for k in COLS)})", out)
             cur.executemany(f"INSERT INTO book_stops ({', '.join(STOP_COLS)}) VALUES ({', '.join(f'%({k})s' for k in STOP_COLS)})",
                             stops)
+            cur.executemany(f"INSERT INTO book_days ({', '.join(DAY_COLS)}) VALUES ({', '.join(f'%({k})s' for k in DAY_COLS)})",
+                            limits)
     return {"book": len({(r["strategy"], r["exchange"]) for r in out})}
 
 
